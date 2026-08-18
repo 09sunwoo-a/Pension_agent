@@ -1,0 +1,16 @@
+# 로컬 개인 설정
+.claude/settings.local.json
+.Rhistory
+.env
+.env.*
+
+# OS 잡파일
+Thumbs.db
+.DS_Store
+~$*
+
+# 파이썬 (추후 에이전트 개발용)
+__pycache__/
+*.pyc
+venv/
+.venv/
