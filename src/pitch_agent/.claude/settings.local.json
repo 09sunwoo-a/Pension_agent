@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -rf /c/Users/superuser/verify_venv)",
+      "Bash(python -m venv /c/Users/superuser/verify_venv)",
+      "Bash(/c/Users/superuser/verify_venv/Scripts/python.exe -m pip install -q -r \"c:/Users/superuser/projects/my-project/pension_aftercare_agent/pitch_agent/requirements.txt\")"
+    ]
+  }
+}

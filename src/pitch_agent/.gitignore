@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+
+# 원본 PDF는 대외비 자료 — 추출 결과(data/*.json)만 버전관리
+sources/

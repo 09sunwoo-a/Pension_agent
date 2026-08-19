@@ -1,0 +1,353 @@
+{
+  "doc_id": "guide01_yield_mgmt",
+  "meta": {
+    "title": "개인형IRP 고객관리 가이드 Series 1 — IRP 수익률 관리",
+    "source_file": "개인형 IRP고객관리 가이드_Series1_IRP수익률 관리 (IMG_5147~5155.jpeg, 9장)",
+    "product": "개인형IRP",
+    "level": null,
+    "week": null,
+    "as_of": "2026-05",
+    "confidential": true,
+    "notes": "직원용 내부 업무 가이드(화면 캡처 이미지 9장 기반). 고객 대화 스크립트가 아니라 고객 발굴·상품 안내·리밸런싱 콜 절차를 다룸. WiseNet 내부 조회 경로·KPI 수치 포함이므로 전 항목 고객 직접 제공 금지."
+  },
+  "records": [
+    {
+      "id": "fact.guide.irp_vs_deposit_yield",
+      "kind": "fact",
+      "fields": {
+        "label": "개인형IRP 평균수익률 vs 시중은행 정기예금 비교",
+        "value": "개인형IRP 고객평균 수익률은 연 7.97%로, 시중은행 정기예금 고객평균 수익률(3.02%, 5~6월 평가 시 2.52%)보다 훨씬 높다",
+        "detail": "'26.1분기 기준 IRP 고객평균 1년 수익률 7.97%, '26.5월 기준 시중은행 정기예금 고객평균 1년 수익률 3.02%, '26.5월 기준 고유계정대 평균수익률 2.52%",
+        "category": "수익률",
+        "assumptions": "2026년 1분기~5월 시점 스냅샷 수치로 이후 변동 가능",
+        "page": 1
+      }
+    },
+    {
+      "id": "fact.guide.churn_risk_ratio",
+      "kind": "fact",
+      "fields": {
+        "label": "고유계정대/정기예금 과다보유 고객 이탈률",
+        "value": "고유계정대를 50% 이상 또는 시중은행 정기예금을 100% 보유한 고객(12.6만명)의 이탈률은 14.8%로, 일반 고객(60.2만명, 이탈률 11.8%)보다 1.3배 높다",
+        "detail": "'25.11월~'26.4월(6개월) 이탈고객 분석 기준. 조건 해당 고객 12.6만명 중 이탈 1.9만명(14.8%), 일반고객 60.2만명 중 이탈 7.1만명(11.8%)",
+        "category": "이탈방어",
+        "assumptions": "2025년 11월~2026년 4월 관찰 기간 기준",
+        "page": 1
+      }
+    },
+    {
+      "id": "fact.guide.etf_lineup",
+      "kind": "fact",
+      "fields": {
+        "label": "KB 퇴직연금 ETF 상품 라인업",
+        "value": "KB국민은행은 퇴직연금 ETF 250종을 취급해 신한(242종)·하나(237종)보다 많고, 24시간 즉시체결이 가능하다",
+        "detail": "5월 현재 218종 보유, 상반기 내 32종 추가 편입 예정 포함 250종. 경쟁은행은 익일 체결·거래시간 제한이 있는 상품이 있는 반면 KB ETF는 24시간 즉시체결 가능",
+        "category": "상품",
+        "assumptions": "2026년 상반기 기준",
+        "page": 4
+      }
+    },
+    {
+      "id": "fact.guide.special_deposit_min_amount",
+      "kind": "fact",
+      "fields": {
+        "label": "원리금보장상품별 최소거래금액·비대면 가능여부",
+        "value": "GIC는 최소거래금액 제한이 없고 비대면 거래가 가능하다(예금자보호 대상). ELB는 최소거래금액 5천만원이며 비대면 거래가 불가능하다(예금자보호 비대상)",
+        "detail": "GIC는 보험사 발행, ELB는 증권사 발행. 상품별 발행주체·예금자보호 여부·최소거래금액이 다르므로 고객 안내 전 확인 필요",
+        "category": "상품",
+        "assumptions": null,
+        "page": 7
+      }
+    },
+    {
+      "id": "fact.guide.deposit_rate_202605",
+      "kind": "fact",
+      "fields": {
+        "label": "26년 5월 기준 시중은행 정기예금 금리",
+        "value": "2026년 5월 현재 시중은행 정기예금 금리는 연 2.50% 정도 수준이다",
+        "detail": "고유계정대(현금성자산) 비중이 높은 고객에게는 정기예금이나 실적배당·원리금보장 상품으로 갈아탈 경우 더 높은 수익률을 기대할 수 있다는 점을 안내",
+        "category": "금리",
+        "assumptions": "2026년 5월 시점 스냅샷 수치로 금리는 변동됨",
+        "page": 8
+      }
+    },
+    {
+      "id": "res.guide.info_zone_target_list",
+      "kind": "resource",
+      "fields": {
+        "name": "이탈위험 고객 타겟리스트",
+        "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > KPI 전담자표 > 타겟리스트",
+        "purpose": "고유계정대 50% 이상 또는 시중은행 정기예금 100% 보유한 이탈위험 고객 조회",
+        "customer_facing": false
+      }
+    },
+    {
+      "id": "res.guide.mystar_terminal",
+      "kind": "resource",
+      "fields": {
+        "name": "MyStar 적립금·수익률 조회",
+        "path": "MyStar 단말 [04-12-642] 적립금 및 수익률 조회",
+        "purpose": "고객별 보유상품·만기·운용수익률 확인",
+        "customer_facing": false
+      }
+    },
+    {
+      "id": "res.guide.info_zone_hotmenu",
+      "kind": "resource",
+      "fields": {
+        "name": "퇴직연금 ETF/TDF/추천펀드 조회",
+        "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > HOT MENU > 퇴직연금 ETF · TDF",
+        "purpose": "ETF·TDF 상품 정보 및 이달의 추천펀드·포트폴리오 조회",
+        "customer_facing": false
+      }
+    },
+    {
+      "id": "res.guide.info_zone_dc_irp_rate",
+      "kind": "resource",
+      "fields": {
+        "name": "DC/개인형IRP 특별제공 원리금보장상품 금리",
+        "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > 원리금보장상품 > 특별제공상품",
+        "purpose": "월별로 갱신되는 고금리 원리금보장 특별제공상품 금리 확인",
+        "customer_facing": false
+      }
+    },
+    {
+      "id": "guide01_yield_mgmt.p01",
+      "kind": "pitch",
+      "fields": {
+        "type": "guide",
+        "title": "이탈위험 고객 선별 기준",
+        "tags": {
+          "stage": "이탈방어",
+          "customer_type": [
+            "공통"
+          ],
+          "objection_type": null,
+          "topics": [
+            "이탈위험",
+            "고유계정대",
+            "시중은행정기예금",
+            "고객관리대상"
+          ]
+        },
+        "trigger_examples": [
+          "이탈 위험이 높은 고객을 어떻게 골라내나요",
+          "관리가 필요한 고객 리스트를 어떻게 뽑나요",
+          "어떤 고객부터 우선 관리해야 하나요"
+        ],
+        "dialogue": [],
+        "key_points": [
+          "고유계정대(현금성자산) 50% 이상 보유 또는 시중은행 정기예금 100% 보유 고객은 이탈위험도가 1.3배 높다",
+          "이런 고객은 IRP 평균수익률(7.97%)보다 훨씬 낮은 수익(2.52~3.02%)에 머물러 있어 상시 관리가 필요하다"
+        ],
+        "supporting_facts": [
+          "fact.guide.irp_vs_deposit_yield",
+          "fact.guide.churn_risk_ratio"
+        ],
+        "tips": [
+          "Info-zone > 연금(퇴직연금) > KPI 전담자표 > 타겟리스트에서 고유계정대·시중은행 정기예금 과다보유 고객 조회"
+        ],
+        "cautions": [
+          "내부 KPI·조회 화면이므로 고객에게 직접 노출하지 말 것"
+        ],
+        "resources": [
+          "res.guide.info_zone_target_list"
+        ],
+        "page": 1
+      }
+    },
+    {
+      "id": "guide01_yield_mgmt.p02",
+      "kind": "pitch",
+      "fields": {
+        "type": "guide",
+        "title": "상품 보유 현황 확인",
+        "tags": {
+          "stage": "이탈방어",
+          "customer_type": [
+            "공통"
+          ],
+          "objection_type": null,
+          "topics": [
+            "MyStar",
+            "적립금조회",
+            "수익률조회"
+          ]
+        },
+        "trigger_examples": [
+          "고객이 어떤 상품을 갖고 있는지 어떻게 확인하나요",
+          "상담 전에 뭘 먼저 봐야 하나요"
+        ],
+        "dialogue": [],
+        "key_points": [
+          "관리 대상 고객을 확인했다면, 이번엔 고객별로 보유하고 있는 상품을 조회해 상품과 수익률을 점검하고 고객님의 성향과 리밸런싱 제안을 준비한다",
+          "MyStar 단말 [04-12-642] 적립금 및 수익률 조회 화면에서 고객별 보유 상품·만기·운용수익률을 확인"
+        ],
+        "supporting_facts": [],
+        "tips": [],
+        "cautions": [
+          "내부 조회 화면이므로 고객에게 직접 노출하지 말 것"
+        ],
+        "resources": [
+          "res.guide.mystar_terminal"
+        ],
+        "page": 3
+      }
+    },
+    {
+      "id": "guide01_yield_mgmt.p03",
+      "kind": "pitch",
+      "fields": {
+        "type": "guide",
+        "title": "실적배당 상품(ETF·TDF·추천펀드) 안내",
+        "tags": {
+          "stage": "이탈방어",
+          "customer_type": [
+            "공통"
+          ],
+          "objection_type": null,
+          "topics": [
+            "ETF",
+            "TDF",
+            "추천펀드",
+            "포트폴리오"
+          ]
+        },
+        "trigger_examples": [
+          "실적배당 상품은 어떤 걸 추천해야 하나요",
+          "고객에게 맞는 ETF·TDF는 무엇을 기준으로 추천하나요"
+        ],
+        "dialogue": [],
+        "key_points": [
+          "KB는 ETF 250종을 취급해 신한(242종)·하나(237종)보다 라인업이 넓고, 24시간 즉시체결이 가능해 경쟁은행보다 매매가 빠르다",
+          "TDF는 (은퇴희망연도 = 출생연도 + 예상은퇴연령)으로 손쉽게 골라줄 수 있어 바쁜 고객에게 적합",
+          "매월 갱신되는 추천펀드·포트폴리오 자료로 고객 투자성향에 맞는 상품을 제안한다"
+        ],
+        "supporting_facts": [
+          "fact.guide.etf_lineup"
+        ],
+        "tips": [],
+        "cautions": [],
+        "resources": [
+          "res.guide.info_zone_hotmenu"
+        ],
+        "page": 4
+      }
+    },
+    {
+      "id": "guide01_yield_mgmt.p04",
+      "kind": "pitch",
+      "fields": {
+        "type": "guide",
+        "title": "원리금보장 특별제공상품 안내",
+        "tags": {
+          "stage": "이탈방어",
+          "customer_type": [
+            "공통"
+          ],
+          "objection_type": null,
+          "topics": [
+            "원리금보장상품",
+            "GIC",
+            "ELB",
+            "특별제공상품"
+          ]
+        },
+        "trigger_examples": [
+          "투자를 원하지 않는 고객에게는 뭘 권해야 하나요",
+          "원리금보장상품 중에서는 뭘 추천하나요"
+        ],
+        "dialogue": [],
+        "key_points": [
+          "매월 금리가 가장 좋은 원리금보장상품(GIC·ELB 등)을 특별제공상품으로 안내한다",
+          "GIC는 최소거래금액 제한이 없고, ELB는 최소거래금액 5천만원이며 비대면 거래가 불가능한 등 상품별 최소거래조건이 다르므로 사전에 확인한다"
+        ],
+        "supporting_facts": [
+          "fact.guide.special_deposit_min_amount"
+        ],
+        "tips": [],
+        "cautions": [],
+        "resources": [
+          "res.special_deposit",
+          "res.guide.info_zone_dc_irp_rate"
+        ],
+        "page": 7
+      }
+    },
+    {
+      "id": "guide01_yield_mgmt.p05",
+      "kind": "pitch",
+      "fields": {
+        "type": "guide",
+        "title": "리밸런싱 콜 스크립트 — 고유계정대 50% 이상 고객 (Mission 1)",
+        "tags": {
+          "stage": "이탈방어",
+          "customer_type": [
+            "공통"
+          ],
+          "objection_type": null,
+          "topics": [
+            "리밸런싱",
+            "콜스크립트",
+            "고유계정대"
+          ]
+        },
+        "trigger_examples": [
+          "고유계정대 비중이 높은 고객에게 어떻게 전화하나요",
+          "리밸런싱 제안 전화는 어떤 순서로 하나요"
+        ],
+        "dialogue": [],
+        "key_points": [
+          "Step1 인사 → Step2 통화목적 안내 → Step3 현재 정기예금 금리(26년 5월 기준 연 2.50%대)가 대안 상품보다 낮다는 점 안내 → Step4 상품 운용 대안 제시",
+          "실적배당 상품을 희망하는 고객에게는 ETF·TDF·추천펀드 자료를, 원리금보장 상품을 희망하는 고객에게는 월별 특별제공상품 자료를 안내한다"
+        ],
+        "supporting_facts": [
+          "fact.guide.deposit_rate_202605"
+        ],
+        "tips": [],
+        "cautions": [
+          "스크립트 속 고객명·지점명·구체 수치는 상담 전 실제 값으로 반드시 교체해서 사용"
+        ],
+        "resources": [],
+        "page": 8
+      }
+    },
+    {
+      "id": "guide01_yield_mgmt.p06",
+      "kind": "pitch",
+      "fields": {
+        "type": "guide",
+        "title": "리밸런싱 콜 스크립트 — 고유계정대·시중은행 정기예금 100% 고객 (Mission 2)",
+        "tags": {
+          "stage": "이탈방어",
+          "customer_type": [
+            "공통"
+          ],
+          "objection_type": null,
+          "topics": [
+            "리밸런싱",
+            "콜스크립트",
+            "정기예금100%"
+          ]
+        },
+        "trigger_examples": [
+          "정기예금만 100% 들고 있는 고객에게는 어떻게 전화하나요"
+        ],
+        "dialogue": [],
+        "key_points": [
+          "Mission 1과 동일한 Step1~4 흐름을 사용하되, 고유계정대 또는 시중은행 정기예금을 100% 보유한 고객이 대상",
+          "실적배당 희망 고객은 ETF·TDF·추천펀드 자료(4~6p 안내)로, 원리금보장 희망 고객은 특별제공상품 자료(7p 안내)로 연결한다"
+        ],
+        "supporting_facts": [
+          "fact.guide.deposit_rate_202605"
+        ],
+        "tips": [],
+        "cautions": [
+          "스크립트 속 고객명·지점명·구체 수치는 상담 전 실제 값으로 반드시 교체해서 사용"
+        ],
+        "resources": [],
+        "page": 9
+      }
+    }
+  ]
+}

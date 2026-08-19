@@ -1,0 +1,62 @@
+{
+  "doc_id": "ch02_transfer",
+  "meta": {
+    "title": "연금왕 찐천재 마스터북 제2장 「계약이전」 마케팅화법",
+    "source_file": "계약이전_마케팅화법.pdf",
+    "product": "개인형IRP",
+    "level": "Level 1",
+    "week": 2,
+    "as_of": "2026-01",
+    "confidential": true,
+    "notes": null
+  },
+
+  "facts": [
+    {
+      "id": "fact.전역_소문자_영문_id",
+      "label": "짧은 이름",
+      "value": "핵심 결론 한 줄",
+      "detail": "부연설명이나 단서조항. 없으면 null",
+      "category": "세제",
+      "assumptions": "예시 수치라면 전제조건을 반드시 적을 것. 없으면 null",
+      "page": 1
+    }
+  ],
+
+  "resources": [
+    {
+      "id": "res.소문자_영문_id",
+      "name": "자료명",
+      "path": "KB-WiseNet > ...",
+      "purpose": "언제 쓰는 자료인지",
+      "customer_facing": true
+    }
+  ],
+
+  "pitches": [
+    {
+      "id": "ch02_transfer.p01",
+      "type": "proposal",
+      "title": "화법 제목",
+      "tags": {
+        "stage": "계약이전",
+        "customer_type": ["직장인"],
+        "objection_type": null,
+        "topics": ["키워드1", "키워드2"]
+      },
+      "trigger_examples": [
+        "고객이 실제로 할 법한 말 (자유텍스트 검색용, 3~5개 권장)"
+      ],
+      "dialogue": [
+        {"speaker": "행원", "text": "PDF 원문 대사 그대로", "intent": "이 턴의 목적"},
+        {"speaker": "고객", "text": "고객 반응", "intent": null}
+      ],
+      "key_points": ["이 화법이 전달해야 할 핵심 메시지"],
+      "supporting_facts": ["fact.전역_소문자_영문_id"],
+      "tips": ["실행 팁"],
+      "cautions": ["반드시 확인/고지할 사항"],
+      "resources": ["res.소문자_영문_id"],
+      "page": 3
+    }
+  ]
+}

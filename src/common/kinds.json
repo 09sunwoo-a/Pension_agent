@@ -1,0 +1,140 @@
+{
+  "_note": "레코드 종류 레지스트리 (선언형·데이터). 검증기·저작 프롬프트·적재가 전적으로 이 선언에서 나온다. 새 종류는 여기 항목 하나만 추가하면 코드 수정 없이 전 기능이 붙는다. consumed: relational(코드가 타입드 필드로 결정론 비교) | retrieval(의미 검색) | reference(재사용 사실). required: fields 안에 반드시 있어야 할 키. fields: 각 필드의 type(text|int|float|bool|enum|list|obj)과 nullable·values(enum). searchable: 검색 신호로 인덱싱할 필드.",
+
+  "product": {
+    "consumed": "relational",
+    "desc": "IRP 운용상품 1행. 적합성 게이트가 타입드 필드로 결정론 비교한다.",
+    "required": ["name", "category", "payout", "risk", "status"],
+    "fields": {
+      "name": {"type": "text"},
+      "category": {"type": "enum", "values": ["채권형", "TDF", "MP", "GIC", "ELB", "예금", "ETF"]},
+      "payout": {"type": "enum", "values": ["실적배당", "원리금보장"]},
+      "risk": {"type": "enum", "values": ["매우낮은위험", "낮은위험", "보통위험", "다소높은위험", "높은위험", "매우높은위험"]},
+      "min_amount": {"type": "int"},
+      "nonface": {"type": "bool"},
+      "default_option": {"type": "bool"},
+      "risk_asset": {"type": "bool"},
+      "risk_asset_exempt": {"type": "bool", "nullable": true},
+      "depositor_protection": {"type": "bool", "nullable": true},
+      "rate": {"type": "float", "nullable": true},
+      "exp_return": {"type": "float", "nullable": true},
+      "status": {"type": "enum", "values": ["판매중", "판매중지"]}
+    }
+  },
+
+  "strategy": {
+    "consumed": "relational",
+    "desc": "전략 플레이북 항목. 요건(when) 성립 시 소집되어 절(clause)을 산출한다. 근거는 sources(가이드) 또는 regulation(법령·내규).",
+    "required": ["title", "kind", "actor", "clause", "evidence", "confidence"],
+    "fields": {
+      "title": {"type": "text"},
+      "kind": {"type": "text"},
+      "actor": {"type": "enum", "values": ["직원", "고객"]},
+      "clause": {"type": "text"},
+      "evidence": {"type": "text"},
+      "confidence": {"type": "enum", "values": ["행내가이드", "규정", "추정"]},
+      "when": {"type": "text", "nullable": true},
+      "sources": {"type": "list", "nullable": true},
+      "topic_keys": {"type": "list", "nullable": true},
+      "regulation": {"type": "text", "nullable": true}
+    }
+  },
+
+  "system_strategy": {
+    "consumed": "relational",
+    "desc": "게이트 결과로 발동하는 조건부 전략(예: 투자성향 재진단). 요건이 아니라 엔진 판정으로 소집된다.",
+    "required": ["title", "kind", "actor", "clause", "evidence", "confidence"],
+    "fields": {
+      "title": {"type": "text"},
+      "kind": {"type": "text"},
+      "actor": {"type": "enum", "values": ["직원", "고객"]},
+      "clause": {"type": "text"},
+      "evidence": {"type": "text"},
+      "confidence": {"type": "enum", "values": ["행내가이드", "규정", "추정"]}
+    }
+  },
+
+  "baseline": {
+    "consumed": "relational",
+    "desc": "기대효과 비교 기준선. (제안 상품 수익률 − 기준선)으로 개선폭을 산출한다. source 는 fact id.",
+    "required": ["label", "rate"],
+    "fields": {
+      "label": {"type": "text"},
+      "rate": {"type": "float"},
+      "as_of": {"type": "text", "nullable": true},
+      "source": {"type": "text", "nullable": true},
+      "note": {"type": "text", "nullable": true}
+    }
+  },
+
+  "capability": {
+    "consumed": "relational",
+    "desc": "시스템 기능 지원 여부. status 가 available 이 아닌 기능을 요구하는 전략은 제안에서 제외된다.",
+    "required": ["label", "status"],
+    "fields": {
+      "label": {"type": "text"},
+      "status": {"type": "enum", "values": ["available", "unavailable", "unknown"]},
+      "note": {"type": "text", "nullable": true}
+    }
+  },
+
+  "asset": {
+    "consumed": "relational",
+    "desc": "고객 발송 가능 콘텐츠. customer_facing 이 true 인 자료만 전략 문안에 인용된다.",
+    "required": ["name"],
+    "fields": {
+      "name": {"type": "text"},
+      "branch": {"type": "text", "nullable": true},
+      "customer_facing": {"type": "bool", "nullable": true},
+      "source_resource": {"type": "text", "nullable": true},
+      "note": {"type": "text", "nullable": true}
+    }
+  },
+
+  "fact": {
+    "consumed": "reference",
+    "desc": "재사용 수치·사실. 여러 카드·전략·기준선이 id 로 참조한다. 같은 label 에 다른 value 가 있으면 개정 반영 누락으로 본다.",
+    "required": ["label", "value"],
+    "fields": {
+      "label": {"type": "text"},
+      "value": {"type": "text"},
+      "detail": {"type": "text", "nullable": true},
+      "category": {"type": "text", "nullable": true},
+      "assumptions": {"type": "text", "nullable": true},
+      "page": {"type": "int", "nullable": true}
+    }
+  },
+
+  "resource": {
+    "consumed": "reference",
+    "desc": "상품안내장·가이드 등 참조 자료. customer_facing 으로 내부용 유출을 막는다.",
+    "required": ["name"],
+    "fields": {
+      "name": {"type": "text"},
+      "path": {"type": "text", "nullable": true},
+      "purpose": {"type": "text", "nullable": true},
+      "customer_facing": {"type": "bool", "nullable": true}
+    }
+  },
+
+  "pitch": {
+    "consumed": "retrieval",
+    "desc": "상담 화법 카드(검색 최소단위). 리치카드는 dialogue+key_points, 단순 지식카드는 content 를 채운다. supporting_facts 로 fact 를 참조한다.",
+    "required": ["title", "type", "tags"],
+    "fields": {
+      "title": {"type": "text"},
+      "type": {"type": "enum", "values": ["proposal", "objection", "guide"]},
+      "tags": {"type": "obj"},
+      "trigger_examples": {"type": "list", "nullable": true},
+      "dialogue": {"type": "list", "nullable": true},
+      "key_points": {"type": "list", "nullable": true},
+      "content": {"type": "text", "nullable": true},
+      "tips": {"type": "list", "nullable": true},
+      "cautions": {"type": "list", "nullable": true},
+      "supporting_facts": {"type": "list", "nullable": true},
+      "resources": {"type": "list", "nullable": true},
+      "page": {"type": "int", "nullable": true}
+    },
+    "searchable": ["title", "trigger_examples", "content", "key_points"]
+  }
+}

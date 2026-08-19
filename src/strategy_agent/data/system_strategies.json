@@ -1,0 +1,32 @@
+{
+  "meta": {
+    "title": "시스템 생성 조건부 전략",
+    "as_of": "2026-08-11",
+    "note": "요건(when)이 아니라 엔진 게이트 결과의 판정으로만 발동하는 조건부 전략을 담는다. strategies.json 플레이북은 원천 소스·규정에 근거한 전략만 담으므로, 근거가 아니라 게이트 결과에 대한 '추론'인 전략(confidence=추정)은 이 파일로 분리해 관리한다. 렌더링·조회 파이프라인은 플레이북 전략과 동일하게 처리되며 engine.SYSTEM_STRATEGIES 로 로드된다. engine.validate() 의 구조 검증(절 종결·주체·시한표현)은 이 파일에도 적용되나, 근거 정합성(sources 교차검증·요건 미대응)은 원천 근거를 전제하는 플레이북에만 적용한다.",
+    "conventions": {
+      "trigger": "발동 조건. 'branch_blocked' 는 적합성 게이트가 실적배당 상품을 전량 차단했을 때만 engine._perf_branch_blocked() 판정으로 추가된다. when(요건) 기반이 아니므로 후보 소집 단계에서 자동 수집되지 않는다.",
+      "confidence": "이 파일의 전략은 게이트 결과에 대한 추론이므로 '추정' 이다. 원천 소스·규정 근거가 확보되면 strategies.json 플레이북으로 승격한다."
+    },
+    "kind": "system_strategy"
+  },
+  "records": [
+    {
+      "id": "st.risk_reassess",
+      "kind": "system_strategy",
+      "fields": {
+        "title": "투자성향 재진단 안내",
+        "trigger": "branch_blocked",
+        "kind": "접촉",
+        "actor": "직원",
+        "urgency": 6,
+        "impact": null,
+        "clause": "실적배당 상품 안내가 가능한지 투자성향 재진단을 안내",
+        "benefit": "현재 등급으로는 실적배당 안내가 막혀 있어, 성향이 실제와 다르면 재진단으로 선택지를 넓힙니다.",
+        "evidence": "현재 위험등급 {grade} 기준으로 실적배당 상품이 전량 제외됨 — 가이드의 ETF·TDF 안내 경로를 적용할 수 없어, 성향이 실제와 다른 경우 재진단이 선행되어야 함",
+        "confidence": "추정",
+        "topic_keys": [],
+        "sources": []
+      }
+    }
+  ]
+}
