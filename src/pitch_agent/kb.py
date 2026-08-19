@@ -29,6 +29,35 @@ from common.store import Store  # noqa: E402
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
+# ─────────────────────────────────────────────────────────────
+# 검색 매칭용 동의어 정규화 (도메인 특화라 kb_base.py 가 아닌 여기 둔다)
+#
+# n-gram 유사도는 표기가 겹쳐야 잡히므로, 실무에서 흔히 혼용되는 표현이 카드
+# 저작 시 쓰인 표준 용어와 문자 단위로 다르면 검색이 실패한다(예: "소득공제"로
+# 물으면 "세액공제" 카드가 안 잡힘). 검색 채점 직전에만 적용하는 치환이며,
+# 실제 세제·상품 설명(respond 단계)은 그대로 fact/pitch 본문 값을 따르므로
+# 여기서 소득공제≒세액공제로 묶는다고 답변 내용이 달라지지는 않는다.
+# ─────────────────────────────────────────────────────────────
+
+_SYNONYMS: dict[str, str] = {
+    "소득공제": "세액공제",  # 실무 혼용 표현 — 정확한 제도 차이는 답변 본문(fact)에서 설명됨
+    "불입": "납입",
+    "입금": "납입",
+    "타은행": "타행",
+    "다른은행": "타행",
+    "다른 은행": "타행",
+    "이관": "이전",
+    "해약": "해지",
+}
+
+
+def _expand_synonyms(text: str) -> str:
+    """검색 채점 전 동의어 정규화. 순서 무관하게 전부 치환한다(포함 관계 없음)."""
+    out = text
+    for k, v in _SYNONYMS.items():
+        out = out.replace(k, v)
+    return out
+
 
 # ─────────────────────────────────────────────────────────────
 # 로드
@@ -115,6 +144,7 @@ def score_parts(
             topical_s += _sim(objection_type, tags["objection_type"]) * 2.0
 
     if utterance:
+        utterance = _expand_synonyms(utterance)
         topical_s += (
             max((_sim(utterance, ex) for ex in pitch.get("trigger_examples", [])), default=0.0) * 4.0
         )
