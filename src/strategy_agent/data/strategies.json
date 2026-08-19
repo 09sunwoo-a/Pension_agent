@@ -439,6 +439,16 @@
           "fact.irp.tax_credit_rate",
           "fact.irp.tax_credit_limit",
           "ch01_new.p01"
+        ],
+        "pitch_refs": [
+          {
+            "id": "ch01_new.p01",
+            "customer_type": "직장인"
+          },
+          {
+            "id": "ch01_new.p02",
+            "customer_type": "사업자"
+          }
         ]
       }
     }

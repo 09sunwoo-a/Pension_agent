@@ -24,7 +24,7 @@
 
   "strategy": {
     "consumed": "relational",
-    "desc": "전략 플레이북 항목. 요건(when) 성립 시 소집되어 절(clause)을 산출한다. 근거는 sources(가이드) 또는 regulation(법령·내규).",
+    "desc": "전략 플레이북 항목. 요건(when) 성립 시 소집되어 절(clause)을 산출한다. 근거는 sources(가이드) 또는 regulation(법령·내규). pitch_refs 는 이 전략 발동 시 함께 안내할 화법 카드를 고객유형별로 미리 연결해둔 정적 참조 — 내용은 복사하지 않고 매 요청마다 pitch_agent 쪽 원본을 그대로 조회한다(중복 저작으로 인한 불일치 방지).",
     "required": ["title", "kind", "actor", "clause", "evidence", "confidence"],
     "fields": {
       "title": {"type": "text"},
@@ -36,7 +36,8 @@
       "when": {"type": "text", "nullable": true},
       "sources": {"type": "list", "nullable": true},
       "topic_keys": {"type": "list", "nullable": true},
-      "regulation": {"type": "text", "nullable": true}
+      "regulation": {"type": "text", "nullable": true},
+      "pitch_refs": {"type": "list", "nullable": true}
     }
   },
 

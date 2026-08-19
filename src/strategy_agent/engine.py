@@ -826,8 +826,9 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         b["card"] = _card(spec, products_fmt, won(b["amount"]) if b["amount"] else None,
                           _effect_grade(b["yield_delta"]), clause_action,
                           spec.get("benefit") or b["evidence"])
-        # 상담 화법 — 콜스크립트 근거의 대화 순서. 접촉 전략에만 정의된다(engine.validate 가 강제).
-        b["talk"] = spec.get("talk", "")
+        # 상담 화법 — pitch_refs 로 연결된 화법 카드를 고객유형에 맞춰 실시간 조회한다
+        # (레거시 talk 필드가 있는 전략은 pitch_talk() 안에서 그쪽으로 폴백).
+        b["talk"] = pitch_talk(spec, p.customer_type)
 
     # 11) 다른 제안 — 메인 문장 밖 전략의 절을 렌더링한다. 선정 항목과 동일한 슬롯 규칙을
     #     쓰되, 축약(prev_action)·고지/확인 누적 같은 문장용 부수효과는 적용하지 않는다.
@@ -954,7 +955,7 @@ def allowed_facts(facts: dict) -> tuple[set[str], set[str]]:
     blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"])
     blob += [str(v) for k, v in facts["briefing"].items() if k != "source"]
     for it in facts["items"]:
-        blob += [it["clause"], it["evidence"], it["amount"] or "", it["formula"]]
+        blob += [it["clause"], it["evidence"], it["amount"] or "", it["formula"], it["talk"]]
         blob += it["evidence_extra"]
         for name in it["products"].values():
             prods.add(name.split("(")[0].strip())
@@ -997,6 +998,48 @@ def load_reference_kb():
         return _kb.load_kb(KB_ROOT / "data")
     except Exception:
         return None
+
+
+_PITCH_KB = None
+_PITCH_KB_LOADED = False
+
+
+def _get_pitch_kb():
+    """첫 호출 때만 적재하고 캐싱한다.
+
+    engine.py 를 import 하는 시점에 바로 적재하면 sys.path 에 pitch_agent 가 즉시 섞여
+    들어가는데, test_engine.py 는 "agent 를 먼저 import 해서 동명 모듈(prompts·kb·llm)이
+    pitch_agent 쪽으로 잡히기 전에 strategy_agent 쪽을 확정한다"는 순서에 기대고 있다(파일
+    상단 주석 참고). 지연 로딩으로 그 전제를 건드리지 않는다 — 실제 요청 처리(prepare())
+    시점에만 로드되므로 그때는 이미 필요한 import 가 다 끝난 뒤다.
+    """
+    global _PITCH_KB, _PITCH_KB_LOADED
+    if not _PITCH_KB_LOADED:
+        _PITCH_KB = load_reference_kb()
+        _PITCH_KB_LOADED = True
+    return _PITCH_KB
+
+
+def pitch_talk(spec: dict, customer_type: str | None) -> str:
+    """spec.pitch_refs 로 연결된 화법 카드의 핵심 포인트·주의사항을 그 자리에서 가져온다.
+
+    내용을 strategies.json 에 복사해두지 않는다 — pitch_agent 쪽 카드가 나중에 수정돼도 다음
+    호출부터 바로 반영되므로, 옛 talk 필드가 갖고 있던 '따로 관리되다 원본과 어긋나는' 문제가
+    구조적으로 생기지 않는다. customer_type 이 일치하는 참조가 없으면 "공통" 참조로, 그마저
+    없으면 옛 talk 필드(레거시, 마이그레이션 유예 중)로 폴백한다.
+    """
+    refs = spec.get("pitch_refs") or []
+    pick = next((r for r in refs if r.get("customer_type") == customer_type), None) \
+        or next((r for r in refs if r.get("customer_type") == "공통"), None)
+    kb = _get_pitch_kb()
+    if pick is None or kb is None:
+        return spec.get("talk", "")
+    card = next((c for c in kb.pitches if c["id"] == pick["id"]), None)
+    if card is None:
+        return spec.get("talk", "")
+    parts = list(card.get("key_points") or [])
+    parts += [f"(주의) {c}" for c in (card.get("cautions") or [])]
+    return " / ".join(parts)
 
 
 def _source_blob(kb, sid: str) -> str | None:
@@ -1112,7 +1155,7 @@ def validate() -> tuple[list[str], list[str]]:
             errors.append(f"[잘못된값] capabilities {cid} status={c.get('status')}")
 
     # 근거 정합성 — 지식베이스 원문 대조
-    kb = load_reference_kb()
+    kb = _get_pitch_kb()
     if kb is None:
         warns.append(f"[교차검증생략] 지식베이스 경로 없음({KB_ROOT / 'data'}) — sources 정합성 미검증")
     else:
@@ -1126,6 +1169,13 @@ def validate() -> tuple[list[str], list[str]]:
                 if keys and not any(k in blob for k in keys):
                     errors.append(
                         f"[근거오인용] {s['id']} → '{sid}' 는 {s['topic_keys']} 를 다루지 않음")
+            pitch_ids = {c["id"] for c in kb.pitches}
+            for ref in s.get("pitch_refs", []) or []:
+                if ref.get("customer_type") not in ("직장인", "사업자", "공통"):
+                    errors.append(
+                        f"[잘못된값] {s['id']} pitch_refs customer_type={ref.get('customer_type')}")
+                if ref.get("id") not in pitch_ids:
+                    errors.append(f"[깨진참조] {s['id']} pitch_refs '{ref.get('id')}' — pitch에 없음")
         if _source_blob(kb, BRIEFING_SOURCE) is None:
             errors.append(f"[깨진참조] briefing source '{BRIEFING_SOURCE}' — 지식베이스에 없음")
         for b in BASELINES.values():
