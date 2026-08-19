@@ -93,11 +93,12 @@
 
   "fact": {
     "consumed": "reference",
-    "desc": "재사용 수치·사실. 여러 카드·전략·기준선이 id 로 참조한다. 같은 label 에 다른 value 가 있으면 개정 반영 누락으로 본다.",
+    "desc": "재사용 수치·사실. 여러 카드·전략·기준선이 id 로 참조한다. 같은 label 에 다른 value 가 있으면 개정 반영 누락으로 본다. as_of 는 근거 자료의 기준시점 — 값 충돌이 없어도 시점이 지나면 조용히 틀려지는 사실(세제·한도·수수료·수익률 등)을 잡기 위한 최신성 추적용. 아직 필수는 아니고(기존 레코드 백필 필요) 없으면 검증기가 경고로 알린다.",
     "required": ["label", "value"],
     "fields": {
       "label": {"type": "text"},
       "value": {"type": "text"},
+      "as_of": {"type": "text", "nullable": true},
       "detail": {"type": "text", "nullable": true},
       "category": {"type": "text", "nullable": true},
       "assumptions": {"type": "text", "nullable": true},

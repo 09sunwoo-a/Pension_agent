@@ -19,10 +19,18 @@ _UMBRELLA = str(Path(__file__).resolve().parent.parent)
 if _UMBRELLA not in sys.path:
     sys.path.insert(0, _UMBRELLA)
 
+import re
+
 from common.kb_base import check_duplicate_ids, check_fact_conflicts  # noqa: E402
 from common.store import Store  # noqa: E402
 
 REGISTRY_PATH = Path(__file__).resolve().parent / "kinds.json"
+
+# 사내 게시판 특유의 "이름(부점/직급)" 저자 표기 — 원본을 저작할 때 옮기면 안 되는 개인 식별정보.
+_AUTHOR_ATTRIBUTION = re.compile(
+    r"[가-힣]{2,4}\s*\([^)]{0,40}(지점|센터|영업부|출장소)[^)]{0,20}"
+    r"(팀원|팀장|과장|대리|차장|조사역|지점장)[^)]{0,10}\)"
+)
 
 
 def load_registry() -> dict[str, dict]:
@@ -90,6 +98,15 @@ def validate(roots: list[Path | str], registry: dict | None = None) -> tuple[lis
             if fname in fields and not _type_ok(fields[fname], fspec):
                 exp = fspec.get("values") if fspec.get("type") == "enum" else fspec.get("type")
                 errors.append(f"[잘못된값] {rid}({kind}).{fname}={fields[fname]!r} — 기대 {exp}")
+            if fname in fields and fspec.get("type") == "text" and isinstance(fields[fname], str):
+                if _AUTHOR_ATTRIBUTION.search(fields[fname]):
+                    warns.append(
+                        f"[개인정보의심] {rid}({kind}).{fname} — 작성자 실명·부점·직급으로 보이는 "
+                        f"패턴 감지, 저작 시 옮기지 않았는지 확인"
+                    )
+
+        if kind == "fact" and not fields.get("as_of"):
+            warns.append(f"[최신성미기재] {rid}(fact) → fields.as_of 없음 — 근거 기준시점 확인 필요")
 
         for ref in r.get("refs", []):
             if ref not in all_ids:
