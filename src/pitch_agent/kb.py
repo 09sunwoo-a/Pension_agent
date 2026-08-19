@@ -193,6 +193,26 @@ def retrieve(kb: KnowledgeBase, *, top_k=3, **criteria) -> list[tuple[float, dic
     return hits[:top_k]
 
 
+def card_index(kb: KnowledgeBase) -> str:
+    """LLM 재랭킹용 카드 인덱스 — id·제목·태그·트리거예시만(본문 제외, 컴팩트).
+
+    검색 대상을 저장소 전체가 아니라 이미 검증 게이트를 통과한 kb.pitches 로
+    한정하는 게 핵심이다. LLM 은 이 목록 밖의 id 를 알 수 없으므로, 아무리
+    자유롭게 판단해도 저작되지 않은(⚠확인필요·⏳시효민감 등 미승인) 내용을
+    새로 끌어올 수 없다 — 안전장치는 응답 파싱 단계가 아니라 이 인덱스 구성
+    단계에서 이미 걸린다.
+    """
+    lines = []
+    for p in kb.pitches:
+        t = p["tags"]
+        ex = "; ".join(p.get("trigger_examples") or [])
+        lines.append(
+            f"[{p['id']}] {p['title']} | 단계:{t.get('stage')} 고객:{','.join(t.get('customer_type') or [])} "
+            f"거절유형:{t.get('objection_type') or '-'} | 예상질문: {ex}"
+        )
+    return "\n".join(lines)
+
+
 def build_context(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> str:
     """검색된 카드 + 그 카드가 참조하는 사실/자료만 프롬프트용 텍스트로 만든다.
 

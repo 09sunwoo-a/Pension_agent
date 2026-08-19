@@ -11,9 +11,9 @@ import json
 import re
 from typing import Any, TypedDict
 
-from kb import build_context, load_kb, retrieve
+from kb import build_context, card_index, load_kb, retrieve
 from llm import generate
-from prompts import SYSTEM, UNDERSTAND_PROMPT, USER, VERIFY_PROMPT
+from prompts import RERANK_PROMPT, SYSTEM, UNDERSTAND_PROMPT, USER, VERIFY_PROMPT
 
 TOP_K = 3
 HISTORY_LIMIT = 4  # understand 프롬프트에 넣는 최근 대화 턴 수
@@ -178,7 +178,40 @@ def broaden(state: AgentState) -> dict[str, Any]:
 def route(state: AgentState) -> str:
     if state.get("hits"):
         return "verify"
-    return "broaden" if state.get("broaden_count", 0) < 2 else "fallback"
+    return "broaden" if state.get("broaden_count", 0) < 2 else "llm_rerank"
+
+
+# ─────────────────────────────────────────────────────────────
+# Node 4b. llm_rerank — 결정론적 검색이 broaden까지 다 쓰고도 0건일 때만
+# 시도하는 LLM 보조 검색 (동의어·패러프레이즈로 n-gram이 못 잡은 경우)
+# ─────────────────────────────────────────────────────────────
+
+def llm_rerank(state: AgentState) -> dict[str, Any]:
+    """카드 인덱스(제목·태그·트리거예시)만 LLM에 보여주고 관련 id를 고르게 한다.
+
+    안전장치는 두 겹이다 — ① 검색 대상 자체가 card_index(kb.pitches)로 한정돼
+    있어 저작되지 않은 내용은 애초에 후보가 될 수 없고, ② LLM이 목록에 없는
+    id를 지어내더라도 아래에서 kb.pitches 실재 id와 대조해 걸러낸다. LLM 미설정·
+    장애 시에는 예외를 삼키고 빈 결과로 fallback 시킨다(운영 중단 방지).
+    """
+    utterance = state.get("utterance") or state["question"]
+    try:
+        text = generate(
+            RERANK_PROMPT.format(card_index=card_index(_kb), question=utterance),
+            max_tokens=200,
+        )
+        m = re.search(r"\[.*\]", text, re.S)
+        picked_ids = json.loads(m.group()) if m else []
+    except Exception:
+        picked_ids = []
+
+    by_id = {p["id"]: p for p in _kb.pitches}
+    hits = [(2.0, by_id[pid]) for pid in picked_ids if pid in by_id]  # 존재하는 id만 통과
+    return {"hits": hits}
+
+
+def route_rerank(state: AgentState) -> str:
+    return "verify" if state.get("hits") else "fallback"
 
 
 # ─────────────────────────────────────────────────────────────

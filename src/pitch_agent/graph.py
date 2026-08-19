@@ -26,10 +26,12 @@ from nodes import (
     broaden,
     capabilities,
     fallback,
+    llm_rerank,
     respond,
     retrieve_node,
     route,
     route_intent,
+    route_rerank,
     route_verify,
     understand,
     verify,
@@ -42,13 +44,15 @@ def build_agent():
     g.add_node("capabilities", capabilities)
     g.add_node("retrieve", retrieve_node)
     g.add_node("broaden", broaden)
+    g.add_node("llm_rerank", llm_rerank)
     g.add_node("verify", verify)
     g.add_node("respond", respond)
     g.add_node("fallback", fallback)
 
     g.add_edge(START, "understand")
     g.add_conditional_edges("understand", route_intent, ["capabilities", "retrieve"])
-    g.add_conditional_edges("retrieve", route, ["verify", "broaden", "fallback"])
+    g.add_conditional_edges("retrieve", route, ["verify", "broaden", "llm_rerank"])
+    g.add_conditional_edges("llm_rerank", route_rerank, ["verify", "fallback"])
     g.add_conditional_edges("verify", route_verify, ["respond", "fallback"])
     g.add_edge("broaden", "retrieve")
     g.add_edge("capabilities", END)
