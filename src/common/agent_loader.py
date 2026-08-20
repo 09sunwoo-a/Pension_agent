@@ -43,6 +43,13 @@ def load_agent_modules(agent_dir: str, module_names: list[str]) -> dict[str, Mod
     try:
         for name in module_names:
             full_name = f"{agent_dir}.{name}"
+            # 짧은 이름 저장은 재사용/신규 적재 두 갈래 모두에 적용한다 — 재사용 갈래에서
+            # 빠뜨리면(이전 버전의 버그) 두 번째 호출 이후 짧은 이름이 원상복구되지 않고
+            # 이 에이전트 쪽으로 계속 남아, 다른 에이전트가 나중에 `import prompts` 같은
+            # 상대 스타일 임포트를 할 때 엉뚱한 모듈을 집게 된다.
+            if name not in saved_short:
+                saved_short[name] = sys.modules.get(name)
+
             if full_name in sys.modules:
                 loaded[name] = sys.modules[full_name]
                 sys.modules[name] = loaded[name]
@@ -54,11 +61,7 @@ def load_agent_modules(agent_dir: str, module_names: list[str]) -> dict[str, Mod
                 raise ImportError(f"모듈을 찾을 수 없음: {file_path}")
             module = importlib.util.module_from_spec(spec)
             sys.modules[full_name] = module
-
-            # 같은 에이전트 내부의 `import {name}` 이 이 모듈을 찾게, 실행 전에 짧은 이름도 건다.
-            if name not in saved_short:
-                saved_short[name] = sys.modules.get(name)
-            sys.modules[name] = module
+            sys.modules[name] = module  # 같은 에이전트 내부의 `import {name}` 이 이걸 찾게
 
             spec.loader.exec_module(module)
             loaded[name] = module

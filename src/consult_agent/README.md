@@ -1,9 +1,9 @@
 # IRP 상담 대화 에이전트 (LangGraph)
 
-직원이 자연어로 묻는 것을 받아 처리하는 에이전트. 지금은 화법 검색(상황을 물으면 핵심
-포인트와 근거를 짚어주는 코칭 조언)만 하지만, 이름 그대로("consult_agent", 구 "pitch_agent")
-브리핑/고객정보 질의, 대화형 LMS 발송, 상담이력 기록, 브리핑 수정 요청까지 늘어날 자리로
-설계돼 있다 — `router.py`가 의도를 분류해 기능별 노드로 보내는 구조라 새 기능은 새 노드
+직원이 자연어로 묻는 것을 받아 처리하는 에이전트. 이름 그대로("consult_agent", 구
+"pitch_agent") 화법 검색을 넘어 브리핑/고객정보 질의(`briefing_qa`)·대화형 LMS 발송
+(`lms_send`)·상담이력 기록(§14, 모든 턴 공통)·브리핑 수정 요청(`correction`)까지 다루는
+자리로 커졌다 — `router.py`가 의도를 분류해 기능별 노드로 보내는 구조라 새 기능은 새 노드
 파일 하나 추가로 붙는다.
 
 ```python
@@ -14,6 +14,10 @@ r["answer"]    # 핵심 포인트 1문장 + 근거 2~3문장, 직원에게 코�
 r["sources"]   # [{"id": "ch01_new.p02", "title": "...", "score": 6.33, "page": 4}]
 
 r2 = ask("그럼 안 된다고 하면요?", history=r["history"])   # 후속 질문 — 이전 맥락 이어받음
+
+# 브리핑질의·LMS발송·수정은 customer_id 가 필요하다(현재 열려 있는 브리핑 화면의 고객).
+# 넘기면 모든 턴이 common/session_data 에 상담이력으로도 함께 기록된다(요건정의서 §14).
+r3 = ask("이 고객 평가금액 얼마야?", customer_id="C1", session_id="branch-101-2026-08-20")
 ```
 
 ```bash
@@ -32,10 +36,13 @@ python kb.py                                              # 지식베이스 점�
 
 ```
 consult_agent/
-├── graph.py                그래프 조립 · ask() · CLI 진입점
+├── graph.py                그래프 조립 · ask() · CLI 진입점 (모든 턴을 session_store 에 기록)
 ├── router.py                 의도분류(understand) · 상태정의(AgentState/Turn) · 모든 분기(route_*) predicate
 ├── pitch.py                  화법 검색 노드 6개 — retrieve/broaden/llm_rerank/verify/respond/fallback
 ├── meta.py                    메타 질문("뭘 도와줄 수 있어?") 응답 노드
+├── briefing_qa.py             브리핑/고객정보 질의 — strategy_agent.agent.propose() 를 그대로 호출
+├── lms.py                     대화형 LMS 발송 명령 — common.tools.send_lms 스텁 호출
+├── correction.py              브리핑 수정 요청 — 편집 가능 필드만, 이번 범위는 감사로그까지
 ├── prompts.py                LLM 프롬프트 템플릿 (기능별 섹션으로 구분)
 ├── llm.py                   LLM 클라이언트·모델 설정 (환경 이전 시 여기만 수정)
 ├── kb.py                   지식베이스 로드 · 검색 · 검증
@@ -50,10 +57,16 @@ consult_agent/
 ```
 
 지식베이스(`_kb`)는 `router.py`에서 한 번만 적재해 `pitch.py`·`meta.py`가 가져다 쓴다(순환
-임포트 없이 한 방향으로만 의존). 화법 문구만 고칠 땐 `prompts.py`, 화법 검색 로직은
-`pitch.py`, 의도분류·분기는 `router.py`, 그래프 흐름은 `graph.py`, LLM 클라이언트·모델·키는
-`llm.py`. 새 기능(브리핑질의·LMS발송 등)은 자기 노드 파일을 추가하고 `router.py`의 의도
-분류·`graph.py`의 그래프 조립에 연결하면 된다.
+임포트 없이 한 방향으로만 의존). `briefing_qa.py`·`correction.py`는 `common.agent_loader`로
+`strategy_agent`(engine·agent·customer)를 같은 프로세스에서 안전하게 불러온다 — 두 에이전트가
+`prompts`/`llm` 같은 동명 모듈을 갖고 있어(각자 평평한 스크립트 디렉터리), 그냥 임포트하면
+sys.modules 를 놓고 경합한다(자세한 이유는 `common/agent_loader.py` docstring 참고).
+
+화법 문구만 고칠 땐 `prompts.py`, 화법 검색 로직은 `pitch.py`, 의도분류·분기는 `router.py`,
+그래프 흐름은 `graph.py`, LLM 클라이언트·모델·키는 `llm.py`. 새 기능은 자기 노드 파일을
+추가하고 `router.py`의 의도 분류(`INTENTS`)·`graph.py`의 그래프 조립에 연결하면 된다 — LMS
+발송처럼 실제 외부 시스템 연동이 필요한 기능은 `common/tools.py`의 스텁 함수를 실제 MCP
+호출로 교체하는 식으로 라우팅 로직 변경 없이 갈아끼울 수 있게 설계했다.
 
 ---
 
@@ -65,7 +78,10 @@ START → understand ─┬─(situation/guide) → retrieve ─┬─(카드 �
                      │                    │          ├─(없음, 1회차)→ broaden ─┘            │
                      │                    └──────────┤                                      │
                      │                               └─(없음, 2회차)────→ fallback ←─────────┘  → END
-                     └─(capability)────────────────────────────────────→ capabilities            → END
+                     ├─(capability)────────────────────────────────────→ capabilities            → END
+                     ├─(briefing_qa)───────────────────────────────────→ briefing_qa             → END
+                     ├─(lms_send)──────────────────────────────────────→ lms_send                → END
+                     └─(correction)────────────────────────────────────→ correction               → END
 ```
 
 | 노드 | 하는 일 | LLM |
@@ -77,8 +93,15 @@ START → understand ─┬─(situation/guide) → retrieve ─┬─(카드 �
 | `verify` | 검색된 카드가 질문 '의도'에 실제로 맞는지 판정 — 아니면 fallback (오답 차단) | ○ |
 | `respond` | 선별된 카드 + 근거 사실만 넣어 화법 생성 | ○ |
 | `fallback` | 지식베이스에 없다고 정직하게 답변 | ✕ |
+| `briefing_qa` | `strategy_agent.agent.propose()` 재료만 근거로 브리핑/고객정보 질문에 답변 | ○ |
+| `lms_send` | 인용부호로 명시된 문구를 `common.tools.send_lms`(스텁)로 전달 | ✕ |
+| `correction` | 수정 요청을 편집 가능 필드로 분류 → 편집 가능하면 재작성+검증, 아니면 거절 | ○ |
 
-- `intent`: `situation`(특정 고객 상담) / `guide`(직원 업무 절차 질문) / `capability`(메타 질문). `guide`도 `retrieve`는 동일하게 타되, 응답 프롬프트 톤만 다름.
+- `intent`: `situation`(특정 고객 상담) / `guide`(직원 업무 절차 질문) / `capability`(메타 질문) /
+  `briefing_qa`(브리핑·고객정보 질의) / `lms_send`(LMS 발송 명령) / `correction`(브리핑 수정
+  요청). `guide`도 `retrieve`는 동일하게 타되, 응답 프롬프트 톤만 다름.
+- `briefing_qa`·`lms_send`·`correction`은 `state["customer_id"]`(호출자가 `ask(..., customer_id=...)`로
+  넘김)가 있어야 동작한다 — 없으면 "고객을 찾을 수 없다"고 안전하게 답한다.
 - **오답 차단 2단계**: ① `retrieve`가 발화·주제 유사도(`MIN_TOPICAL`)로 무관한 질문을 거르고, ② 그래도 주제어만 겹쳐 딸려온 카드는 `verify`가 질문 의도와 대조해 걸러 `fallback`시킴. 확신이 낮으면 억지 답변 대신 "화법 없음"으로 정직하게 응답.
 - 검색은 결정적(deterministic) — 같은 질문엔 같은 카드. 재검색은 `broaden_count`로 최대 2회 제한.
 - `retrieve`는 `stage`/`customer_type`으로 먼저 후보를 좁힌 뒤 채점 — 챕터 간 같은 라벨(예: "수수료 비교"가 퇴직금·계약이전에 둘 다 있음)이 섞이지 않음. 세부 로직·근거는 `nodes.py`/`kb.py` 코드 주석 참고.
@@ -129,3 +152,22 @@ START → understand ─┬─(situation/guide) → retrieve ─┬─(카드 �
 
 원본 PDF는 당행 영업전략·타사대응 노하우가 포함된 대외비 자료입니다. `data/`에 그 내용이
 그대로 들어 있으므로 저장소 접근권한을 반드시 통제하세요.
+
+---
+
+## 상담이력 · LMS · 브리핑 수정 (에이전틱 확장, 이번 범위)
+
+- **상담이력(§14)**: `graph.py::ask()`가 `customer_id`를 받으면 매 턴(질문+답변)을
+  `common/session_data/{customer_id}.json`에 기록한다. `strategy_agent.engine.prepare()`는 이
+  기록을 `facts["consult_history"]`로 **읽기만** 한다 — consult_agent 가 기록하고
+  strategy_agent 가 읽는 단방향 관계라 "코드=사실" 경계를 대화이력에도 그대로 적용한다.
+- **LMS 발송**: `common/tools.py::send_lms`는 아직 스텁이다 — 실제 발송 없이 호출 사실만
+  세션이력에 남긴다. MCP 연동이 준비되면 그 함수 **본문만** 실제 클라이언트 호출로 교체하면
+  된다(레지스트리 키·시그니처 불변 — `lms.py`도 이 화면의 "LMS 발송" 버튼도 다시 손댈 필요
+  없음).
+- **브리핑 수정**: 편집 가능 항목은 `strategy_agent.agent.EDITABLE_FIELDS`(AI브리핑
+  문장·근거해설·카드 한줄혜택 — 전부 LLM 이 쓴 산문)로 코드가 못박아둔다. 수치·상품명·전략
+  선정처럼 시스템이 계산한 값을 고쳐달라는 요청은 조용히 수용하지 않고 명확히 거절한다.
+  승인된 수정은 세션이력에 감사로그로만 남고, 다음 브리핑 생성에 자동 반영되는 재적용 루프는
+  아직 없다 — 그 루프는 "코드=사실" 경계를 실제로 어떻게 지킬지 더 구체적인 설계가 필요한
+  다음 단계 항목이다.

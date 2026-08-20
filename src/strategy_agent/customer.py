@@ -247,3 +247,12 @@ PERSONAS = [
         dorm=20, nchM=2.0, income_bracket="5500초과",
     ),
 ]
+
+_BY_ID = {p.id: p for p in PERSONAS}
+
+
+def get_profile(customer_id: str) -> Profile | None:
+    """고객 id 로 Profile 을 조회한다. 지금은 PERSONAS(테스트 픽스처) 조회의 얇은 래퍼일
+    뿐이지만, 대화형 에이전트(consult_agent.briefing_qa)가 이 함수 하나만 의존하도록 해
+    나중에 실제 고객 프로파일 저장소로 교체할 때 이 함수 본문만 바꾸면 되게 한다."""
+    return _BY_ID.get(customer_id)

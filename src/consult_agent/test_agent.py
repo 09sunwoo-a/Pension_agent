@@ -123,6 +123,49 @@ def check_broaden_stages() -> bool:
     return ok
 
 
+def check_intent_routing() -> bool:
+    """새 인텐트(briefing_qa/lms_send/correction)가 understand 분류에 따라 올바른 노드로
+    라우팅되는지 확인한다 — 각 노드 자체의 로직(LLM 프롬프트·검증)은 briefing_qa.py/
+    correction.py/lms.py 안에서 별도로 검증할 대상이라, 여기서는 router.py 의 배선만 본다."""
+    orig = {name: getattr(G, name) for name in ("briefing_qa", "lms_send", "correction")}
+
+    def make_probe(name):
+        def probe(state):
+            return {"answer": f"({name} 응답)", "sources": []}
+        return probe
+
+    for name in orig:
+        setattr(G, name, make_probe(name))
+
+    ok = True
+    for intent in ("briefing_qa", "lms_send", "correction"):
+        question = f"{intent}-라우팅-테스트"
+        _OVERRIDES[question] = {"intent": intent}
+        agent = G.build_agent()
+        out = agent.invoke({"question": question, "customer_id": "C1"})
+        this_ok = out.get("answer") == f"({intent} 응답)"
+        ok = ok and this_ok
+        print(f"{'✓' if this_ok else '✗'} intent={intent} → {intent} 노드로 라우팅")
+        del _OVERRIDES[question]
+
+    for name, fn in orig.items():
+        setattr(G, name, fn)
+    return ok
+
+
+def check_lms_send_parsing() -> bool:
+    """lms_send 는 LLM 을 쓰지 않는다 — 인용부호 파싱·문구 누락·customer_id 없음을 직접 검증."""
+    import lms
+
+    ok1 = "발송 없음" in lms.lms_send(
+        {"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "C1"})["answer"]
+    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "C1"})["answer"]
+    ok3 = "찾을 수 없어요" in lms.lms_send({"question": '"문구" 보내줘', "customer_id": None})["answer"]
+    ok = ok1 and ok2 and ok3
+    print(f"{'✓' if ok else '✗'} lms_send: 인용부호 파싱 · 문구 누락 · customer_id 없음 처리")
+    return ok
+
+
 def check_verify_gate() -> bool:
     """verify 가 NO 를 내면(의도 불일치) 카드가 검색됐어도 fallback 으로 가는지 검증한다.
     검색은 성공하지만 게이트가 거부하는 상황을 스텁으로 재현한다."""
@@ -161,7 +204,17 @@ def main() -> int:
 
     passed += check_broaden_stages()
     passed += check_verify_gate()
-    total = len(CASES) + 2
+    passed += check_intent_routing()
+    passed += check_lms_send_parsing()
+    total = len(CASES) + 4
+
+    # 위 테스트들(특히 lms_send)이 common/session_data 에 감사로그를 남기므로 정리한다.
+    import shutil
+    from pathlib import Path
+    session_dir = Path(__file__).resolve().parent.parent / "common" / "session_data"
+    if session_dir.exists():
+        shutil.rmtree(session_dir)
+
     print(f"\n{passed}/{total} 통과")
     return 0 if passed == total else 1
 

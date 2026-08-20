@@ -20,6 +20,7 @@ from llm import generate
 from prompts import UNDERSTAND_PROMPT
 
 HISTORY_LIMIT = 4  # understand 프롬프트에 넣는 최근 대화 턴 수
+INTENTS = ("situation", "guide", "capability", "briefing_qa", "lms_send", "correction")
 
 _kb = load_kb()
 
@@ -41,7 +42,9 @@ class Turn(TypedDict, total=False):
 class AgentState(TypedDict, total=False):
     question: str                    # [입력] 직원의 자연어 질문
     history: list[Turn]              # [입력] 이전 대화 턴 (호출자가 세션별로 들고 다님)
-    intent: str                      # understand 가 채움 — "situation" | "guide" | "capability"
+    customer_id: str | None          # [입력] 현재 열려 있는 브리핑 화면의 고객 id (호출자가 넘김)
+    intent: str                      # understand 가 채움 — situation|guide|capability|
+                                      # briefing_qa|lms_send|correction
     customer_type: str | None
     objection_type: str | None
     stage: str | None
@@ -89,7 +92,7 @@ def understand(state: AgentState) -> dict[str, Any]:
         slots = {}  # 분해 실패해도 원문으로 검색은 된다
 
     return {
-        "intent": slots.get("intent") if slots.get("intent") in ("situation", "guide", "capability") else "situation",
+        "intent": slots.get("intent") if slots.get("intent") in INTENTS else "situation",
         "customer_type": slots.get("customer_type"),
         "objection_type": slots.get("objection_type"),
         "stage": slots.get("stage"),
@@ -98,8 +101,16 @@ def understand(state: AgentState) -> dict[str, Any]:
     }
 
 
+_INTENT_NODE = {
+    "capability": "capabilities",
+    "briefing_qa": "briefing_qa",
+    "lms_send": "lms_send",
+    "correction": "correction",
+}
+
+
 def route_intent(state: AgentState) -> str:
-    return "capabilities" if state.get("intent") == "capability" else "retrieve"
+    return _INTENT_NODE.get(state.get("intent"), "retrieve")
 
 
 # ─────────────────────────────────────────────────────────────

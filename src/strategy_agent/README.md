@@ -30,7 +30,8 @@
 ```bash
 # 정의·회귀 검증 (외부 의존성 없음 · stdlib 만)
 python engine.py            # 정의 검증 — 근거 교차검증 포함 (ERROR 0건 확인)
-python test_engine.py       # 회귀 테스트 (전건 통과 확인)
+python test_engine.py       # 회귀 테스트 — 엔진 결정론 로직 (전건 통과 확인)
+python test_agent.py        # 회귀 테스트 — LLM 단계 (스텁, API 키 불필요)
 
 # 산출
 python agent.py 이현우      # 단일 고객 전략 제안 (CLI)
@@ -90,28 +91,55 @@ LLM 설정은 이 폴더가 아니라 **umbrella 루트 `.env`** 에 둔다(`../
 
 | 파일 | 내용 |
 |---|---|
-| `strategies.json` | 전략 플레이북 — 요건·절·근거·시급성·혜택·출처·행위주체 (근거 있는 전략만) |
+| `strategies.json` | 전략 플레이북 — 요건·절·근거·시급성·혜택·출처·행위주체·`pitch_refs`/`objection_refs` (근거 있는 전략만) |
 | `system_strategies.json` | 게이트 결과로 발동하는 조건부 전략(예: 투자성향 재진단) |
-| `products.json` | 상품 — 위험등급·최소금액·비대면·위험자산 산입·예금자보호 |
+| `products.json` | 상품 — 위험등급·최소금액·비대면·위험자산 산입·예금자보호(+ ⑤용 지역·자산군·운용전략·특징) |
 | `baselines.json` | 기대효과 비교 기준선 (전부 KB 사실 출처) |
 | `capabilities.json` | 시스템 기능 지원 여부 |
-| `assets.json` | 고객 발송 가능 콘텐츠 |
+| `assets.json` | 고객 발송 가능 콘텐츠 + 이벤트·세미나 일정(⑨) |
+| `top_holdings.json` | 수익률 상위 1% 고객 상품 사례(④, 비개인화·참고용) |
+| `portfolios.json` | 적합 상품 추천의 '포트폴리오' 후보(⑤) |
 
 **상품·전략·기준선·발송자료 추가는 코드 수정 불필요** — JSON 만 채운다. 요건(`CONDS`) 신설만
 `customer.py` 수정 필요. 저작 절차와 프롬프트 → **[../AUTHORING.md](../AUTHORING.md)**.
+
+`top_holdings.json`·`portfolios.json`과 `assets.json`의 이벤트·세미나 레코드는 요건정의서의
+예시를 옮긴 자리표시자 데이터다 — 실제 콘텐츠로 교체하는 것은 데이터 담당자 몫이다.
+
+## AI 브리핑 — 9개 섹션 + 상담이력
+
+`agent.propose(profile)`은 화면의 "AI 브리핑"이 필요로 하는 조각들을 `facts`에 함께 담아
+반환한다(①은 `sentence`, 나머지는 `facts` 키):
+
+| 섹션 | facts 키 | 산출 |
+|---|---|---|
+| ① AI 브리핑 | `sentence`/`insight` | LLM(재료 안에서), 폴백 시 규칙 |
+| ② 왜 이 고객님인가요 | `why_this_customer` | 코드(≤3줄, LLM 없음) |
+| ③ 현재 운용상태 | `briefing["운용현황(3분류)"]` | 코드(`cash_idle_pct` 없으면 생략) |
+| ④ 상위 1% 상품 사례 | `top_holdings` | 코드(고객 필터 없음) |
+| ⑤ 적합 상품·포트폴리오 | `recommendation` | LLM(폐쇄 후보군에서 선택 + verify) |
+| ⑥ 이렇게 말해보세요 | `talking_points` | 코드로 2개 보장 + LLM 스크립트(선택적) |
+| ⑦ 예상 반론 및 대응 | `objections` | 코드로 2개 보장(저작 우선, 부족 시 폴백) |
+| ⑧ 상담에 참고하세요 | `consult_resources` | consult_agent.kb.retrieve() 재사용 |
+| ⑨ 고객님께 안내해보세요 | `outreach` | 코드(가장 임박한 이벤트·세미나) |
+| §14 상담 이력 | `consult_history` | `common.session_store` 읽기 전용 |
+
+새 LLM 접점(⑤·⑥)도 기존 `sentence`와 같은 원칙을 따른다 — `common.verify.verify()`로 재료
+밖 수치·상품명을 걸러내고, 실패하면 그 섹션만 조용히 비거나(⑤) 원본 텍스트로 폴백한다(⑥).
 
 ## 파일 구조
 
 ```
 strategy_agent/
-├─ data/*.json          ★ 핵심 자산 (위 6개)
-├─ engine.py            사실 계산 · 게이트 · 정의 검증 · 규칙 기반 문장 합성
-├─ customer.py          고객 프로파일 · 요건 판정 · 검증용 페르소나
-├─ agent.py             LLM 단계 · 최종 조립 · CLI
+├─ data/*.json          ★ 핵심 자산 (위 8개)
+├─ engine.py            사실 계산 · 게이트 · 정의 검증 · 규칙 기반 문장 합성 · AI브리핑 섹션별 선택 함수
+├─ customer.py          고객 프로파일 · 요건 판정 · 검증용 페르소나 · get_profile()
+├─ agent.py             LLM 단계 · 최종 조립 · CLI · EDITABLE_FIELDS(대화형 수정 경계)
 ├─ prompts.py           LLM 프롬프트
 ├─ llm.py               common.llm 위임 shim (구현·설정은 ../common/llm.py + ../.env)
 ├─ app.py               Streamlit 평가/피드백 대시보드
-└─ test_engine.py       회귀 테스트
+├─ test_engine.py       회귀 테스트 (엔진 결정론 로직)
+└─ test_agent.py        회귀 테스트 (LLM 단계 — 스텁, API 키 불필요)
 ```
 
 ## 튜닝 포인트

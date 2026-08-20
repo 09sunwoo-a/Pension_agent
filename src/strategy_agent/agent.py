@@ -82,6 +82,17 @@ def _parse(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+# 대화형 브리핑 수정(consult_agent.correction)이 건드릴 수 있는 필드 — 전부 LLM 이 쓴 산문
+# (의견)이지, engine.py 가 계산한 숫자·상품명·조건 판정이 아니다. 이 밖의 요청은 "시스템이
+# 계산한 사실이라 대화로 못 고친다"고 거절해야 한다. 이번 범위는 검토 기록(감사로그)까지만—
+# 승인된 수정이 다음 propose() 호출에 자동 반영되는 재적용 루프는 아직 없다.
+EDITABLE_FIELDS = {
+    "ai_briefing_sentence": "propose() 반환의 sentence",
+    "ai_briefing_insight": "propose() 반환의 insight",
+    "card_benefit": "facts['items'][i]['card']['benefit'] — 전략 카드의 한 줄 혜택",
+}
+
+
 def _write_talking_scripts(facts: dict) -> None:
     """talking_points 각 항목에 고객 맞춤 대고객 화법 스크립트(script)를 채운다(요건정의서 ⑥).
 

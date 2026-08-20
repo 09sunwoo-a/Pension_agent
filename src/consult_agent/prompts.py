@@ -12,11 +12,11 @@ from __future__ import annotations
 UNDERSTAND_PROMPT = """직원의 상담 질문을 아래 항목으로 분해해 JSON만 출력하라. 설명·코드펜스 금지.
 
 {{
-  "intent": "situation" 또는 "guide" 또는 "capability",
+  "intent": "situation" 또는 "guide" 또는 "capability" 또는 "briefing_qa" 또는 "lms_send" 또는 "correction",
   "customer_type": {customer_types} 중 하나 또는 null,
   "objection_type": {objection_types} 중 하나 또는 null,
   "stage": {stages} 중 하나 또는 null,
-  "utterance": "situation이면 질문에 담긴 '고객이 한 말'을 한 문장으로. guide·capability면 질문 원문 그대로"
+  "utterance": "situation이면 질문에 담긴 '고객이 한 말'을 한 문장으로. 그 외 intent는 질문 원문 그대로"
 }}
 
 utterance 작성 시 명백한 표기 차이(구어체·붙여쓰기 등)만 상담 현장 표준 용어로 바꿔 쓴다
@@ -31,8 +31,15 @@ intent 판단 기준:
   (예: "이탈위험 고객을 어떻게 골라내나요", "리밸런싱 콜은 어떤 순서로 하나요")
 - "capability": 에이전트가 무엇을 도와줄 수 있는지, 어떤 화법·상황을 다룰 수 있는지 묻는 메타 질문
   (예: "어떤 걸 도와줄 수 있어?", "너가 답변할 수 있는 화법은 뭐가 있어?")
+- "briefing_qa": 현재 열려 있는 고객의 AI브리핑 내용·고객 정보를 묻는 질문
+  (예: "이 고객 평가금액 얼마야?", "이 고객 왜 대상이야?", "브리핑 요약해줘")
+- "lms_send": 방금 나온 문구·화법을 고객에게 LMS로 보내달라는 대화형 명령
+  (예: "그 문구로 LMS 보내줘", "방금 화법 그대로 문자 발송해줘")
+- "correction": 방금 나온 AI브리핑 내용의 특정 부분이 틀렸으니 고쳐달라는 요청
+  (예: "이 부분 틀렸어, 고쳐줘", "이 고객은 사정이 달라서 이렇게 바꿔줘")
 
-guide·capability 질문에는 customer_type·objection_type 을 추정하지 말고 null 로 둬라.
+guide·capability·briefing_qa·lms_send·correction 질문에는 customer_type·objection_type 을
+추정하지 말고 null 로 둬라.
 목록에 없는 값은 만들어내지 말고 null 을 넣어라.
 objection_type 은 고객이 실제로 그 거절·우려를 말이나 반응으로 드러낸 경우에만 채운다.
 단지 주제어(예: "연금 개시", "수수료")가 등장했다는 이유로 비슷한 라벨을 고르지 말고,

@@ -12,15 +12,27 @@
 그래프 구조(노드·분기 다이어그램)는 README.md 참고. 이 파일은 그래프를
 조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
 노드 함수는 기능별로 나뉘어 있다 — 의도분류·상태정의·분기는 router.py, 화법 검색은
-pitch.py, 메타 질문 응답은 meta.py. LLM 프롬프트는 prompts.py.
+pitch.py, 메타 질문 응답은 meta.py, 브리핑질의는 briefing_qa.py, LMS발송은 lms.py,
+브리핑수정은 correction.py. LLM 프롬프트는 prompts.py.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
+_UMBRELLA = str(Path(__file__).resolve().parent.parent)
+if _UMBRELLA not in sys.path:
+    sys.path.insert(0, _UMBRELLA)
+
+from common.session_store import append_turn  # noqa: E402
+
+from briefing_qa import briefing_qa
+from correction import correction
+from lms import lms_send
 from meta import capabilities
 from pitch import broaden, fallback, llm_rerank, respond, retrieve_node, verify
 from router import (
@@ -44,9 +56,15 @@ def build_agent():
     g.add_node("verify", verify)
     g.add_node("respond", respond)
     g.add_node("fallback", fallback)
+    g.add_node("briefing_qa", briefing_qa)
+    g.add_node("lms_send", lms_send)
+    g.add_node("correction", correction)
 
     g.add_edge(START, "understand")
-    g.add_conditional_edges("understand", route_intent, ["capabilities", "retrieve"])
+    g.add_conditional_edges(
+        "understand", route_intent,
+        ["capabilities", "retrieve", "briefing_qa", "lms_send", "correction"],
+    )
     g.add_conditional_edges("retrieve", route, ["verify", "broaden", "llm_rerank"])
     g.add_conditional_edges("llm_rerank", route_rerank, ["verify", "fallback"])
     g.add_conditional_edges("verify", route_verify, ["respond", "fallback"])
@@ -54,23 +72,35 @@ def build_agent():
     g.add_edge("capabilities", END)
     g.add_edge("respond", END)
     g.add_edge("fallback", END)
+    g.add_edge("briefing_qa", END)
+    g.add_edge("lms_send", END)
+    g.add_edge("correction", END)
     return g.compile()
 
 
 _AGENT = None
 
 
-def ask(question: str, history: list[dict] | None = None) -> dict[str, Any]:
+def ask(
+    question: str, history: list[dict] | None = None,
+    *, customer_id: str | None = None, session_id: str = "default",
+) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
 
     후속 질문에 맥락을 이어가려면 이번 호출이 돌려준 "history"를 다음
     호출에 그대로 넘긴다. 세션(대화 묶음) 유지는 호출자 책임 — 이 함수
     자체는 상태를 들고 있지 않는다.
+
+    customer_id: 현재 열려 있는 브리핑 화면의 고객 id. briefing_qa/lms_send/correction
+    노드가 필요로 한다 — 넘기지 않으면 그 세 의도는 "고객을 찾을 수 없다"고 답한다.
+    session_id: 상담 세션 구분자(요건정의서 §14 상담이력 단위). 넘기지 않으면 "default"
+    세션으로 기록된다 — 모든 턴은 intent 와 무관하게 이 진입점 한 곳에서 기록되므로, 새
+    intent 가 추가돼도 상담이력 기록을 빠뜨릴 일이 없다.
     """
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    out = _AGENT.invoke({"question": question, "history": history or []})
+    out = _AGENT.invoke({"question": question, "history": history or [], "customer_id": customer_id})
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),
@@ -79,6 +109,15 @@ def ask(question: str, history: list[dict] | None = None) -> dict[str, Any]:
         "utterance": out.get("utterance"),
     }
     new_history = [*(history or []), turn][-HISTORY_LIMIT:]
+
+    if customer_id:
+        append_turn(customer_id, session_id, {
+            "role": "user", "text": question, "intent": out.get("intent"),
+        })
+        append_turn(customer_id, session_id, {
+            "role": "agent", "text": out.get("answer", ""), "intent": out.get("intent"),
+        })
+
     return {"answer": out["answer"], "sources": out.get("sources", []), "history": new_history}
 
 
