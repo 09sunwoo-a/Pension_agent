@@ -70,28 +70,36 @@ _CAPABILITY_HINTS = ("화법이 뭐가 있", "화법은 뭐가 있", "도와줄"
 
 
 def stub_understand(state):
+    """understand 는 이제 intent+utterance 만 낸다 — 화법 슬롯은 stub_situation_slots 가 낸다
+    (실제 그래프도 situation/guide 확정 후에만 pitch.situation_slots 를 별도로 거친다)."""
+    q = state["question"]
+    if q in _OVERRIDES:
+        return {"intent": _OVERRIDES[q].get("intent", "situation"), "utterance": q, "broaden_count": 0}
+    return {
+        "intent": "capability" if any(k in q for k in _CAPABILITY_HINTS) else "situation",
+        "utterance": q,
+        "broaden_count": 0,
+    }
+
+
+def stub_situation_slots(state):
+    """situation_slots 가 실제로 뽑아낼 법한 화법 슬롯을 규칙으로 흉내낸다."""
     q = state["question"]
     if q in _OVERRIDES:
         override = _OVERRIDES[q]
         return {
-            "intent": override.get("intent", "situation"),
             "customer_type": override.get("customer_type"),
             "objection_type": override.get("objection_type"),
             "stage": override.get("stage"),
-            "utterance": q,
-            "broaden_count": 0,
         }
     if q == _AMBIGUOUS_Q:
         objection_type = None  # 미탐지 재현 — "이미"가 있어도 일부러 못 잡은 것으로 취급
     else:
         objection_type = next((v for k, v in _OBJ_HINTS if k in q), None)
     return {
-        "intent": "capability" if any(k in q for k in _CAPABILITY_HINTS) else "situation",
         "customer_type": "사업자" if "사업자" in q else ("직장인" if "직장인" in q else None),
         "objection_type": objection_type,
         "stage": "신규",
-        "utterance": q,
-        "broaden_count": 0,
     }
 
 
@@ -170,6 +178,7 @@ def check_verify_gate() -> bool:
     """verify 가 NO 를 내면(의도 불일치) 카드가 검색됐어도 fallback 으로 가는지 검증한다.
     검색은 성공하지만 게이트가 거부하는 상황을 스텁으로 재현한다."""
     G.understand = stub_understand
+    G.situation_slots = stub_situation_slots
     G.respond = stub_respond
     G.verify = lambda state: {"verified": False}
     agent = G.build_agent()
@@ -185,6 +194,7 @@ def check_verify_gate() -> bool:
 def main() -> int:
     # build_agent() 는 호출 시점에 모듈 전역에서 노드 함수를 찾으므로 치환이 그대로 먹는다
     G.understand = stub_understand
+    G.situation_slots = stub_situation_slots
     G.respond = stub_respond
     G.verify = stub_verify_yes
     agent = G.build_agent()

@@ -34,7 +34,7 @@ from briefing_qa import briefing_qa
 from correction import correction
 from lms import lms_send
 from meta import capabilities
-from pitch import broaden, fallback, llm_rerank, respond, retrieve_node, verify
+from pitch import broaden, fallback, llm_rerank, respond, retrieve_node, situation_slots, verify
 from router import (
     HISTORY_LIMIT,
     AgentState,
@@ -50,6 +50,7 @@ def build_agent():
     g = StateGraph(AgentState)
     g.add_node("understand", understand)
     g.add_node("capabilities", capabilities)
+    g.add_node("situation_slots", situation_slots)
     g.add_node("retrieve", retrieve_node)
     g.add_node("broaden", broaden)
     g.add_node("llm_rerank", llm_rerank)
@@ -63,8 +64,9 @@ def build_agent():
     g.add_edge(START, "understand")
     g.add_conditional_edges(
         "understand", route_intent,
-        ["capabilities", "retrieve", "briefing_qa", "lms_send", "correction"],
+        ["capabilities", "situation_slots", "briefing_qa", "lms_send", "correction"],
     )
+    g.add_edge("situation_slots", "retrieve")
     g.add_conditional_edges("retrieve", route, ["verify", "broaden", "llm_rerank"])
     g.add_conditional_edges("llm_rerank", route_rerank, ["verify", "fallback"])
     g.add_conditional_edges("verify", route_verify, ["respond", "fallback"])

@@ -37,8 +37,8 @@ python kb.py                                              # 지식베이스 점�
 ```
 consult_agent/
 ├── graph.py                그래프 조립 · ask() · CLI 진입점 (모든 턴을 session_store 에 기록)
-├── router.py                 의도분류(understand) · 상태정의(AgentState/Turn) · 모든 분기(route_*) predicate
-├── pitch.py                  화법 검색 노드 6개 — retrieve/broaden/llm_rerank/verify/respond/fallback
+├── router.py                 의도분류(understand, 도메인 어휘 없는 라우팅 전용) · 상태정의(AgentState/Turn) · 모든 분기(route_*) predicate
+├── pitch.py                  화법 검색 노드 7개 — situation_slots/retrieve/broaden/llm_rerank/verify/respond/fallback
 ├── meta.py                    메타 질문("뭘 도와줄 수 있어?") 응답 노드
 ├── briefing_qa.py             브리핑/고객정보 질의 — strategy_agent.agent.propose() 를 그대로 호출
 ├── lms.py                     대화형 LMS 발송 명령 — common.tools.send_lms 스텁 호출
@@ -68,26 +68,34 @@ sys.modules 를 놓고 경합한다(자세한 이유는 `common/agent_loader.py`
 발송처럼 실제 외부 시스템 연동이 필요한 기능은 `common/tools.py`의 스텁 함수를 실제 MCP
 호출로 교체하는 식으로 라우팅 로직 변경 없이 갈아끼울 수 있게 설계했다.
 
+**`router.py::understand`는 라우팅만 한다 — 특정 기능의 어휘를 모른다.** 고객유형·거절유형·
+상담단계 같은 화법 검색 전용 슬롯은 `understand`가 채우지 않는다. `intent`가 situation/guide
+로 확정된 뒤에만 `pitch.py::situation_slots`가 그 슬롯을 스스로 분해한다 —
+`briefing_qa.py`/`correction.py`가 각자 자기 프롬프트로 스스로 해석하는 것과 같은 원칙이다.
+이렇게 분리해두면 새 기능이 늘어나도 `understand`가 모든 기능의 도메인 어휘를 알아야 하는
+단일 병목이 되지 않는다 — 각 기능이 자기 슬롯 추출을 스스로 소유한다.
+
 ---
 
 ## 그래프 구조
 
 ```
-START → understand ─┬─(situation/guide) → retrieve ─┬─(카드 있음)→ verify ─┬─(의도 맞음)→ respond → END
-                     │                    ↑          │                     └─(의도 안맞음)─┐
-                     │                    │          ├─(없음, 1회차)→ broaden ─┘            │
-                     │                    └──────────┤                                      │
-                     │                               └─(없음, 2회차)────→ fallback ←─────────┘  → END
-                     ├─(capability)────────────────────────────────────→ capabilities            → END
-                     ├─(briefing_qa)───────────────────────────────────→ briefing_qa             → END
-                     ├─(lms_send)──────────────────────────────────────→ lms_send                → END
-                     └─(correction)────────────────────────────────────→ correction               → END
+START → understand ─┬─(situation/guide) → situation_slots → retrieve ─┬─(카드 있음)→ verify ─┬─(의도 맞음)→ respond → END
+                     │                                      ↑          │                     └─(의도 안맞음)─┐
+                     │                                      │          ├─(없음, 1회차)→ broaden ─┘            │
+                     │                                      └──────────┤                                      │
+                     │                                                 └─(없음, 2회차)────→ fallback ←─────────┘  → END
+                     ├─(capability)──────────────────────────────────────────────────────→ capabilities            → END
+                     ├─(briefing_qa)─────────────────────────────────────────────────────→ briefing_qa             → END
+                     ├─(lms_send)────────────────────────────────────────────────────────→ lms_send                → END
+                     └─(correction)──────────────────────────────────────────────────────→ correction               → END
 ```
 
 | 노드 | 하는 일 | LLM |
 |---|---|:---:|
-| `understand` | 질문(+이전 대화) → `intent`·고객유형·거절유형·단계·고객발화로 분해 | ○ |
+| `understand` | 질문(+이전 대화) → `intent`·`utterance`만 판단(도메인 어휘 없는 라우팅 전용) | ○ |
 | `capabilities` | "뭘 도와줄 수 있어?" 같은 메타 질문에 KB 메타데이터로 안내 | ✕ |
+| `situation_slots` | situation/guide 확정 후에만 호출 — 고객유형·거절유형·단계를 화법 검색용으로 분해 | ○ |
 | `retrieve` | 스코프(고객유형·단계) + 발화 유사도로 화법 카드 top-3 선별 | ✕ |
 | `broaden` | 못 찾으면 1차로 고객유형·단계, 2차로 거절유형까지 풀고 재검색 (최대 2회) | ✕ |
 | `verify` | 검색된 카드가 질문 '의도'에 실제로 맞는지 판정 — 아니면 fallback (오답 차단) | ○ |

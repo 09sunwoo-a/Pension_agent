@@ -43,7 +43,7 @@ flowchart TB
 
     subgraph CONSULT["consult_agent — 직원 상담 대화 (LangGraph)"]
         PDATA[("data/*.json<br/>fact · pitch · resource")]
-        PDATA --> FLOW1["화법: understand → retrieve(n-gram+태그)<br/>→ broaden ×2 → llm_rerank(안전망)<br/>→ verify → respond"]
+        PDATA --> FLOW1["화법: understand(라우팅) → situation_slots(슬롯분해)<br/>→ retrieve(n-gram+태그) → broaden ×2<br/>→ llm_rerank(안전망) → verify → respond"]
         FLOW3["briefing_qa · lms_send · correction<br/>(agent_loader 로 strategy_agent 호출)"]
     end
 

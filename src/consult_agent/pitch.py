@@ -1,7 +1,12 @@
-"""화법 검색 노드 — retrieve/broaden/llm_rerank/verify/respond/fallback.
+"""화법 검색 노드 — situation_slots/retrieve/broaden/llm_rerank/verify/respond/fallback.
 
 원래 nodes.py 에 다른 기능들과 함께 있던 화법 검색 흐름을 그대로(로직 무변경) 옮긴 것이다.
 분기 predicate(route/route_rerank/route_verify)는 router.py 에 있다 — 여기는 노드 본체만.
+
+situation_slots 는 router.py::understand 가 라우팅만 하고 넘긴 뒤, 화법 검색에만 필요한
+고객유형·거절유형·상담단계를 이 파일 안에서 스스로 분해하는 노드다 — briefing_qa/lms_send/
+correction 이 각자 자기 프롬프트로 스스로 해석하는 것과 같은 원칙을, 화법 검색에도 적용한
+것(understand 를 모든 기능의 어휘를 아는 단일 진입점으로 비대해지게 두지 않는다).
 """
 
 from __future__ import annotations
@@ -12,10 +17,39 @@ from typing import Any
 
 from kb import build_context, card_index, retrieve
 from llm import generate
-from prompts import RERANK_PROMPT, SYSTEM, USER, VERIFY_PROMPT
-from router import AgentState, _kb
+from prompts import RERANK_PROMPT, SITUATION_PROMPT, SYSTEM, USER, VERIFY_PROMPT
+from router import AgentState, _format_history, _kb
 
 TOP_K = 3
+
+
+# ─────────────────────────────────────────────────────────────
+# Node. situation_slots — 화법 검색 전용 슬롯 분해 (situation/guide 확정 후에만 호출)
+# ─────────────────────────────────────────────────────────────
+
+def situation_slots(state: AgentState) -> dict[str, Any]:
+    prompt = SITUATION_PROMPT.format(
+        customer_types=_kb.customer_types,
+        objection_types=_kb.objection_types,
+        stages=_kb.stages,
+        history_block=_format_history(state.get("history")),
+        intent=state.get("intent"),
+        utterance=state.get("utterance"),
+        question=state["question"],
+    )
+    text = generate(prompt, max_tokens=150)
+
+    try:
+        m = re.search(r"\{.*\}", text, re.S)
+        slots = json.loads(m.group()) if m else {}
+    except (json.JSONDecodeError, AttributeError):
+        slots = {}  # 분해 실패해도 utterance 만으로 검색은 된다
+
+    return {
+        "customer_type": slots.get("customer_type"),
+        "objection_type": slots.get("objection_type"),
+        "stage": slots.get("stage"),
+    }
 
 
 # ─────────────────────────────────────────────────────────────
