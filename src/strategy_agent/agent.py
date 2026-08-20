@@ -29,6 +29,8 @@ from customer import PERSONAS, Profile
 from prompts import (
     FALLBACK_PROMPT,
     FALLBACK_SYSTEM,
+    RECOMMEND_PROMPT,
+    RECOMMEND_SYSTEM,
     SYSTEM,
     TALK_PROMPT,
     TALK_SYSTEM,
@@ -107,6 +109,72 @@ def _write_talking_scripts(facts: dict) -> None:
             tp["script"] = script
 
 
+def _recommend(p: Profile) -> dict | None:
+    """⑤ '이런 상품이 적합할 수 있어요' — 상품 1개 + 포트폴리오 1개를 LLM 이 폐쇄 후보군에서
+    고른다(요건정의서 ⑤). 실패(후보 없음·LLM 미가용·파싱 실패·목록 밖 id·재료 이탈)하면
+    None 을 반환해 섹션을 노출하지 않는다 — 근거 없는 추천을 보여주느니 비우는 쪽을 택한다.
+    """
+    pool = engine.candidate_pool_for_recommendation(p)
+    if not pool["products"] or not llm.available():
+        return None
+
+    customer_state = {
+        "투자성향": p.rk, "연령": p.ag, "평가금액": engine.won(p.bal),
+        "포트폴리오": dict(zip(engine.PORT_LABELS, p.port, strict=True)),
+        "투자기간": f"{p.invest_period_years}년" if p.invest_period_years is not None else "미확인",
+        "연금수령여부": "수령 중" if p.pension_started else "미개시",
+    }
+    products_payload = [{
+        "id": r["id"], "name": r["name"], "category": r["category"], "risk": r["risk"],
+        "return_1y": engine.product_return(r), "region": r.get("region"),
+        "asset_class": r.get("asset_class"), "strategy": r.get("strategy_desc"),
+        "features": r.get("features"),
+    } for r in pool["products"]]
+    portfolios_payload = [{
+        "id": pf["id"], "name": pf["name"], "description": pf["description"],
+        "allocation": pf["allocation"],
+    } for pf in pool["portfolios"]]
+
+    try:
+        raw = llm.generate(
+            RECOMMEND_PROMPT.format(
+                customer_state=json.dumps(customer_state, ensure_ascii=False),
+                products=json.dumps(products_payload, ensure_ascii=False, indent=1),
+                portfolios=json.dumps(portfolios_payload, ensure_ascii=False, indent=1),
+            ),
+            system=RECOMMEND_SYSTEM, max_tokens=700,
+        )
+    except Exception:
+        return None
+
+    data = _parse(raw)
+    if not isinstance(data, dict):
+        return None
+
+    by_pid = {r["id"]: r for r in pool["products"]}
+    product = by_pid.get(str(data.get("product_id") or ""))
+    if product is None:
+        return None
+    by_fid = {pf["id"]: pf for pf in pool["portfolios"]}
+    portfolio = by_fid.get(str(data.get("portfolio_id") or "")) if data.get("portfolio_id") else None
+
+    verify_facts = engine.recommendation_facts(p, product, portfolio)
+    product_reason = str(data.get("product_reason") or "").strip()
+    if not product_reason or not engine.verify(product_reason, verify_facts)[0]:
+        return None
+
+    portfolio_reason = str(data.get("portfolio_reason") or "").strip()
+    if portfolio and (not portfolio_reason or not engine.verify(portfolio_reason, verify_facts)[0]):
+        portfolio = None
+        portfolio_reason = ""
+
+    combined_reason = str(data.get("combined_reason") or "").strip()
+    if combined_reason and not engine.verify(combined_reason, verify_facts)[0]:
+        combined_reason = ""
+
+    return engine.render_recommendation(product, portfolio, product_reason, portfolio_reason, combined_reason)
+
+
 def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> dict[str, Any]:
     """고객 프로파일에 대한 전략 제안 문장을 생성한다.
 
@@ -118,6 +186,9 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
     facts = engine.prepare(p, top_n=top_n)
     if use_llm and llm.available():
         _write_talking_scripts(facts)
+        facts["recommendation"] = _recommend(p)
+    else:
+        facts["recommendation"] = None
     out: dict[str, Any] = {
         "customer": p.nm, "facts": facts, "sentence": engine.compose_rule(facts),
         "insight": "", "source": "규칙", "tier": "행내전략", "reason": "", "rejected": [],
@@ -244,6 +315,19 @@ def _print(r: dict) -> None:
         print("\n  [예상 반론 및 대응]")
         for ob in f["objections"]:
             print(f"    · \"{ob['objection']}\" → {ob['response']}")
+    if f.get("recommendation"):
+        reco = f["recommendation"]
+        print("\n  [이런 상품이 적합할 수 있어요]")
+        prod = reco["product"]
+        print(f"    · 상품: {prod['name']} — {prod['description']} (최근 1년 {prod['return_1y']}%)")
+        print(f"      사유: {prod['reason']}")
+        if reco.get("portfolio"):
+            pf = reco["portfolio"]
+            alloc = ", ".join(f"{a['product_name']} {a['weight_pct']}%" for a in pf["allocation"])
+            print(f"    · 포트폴리오: {pf['name']} — {alloc}")
+            print(f"      사유: {pf['reason']}")
+        if reco.get("combined_reason"):
+            print(f"    · 종합: {reco['combined_reason']}")
     if f.get("top_holdings"):
         print("\n  [수익률 상위 1% 고객님들이 많이 담은 상품은?]  ※ 이 고객 대상 추천 아님, 참고용")
         for th in f["top_holdings"]:
