@@ -25,27 +25,10 @@ from common.agent_loader import load_strategy_agent  # noqa: E402
 from common.verify import verify  # noqa: E402
 
 from llm import generate
+from prompts import BRIEFING_QA_PROMPT, BRIEFING_QA_SYSTEM
 from router import AgentState
 
 _strategy = load_strategy_agent()
-
-BRIEFING_QA_SYSTEM = """당신은 퇴직연금(IRP) 상담 직원을 돕는 사내 에이전트입니다.
-직원이 현재 조회 중인 고객의 AI브리핑 내용에 대해 묻습니다.
-
-반드시 지킬 것
-1. 아래 제공된 사실(facts)에 있는 값만 답합니다. 새 수치·상품명을 만들지 않습니다.
-2. 사실에 없는 것을 물으면 모른다고 답합니다(추측 금지).
-3. 직원에게 답하듯 해요체로, 1~3문장으로 간결하게 답합니다.
-
-출력은 답변 문장만 반환합니다. JSON·설명·코드펜스 없이 순수 텍스트로만 답합니다."""
-
-BRIEFING_QA_PROMPT = """## 이 고객의 확정된 사실 (이 안의 값만 답변에 사용)
-{facts}
-
-## 직원 질문
-{question}
-
-## 답변"""
 
 
 def briefing_qa(state: AgentState) -> dict[str, Any]:

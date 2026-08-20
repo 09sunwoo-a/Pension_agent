@@ -27,46 +27,10 @@ from common.agent_loader import load_strategy_agent  # noqa: E402
 from common.session_store import append_turn  # noqa: E402
 
 from llm import generate
+from prompts import CORRECTION_PROMPT, CORRECTION_SYSTEM
 from router import AgentState
 
 _strategy = load_strategy_agent()
-
-CORRECTION_SYSTEM = """당신은 퇴직연금(IRP) AI브리핑 화면의 수정 요청을 분류하고, 편집
-가능한 항목이면 수정 문장을 작성하는 사내 에이전트입니다.
-
-편집 가능한 항목은 이 세 가지뿐입니다 — 전부 LLM 이 쓴 산문(의견)이지, 시스템이 계산한
-숫자·상품명·조건 판정이 아닙니다.
-  - "ai_briefing_sentence": AI 브리핑 문장(종합 제안)
-  - "ai_briefing_insight": AI 브리핑의 근거 해설(insight)
-  - "card_benefit": 개별 전략 카드의 '한 줄 혜택' 문구
-
-평가금액·수익률·백분위·포트폴리오 비중·세액공제 금액·상품명·전략 선정 여부 등은 시스템이
-결정론적으로 계산한 값이라 대화로 고칠 수 없습니다 — 이런 요청이면 target 을 "not_editable"
-로 분류하고 revised_text 는 비웁니다.
-
-반드시 지킬 것
-1. revised_text 는 제시된 사실(facts) 안의 수치·상품명만 사용합니다. 새로 만들지 않습니다.
-2. 애매하면 "not_editable" 로 분류합니다 — 편집 가능 여부가 불확실한 요청을 조용히 수용하지
-   않습니다.
-
-출력은 JSON 객체 하나만 반환합니다. 다른 설명을 덧붙이지 않습니다."""
-
-CORRECTION_PROMPT = """## 현재 AI브리핑 사실(facts) — 이 안의 값만 근거로 삼습니다
-{facts}
-
-## 직원의 수정 요청
-{question}
-
-## 지시
-1. `target`: "ai_briefing_sentence" | "ai_briefing_insight" | "card_benefit" | "not_editable" 중 하나.
-2. `item_id`: target 이 "card_benefit" 일 때만, 어느 전략 카드인지 items 의 id. 아니면 null.
-3. `revised_text`: target 이 편집 가능한 값이면 수정된 문장(원래 톤 유지, facts 밖 수치·
-   상품명 창작 금지). "not_editable" 이면 빈 문자열.
-4. `reject_reason`: target 이 "not_editable" 이면 왜 대화로 못 고치는지 직원에게 설명할
-   한 문장. 아니면 빈 문자열.
-
-{{"target": "...", "item_id": "..." | null, "revised_text": "...", "reject_reason": "..."}}"""
-
 
 def _parse(raw: str) -> dict | None:
     m = re.search(r"\{.*\}", raw, re.S)
