@@ -328,6 +328,10 @@ def _print(r: dict) -> None:
             print(f"      사유: {pf['reason']}")
         if reco.get("combined_reason"):
             print(f"    · 종합: {reco['combined_reason']}")
+    if f.get("consult_resources"):
+        print("\n  [상담에 참고하세요]")
+        for res in f["consult_resources"]:
+            print(f"    · {res['title']} — {res['snippet']}")
     if f.get("top_holdings"):
         print("\n  [수익률 상위 1% 고객님들이 많이 담은 상품은?]  ※ 이 고객 대상 추천 아님, 참고용")
         for th in f["top_holdings"]:

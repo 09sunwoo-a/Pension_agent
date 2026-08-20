@@ -926,6 +926,8 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         "talking_points": pick_talking_points(p, selected, alternatives),
         # 예상 반론 — 정확히 2개를 보장한다(요건정의서 ⑦).
         "objections": pick_objections(p, selected),
+        # 상담에 참고하세요 — 노하우/가이드 스니펫 최대 2개(요건정의서 ⑧).
+        "consult_resources": consult_resources(p, conds),
         # 상담 이력 — consult_agent 가 기록한 대화이력 요약(요건정의서 §14). 읽기만 한다 —
         # strategy_agent 는 세션 저장소에 쓰지 않는다("코드=사실" 경계를 대화이력에도 유지).
         "consult_history": summarize_for_briefing(p.id),
@@ -1048,6 +1050,27 @@ def _get_pitch_kb():
     return _PITCH_KB
 
 
+_PITCH_KB_MODULE = None
+_PITCH_KB_MODULE_LOADED = False
+
+
+def _get_pitch_kb_module():
+    """consult_agent.kb 모듈 자체(함수 접근용 — retrieve() 재사용, ⑧용). 지연 로딩·캐싱은
+    _get_pitch_kb() 와 동일한 이유."""
+    global _PITCH_KB_MODULE, _PITCH_KB_MODULE_LOADED
+    if not _PITCH_KB_MODULE_LOADED:
+        try:
+            if str(KB_ROOT) not in sys.path:
+                sys.path.insert(0, str(KB_ROOT))
+            import kb as _kb_mod  # noqa: PLC0415
+
+            _PITCH_KB_MODULE = _kb_mod
+        except Exception:
+            _PITCH_KB_MODULE = None
+        _PITCH_KB_MODULE_LOADED = True
+    return _PITCH_KB_MODULE
+
+
 def pitch_talk(spec: dict, customer_type: str | None) -> str:
     """spec.pitch_refs 로 연결된 화법 카드의 핵심 포인트·주의사항을 그 자리에서 가져온다.
 
@@ -1148,6 +1171,28 @@ def render_recommendation(
             "reason": portfolio_reason,
         }
     return out
+
+
+def consult_resources(p: Profile, conds: list[str], n: int = 2) -> list[dict]:
+    """상담에 참고하세요 — 당행 노하우/가이드 스니펫 n개(기본 2개, 요건정의서 ⑧).
+
+    프로파일만 입력이라 자연어 질문이 없다 — 성립 요건 라벨을 의사-발화로 합성해
+    consult_agent.kb.retrieve() 를 그대로 호출한다(신규 검색 로직 없이 기존 n-gram+태그
+    스코어링을 재사용). guide 타입 카드만 대상으로 삼는다 — proposal·objection 은 다른
+    섹션(⑥·⑦)이 이미 다룬다. 소스 콘텐츠(현장의 목소리·행내가이드)가 아직 consult_agent
+    의 pitch kind 로 저작되지 않았다면 자연히 빈 리스트를 반환한다.
+    """
+    if not conds:
+        return []
+    kb_mod = _get_pitch_kb_module()
+    kb = _get_pitch_kb()
+    if kb_mod is None or kb is None:
+        return []
+    utterance = "、".join(CONDS[c] for c in conds)
+    hits = kb_mod.retrieve(kb, top_k=n * 2, customer_type=p.customer_type, utterance=utterance)
+    guides = [(score, c) for score, c in hits if c.get("type") == "guide"][:n]
+    return [{"title": c["title"], "snippet": " ".join((c.get("key_points") or [])[:2]) or (c.get("content") or "")}
+            for _, c in guides]
 
 
 def top_reference_products(n: int = 2) -> list[dict]:
