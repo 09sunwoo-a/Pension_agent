@@ -1,6 +1,6 @@
 # common — 공용 인프라
 
-세 에이전트(pitch · strategy · 향후 knowhow)가 공유하는 도메인 중립 모듈. 각 에이전트에
+세 에이전트(consult · strategy · 향후 knowhow)가 공유하는 도메인 중립 모듈. 각 에이전트에
 복제돼 있던 LLM 클라이언트와 지식베이스 뼈대를 한 곳으로 모은다.
 
 | 파일 | 역할 |
@@ -10,6 +10,9 @@
 | [store.py](store.py) | 통합 레코드 스토어. 모든 데이터의 단일 로더 (`fields_of`·`records`) |
 | [schema.py](schema.py) | 종류 구동 검증 + 단일 저작 프롬프트 생성기 (CLI) |
 | [kb_base.py](kb_base.py) | 문자열 유사도 · 검토게이트 로딩 · 범용 검증 (도메인 중립) |
+| [verify.py](verify.py) | LLM 산출물의 재료(facts) 이탈 여부 판정 — strategy_agent 밖에서도 재사용 |
+| [session_store.py](session_store.py) | 상담 세션/대화이력 저장소 — consult_agent 가 기록, strategy_agent 가 브리핑에 노출 |
+| [agent_loader.py](agent_loader.py) | strategy_agent·consult_agent 를 한 프로세스에서 안전하게 함께 임포트하는 헬퍼 |
 
 ## 데이터 규격 (모든 지식/데이터 공통)
 
@@ -63,5 +66,5 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 `ngram_sim`(유사도), `iter_knowledge_files`(`_` 접두 검토 게이트 로딩 — `store.py` 가 사용),
 `check_duplicate_ids`/`check_broken_refs`/`check_fact_conflicts`(범용 검증)를 제공한다.
-`pitch_agent/kb.py`·`strategy_agent/engine.py` 모두 이 함수들을 import 해서 쓴다. 화법 태그
+`consult_agent/kb.py`·`strategy_agent/engine.py` 모두 이 함수들을 import 해서 쓴다. 화법 태그
 스코어링·전략 게이트 같은 도메인 로직은 각 에이전트에 남긴다.

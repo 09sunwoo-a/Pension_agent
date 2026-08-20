@@ -22,7 +22,7 @@
 - `source`·`refs` — 표준 출처/참조. 새 데이터는 이걸 쓴다(레거시는 fields 안에 둔 것도 허용).
 - 파일을 **데이터 루트에 떨어뜨리면** 스토어가 `kind` 로 자동 인덱싱한다. 파일별 배선 없음.
 
-**데이터 루트**: 운영 데이터 = `strategy_agent/data/` · 검색 지식 = `pitch_agent/data/`
+**데이터 루트**: 운영 데이터 = `strategy_agent/data/` · 검색 지식 = `consult_agent/data/`
 (폴더명은 같지만 대외비 경계로 물리적으로 분리). `_` 로 시작하는 파일·`_backup/` 은 로더가
 건너뛴다(검토 게이트).
 
@@ -35,9 +35,9 @@
 | `product` | 관계형(적합성 게이트) | `strategy_agent/data/products.json` |
 | `strategy` / `system_strategy` | 관계형(전략 로직) | `strategy_agent/data/strategies.json` 등 |
 | `baseline` · `capability` · `asset` | 관계형(레지스트리) | `strategy_agent/data/` |
-| `fact` | 참조(재사용 사실) | `pitch_agent/data/*.json` |
-| `resource` | 참조(자료 목록) | `pitch_agent/data/*.json` |
-| `pitch` | 검색(화법·규정·노하우) | `pitch_agent/data/*.json` |
+| `fact` | 참조(재사용 사실) | `consult_agent/data/*.json` |
+| `resource` | 참조(자료 목록) | `consult_agent/data/*.json` |
+| `pitch` | 검색(화법·규정·노하우) | `consult_agent/data/*.json` |
 
 `python -m common.schema kinds` 로 최신 목록을 본다.
 
@@ -71,7 +71,7 @@
 ```
 
 - **루트**: 관계형(product·strategy·baseline·capability·asset) → `strategy_agent/data/`,
-  검색·참조(pitch·fact·resource) → `pitch_agent/data/`.
+  검색·참조(pitch·fact·resource) → `consult_agent/data/`.
 - 프롬프트에는 환각방지 규칙이 내장돼 있다: **문서에 없거나 안 보이면 지어내지 말고 null**,
   스캔 문서는 보이는 값 그대로 전사, 같은 수치는 `fact` 로 한 번만 두고 `refs` 로 참조,
   출력은 JSON 하나만(코드블록·설명 없이). 그대로 파일로 저장하면 된다.
@@ -113,11 +113,11 @@
 ```
 
 이후 `python -m common.schema prompt regulation` 으로 바로 저작 프롬프트가 나온다. 검색형
-종류를 pitch 검색이 함께 다루게 하려면 `pitch_agent/kb.py` 의 로드 종류만 넓히면 된다.
+종류를 pitch 검색이 함께 다루게 하려면 `consult_agent/kb.py` 의 로드 종류만 넓히면 된다.
 
 ## 7. 주의
 
-`products.json`·`strategies.json`·`pitch_agent/data/*` 는 행내 영업전략·상품조건·
+`products.json`·`strategies.json`·`consult_agent/data/*` 는 행내 영업전략·상품조건·
 대외비 화법을 담는다. 저장소 접근권한을 통제하고, `customer_facing`(asset·resource) 은 고객
 직접 제공이 허용된 배포본에만 `true` 로 둔다.
 

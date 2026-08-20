@@ -20,8 +20,8 @@ if hasattr(sys.stdout, "reconfigure"):
 import engine  # noqa: E402
 from customer import PERSONAS, Profile, conditions  # noqa: E402
 
-# agent 는 여기서(위 engine.validate 로 sys.path 에 ../pitch_agent 가 삽입되기 전에) 임포트한다.
-# 두 에이전트가 동명의 prompts·llm·kb 모듈을 가지므로, 늦게 임포트하면 pitch_agent 쪽이 잡힌다.
+# agent 는 여기서(위 engine.validate 로 sys.path 에 ../consult_agent 가 삽입되기 전에) 임포트한다.
+# 두 에이전트가 동명의 prompts·llm·kb 모듈을 가지므로, 늦게 임포트하면 consult_agent 쪽이 잡힌다.
 import agent  # noqa: E402
 
 BY_NAME = {p.nm: p for p in PERSONAS}

@@ -1,6 +1,10 @@
-# IRP 상담 화법 에이전트 (LangGraph)
+# IRP 상담 대화 에이전트 (LangGraph)
 
-직원이 자연어로 상황을 물으면 핵심 포인트와 근거를 짚어주는 코칭 조언을 돌려주는 에이전트.
+직원이 자연어로 묻는 것을 받아 처리하는 에이전트. 지금은 화법 검색(상황을 물으면 핵심
+포인트와 근거를 짚어주는 코칭 조언)만 하지만, 이름 그대로("consult_agent", 구 "pitch_agent")
+브리핑/고객정보 질의, 대화형 LMS 발송, 상담이력 기록, 브리핑 수정 요청까지 늘어날 자리로
+설계돼 있다 — `router.py`가 의도를 분류해 기능별 노드로 보내는 구조라 새 기능은 새 노드
+파일 하나 추가로 붙는다.
 
 ```python
 from graph import ask
@@ -27,10 +31,12 @@ python kb.py                                              # 지식베이스 점�
 ## 파일 구조
 
 ```
-pitch_agent/
+consult_agent/
 ├── graph.py                그래프 조립 · ask() · CLI 진입점
-├── nodes.py                 노드 함수 6개 — understand/capabilities/retrieve/broaden/respond/fallback
-├── prompts.py                LLM 프롬프트 템플릿 (understand·respond 용)
+├── router.py                 의도분류(understand) · 상태정의(AgentState/Turn) · 모든 분기(route_*) predicate
+├── pitch.py                  화법 검색 노드 6개 — retrieve/broaden/llm_rerank/verify/respond/fallback
+├── meta.py                    메타 질문("뭘 도와줄 수 있어?") 응답 노드
+├── prompts.py                LLM 프롬프트 템플릿 (기능별 섹션으로 구분)
 ├── llm.py                   LLM 클라이언트·모델 설정 (환경 이전 시 여기만 수정)
 ├── kb.py                   지식베이스 로드 · 검색 · 검증
 ├── data/
@@ -43,7 +49,11 @@ pitch_agent/
 └── requirements.txt         langgraph, anthropic
 ```
 
-문구만 고칠 땐 `prompts.py`, 노드 로직은 `nodes.py`, 그래프 흐름은 `graph.py`, LLM 클라이언트·모델·키는 `llm.py`.
+지식베이스(`_kb`)는 `router.py`에서 한 번만 적재해 `pitch.py`·`meta.py`가 가져다 쓴다(순환
+임포트 없이 한 방향으로만 의존). 화법 문구만 고칠 땐 `prompts.py`, 화법 검색 로직은
+`pitch.py`, 의도분류·분기는 `router.py`, 그래프 흐름은 `graph.py`, LLM 클라이언트·모델·키는
+`llm.py`. 새 기능(브리핑질의·LMS발송 등)은 자기 노드 파일을 추가하고 `router.py`의 의도
+분류·`graph.py`의 그래프 조립에 연결하면 된다.
 
 ---
 

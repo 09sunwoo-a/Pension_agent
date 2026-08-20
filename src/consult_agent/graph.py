@@ -11,7 +11,8 @@
 
 그래프 구조(노드·분기 다이어그램)는 README.md 참고. 이 파일은 그래프를
 조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
-노드 함수는 nodes.py, LLM 프롬프트는 prompts.py 에 있다.
+노드 함수는 기능별로 나뉘어 있다 — 의도분류·상태정의·분기는 router.py, 화법 검색은
+pitch.py, 메타 질문 응답은 meta.py. LLM 프롬프트는 prompts.py.
 """
 
 from __future__ import annotations
@@ -20,21 +21,16 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
-from nodes import (
+from meta import capabilities
+from pitch import broaden, fallback, llm_rerank, respond, retrieve_node, verify
+from router import (
     HISTORY_LIMIT,
     AgentState,
-    broaden,
-    capabilities,
-    fallback,
-    llm_rerank,
-    respond,
-    retrieve_node,
     route,
     route_intent,
     route_rerank,
     route_verify,
     understand,
-    verify,
 )
 
 

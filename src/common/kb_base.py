@@ -1,6 +1,6 @@
 """지식베이스 공통 기반 — 도메인 중립. 표준 라이브러리만 사용한다.
 
-pitch_agent/kb.py 와 strategy_agent/engine.py 가 함께 쓰는, **도메인과 무관한 부분**만
+consult_agent/kb.py 와 strategy_agent/engine.py 가 함께 쓰는, **도메인과 무관한 부분**만
 여기로 모은다:
 
   · 문자열 n-gram 유사도            (검색 채점의 기초)

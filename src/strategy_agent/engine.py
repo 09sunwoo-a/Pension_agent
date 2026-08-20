@@ -41,6 +41,7 @@ if _UMBRELLA not in sys.path:
 
 from common.kb_base import check_broken_refs, check_duplicate_ids  # noqa: E402
 from common.store import Store  # noqa: E402
+from common.verify import verify as _verify  # noqa: E402
 
 from customer import (
     CONDS,
@@ -55,10 +56,10 @@ from customer import (
 )
 
 DIR = Path(__file__).resolve().parent
-KB_ROOT = DIR.parent / "pitch_agent"
+KB_ROOT = DIR.parent / "consult_agent"
 
 
-# 통합 스토어 — 자체 data(운영 데이터)와 pitch_agent/data(사실·화법)를 함께 적재한다. 모든
+# 통합 스토어 — 자체 data(운영 데이터)와 consult_agent/data(사실·화법)를 함께 적재한다. 모든
 # 데이터는 단일 레코드 형태이며, fields_of(kind) 가 기존 flat dict 뷰({id, **fields})를 그대로 준다.
 _STORE = Store([DIR / "data", KB_ROOT / "data"])
 
@@ -941,40 +942,13 @@ def compose_rule(facts: dict) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# 검증 — LLM 산출물의 재료 이탈 여부 판정
+# 검증 — LLM 산출물의 재료 이탈 여부 판정 (common/verify.py 로 공용화됨)
 # ─────────────────────────────────────────────────────────────
-
-_NUM = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
-_PROD = re.compile(r"KB\s[^\s,·)]+(?:\s[^\s,·)]+)*")
-
-
-def allowed_facts(facts: dict) -> tuple[set[str], set[str]]:
-    """LLM 이 인용할 수 있는 숫자·상품명 집합. 이 범위를 벗어난 표현은 환각으로 판정한다."""
-    nums: set[str] = set()
-    prods: set[str] = set()
-    blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"])
-    blob += [str(v) for k, v in facts["briefing"].items() if k != "source"]
-    for it in facts["items"]:
-        blob += [it["clause"], it["evidence"], it["amount"] or "", it["formula"], it["talk"]]
-        blob += it["evidence_extra"]
-        for name in it["products"].values():
-            prods.add(name.split("(")[0].strip())
-            blob.append(name)
-    for t in blob:
-        nums.update(_NUM.findall(t))
-    return nums, prods
 
 
 def verify(sentence: str, facts: dict) -> tuple[bool, list[str]]:
     """재료에 없는 수치 또는 게이트 미통과·미등록 상품명이 포함되었는지 검사한다."""
-    nums, prods = allowed_facts(facts)
-    bad = [f"수치 '{n}'" for n in _NUM.findall(sentence) if n not in nums]
-    known = {r["name"] for r in PRODUCTS}
-    for m in (x.strip() for x in _PROD.findall(sentence)):
-        if any(m.startswith(x) or x.startswith(m) for x in prods):
-            continue
-        bad.append(f"상품명 '{m}' ({'게이트 미통과' if m in known else '미등록'})")
-    return (not bad), bad
+    return _verify(sentence, facts, known_products={r["name"] for r in PRODUCTS})
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1007,9 +981,9 @@ _PITCH_KB_LOADED = False
 def _get_pitch_kb():
     """첫 호출 때만 적재하고 캐싱한다.
 
-    engine.py 를 import 하는 시점에 바로 적재하면 sys.path 에 pitch_agent 가 즉시 섞여
+    engine.py 를 import 하는 시점에 바로 적재하면 sys.path 에 consult_agent 가 즉시 섞여
     들어가는데, test_engine.py 는 "agent 를 먼저 import 해서 동명 모듈(prompts·kb·llm)이
-    pitch_agent 쪽으로 잡히기 전에 strategy_agent 쪽을 확정한다"는 순서에 기대고 있다(파일
+    consult_agent 쪽으로 잡히기 전에 strategy_agent 쪽을 확정한다"는 순서에 기대고 있다(파일
     상단 주석 참고). 지연 로딩으로 그 전제를 건드리지 않는다 — 실제 요청 처리(prepare())
     시점에만 로드되므로 그때는 이미 필요한 import 가 다 끝난 뒤다.
     """
@@ -1023,7 +997,7 @@ def _get_pitch_kb():
 def pitch_talk(spec: dict, customer_type: str | None) -> str:
     """spec.pitch_refs 로 연결된 화법 카드의 핵심 포인트·주의사항을 그 자리에서 가져온다.
 
-    내용을 strategies.json 에 복사해두지 않는다 — pitch_agent 쪽 카드가 나중에 수정돼도 다음
+    내용을 strategies.json 에 복사해두지 않는다 — consult_agent 쪽 카드가 나중에 수정돼도 다음
     호출부터 바로 반영되므로, 옛 talk 필드가 갖고 있던 '따로 관리되다 원본과 어긋나는' 문제가
     구조적으로 생기지 않는다. customer_type 이 일치하는 참조가 없으면 "공통" 참조로, 그마저
     없으면 옛 talk 필드(레거시, 마이그레이션 유예 중)로 폴백한다.

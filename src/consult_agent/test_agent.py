@@ -18,7 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
 os.environ.setdefault("ANTHROPIC_API_KEY", "dummy")  # 클라이언트 초기화만 통과시킨다
 
 import graph as G  # noqa: E402
-import nodes  # noqa: E402
+import pitch  # noqa: E402
 
 # 거절유형이 null 로 나와(=미탐지) 1·2차 재검색까지 0건인 애매한 질문. broaden 이
 # 채택 기준(kb.MIN_TOPICAL)은 건드리지 않으므로 여전히 FALLBACK 이 맞다 — 실수로
@@ -108,14 +108,14 @@ def stub_verify_yes(state):
 
 
 def check_broaden_stages() -> bool:
-    """nodes.broaden() 이 1차엔 고객유형·단계만, 2차엔 거절유형까지 지우는지 직접 검증한다."""
+    """pitch.broaden() 이 1차엔 고객유형·단계만, 2차엔 거절유형까지 지우는지 직접 검증한다."""
     state = {"customer_type": "사업자", "objection_type": "수익률 우선", "stage": "신규", "broaden_count": 0}
 
-    stage1 = nodes.broaden(state)
+    stage1 = pitch.broaden(state)
     ok1 = stage1["broaden_count"] == 1 and stage1["customer_type"] is None and stage1["stage"] is None
     ok1 = ok1 and "objection_type" not in stage1  # 1차는 거절유형을 건드리지 않는다
 
-    stage2 = nodes.broaden({**state, **stage1})
+    stage2 = pitch.broaden({**state, **stage1})
     ok2 = stage2["broaden_count"] == 2 and stage2["objection_type"] is None
 
     ok = ok1 and ok2

@@ -34,7 +34,6 @@ python test_engine.py       # 회귀 테스트 (전건 통과 확인)
 
 # 산출
 python agent.py 이현우      # 단일 고객 전략 제안 (CLI)
-python demo.py              # 4개 페르소나 · 목업 대비 비교
 
 # 평가/피드백 대시보드 (Streamlit)
 pip install streamlit pandas
@@ -43,7 +42,7 @@ streamlit run app.py        # 페르소나 산출물 리뷰 + 자연어 피드�
 
 LLM 설정은 이 폴더가 아니라 **umbrella 루트 `.env`** 에 둔다(`../.env`, `common/llm.py` 가
 읽음). 미설정이면 `llm.available()` 이 False → 코드가 만든 문장으로 폴백한다. 교차검증은
-`../pitch_agent/data` 를 참조한다.
+`../consult_agent/data` 를 참조한다.
 
 ---
 
@@ -112,7 +111,6 @@ strategy_agent/
 ├─ prompts.py           LLM 프롬프트
 ├─ llm.py               common.llm 위임 shim (구현·설정은 ../common/llm.py + ../.env)
 ├─ app.py               Streamlit 평가/피드백 대시보드
-├─ demo.py              목업 대비 비교
 └─ test_engine.py       회귀 테스트
 ```
 
