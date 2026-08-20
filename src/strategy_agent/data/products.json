@@ -27,7 +27,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": null,
         "exp_return": 4.8,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "글로벌",
+        "asset_class": "채권",
+        "strategy_desc": "글로벌 투자등급 채권 지수를 추종하는 인덱스 운용",
+        "features": [
+          "글로벌 분산",
+          "인덱스 추종"
+        ]
       }
     },
     {
@@ -45,7 +52,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": null,
         "exp_return": 3.8,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "채권",
+        "strategy_desc": "국내 우량 채권에 투자하는 액티브 운용",
+        "features": [
+          "국내 채권",
+          "안정적 이자수익"
+        ]
       }
     },
     {
@@ -63,7 +77,15 @@
         "risk_asset_exempt": null,
         "depositor_protection": null,
         "exp_return": 6.2,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "글로벌",
+        "asset_class": "혼합자산",
+        "strategy_desc": "2035년 은퇴를 목표로 위험자산 비중을 자동 조정하는 TDF",
+        "features": [
+          "생애주기 자동조정",
+          "글로벌 분산"
+        ],
+        "tdf_risk_asset_pct": 60.0
       }
     },
     {
@@ -81,7 +103,15 @@
         "risk_asset_exempt": null,
         "depositor_protection": null,
         "exp_return": 6.6,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "글로벌",
+        "asset_class": "혼합자산",
+        "strategy_desc": "2040년 은퇴를 목표로 위험자산 비중을 자동 조정하는 TDF",
+        "features": [
+          "생애주기 자동조정",
+          "글로벌 분산"
+        ],
+        "tdf_risk_asset_pct": 68.0
       }
     },
     {
@@ -99,7 +129,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": null,
         "exp_return": 3.9,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "혼합자산",
+        "strategy_desc": "채권 중심의 안정적 자산배분 포트폴리오",
+        "features": [
+          "디폴트옵션 지정상품",
+          "안정적 배분"
+        ]
       }
     },
     {
@@ -117,7 +154,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": null,
         "exp_return": 5.1,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "혼합자산",
+        "strategy_desc": "주식·채권 균형배분 포트폴리오",
+        "features": [
+          "디폴트옵션 지정상품",
+          "균형 배분"
+        ]
       }
     },
     {
@@ -135,7 +179,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": null,
         "exp_return": 6.4,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "글로벌",
+        "asset_class": "혼합자산",
+        "strategy_desc": "주식 비중을 높여 성장성을 추구하는 자산배분 포트폴리오",
+        "features": [
+          "디폴트옵션 지정상품",
+          "성장성 추구"
+        ]
       }
     },
     {
@@ -153,7 +204,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": true,
         "rate": 3.65,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "확정금리",
+        "strategy_desc": "가입 시점 확정금리로 만기까지 운용",
+        "features": [
+          "확정금리",
+          "예금자보호"
+        ]
       }
     },
     {
@@ -171,7 +229,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": false,
         "rate": 4.1,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "지수연계",
+        "strategy_desc": "기초지수 수익률에 연동해 수익을 지급하는 파생결합사채",
+        "features": [
+          "지수연계",
+          "최소가입금액 있음"
+        ]
       }
     },
     {
@@ -189,7 +254,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": true,
         "rate": 3.1,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "예금",
+        "strategy_desc": "1년 만기 정기예금",
+        "features": [
+          "확정금리",
+          "예금자보호"
+        ]
       }
     },
     {
@@ -207,7 +279,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": null,
         "exp_return": 7.5,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "글로벌",
+        "asset_class": "리츠",
+        "strategy_desc": "글로벌 상장 리츠에 분산 투자하는 ETF",
+        "features": [
+          "글로벌 분산",
+          "배당수익 추구"
+        ]
       }
     },
     {
@@ -225,7 +304,14 @@
         "risk_asset_exempt": false,
         "depositor_protection": true,
         "rate": 3.3,
-        "status": "판매중"
+        "status": "판매중",
+        "region": "국내",
+        "asset_class": "확정금리 혼합",
+        "strategy_desc": "원리금보장형 상품 중심의 안정형 포트폴리오",
+        "features": [
+          "디폴트옵션 지정상품",
+          "원리금보장"
+        ]
       }
     }
   ]

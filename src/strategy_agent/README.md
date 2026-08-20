@@ -38,7 +38,7 @@ python agent.py 이현우      # 단일 고객 전략 제안 (CLI)
 
 # 평가/피드백 대시보드 (Streamlit)
 pip install streamlit pandas
-streamlit run app.py        # 페르소나 산출물 리뷰 + 자연어 피드백 접수
+streamlit run app.py        # 페르소나 산출물(AI브리핑 ①~⑨) 리뷰 + consult_agent 대화형 테스트 탭 + 피드백 접수
 ```
 
 LLM 설정은 이 폴더가 아니라 **umbrella 루트 `.env`** 에 둔다(`../.env`, `common/llm.py` 가

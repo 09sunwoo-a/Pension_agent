@@ -83,5 +83,15 @@ def load_strategy_agent() -> dict[str, ModuleType]:
 
 
 def load_consult_agent() -> dict[str, ModuleType]:
-    """consult_agent 의 화법 검색 KB(kb)를 완전정규화 이름으로 적재한다."""
-    return load_agent_modules("consult_agent", ["llm", "prompts", "kb"])
+    """consult_agent 전체(그래프 포함)를 완전정규화 이름으로 적재한다. 반환된
+    `graph.ask(question, customer_id=..., ...)` 로 대화형 에이전트를 그대로 호출할 수 있다.
+
+    module_names 순서는 의존관계를 따른다 — kb/llm/prompts(잎) → router(그 셋에 의존) →
+    pitch·meta(router 에 의존) → briefing_qa·correction(router 에 의존 + 내부적으로
+    load_strategy_agent() 를 한 번 더 호출한다 — 이미 strategy_agent 를 bare import 로 쓰고
+    있는 호출부(예: strategy_agent/app.py) 안에서 이 함수를 불러도, 중첩 호출이 짧은 이름을
+    안전하게 저장·복원하므로 서로 깨뜨리지 않는다) → lms(router 에만 의존) → graph(전부 조립)."""
+    return load_agent_modules(
+        "consult_agent",
+        ["llm", "prompts", "kb", "router", "pitch", "meta", "briefing_qa", "lms", "correction", "graph"],
+    )

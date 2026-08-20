@@ -202,8 +202,9 @@ def days_to_year_end() -> int:
 # 플레이북 전략이 없으면 engine.prepare() 의 items 가 비고, agent.propose() 는 LLM 단계를
 # 건너뛴 채 '제안 항목 없음' 을 반환한다(LLM 자유 답변 경로 Tier2 는 미구현).
 # income_bracket·pension_paid_ytd·balPct·cash_idle_pct·invest_period_years 는 타겟리스트·
-# MyStar 에서 조인되는 값이며, 아래 값은 예시이다. C1·C3 에만 balPct·cash_idle_pct 를 채워
-# "필드가 없으면 해당 화면 요소를 생략한다"는 그레이스풀 폴백 경로도 함께 검증한다.
+# MyStar 에서 조인되는 값이며, 아래 값은 예시이다. C1~C5 에는 balPct·cash_idle_pct 를 채워
+# AI브리핑 9개 섹션이 실제로 채워지는 모습을 볼 수 있게 하고, C6 만 비워둬 "필드가 없으면
+# 해당 화면 요소를 생략한다"는 그레이스풀 폴백 경로를 데모에서도 확인할 수 있게 한다.
 # ─────────────────────────────────────────────────────────────
 
 PERSONAS = [
@@ -219,6 +220,7 @@ PERSONAS = [
         port=[15, 10, 14, 61], ret=-12.3, retPct=5, dopt="설정", room=0,
         dorm=84, nchM=1.6,
         income_bracket="5500이하",
+        balPct=68, cash_idle_pct=8, invest_period_years=3.2,
     ),
     Profile(
         id="C3", nm="이현우", ag=45, bal=230_000_000, rk="안정형", grade="매우낮은위험",
@@ -232,16 +234,20 @@ PERSONAS = [
         port=[10, 8, 30, 52], ret=-3.2, retPct=12, dopt="미설정", room=400,
         dorm=30, nchM=2.0, nonface=True,
         income_bracket=None, pension_paid_ytd=0,  # 소득 구간 미확인 케이스
+        balPct=41, cash_idle_pct=6, invest_period_years=4.0,
     ),
     Profile(
         # 무이슈 모범 관리 고객 — 성립 요건 0건. 어떤 전략도 소집되지 않아 items 가 빈다.
         id="C5", nm="한서진", ag=44, bal=120_000_000, rk="위험중립형", grade="다소높은위험",
         port=[40, 20, 30, 10], ret=6.5, retPct=55, dopt="설정", room=0,
         dorm=30, nchM=1.0, income_bracket="5500초과",
+        balPct=22, cash_idle_pct=14, invest_period_years=8.5,
     ),
     Profile(
         # 추가납입 여력만 있는 고객 — 요건은 'add' 하나뿐. add 는 원천 근거가 없어 플레이북
         # 전략이 없으므로(LLM 재량) items 가 비고, 납입여력만 briefing 에 노출된다.
+        # balPct·cash_idle_pct 를 의도적으로 비워둔 케이스 — 상류 조인 값이 없을 때 ②·③
+        # 섹션이 해당 줄만 조용히 생략하는지 확인하는 용도.
         id="C6", nm="오지호", ag=41, bal=95_000_000, rk="위험중립형", grade="다소높은위험",
         port=[35, 25, 30, 10], ret=5.8, retPct=60, dopt="설정", room=200,
         dorm=20, nchM=2.0, income_bracket="5500초과",

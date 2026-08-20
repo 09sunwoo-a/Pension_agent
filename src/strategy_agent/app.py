@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 import streamlit as st
 import pandas as pd
 import csv
@@ -8,6 +11,13 @@ from datetime import datetime
 from customer import PERSONAS
 from agent import propose
 import engine
+
+# consult_agent(대화형 에이전트) 교차 로드용 — common.agent_loader 가 두 에이전트를
+# 한 프로세스에서 안전하게 함께 임포트하게 해준다(자세한 이유는 그 파일 docstring 참고).
+_UMBRELLA = str(Path(__file__).resolve().parent.parent)
+if _UMBRELLA not in sys.path:
+    sys.path.insert(0, _UMBRELLA)
+from common.agent_loader import load_consult_agent  # noqa: E402
 
 st.set_page_config(page_title="IRP 에이전트 평가 룸", layout="wide")
 st.title("📈 IRP 전략 제안 에이전트 평가 대시보드")
@@ -27,11 +37,12 @@ def load_all_proposals(use_llm=True):
 use_llm = st.sidebar.checkbox("LLM 문장 생성 적용", value=True)
 results = load_all_proposals(use_llm)
 
-# 5개의 탭으로 구성
-tab_cat, tab1, tab2, tab3, tab4 = st.tabs([
+# 6개의 탭으로 구성
+tab_cat, tab1, tab2, tab_chat, tab3, tab4 = st.tabs([
     "🗂 행내 전략 카탈로그",
     "👥 한눈에 보기",
     "📝 상세 조회 및 피드백",
+    "💬 대화형 에이전트 테스트",
     "⚙️ 시스템 무결성",
     "📋 피드백 관리 보드"
 ])
@@ -107,34 +118,43 @@ with tab2:
         target_res = results[target_name]
         f = target_res["facts"]
         
-        # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다.
+        # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — 요건정의서 ①~⑨ +
+        # §14 상담이력 전체를 화면 순서(①AI브리핑→②근거→③운용상태→...→⑨안내)로 노출한다.
         # ── 헤더: ■ 고객 · 요건 N건
         st.markdown(f"#### ■ {target_name} · 요건 {len(f['conditions'])}건")
         st.write(", ".join(c.split(":", 1)[1] for c in f["conditions"]))
 
-        # ── 보유현황
+        # ── ② 왜 이 고객님인가요 (최대 3줄, 코드 산출)
+        if f.get("why_this_customer"):
+            st.markdown("**[② 왜 이 고객님인가요]**")
+            for line in f["why_this_customer"]:
+                st.markdown(f"- {line}")
+
+        # ── ③ 보유현황 (3분류 운용현황 포함)
         bf = f["briefing"]
         src = "; ".join(engine.format_sources([bf["source"]]))
         holdings = " | ".join(f"{k} {v}" for k, v in bf.items() if k != "source")
-        st.markdown(f"**[보유현황]** {holdings}")
+        st.markdown(f"**[③ 현재 운용상태]** {holdings}")
         st.caption(f"근거 · {src}")
 
         st.divider()
 
-        # ── 전략 제안: 긴 지시 문장 대신 항목별 카드로 제시
-        st.markdown("**[전략 제안]**")
-        if target_res.get("insight"):
+        # ── ① AI 브리핑 (sentence — 종합 제안 문장, 2~3문장) + 근거 해설(insight)
+        st.markdown("**[① AI 브리핑]**")
+        if target_res.get("tier") == "LLM판단":
+            st.warning(f"⚠ 행내 전략 미매칭 · LLM 참고 의견(검토 필요)\n\n{target_res['sentence']}")
+        elif not f["items"]:
+            st.info(target_res["sentence"])
+        else:
             st.markdown(
                 f"<div style='font-size:1.15rem;font-weight:800;margin:4px 0'>"
-                f"▷ {target_res['insight']}</div>",
+                f"▷ {target_res['sentence']}</div>",
                 unsafe_allow_html=True,
             )
-        # 행내 전략 미매칭(Tier2/미매칭) — 카드가 없으므로 LLM 참고 의견/안내 문장을 노출한다.
-        if not f["items"]:
-            if target_res.get("tier") == "LLM판단":
-                st.warning(f"⚠ 행내 전략 미매칭 · LLM 참고 의견(검토 필요)\n\n{target_res['sentence']}")
-            else:
-                st.info(target_res["sentence"])
+        if target_res.get("insight"):
+            st.caption(f"근거 해설 · {target_res['insight']}")
+
+        st.markdown("**[전략 카드]**")
         for i, it in enumerate(f["items"], 1):
             c = it["card"]
             with st.container(border=True):
@@ -146,11 +166,47 @@ with tab2:
                     st.markdown(f"실행 {c['action']}")
                 st.markdown(c["benefit"])
 
-        # ── 상담 화법
+        st.divider()
+
+        # ── ④ 수익률 상위 1% 고객님들이 많이 담은 상품은? (비개인화·참고용)
+        if f.get("top_holdings"):
+            st.markdown("**[④ 수익률 상위 1% 고객님들이 많이 담은 상품은?]** *(이 고객 대상 추천 아님, 참고용)*")
+            for th in f["top_holdings"]:
+                st.markdown(f"- {th['product_name']} — {th['description']} (최근 1년 {th['return_1y']}%)")
+
+        # ── ⑤ 이런 상품이 적합할 수 있어요 (LLM 상품 1개 + 포트폴리오 1개, 폐쇄 후보군에서 선택)
+        reco = f.get("recommendation")
+        st.markdown("**[⑤ 이런 상품이 적합할 수 있어요]**")
+        if reco:
+            with st.container(border=True):
+                prod = reco["product"]
+                st.markdown(f"**추천 상품** · {prod['name']} (최근 1년 {prod['return_1y']}%)")
+                if prod.get("description"):
+                    st.caption(prod["description"])
+                st.markdown(f"AI 추천 사유: {prod['reason']}")
+            if reco.get("portfolio"):
+                pf = reco["portfolio"]
+                with st.container(border=True):
+                    alloc = ", ".join(f"{a['product_name']} {a['weight_pct']}%" for a in pf["allocation"])
+                    st.markdown(f"**추천 포트폴리오** · {pf['name']}")
+                    st.caption(alloc)
+                    st.markdown(f"AI 추천 사유: {pf['reason']}")
+            if reco.get("combined_reason"):
+                st.markdown(f"*종합 AI 추천 사유: {reco['combined_reason']}*")
+        else:
+            st.caption("LLM 미가용 또는 적합 후보 없음 — 이 섹션은 근거 없는 추천 대신 비워둔다.")
+
+        # ── ⑥ 이렇게 말해보세요 (대고객 화법, script 있으면 그것을 우선 노출)
         if f.get("talking_points"):
-            st.markdown("**[상담 화법]**")
+            st.markdown("**[⑥ 이렇게 말해보세요]**")
             for tp in f["talking_points"]:
-                st.markdown(f"- ({tp['title']}) {tp['talk']}")
+                st.markdown(f"- ({tp['title']}) {tp.get('script') or tp['talk']}")
+
+        # ── ⑦ 예상 반론 및 대응 화법
+        if f.get("objections"):
+            st.markdown("**[⑦ 예상 반론 및 대응 화법]**")
+            for ob in f["objections"]:
+                st.markdown(f"- \"{ob['objection']}\" → {ob['response']}")
 
         # ── 판단근거
         if f["rationale"]:
@@ -168,11 +224,33 @@ with tab2:
             for rg in f["regulations"]:
                 st.markdown(f"- ({rg['title']}) {rg['regulation']}")
 
+        # ── ⑧ 상담에 참고하세요 (노하우/가이드 스니펫)
+        if f.get("consult_resources"):
+            st.markdown("**[⑧ 상담에 참고하세요]**")
+            for res in f["consult_resources"]:
+                st.markdown(f"- {res['title']} — {res['snippet']}")
+
         # ── 다른 제안 (수익 개선폭 순)
         if f["alternatives"]:
             st.markdown("**[다른 제안]** 수익 개선폭 순")
             for i, a in enumerate(f["alternatives"], 1):
                 st.markdown(f"{i}. {a['clause']} &nbsp; [{engine.effect_label(a['effect_grade'])}]")
+
+        # ── ⑨ 고객님께 안내해보세요 (가장 임박한 이벤트 1개 + 세미나 1개)
+        outreach = f.get("outreach") or {}
+        if outreach.get("event") or outreach.get("seminar"):
+            st.markdown("**[⑨ 고객님께 안내해보세요]**")
+            for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
+                if item:
+                    st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")
+                    if item.get("lms_message"):
+                        st.caption(f"LMS 문구: {item['lms_message']}")
+
+        # ── §14 상담 이력
+        if f.get("consult_history"):
+            st.markdown("**[상담 이력]**")
+            for line in f["consult_history"]:
+                st.markdown(f"- {line}")
 
         # ── 생성 경로 및 리젝 사유
         st.divider()
@@ -216,6 +294,127 @@ with tab2:
                         ])
                     
                     st.success(f"{target_name} 님에 대한 피드백이 성공적으로 기록되었습니다!")
+
+
+# ==========================================
+# Tab (신규): 대화형 에이전트 테스트 (consult_agent)
+# ==========================================
+with tab_chat:
+    st.subheader("💬 대화형 에이전트 테스트 (consult_agent)")
+    st.caption(
+        "화법 코칭뿐 아니라 브리핑/고객정보 질의·대화형 LMS발송·브리핑 수정 요청까지 "
+        "한 채팅창에서 테스트합니다. 아래에서 고객을 선택하면 브리핑질의·LMS발송·수정 "
+        "요청이 그 고객을 대상으로 동작합니다(화법·업무절차·메타 질문에는 필요 없음)."
+    )
+
+    @st.cache_resource(show_spinner="대화형 에이전트(consult_agent) 로딩 중...")
+    def _load_consult():
+        return load_consult_agent()
+
+    consult = _load_consult()
+    if not consult["llm"].available():
+        st.warning(
+            "⚠️ LLM 이 설정되지 않았습니다. `../.env`(umbrella 루트)에 "
+            "`LLM_BASE_URL`/`LLM_API_KEY`(사내 GenAI) 또는 `ANTHROPIC_API_KEY`(테스트용)를 "
+            "설정한 뒤 앱을 다시 시작하세요 — understand(의도분류)·respond(문장생성) 등은 "
+            "LLM 이 반드시 필요해, 지금 상태로는 질문마다 오류 메시지가 표시됩니다."
+        )
+
+    chat_customer = st.selectbox(
+        "브리핑질의·LMS발송·수정 요청 대상 고객",
+        ["(선택 안 함)"] + [f"{p.nm} ({p.id})" for p in PERSONAS],
+        key="chat_customer_select",
+    )
+    customer_id = chat_customer.split("(")[-1].rstrip(")") if chat_customer != "(선택 안 함)" else None
+
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []  # [{"role": "user"/"assistant", "text": ...}]
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []  # graph.ask() 의 history(Turn 목록) — 후속질문 맥락
+    if "chat_session_id" not in st.session_state:
+        import uuid
+        st.session_state.chat_session_id = f"streamlit-{uuid.uuid4().hex[:8]}"
+    if "pending_question" not in st.session_state:
+        st.session_state.pending_question = None
+
+    QUESTION_GROUPS = {
+        "화법 — 특정 상담 상황(situation)": [
+            "사업자 고객인데 수수료 부담된다고 하시네요. 뭐라고 답변하죠?",
+            "고객이 주식이 더 나을 것 같다는데 어떻게 말하지?",
+            "이미 증권사에 IRP 만들어놨다고 하시는데요",
+            "나중에 돈 필요하면 못 빼는거 아니냐고 하세요",
+        ],
+        "화법 — 직원 업무 절차(guide)": [
+            "이탈 위험이 높은 고객을 어떻게 골라내나요",
+            "리밸런싱 콜은 어떤 순서로 하나요",
+        ],
+        "메타 질문(capability)": [
+            "네가 답변할 수 있는 화법은 뭐가 있어?",
+            "어떤 상황을 도와줄 수 있어?",
+        ],
+        "브리핑/고객정보 질의(briefing_qa) — 고객 선택 필요": [
+            "이 고객 평가금액 얼마야?",
+            "이 고객 왜 대상이야?",
+            "이 고객한테 지금 추천할 상품이 뭐야?",
+            "이 고객 최근 상담 이력 있어?",
+            "이 고객 예상 반론이 뭐가 있어?",
+        ],
+        "대화형 LMS 발송(lms_send) — 고객 선택 필요": [
+            '"만기 예금 재예치 관련해서 안내드려요" 이 문구로 LMS 보내줘',
+            "방금 화법 그대로 문자 발송해줘",
+        ],
+        "브리핑 수정(correction) — 고객 선택 필요": [
+            "AI브리핑 문장이 너무 딱딱해. 더 부드럽게 고쳐줘",
+            "이 고객 평가금액을 2억으로 바꿔줘",
+        ],
+    }
+    with st.expander("📋 테스트 질문 리스트 (클릭하면 바로 전송)", expanded=not st.session_state.chat_messages):
+        for group, qs in QUESTION_GROUPS.items():
+            st.markdown(f"**{group}**")
+            cols = st.columns(2)
+            for i, q in enumerate(qs):
+                if cols[i % 2].button(q, key=f"qbtn-{group}-{i}", use_container_width=True):
+                    st.session_state.pending_question = q
+
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["text"])
+
+    typed = st.chat_input("직원처럼 자연어로 질문해보세요")
+    question = st.session_state.pending_question or typed
+    st.session_state.pending_question = None
+
+    if question:
+        st.session_state.chat_messages.append({"role": "user", "text": question})
+        with st.chat_message("user"):
+            st.markdown(question)
+        with st.chat_message("assistant"):
+            with st.spinner("생각 중..."):
+                try:
+                    result = consult["graph"].ask(
+                        question,
+                        history=st.session_state.chat_history,
+                        customer_id=customer_id,
+                        session_id=st.session_state.chat_session_id,
+                    )
+                except Exception as e:
+                    msg = str(e)
+                    if "LLM 미설정" in msg:
+                        answer = ("⚠️ LLM 이 설정되지 않아 응답을 생성할 수 없어요. "
+                                  "`.env` 설정 후 앱을 다시 시작해주세요.")
+                    else:
+                        answer = f"오류 발생: {type(e).__name__}: {e}"
+                    result = {"answer": answer, "sources": [], "history": st.session_state.chat_history}
+            st.markdown(result["answer"])
+            if result.get("sources"):
+                st.caption("근거: " + ", ".join(f"{s['id']}({s['score']})" for s in result["sources"]))
+        st.session_state.chat_history = result["history"]
+        st.session_state.chat_messages.append({"role": "assistant", "text": result["answer"]})
+
+    if st.session_state.chat_messages and st.button("🗑 대화 초기화"):
+        st.session_state.chat_messages = []
+        st.session_state.chat_history = []
+        st.rerun()
 
 
 # ==========================================
