@@ -41,6 +41,7 @@ if _UMBRELLA not in sys.path:
 
 from common.kb_base import check_broken_refs, check_duplicate_ids  # noqa: E402
 from common.store import Store  # noqa: E402
+from common.session_store import summarize_for_briefing  # noqa: E402
 from common.verify import verify as _verify  # noqa: E402
 
 from customer import (
@@ -596,7 +597,7 @@ def _briefing(p: Profile) -> dict:
     전략(clause)은 판단·행동만 담고, 이미 보유한 데이터의 제시는 여기(코드)에서 처리한다.
     """
     comp = " · ".join(f"{lbl} {pct}%" for lbl, pct in zip(PORT_LABELS, p.port) if pct)
-    snap = {"보유구성": comp, "운용수익률": f"{p.ret}% (동일군 하위 {p.retPct}%)"}
+    snap = {"보유구성": comp, "운용수익률": f"{p.ret}% (유사 고객 기준 하위 {p.retPct}%)"}
     if p.matDD is not None:
         snap["만기도래"] = f"D-{p.matDD} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
@@ -872,9 +873,13 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             "source_titles": format_sources(b["spec"].get("sources", [])),
             "regulation": b["spec"].get("regulation", ""),
         } for b in selected],
-        # 상담 화법 — 접촉 전략에 정의된 콜스크립트 순서. 렌더러가 별도 섹션으로 노출한다.
-        "talking_points": [{"title": b["spec"]["title"], "talk": b["talk"]}
-                           for b in selected if b["talk"]],
+        # 상담 화법 — 정확히 2개를 보장한다(요건정의서 ⑥). 렌더러가 별도 섹션으로 노출한다.
+        "talking_points": pick_talking_points(p, selected, alternatives),
+        # 예상 반론 — 정확히 2개를 보장한다(요건정의서 ⑦).
+        "objections": pick_objections(p, selected),
+        # 상담 이력 — consult_agent 가 기록한 대화이력 요약(요건정의서 §14). 읽기만 한다 —
+        # strategy_agent 는 세션 저장소에 쓰지 않는다("코드=사실" 경계를 대화이력에도 유지).
+        "consult_history": summarize_for_briefing(p.id),
         # 근거 규정 — 규정 근거가 붙은 선정 항목. 적합성 원칙 등 판단의 출처를 추적 가능하게 한다.
         "regulations": [{"title": b["spec"]["title"], "regulation": b["spec"]["regulation"]}
                         for b in selected if b["spec"].get("regulation")],
@@ -1014,6 +1019,97 @@ def pitch_talk(spec: dict, customer_type: str | None) -> str:
     parts = list(card.get("key_points") or [])
     parts += [f"(주의) {c}" for c in (card.get("cautions") or [])]
     return " / ".join(parts)
+
+
+def pick_talking_points(p: Profile, selected: list[dict], alternatives: list[dict], n: int = 2) -> list[dict]:
+    """대고객 TM 화법을 정확히 n개(기본 2개) 보장한다(요건정의서 ⑥ "이렇게 말해보세요").
+
+    선정 항목(selected) 중 화법이 있는 것만으로는 개수가 보장되지 않는다 — 접촉 성격의
+    전략만 pitch_refs/talk 를 갖기 때문이다(예: C5·C6 페르소나는 0개). 모자라면 대안
+    항목(alternatives)에서 pitch_talk() 을 다시 조회해 보충한다. 반환 항목은 대고객
+    스크립트 생성(agent.py)의 재료가 된다 — amount·products 를 함께 담아 스크립트가
+    이 고객의 실제 금액·상품명을 반영하게 한다.
+    """
+    def _entry(b: dict, talk: str) -> dict:
+        return {
+            "title": b["spec"]["title"],
+            "talk": talk,
+            "amount": won(b["amount"]) if b.get("amount") else None,
+            "products": [_pname(r) for r in b["products"].values() if r],
+        }
+
+    picked = [_entry(b, b["talk"]) for b in selected if b.get("talk")]
+    if len(picked) >= n:
+        return picked[:n]
+
+    used_ids = {b["spec"]["id"] for b in selected}
+    for b in alternatives:
+        if len(picked) >= n:
+            break
+        if b["spec"]["id"] in used_ids:
+            continue
+        talk = pitch_talk(b["spec"], p.customer_type)
+        if talk:
+            picked.append(_entry(b, talk))
+    return picked[:n]
+
+
+def _objection_entry(card: dict) -> dict:
+    """반론 카드를 화면 표시용 {objection, response} 로 압축한다.
+
+    objection 은 고객이 실제로 할 법한 말(trigger_examples 첫 문장, 없으면 카드 제목),
+    response 는 카드의 대사(dialogue 중 '행원' 발화 첫 줄)를 그대로 쓴다 — key_points 는
+    직원용 요약 불릿이라 '자연스러운 문장'을 요구하는 요건정의서 ⑦ 표시에는 부적합하다.
+    """
+    triggers = card.get("trigger_examples") or []
+    reply = next((d["text"] for d in (card.get("dialogue") or []) if d.get("speaker") == "행원"), None)
+    return {
+        "objection": triggers[0] if triggers else card["title"],
+        "response": reply or " / ".join(card.get("key_points") or []),
+    }
+
+
+def pick_objections(p: Profile, selected: list[dict], n: int = 2) -> list[dict]:
+    """예상 반론 카드를 정확히 n개(기본 2개) 선별한다(요건정의서 ⑦ "예상 반론 및 대응 화법").
+
+    1차: 선정 항목(selected)에 저작된 objection_refs 를 customer_type 매칭으로 취합한다
+    (pitch_talk() 과 같은 방식 — 내용을 복사하지 않고 매 요청마다 consult_agent 쪽 원본을
+    실시간 조회). objection_refs 저작이 아직 부족해 n개에 못 미치면, 2차로 지식베이스의
+    objection 카드 전체를 customer_type 만으로 걸러 id 순 결정론적으로 보충한다 — 발화 단서가
+    없는 프로파일 입력이라 consult_agent.retrieve() 수준의 정밀 매칭은 못 하지만, 카드를 아예
+    노출하지 못하는 것보다는 낫다. 저작(objection_refs)이 쌓일수록 1차 경로가 더 채운다.
+    """
+    if not selected:
+        return []  # 추천 전략 자체가 없으면(Tier2/미매칭) 반박할 대상도 없다
+    kb = _get_pitch_kb()
+    if kb is None:
+        return []
+    by_id = {c["id"]: c for c in kb.pitches if c["type"] == "objection"}
+
+    picked_ids: list[str] = []
+    for b in selected:
+        for ref in b["spec"].get("objection_refs") or []:
+            if len(picked_ids) >= n:
+                break
+            if ref.get("customer_type") not in (p.customer_type, "공통"):
+                continue
+            if ref["id"] in by_id and ref["id"] not in picked_ids:
+                picked_ids.append(ref["id"])
+        if len(picked_ids) >= n:
+            break
+
+    if len(picked_ids) < n:
+        for cid in sorted(by_id):
+            if len(picked_ids) >= n:
+                break
+            if cid in picked_ids:
+                continue
+            types = by_id[cid]["tags"].get("customer_type") or []
+            if p.customer_type and p.customer_type not in types and "공통" not in types:
+                continue
+            picked_ids.append(cid)
+
+    return [_objection_entry(by_id[cid]) for cid in picked_ids[:n]]
 
 
 def _source_blob(kb, sid: str) -> str | None:

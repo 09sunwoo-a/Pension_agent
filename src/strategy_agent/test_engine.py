@@ -544,7 +544,7 @@ check("[효과 —]" not in _kim_art and "효과 —" not in _artifact("이현�
 # 출력 포맷 변경은 프롬프트(prompts.py)에 계약으로 반영된다.
 _ptxt = prompts.SYSTEM + prompts.WRITE_PROMPT
 check("카드" in _ptxt, "프롬프트: 카드형 포맷 계약 명시")
-check(("간결" in _ptxt) or ("요약" in _ptxt), "프롬프트: 간결 요약 지시")
+check(("2~3문장" in _ptxt) or ("짧게" in _ptxt), "프롬프트: 간결 요약 지시(AI 브리핑 2~3문장 길이 제약)")
 check(("명령" in _ptxt) and ("제안" in _ptxt), "프롬프트: 매수 명령이 아닌 제안 어조 지시")
 
 

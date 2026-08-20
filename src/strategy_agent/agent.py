@@ -26,7 +26,14 @@ from typing import Any
 import engine
 import llm
 from customer import PERSONAS, Profile
-from prompts import FALLBACK_PROMPT, FALLBACK_SYSTEM, SYSTEM, WRITE_PROMPT
+from prompts import (
+    FALLBACK_PROMPT,
+    FALLBACK_SYSTEM,
+    SYSTEM,
+    TALK_PROMPT,
+    TALK_SYSTEM,
+    WRITE_PROMPT,
+)
 
 
 def _prompt(facts: dict) -> str:
@@ -73,6 +80,33 @@ def _parse(raw: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _write_talking_scripts(facts: dict) -> None:
+    """talking_points 각 항목에 고객 맞춤 대고객 화법 스크립트(script)를 채운다(요건정의서 ⑥).
+
+    실패(LLM 미가용·호출 실패·파싱 실패·재료 이탈)해도 조용히 건너뛴다 — 이 경우 talk(화법
+    카드 핵심포인트 나열)를 그대로 쓰면 되므로 propose() 전체를 막을 이유가 없다.
+    """
+    points = facts.get("talking_points") or []
+    if not points or not llm.available():
+        return
+    payload = [{"title": tp["title"], "화법_핵심": tp["talk"],
+                "금액": tp.get("amount"), "상품": tp.get("products")} for tp in points]
+    try:
+        raw = llm.generate(
+            TALK_PROMPT.format(points=json.dumps(payload, ensure_ascii=False, indent=1)),
+            system=TALK_SYSTEM, max_tokens=500,
+        )
+    except Exception:
+        return
+    data = _parse(raw)
+    if not isinstance(data, dict):
+        return
+    for tp in points:
+        script = str(data.get(tp["title"]) or "").strip()
+        if script and engine.verify(script, facts)[0]:
+            tp["script"] = script
+
+
 def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> dict[str, Any]:
     """고객 프로파일에 대한 전략 제안 문장을 생성한다.
 
@@ -82,6 +116,8 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
       · '미매칭'    매칭 전략도, 쓸 LLM 도 없어 '제안 항목 없음' 만 반환.
     """
     facts = engine.prepare(p, top_n=top_n)
+    if use_llm and llm.available():
+        _write_talking_scripts(facts)
     out: dict[str, Any] = {
         "customer": p.nm, "facts": facts, "sentence": engine.compose_rule(facts),
         "insight": "", "source": "규칙", "tier": "행내전략", "reason": "", "rejected": [],
@@ -199,7 +235,15 @@ def _print(r: dict) -> None:
     if f.get("talking_points"):
         print("\n  [상담 화법]")
         for tp in f["talking_points"]:
-            print(f"    · ({tp['title']}) {tp['talk']}")
+            print(f"    · ({tp['title']}) {tp.get('script') or tp['talk']}")
+    if f.get("objections"):
+        print("\n  [예상 반론 및 대응]")
+        for ob in f["objections"]:
+            print(f"    · \"{ob['objection']}\" → {ob['response']}")
+    if f.get("consult_history"):
+        print("\n  [상담 이력]")
+        for line in f["consult_history"]:
+            print(f"    · {line}")
     if f["rationale"]:
         print("\n  [판단근거]")
         for s in f["rationale"]:
