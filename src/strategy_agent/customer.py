@@ -68,6 +68,17 @@ class Profile:
     # 고를 때만 쓴다 — 없으면 "공통" 화법으로 폴백(pitch_talk() 참고). 출처 미정: 타겟리스트·
     # MyStar·CRM 중 실제 직업 구분 값이 있는지 확인이 이 필드 사용의 전제 조건이다.
     pension_paid_ytd: int = 0  # 당해 연금계좌 기납입액(원). 세액공제 잔여 한도 산출에 사용한다.
+    balPct: int | None = None  # 평가금액(적립금) 백분위 — 값이 낮을수록 상위 구간이다(예:
+    # 9 → "상위 9%"). retPct(낮을수록 하위)와 표기 방향이 반대이니 주의 — "평가금액 상위
+    # N%"라는 화면 표현과 필드값이 그대로 일치하도록 관례를 맞췄다. retPct 와 같은 성격의
+    # 상류 배치 조인 필드다 — 모수(유사고객 모집단)가 이 저장소 안에 없어 엔진이 직접 계산할
+    # 수 없다. 없으면 "왜 이 고객님인가요?" 근거에서 해당 줄만 생략한다(engine._why_this_customer 참고).
+    cash_idle_pct: int | None = None  # 고유계정대(미투자 현금) 비중(%). port[0](예금) 중 운용
+    # 지시가 없어 대기 중인 부분만 가리키며, port[0] 의 부분집합이다(port[0] 을 대체하지 않음
+    # — 위험자산 한도 등 기존 게이팅 로직은 계속 port 4분류만 본다). 없으면 3분류 운용현황
+    # 표시를 생략한다(engine._three_way_breakdown 참고).
+    invest_period_years: float | None = None  # 투자기간(가입 후 경과연수). 상품추천 LLM 입력.
+    pension_started: bool = False  # 연금수령 개시 여부. 상품추천 LLM 입력(요건정의서 §9).
 
     @property
     def risk_asset(self) -> int:
@@ -190,7 +201,9 @@ def days_to_year_end() -> int:
 # C5~C6 은 '행내 전략 로직에 걸리지 않는' 경우의 산출을 확인하는 케이스이다. 매칭되는
 # 플레이북 전략이 없으면 engine.prepare() 의 items 가 비고, agent.propose() 는 LLM 단계를
 # 건너뛴 채 '제안 항목 없음' 을 반환한다(LLM 자유 답변 경로 Tier2 는 미구현).
-# income_bracket·pension_paid_ytd 는 타겟리스트에서 조인되는 값이며, 아래 값은 예시이다.
+# income_bracket·pension_paid_ytd·balPct·cash_idle_pct·invest_period_years 는 타겟리스트·
+# MyStar 에서 조인되는 값이며, 아래 값은 예시이다. C1·C3 에만 balPct·cash_idle_pct 를 채워
+# "필드가 없으면 해당 화면 요소를 생략한다"는 그레이스풀 폴백 경로도 함께 검증한다.
 # ─────────────────────────────────────────────────────────────
 
 PERSONAS = [
@@ -199,6 +212,7 @@ PERSONAS = [
         port=[82, 16, 2, 0], ret=1.9, retPct=35, dopt="미설정", room=580,
         dorm=10, nchM=0.3, matDD=36, matAmt=50_000_000,
         income_bracket="5500초과", pension_paid_ytd=3_200_000,
+        balPct=9, cash_idle_pct=25, invest_period_years=6.4,
     ),
     Profile(
         id="C2", nm="박지영", ag=39, bal=47_000_000, rk="적극투자형", grade="높은위험",
@@ -211,6 +225,7 @@ PERSONAS = [
         port=[100, 0, 0, 0], ret=1.8, retPct=17, dopt="미설정", room=0,
         dorm=419, nchM=13.8, matDD=22, matAmt=230_000_000,
         income_bracket="5500초과",
+        balPct=3, cash_idle_pct=40, invest_period_years=11.2,
     ),
     Profile(
         id="C4", nm="정수연", ag=52, bal=90_000_000, rk="안정추구형", grade="낮은위험",

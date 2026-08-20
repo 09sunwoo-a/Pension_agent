@@ -31,6 +31,7 @@ import json
 import math
 import re
 import sys
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,7 @@ from customer import (
     PRIO,
     RISK,
     RISK_ASSET_CAP_PCT,
+    TODAY,
     Profile,
     churn,
     conditions,
@@ -69,6 +71,8 @@ SPECS: list[dict] = _STORE.fields_of("strategy")
 CAPS: dict[str, dict] = {r["id"]: r for r in _STORE.fields_of("capability")}
 ASSETS: list[dict] = _STORE.fields_of("asset")
 BASELINES: dict[str, dict] = {r["id"]: r for r in _STORE.fields_of("baseline")}
+TOP_HOLDINGS: list[dict] = _STORE.fields_of("top_holding")
+PORTFOLIOS: list[dict] = _STORE.fields_of("portfolio")
 
 # 시스템 생성 조건부 전략 — 요건(when)이 아니라 엔진 게이트 결과의 판정으로만 발동한다.
 # strategies.json 플레이북은 원천 소스·규정에 근거한 전략만 담으므로, 근거가 아니라 게이트
@@ -520,8 +524,12 @@ def _card(spec: dict, products: dict[str, str], amount: str | None,
 # ─────────────────────────────────────────────────────────────
 
 def customer_facing_asset(branch: str | None = None) -> dict | None:
-    """고객 발송이 승인된 자료 1건. 미등록 시 None 을 반환한다."""
-    rows = [a for a in ASSETS if a.get("customer_facing") is True]
+    """고객 발송이 승인된 자료 1건. 미등록 시 None 을 반환한다.
+
+    content_type 이 있는 레코드(이벤트·세미나 — 요건정의서 ⑨, next_event_and_seminar() 가
+    다룬다)는 여기서 제외한다 — 같은 asset kind·같은 customer_facing 필드를 쓰지만 이 함수가
+    찾는 '전략에 첨부할 발송 자료'와는 다른 성격의 콘텐츠다."""
+    rows = [a for a in ASSETS if a.get("customer_facing") is True and not a.get("content_type")]
     if branch:
         rows = [a for a in rows if a.get("branch") in (branch, None)] or rows
     return rows[0] if rows else None
@@ -588,6 +596,38 @@ def _eval_condition(cond: dict | list, p: Profile) -> bool:
 _BRACKET_LABEL = {"5500이하": "5,500만원 이하", "5500초과": "5,500만원 초과"}
 
 
+def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
+    """3분류 운용현황 — 고유계정대/실적배당형/원리금보장형(요건정의서 ③).
+
+    cash_idle_pct(고유계정대 비중)가 없으면 None — 화면은 이 경우 3분류 표시를 생략한다
+    (customer.py::Profile.cash_idle_pct 참고). 고유계정대는 port[0](예금)의 부분집합으로
+    다룬다 — port[0] 자체는 위험자산 한도 등 기존 게이팅 로직이 그대로 참조하므로 건드리지
+    않는다(port 4분류는 불변, 이 3분류는 순수 표시용 추가 뷰다).
+    """
+    if p.cash_idle_pct is None:
+        return None
+    return {
+        "고유계정대": p.cash_idle_pct,
+        "실적배당형": p.port[1] + p.port[2] + p.port[3],
+        "원리금보장형": p.port[0] - p.cash_idle_pct,
+    }
+
+
+def _why_this_customer(p: Profile, conds: list[str]) -> list[str]:
+    """AI 브리핑 근거 최대 3개, 정량 중심 1줄씩(요건정의서 ② "왜 이 고객님인가요?").
+
+    결정론적 코드 산출 — LLM 이 만들지 않는다. balPct 가 없는 페르소나는 해당 줄만
+    생략한다(상류 조인 값이라 이 엔진이 직접 계산할 수 없다).
+    """
+    lines: list[str] = []
+    if p.balPct is not None:
+        lines.append(f"평가금액 {won(p.bal)}으로 유사 고객 상위 {p.balPct}% 수준이에요.")
+    lines.append(f"최근 1년 수익률은 {p.ret}%로 유사 고객 하위 {p.retPct}% 수준이에요.")
+    if "mis" in conds:
+        lines.append(f"{p.rk} 성향 대비 원리금보장형 비중이 {p.port[0]}%로 높아요.")
+    return lines[:3]
+
+
 def _briefing(p: Profile) -> dict:
     """상담 준비용 보유 현황 스냅샷.
 
@@ -598,6 +638,9 @@ def _briefing(p: Profile) -> dict:
     """
     comp = " · ".join(f"{lbl} {pct}%" for lbl, pct in zip(PORT_LABELS, p.port) if pct)
     snap = {"보유구성": comp, "운용수익률": f"{p.ret}% (유사 고객 기준 하위 {p.retPct}%)"}
+    three_way = _three_way_breakdown(p)
+    if three_way:
+        snap["운용현황(3분류)"] = " · ".join(f"{k} {v}%" for k, v in three_way.items())
     if p.matDD is not None:
         snap["만기도래"] = f"D-{p.matDD} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
@@ -860,6 +903,12 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
                      "거래채널": "비대면" if p.nonface else "대면"},
         "briefing": _briefing(p),
         "conditions": [f"{c}:{CONDS[c]}" for c in conds],
+        # 왜 이 고객님인가요 — 최대 3개, 정량 중심(요건정의서 ②). 코드 산출, LLM 개입 없음.
+        "why_this_customer": _why_this_customer(p, conds),
+        # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(요건정의서 ④).
+        "top_holdings": top_reference_products(),
+        # 고객님께 안내해보세요 — 가장 임박한 이벤트 1개 + 세미나 1개(요건정의서 ⑨).
+        "outreach": next_event_and_seminar(),
         "items": [{
             "id": b["spec"]["id"], "title": b["spec"]["title"], "kind": b["spec"]["kind"],
             "actor": b["spec"]["actor"], "clause": b["clause"], "evidence": b["evidence"],
@@ -1019,6 +1068,47 @@ def pitch_talk(spec: dict, customer_type: str | None) -> str:
     parts = list(card.get("key_points") or [])
     parts += [f"(주의) {c}" for c in (card.get("cautions") or [])]
     return " / ".join(parts)
+
+
+def top_reference_products(n: int = 2) -> list[dict]:
+    """수익률 상위 1% 고객 상품 사례 n개(기본 2개) — 요건정의서 ④.
+
+    고객별 필터가 없다 — 이 섹션 자체가 "이 고객에 대한 추천"이 아니라 고성과 고객의 실제
+    운용 사례를 비교·참고 정보로 보여주는 것이라고 요건정의서가 명시한다(§7). 수익률 내림차순
+    상위만 뽑는 순수 데이터 조회이며 LLM 이 개입하지 않는다.
+    """
+    ranked = sorted(TOP_HOLDINGS, key=lambda r: r["return_1y"], reverse=True)
+    return [
+        {"product_name": r["product_name"], "description": r["description"],
+         "return_1y": r["return_1y"]}
+        for r in ranked[:n]
+    ]
+
+
+def next_event_and_seminar(today: date | None = None) -> dict[str, dict | None]:
+    """가장 임박한 이벤트 1개 + 세미나 1개(요건정의서 ⑨ "고객님께 안내해보세요").
+
+    content_type 별로 종료되지 않은 것(end_date >= today) 중 start_date 오름차순 첫 건을
+    고른다 — 진행 중이거나 미래 일정인 콘텐츠를 우선하고 종료된 콘텐츠는 노출하지 않는다는
+    요건을 그대로 코드로 옮긴 것. LLM 은 개입하지 않는다.
+    """
+    today = today or TODAY
+
+    def _pick(content_type: str) -> dict | None:
+        candidates = [
+            a for a in ASSETS
+            if a.get("content_type") == content_type and a.get("end_date")
+            and date.fromisoformat(a["end_date"]) >= today
+        ]
+        if not candidates:
+            return None
+        best = min(candidates, key=lambda a: a["start_date"])
+        return {
+            "name": best["name"], "start_date": best["start_date"], "end_date": best["end_date"],
+            "channel": best.get("channel"), "lms_message": best.get("lms_message"),
+        }
+
+    return {"event": _pick("이벤트"), "seminar": _pick("세미나")}
 
 
 def pick_talking_points(p: Profile, selected: list[dict], alternatives: list[dict], n: int = 2) -> list[dict]:

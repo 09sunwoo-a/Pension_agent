@@ -213,6 +213,10 @@ def _print(r: dict) -> None:
     f = r["facts"]
     print(f"\n■ {r['customer']}  ·  요건 {len(f['conditions'])}건")
     print("  " + ", ".join(c.split(":", 1)[1] for c in f["conditions"]))
+    if f.get("why_this_customer"):
+        print("\n  [왜 이 고객님인가요]")
+        for line in f["why_this_customer"]:
+            print(f"    · {line}")
     bf = f["briefing"]
     src = "; ".join(engine.format_sources([bf["source"]]))
     print(f"  [보유현황] {' | '.join(f'{k} {v}' for k, v in bf.items() if k != 'source')}"
@@ -240,6 +244,16 @@ def _print(r: dict) -> None:
         print("\n  [예상 반론 및 대응]")
         for ob in f["objections"]:
             print(f"    · \"{ob['objection']}\" → {ob['response']}")
+    if f.get("top_holdings"):
+        print("\n  [수익률 상위 1% 고객님들이 많이 담은 상품은?]  ※ 이 고객 대상 추천 아님, 참고용")
+        for th in f["top_holdings"]:
+            print(f"    · {th['product_name']} — {th['description']} (최근 1년 {th['return_1y']}%)")
+    outreach = f.get("outreach") or {}
+    if outreach.get("event") or outreach.get("seminar"):
+        print("\n  [고객님께 안내해보세요]")
+        for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
+            if item:
+                print(f"    · [{label}] {item['name']} ({item['start_date']}~{item['end_date']})")
     if f.get("consult_history"):
         print("\n  [상담 이력]")
         for line in f["consult_history"]:

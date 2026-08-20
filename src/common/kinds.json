@@ -3,7 +3,7 @@
 
   "product": {
     "consumed": "relational",
-    "desc": "IRP 운용상품 1행. 적합성 게이트가 타입드 필드로 결정론 비교한다.",
+    "desc": "IRP 운용상품 1행. 적합성 게이트가 타입드 필드로 결정론 비교한다. region·asset_class·strategy_desc·features·tdf_risk_asset_pct 는 상품추천 LLM 입력(요건정의서 §9 '상품 특성') 전용 선택 필드다 — 게이트 로직은 여전히 category·payout·risk 등 기존 필드만 본다.",
     "required": ["name", "category", "payout", "risk", "status"],
     "fields": {
       "name": {"type": "text"},
@@ -18,7 +18,36 @@
       "depositor_protection": {"type": "bool", "nullable": true},
       "rate": {"type": "float", "nullable": true},
       "exp_return": {"type": "float", "nullable": true},
-      "status": {"type": "enum", "values": ["판매중", "판매중지"]}
+      "status": {"type": "enum", "values": ["판매중", "판매중지"]},
+      "region": {"type": "text", "nullable": true},
+      "asset_class": {"type": "text", "nullable": true},
+      "strategy_desc": {"type": "text", "nullable": true},
+      "features": {"type": "list", "nullable": true},
+      "tdf_risk_asset_pct": {"type": "float", "nullable": true}
+    }
+  },
+
+  "top_holding": {
+    "consumed": "relational",
+    "desc": "수익률 상위 1% 고객이 많이 담은 상품 사례(요건정의서 ④). 특정 고객에 대한 추천이 아니라 비교·참고 정보다 — engine.top_reference_products() 가 고객 필터 없이 수익률순 상위만 뽑는다.",
+    "required": ["product_name", "description", "return_1y"],
+    "fields": {
+      "product_name": {"type": "text"},
+      "description": {"type": "text"},
+      "return_1y": {"type": "float"},
+      "as_of": {"type": "text", "nullable": true}
+    }
+  },
+
+  "portfolio": {
+    "consumed": "relational",
+    "desc": "적합 상품 추천의 '포트폴리오 1개'(요건정의서 ⑤) 후보. 개별 상품과 달리 가중치 있는 상품 묶음이다. allocation 의 product_id 는 product kind 레코드 id 를 참조한다.",
+    "required": ["name", "description", "allocation"],
+    "fields": {
+      "name": {"type": "text"},
+      "description": {"type": "text"},
+      "allocation": {"type": "list"},
+      "suitability_tags": {"type": "list", "nullable": true}
     }
   },
 
@@ -82,14 +111,19 @@
 
   "asset": {
     "consumed": "relational",
-    "desc": "고객 발송 가능 콘텐츠. customer_facing 이 true 인 자료만 전략 문안에 인용된다.",
+    "desc": "고객 발송 가능 콘텐츠. customer_facing 이 true 인 자료만 전략 문안에 인용된다. content_type·start_date·end_date·lms_message·channel 은 요건정의서 ⑨ '고객님께 안내해보세요'(이벤트·세미나 안내) 전용 선택 필드 — engine.next_event_and_seminar() 가 content_type 별로 종료되지 않은 것 중 가장 임박한 것만 고른다.",
     "required": ["name"],
     "fields": {
       "name": {"type": "text"},
       "branch": {"type": "text", "nullable": true},
       "customer_facing": {"type": "bool", "nullable": true},
       "source_resource": {"type": "text", "nullable": true},
-      "note": {"type": "text", "nullable": true}
+      "note": {"type": "text", "nullable": true},
+      "content_type": {"type": "enum", "values": ["이벤트", "세미나", "자료"], "nullable": true},
+      "start_date": {"type": "text", "nullable": true},
+      "end_date": {"type": "text", "nullable": true},
+      "lms_message": {"type": "text", "nullable": true},
+      "channel": {"type": "enum", "values": ["LMS", "알림톡"], "nullable": true}
     }
   },
 

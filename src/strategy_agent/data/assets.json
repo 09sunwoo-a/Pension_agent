@@ -27,6 +27,34 @@
         "source_resource": "res.guide.info_zone_dc_irp_rate",
         "note": "가이드 p04·p05 가 원리금보장 희망 고객에게 안내하도록 규정한 자료. 고객 제공용 배포본의 존재 여부 확인 필요."
       }
+    },
+    {
+      "id": "AS03",
+      "kind": "asset",
+      "fields": {
+        "name": "우리는 지금 개인형IRP로 투자중!",
+        "content_type": "이벤트",
+        "start_date": "2026-08-19",
+        "end_date": "2026-08-31",
+        "channel": "LMS",
+        "lms_message": "[KB국민은행] 지금 개인형IRP로 투자 중이신 고객님을 위한 이벤트가 진행 중이에요. 8/31까지 스타뱅킹에서 확인해보세요.",
+        "customer_facing": true,
+        "note": "요건정의서 ⑨ 예시 표를 그대로 옮긴 자리표시자 데이터 — 실제 이벤트 일정 연동 전까지 engine.next_event_and_seminar() 동작 확인용. 데이터 담당자가 실제 콘텐츠 캘린더로 교체해야 한다."
+      }
+    },
+    {
+      "id": "AS04",
+      "kind": "asset",
+      "fields": {
+        "name": "AI투자 고민되시죠? 시장전망 & AI 공급부족",
+        "content_type": "세미나",
+        "start_date": "2026-08-25",
+        "end_date": "2026-08-25",
+        "channel": null,
+        "lms_message": "[KB국민은행] 미래에셋증권과 함께하는 AI투자 시장전망 세미나를 8/25 유튜브로 안내드려요.",
+        "customer_facing": true,
+        "note": "요건정의서 ⑨ 예시 표(원문 일정 2026.7.16)를 옮기되, 이 저장소의 데모 기준일(customer.TODAY=2026-08-11)보다 미래가 되도록 날짜만 조정한 자리표시자 데이터. 유튜브 생중계라 channel(LMS/알림톡) 값은 해당 없음(null). 데이터 담당자가 실제 세미나 일정으로 교체해야 한다."
+      }
     }
   ]
 }
