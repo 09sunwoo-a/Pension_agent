@@ -102,7 +102,7 @@ START → understand ─┬─(situation/guide) → situation_slots → retrieve
                      │                                      │          ├─(없음, 1회차)→ broaden ─┘            │
                      │                                      └──────────┤                                      │
                      │                                                 └─(없음, 2회차)────→ fallback ←─────────┘  → END
-                     ├─(capability)──────────────────────────────────────────────────────→ capabilities            → END
+                     ├─(agent_help)──────────────────────────────────────────────────────→ agent_help              → END
                      ├─(briefing_qa)─────────────────────────────────────────────────────→ briefing_qa             → END
                      ├─(lms_send)────────────────────────────────────────────────────────→ lms_send                → END
                      └─(correction)──────────────────────────────────────────────────────→ correction               → END
@@ -111,7 +111,7 @@ START → understand ─┬─(situation/guide) → situation_slots → retrieve
 | 노드 | 하는 일 | LLM |
 |---|---|:---:|
 | `understand` | 질문(+이전 대화) → `intent`·`utterance`만 판단(도메인 어휘 없는 라우팅 전용) | ○ |
-| `capabilities` | "뭘 도와줄 수 있어?" 같은 메타 질문에 KB 메타데이터로 안내 | ✕ |
+| `agent_help` | "뭘 도와줄 수 있어?" 같은 메타 질문에 KB 메타데이터로 안내(에이전트 자신에 대한 질문 — 06_에이전트_기능정의/01 ② "가능 여부 즉시 확인"(고객 계좌 상태 조회)과 다름) | ✕ |
 | `situation_slots` | situation/guide 확정 후에만 호출 — 고객유형·거절유형·단계를 화법 검색용으로 분해 | ○ |
 | `retrieve` | 스코프(고객유형·단계) + 발화 유사도로 화법 카드 top-3 선별 | ✕ |
 | `broaden` | 못 찾으면 1차로 고객유형·단계, 2차로 거절유형까지 풀고 재검색 (최대 2회) | ✕ |
@@ -122,7 +122,7 @@ START → understand ─┬─(situation/guide) → situation_slots → retrieve
 | `lms_send` | 인용부호로 명시된 문구를 `common.tools.send_lms`(스텁)로 전달 | ✕ |
 | `correction` | 수정 요청을 편집 가능 필드로 분류 → 편집 가능하면 재작성+검증, 아니면 거절 | ○ |
 
-- `intent`: `situation`(특정 고객 상담) / `guide`(직원 업무 절차 질문) / `capability`(메타 질문) /
+- `intent`: `situation`(특정 고객 상담) / `guide`(직원 업무 절차 질문) / `agent_help`(메타 질문) /
   `briefing_qa`(브리핑·고객정보 질의) / `lms_send`(LMS 발송 명령) / `correction`(브리핑 수정
   요청). `guide`도 `retrieve`는 동일하게 타되, 응답 프롬프트 톤만 다름.
 - `briefing_qa`·`lms_send`·`correction`은 `state["customer_id"]`(호출자가 `ask(..., customer_id=...)`로
@@ -160,7 +160,7 @@ START → understand ─┬─(situation/guide) → situation_slots → retrieve
 - 프롬프트에 넣는 수치는 `facts`에 있는 값으로 한정, 예시 수치는 전제조건(`assumptions`)과 함께 전달
 - 검색 채택 기준을 **내용 관련도**로 걸어 무관한 질문엔 억지로 카드를 붙이지 않고 `fallback`
 - `customer_facing: false` 자료는 "고객 직접 제공 금지"로 표기, 응답의 `sources`로 근거 카드 역추적 가능
-- `capabilities` 응답도 LLM 호출 없이 KB 메타데이터만으로 생성 — 없는 기능을 있다고 답할 수 없음
+- `agent_help` 응답도 LLM 호출 없이 KB 메타데이터만으로 생성 — 없는 기능을 있다고 답할 수 없음
 
 ---
 

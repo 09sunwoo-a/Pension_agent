@@ -25,7 +25,10 @@ from llm import generate
 from prompts import ROUTE_PROMPT
 
 HISTORY_LIMIT = 4  # 프롬프트에 넣는 최근 대화 턴 수 (understand·situation_slots 공통)
-INTENTS = ("situation", "guide", "capability", "briefing_qa", "lms_send", "correction")
+# 메타 질문 의도는 `agent_help` 다. `capability` 라는 이름은 쓰지 않는다 — 06_에이전트_기능정의/01 ②
+# "가능 여부 즉시 확인"(고객 계좌 상태 플래그로 '이 제안 지금 되나'를 보는 기능, 미구현)과
+# strategy_agent 의 `capability` kind(시스템 기능 지원 여부, cap.lms_send)와 혼동되기 때문이다.
+INTENTS = ("situation", "guide", "agent_help", "briefing_qa", "lms_send", "correction")
 
 _kb = load_kb()
 
@@ -48,7 +51,7 @@ class AgentState(TypedDict, total=False):
     question: str                    # [입력] 직원의 자연어 질문
     history: list[Turn]              # [입력] 이전 대화 턴 (호출자가 세션별로 들고 다님)
     customer_id: str | None          # [입력] 현재 열려 있는 브리핑 화면의 고객 id (호출자가 넘김)
-    intent: str                      # understand 가 채움 — situation|guide|capability|
+    intent: str                      # understand 가 채움 — situation|guide|agent_help|
                                       # briefing_qa|lms_send|correction
     customer_type: str | None
     objection_type: str | None
@@ -103,7 +106,7 @@ def understand(state: AgentState) -> dict[str, Any]:
 # situation/guide 는 화법 검색 전에 pitch.py::situation_slots 를 한 번 더 거친다(도메인
 # 슬롯 추출) — 그 외 기능은 각자 자기 노드가 스스로 해석하므로 바로 연결한다.
 _INTENT_NODE = {
-    "capability": "capabilities",
+    "agent_help": "agent_help",
     "briefing_qa": "briefing_qa",
     "lms_send": "lms_send",
     "correction": "correction",

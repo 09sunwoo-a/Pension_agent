@@ -1,7 +1,7 @@
 """AI 브리핑 화면 ①~⑨ 섹션 레지스트리 — 제목과 생성 주체를 한 곳에서 관리한다.
 
 docs/REQUIREMENTS.md §2(섹션 정의 · §15 생성 주체)를 코드 상수로 옮긴 것이다. 화면을 그리는
-세 곳(agent.py CLI · app.py Streamlit · bff/main.py → React BriefingPanel.jsx)이 전부 여기서
+두 곳(agent.py CLI · app.py Streamlit)이 전부 여기서
 제목을 읽는다.
 
 이 모듈이 생긴 이유는 실제로 어긋났기 때문이다 — 같은 섹션 제목이 세 파일에 각각 하드코딩돼
@@ -74,15 +74,3 @@ def title(key: str) -> str:
     s = BY_KEY.get(key)
     return s.full_title if s else key
 
-
-def payload() -> list[dict]:
-    """BFF 응답에 실어 프론트가 제목을 API 에서 받게 하는 직렬화 형태.
-
-    프론트가 제목 문자열을 자기 코드에 다시 적어두지 않도록 하는 것이 목적이다.
-    """
-    return [
-        {"key": s.key, "label": s.label, "title": s.title,
-         "full_title": s.full_title, "note": s.note,
-         "llm_only": s.source is Source.LLM_ONLY}
-        for s in SECTIONS
-    ]

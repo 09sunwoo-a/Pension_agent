@@ -123,6 +123,7 @@ with tab2:
         # §14 상담이력 전체를 화면 순서(①AI브리핑→②근거→③운용상태→...→⑨안내)로 노출한다.
         # ── 헤더: ■ 고객 · 요건 N건
         st.markdown(f"#### ■ {target_name} · 요건 {len(f['conditions'])}건")
+        st.caption(engine.customer_header_line(f["customer"]))  # 상단 항목(REQUIREMENTS.md §3.1)
         st.write(", ".join(c.split(":", 1)[1] for c in f["conditions"]))
 
         # ── ② 왜 이 고객님인가요 (최대 3줄, 코드 산출)
@@ -349,7 +350,7 @@ with tab_chat:
             "이탈 위험이 높은 고객을 어떻게 골라내나요",
             "리밸런싱 콜은 어떤 순서로 하나요",
         ],
-        "메타 질문(capability)": [
+        "메타 질문(agent_help)": [
             "네가 답변할 수 있는 화법은 뭐가 있어?",
             "어떤 상황을 도와줄 수 있어?",
         ],

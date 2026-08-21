@@ -17,7 +17,7 @@ from __future__ import annotations
 ROUTE_PROMPT = """직원의 입력을 보고 어떤 기능으로 보낼지 판단해 JSON만 출력하라. 설명·코드펜스 금지.
 
 {{
-  "intent": "situation" 또는 "guide" 또는 "capability" 또는 "briefing_qa" 또는 "lms_send" 또는 "correction",
+  "intent": "situation" 또는 "guide" 또는 "agent_help" 또는 "briefing_qa" 또는 "lms_send" 또는 "correction",
   "utterance": "질문에서 핵심 요청·발화를 한 문장으로 정리한 것"
 }}
 
@@ -31,7 +31,8 @@ intent 판단 기준:
 - "situation": 특정 고객과의 상담 상황에 대한 질문 — 고객이 한 말이나 반응이 있다 (기본값)
 - "guide": 고객 응대가 아니라 직원의 업무 절차·기준·조회 방법을 묻는 질문
   (예: "이탈위험 고객을 어떻게 골라내나요", "리밸런싱 콜은 어떤 순서로 하나요")
-- "capability": 에이전트가 무엇을 도와줄 수 있는지 묻는 메타 질문
+- "agent_help": 에이전트 자신이 무엇을 도와줄 수 있는지 묻는 메타 질문 — 특정 고객 계좌에서
+  어떤 거래·제안이 가능한지 묻는 것이 아니다
   (예: "어떤 걸 도와줄 수 있어?", "너가 답변할 수 있는 화법은 뭐가 있어?")
 - "briefing_qa": 현재 열려 있는 고객의 AI브리핑 내용·고객 정보를 묻는 질문
   (예: "이 고객 평가금액 얼마야?", "이 고객 왜 대상이야?", "브리핑 요약해줘")

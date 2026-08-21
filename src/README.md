@@ -14,7 +14,6 @@ src/
 ├─ common/          공용 인프라 — LLM 클라이언트 · 데이터 규격(store·schema·kinds) · 세션이력 · 두 에이전트 교차 로더
 ├─ consult_agent/   직원 상담 대화 에이전트 — 화법 코칭 · 브리핑 질의 · LMS 발송 · 브리핑 수정 (LangGraph)
 ├─ strategy_agent/  AI 브리핑 에이전트 — 고객 1명 종합 → ①~⑨ 섹션 (+평가 대시보드)
-├─ bff/             프론트 서빙 게이트웨이 — FastAPI JSON API + React 프론트(frontend/)
 ├─ market/          시황 소스 — 뉴스·금리를 지식으로 정제 (플레이스홀더)
 ├─ .env             공용 LLM 설정 (커밋 금지) · .env.example 참고
 └─ AUTHORING.md     데이터 소스 추가 가이드 (사내 규정·상품 등 + 저작 프롬프트)
@@ -35,8 +34,6 @@ cp .env.example .env      # 사내 GenAI 게이트웨이 URL·키 입력 (common
 python strategy_agent/agent.py 이현우           # 단일 고객 AI 브리핑 (CLI)
 streamlit run strategy_agent/app.py             # 평가·피드백 대시보드 (+대화형 에이전트 테스트 탭)
 python consult_agent/graph.py -c C3             # 대화형 에이전트 REPL — 고객 화면이 열린 상태
-uvicorn bff.main:app --reload --port 8000       # BFF API (/api/customers · /api/chat)
-cd bff/frontend && npm install && npm run dev   # React 프론트 (별도 터미널)
 
 # ── 테스트 (LLM 키 없이 동작)
 python strategy_agent/test_engine.py            # 엔진 감사 회귀 632건
@@ -107,7 +104,7 @@ flowchart TB
   원본과 어긋나지 않는다). 상담이력도 같은 단방향 원칙 — consult_agent 가 쓰고 strategy_agent 는
   읽기만 한다.
 - **화면 제목은 한 곳에서 정한다.** ①~⑨ 섹션의 제목·생성주체는 `strategy_agent/sections.py` 가
-  유일한 출처이고, CLI·Streamlit·BFF(→React)가 전부 여기서 읽는다.
+  유일한 출처이고, CLI·Streamlit 이 전부 여기서 읽는다.
 - **외부 연동은 도구 레지스트리로 갈아끼운다.** LMS 발송 등은 `common/tools.py` 스텁으로 자리를
   잡아두고, MCP 연동 시 함수 본문만 교체한다 — 라우팅 로직은 손대지 않는다.
 - **편집 가능 범위는 코드가 못박는다.** 브리핑 수정은 `strategy_agent.agent.EDITABLE_FIELDS`

@@ -343,12 +343,41 @@ for nm, f in FACTS.items():
                                   _products_of(f["items"][idx - 1]))
             check(idx > 0 and prev, f"{nm}: 축약이 직전 절을 가리킴", c)
 
-# 만기 요건은 D-90 이내에서만 성립한다.
+# 만기 요건은 D-30 이내에서만 성립한다 — 본부 가이드 "만기 1개월 전 반드시 만기 안내"
+# (05_주제별_추출지식/01_고객세그먼트 9 · 02_IRP관리방법론 18, 06_에이전트_기능정의/01 ④ "기한 임박").
 _far = Profile(id="T", nm="T", ag=40, bal=100_000_000, rk="안정형", grade="낮은위험",
                port=[100, 0, 0, 0], ret=1.0, retPct=50, dopt="설정", room=0, dorm=0,
                nchM=0, matDD=300, matAmt=100_000_000)
 check("mat" not in conditions(_far), "D-300 은 만기 요건 미성립")
+_far.matDD = 45
+check("mat" not in conditions(_far), "D-45 는 만기 요건 미성립(창 D-30)")
 check("mat" in conditions(BY_NAME["이현우"]), "D-22 는 만기 요건 성립")
+check("mat" in conditions(BY_NAME["김민수"]), "D-26 은 만기 요건 성립")
+
+# 연금수령 개시 계좌에는 추가납 요건(add·tax)이 성립하지 않는다 — 06_에이전트_기능정의/01 ①
+# "⚠ 하지 말 것: 연금개시 계좌 → 추가납 권유 금지", 02_IRP관리방법론 59 "연금개시 → 추가입금 불가".
+_pens = Profile(id="T", nm="T", ag=60, bal=100_000_000, rk="안정형", grade="낮은위험",
+                port=[100, 0, 0, 0], ret=1.0, retPct=50, dopt="설정", room=500, dorm=0,
+                nchM=0, pension_paid_ytd=0, pension_started=True)
+check("add" not in conditions(_pens) and "tax" not in conditions(_pens), "연금개시 계좌: add·tax 미성립",
+      str(conditions(_pens)))
+_pb = engine.prepare(_pens)["briefing"]
+check("납입여력" not in _pb and "연금수령" in _pb, "연금개시 계좌: 납입여력 미노출 · 연금수령 사실 노출", str(_pb))
+_pens.pension_started = False
+check("tax" in conditions(_pens), "미개시 계좌(대조군): tax 성립")
+check("납입여력" in engine.prepare(_pens)["briefing"], "미개시 계좌(대조군): 납입여력 노출")
+
+# 고객 헤더 — 최근 접촉·스타클럽 등급(06_에이전트_기능정의/01 ① 양식 "만 57세 · VIP",
+# "최근 접촉: 없음 (6개월+)"; REQUIREMENTS.md §3.1). 등급은 값이 있을 때만 키가 생긴다.
+for nm, f in FACTS.items():
+    check("최근접촉" in f["customer"], f"{nm}: 헤더에 최근접촉")
+    check(("스타클럽등급" in f["customer"]) == (BY_NAME[nm].club_grade is not None),
+          f"{nm}: 스타클럽등급은 값 있을 때만")
+check(FACTS["이현우"]["customer"]["최근접촉"] == "없음(6개월+)", "이현우 dorm 419 → 없음(6개월+)")
+check(FACTS["김민수"]["customer"]["최근접촉"] == "10일 전", "김민수 dorm 10 → 10일 전")
+check(FACTS["이현우"]["customer"].get("스타클럽등급") == "VIP", "이현우 스타클럽등급 VIP")
+check(engine.customer_header_line(FACTS["이현우"]["customer"]).startswith("45세 · VIP · 안정형"),
+      "헤더 한 줄 순서: 연령 · 등급 · 성향", engine.customer_header_line(FACTS["이현우"]["customer"]))
 
 # 요건이 성립하지 않는 전략을 정원 충족 목적으로 채우지 않는다.
 for nm, f in FACTS.items():

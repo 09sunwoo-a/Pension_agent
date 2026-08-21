@@ -5,8 +5,9 @@
 판정 기준 중 근거를 명시해둘 두 건:
 
     · `mat`(만기예금 보유) — 만기 잔여일수가 남아 있다는 것만으로는 대상이 되지 않는다.
-      재예치 상담이 실효를 갖는 D-90 이내(`MAT_WINDOW_DAYS`)로 제한한다. 그보다 먼 만기는
-      지금 접촉해도 고객이 행동할 시점이 아니다.
+      본부 가이드가 "만기 1개월 전 반드시 만기 안내"를 필수 행동으로 규정하므로 D-30 이내
+      (`MAT_WINDOW_DAYS`)로 제한한다(05_주제별_추출지식/01_고객세그먼트 9 · 02_IRP관리방법론 18,
+      06_에이전트_기능정의/01 ④ "기한 임박"). 그보다 먼 만기는 지금 접촉해도 고객이 행동할 시점이 아니다.
     · `lim`(위험자산 한도 초과) — DC·개인형IRP 의 위험자산 투자한도 70%(`RISK_ASSET_CAP_PCT`)는
       투자성향과 무관한 규정 사항이라, 성향 적합성과 별개로 판정한다.
 
@@ -46,8 +47,9 @@ RISK_ASSET_CAP_PCT = 70
 # 총급여 구간별 연금계좌 세액공제율(지방소득세 포함). 출처: ch01_new fact.irp.tax_credit_rate
 TAX_CREDIT_RATE = {"5500이하": 0.165, "5500초과": 0.132}
 
-# 만기예금 요건의 인정 범위(잔여일수). 이 기간을 넘으면 재예치 상담의 실효가 없다.
-MAT_WINDOW_DAYS = 90
+# 만기예금 요건의 인정 범위(잔여일수) — "만기 1개월 전 만기 안내"(세그먼트 9·방법론 18). churn() 의
+# 만기 가산 구간(≤30/≤90)은 이탈 점수용이라 별개다.
+MAT_WINDOW_DAYS = 30
 
 
 @dataclass
@@ -85,7 +87,11 @@ class Profile:
     # — 위험자산 한도 등 기존 게이팅 로직은 계속 port 4분류만 본다). 없으면 3분류 운용현황
     # 표시를 생략한다(engine._three_way_breakdown 참고).
     invest_period_years: float | None = None  # 투자기간(가입 후 경과연수). 상품추천 LLM 입력.
-    pension_started: bool = False  # 연금수령 개시 여부. 상품추천 LLM 입력(REQUIREMENTS.md §9).
+    pension_started: bool = False  # 연금수령 개시 여부. 참이면 추가납 요건(add·tax)이 성립하지 않는다
+    # (conditions() — 06_에이전트_기능정의/01 ① "연금개시 계좌 → 추가납 권유 금지", 방법론 59 "연금개시 →
+    # 추가입금 불가"; REQUIREMENTS.md §7). 상품추천 LLM 입력(§9)에도 쓴다.
+    club_grade: str | None = None  # 스타클럽 등급(예: "VIP"). CRM 조인 값 — 화면 상단에 값이 있을 때만
+    # 붙인다(REQUIREMENTS.md §3.1, 06_에이전트_기능정의/01 ① 양식 "만 57세 · VIP"). 없으면 생략한다.
 
     @property
     def risk_asset(self) -> int:
@@ -188,10 +194,13 @@ def conditions(p: Profile) -> list[str]:
         a.add("mis")
     if churn(p) >= 10:
         a.add("chn")
-    if p.room > 0:
-        a.add("add")
-    if p.room >= 300:
-        a.add("tax")
+    # 연금수령 개시 계좌에는 추가납 요건을 세우지 않는다 — 연금지급설계가 등록되면 추가입금 자체가
+    # 불가하고(방법론 59), 권유는 "하지 말 것"이다(06_에이전트_기능정의/01 ①). REQUIREMENTS.md §7.
+    if not p.pension_started:
+        if p.room > 0:
+            a.add("add")
+        if p.room >= 300:
+            a.add("tax")
     return [k for k in PRIO if k in a]
 
 
@@ -208,8 +217,8 @@ def days_to_year_end() -> int:
 # C5~C6 은 '행내 전략 로직에 걸리지 않는' 경우의 산출을 확인하는 케이스이다. 매칭되는
 # 플레이북 전략이 없으면 engine.prepare() 의 items 가 비고, agent.propose() 는 LLM 단계를
 # 건너뛴 채 '제안 항목 없음' 을 반환한다(LLM 자유 답변 경로 Tier2 는 미구현).
-# income_bracket·pension_paid_ytd·balPct·cash_idle_pct·invest_period_years 는 타겟리스트·
-# MyStar 에서 조인되는 값이며, 아래 값은 예시이다. C1~C5 에는 balPct·cash_idle_pct 를 채워
+# income_bracket·pension_paid_ytd·balPct·cash_idle_pct·invest_period_years·club_grade 는 타겟리스트·
+# MyStar·CRM 에서 조인되는 값이며, 아래 값은 예시이다. C1~C5 에는 balPct·cash_idle_pct 를 채워
 # AI브리핑 9개 섹션이 실제로 채워지는 모습을 볼 수 있게 하고, C6 만 비워둬 "필드가 없으면
 # 해당 화면 요소를 생략한다"는 그레이스풀 폴백 경로를 데모에서도 확인할 수 있게 한다.
 # ─────────────────────────────────────────────────────────────
@@ -218,7 +227,7 @@ PERSONAS = [
     Profile(
         id="C1", nm="김민수", ag=48, bal=180_000_000, rk="안정형", grade="보통위험",
         port=[82, 16, 2, 0], ret=1.9, retPct=35, dopt="미설정", room=580,
-        dorm=10, nchM=0.3, matDD=36, matAmt=50_000_000,
+        dorm=10, nchM=0.3, matDD=26, matAmt=50_000_000,
         income_bracket="5500초과", pension_paid_ytd=3_200_000,
         balPct=9, cash_idle_pct=25, invest_period_years=6.4,
     ),
@@ -235,6 +244,7 @@ PERSONAS = [
         dorm=419, nchM=13.8, matDD=22, matAmt=230_000_000,
         income_bracket="5500초과",
         balPct=3, cash_idle_pct=40, invest_period_years=11.2,
+        club_grade="VIP",  # 스타클럽 등급 예시(CRM 조인 값) — 상단 표기 데모용. 다른 페르소나는 비워 생략 경로 확인
     ),
     Profile(
         id="C4", nm="정수연", ag=52, bal=90_000_000, rk="안정추구형", grade="낮은위험",

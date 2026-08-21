@@ -616,6 +616,43 @@ def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
     }
 
 
+def _last_contact_label(p: Profile) -> str:
+    """최근 접촉 표기 — "N일 전", 180일 이상이면 "없음(6개월+)"(06_에이전트_기능정의/01 ① 양식
+    "최근 접촉: 없음 (6개월+)"). 180 은 customer.conditions() 의 `dor`(장기 미접촉) 경계와 같다."""
+    return "없음(6개월+)" if p.dorm >= 180 else f"{p.dorm}일 전"
+
+
+def _customer_header(p: Profile) -> dict[str, Any]:
+    """facts["customer"] — 화면 상단·LLM 프롬프트가 공유하는 고객 식별 항목(REQUIREMENTS.md §3.1·§3.2).
+
+    CLI(agent._print)·Streamlit(app.py)이 전부 이 dict 를 읽으므로 상단 항목의
+    유일한 출처다. 스타클럽 등급은 값이 있을 때만 키를 만든다 — 없는 값을 "미확인"으로 채우면 화면이
+    그 문자열을 노출하게 된다.
+    """
+    header: dict[str, Any] = {
+        "성명": p.nm, "연령": p.ag, "투자성향": p.rk, "위험등급": p.grade,
+        "평가금액": (f"{won(p.bal)} (상위 {p.balPct}%)" if p.balPct is not None else won(p.bal)),
+        "수익률": f"{p.ret}% (하위 {p.retPct}%)",
+        "위험자산": f"{p.risk_asset}% (한도 {RISK_ASSET_CAP_PCT}%)",
+        "거래채널": "비대면" if p.nonface else "대면",
+        "소득구간": _BRACKET_LABEL.get(p.income_bracket or "", "구간 미확인"),
+        "최근접촉": _last_contact_label(p),
+    }
+    if p.club_grade:
+        header["스타클럽등급"] = p.club_grade
+    return header
+
+
+def customer_header_line(customer: dict) -> str:
+    """화면 상단 한 줄(REQUIREMENTS.md §3.1). 항목 순서는 06/01 ① 양식 "만 57세 · VIP" 를 따라
+    연령 다음에 등급을 둔다. CLI·Streamlit 이 공유한다."""
+    parts = [f"{customer['연령']}세"]
+    if customer.get("스타클럽등급"):
+        parts.append(customer["스타클럽등급"])
+    parts += [customer["투자성향"], f"평가금액 {customer['평가금액']}", f"최근 접촉 {customer['최근접촉']}"]
+    return " · ".join(parts)
+
+
 def _why_this_customer(p: Profile, conds: list[str]) -> list[str]:
     """AI 브리핑 근거 최대 3개, 정량 중심 1줄씩(REQUIREMENTS.md ② "왜 이 고객님인가요?").
 
@@ -657,7 +694,12 @@ def _briefing(p: Profile) -> dict:
         snap["만기도래"] = f"D-{p.matDD} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
     # 근거 수치는 여기서 확정하고, 실제 제안 여부는 LLM 이 맥락상 판단한다(prompts.py).
-    if p.room > 0:
+    # 단 연금수령 개시 계좌는 추가입금 자체가 불가하므로(방법론 59) 납입여력을 제시하지 않고,
+    # 대신 그 상태를 사실로 남겨 LLM·화면이 추가납을 권하지 않게 한다(06_에이전트_기능정의/01 ①
+    # "연금개시 계좌 → 추가납 권유 금지", REQUIREMENTS.md §7).
+    if p.pension_started:
+        snap["연금수령"] = "수령 중 · 추가납입 불가(연금지급설계 등록 계좌)"
+    elif p.room > 0:
         snap["납입여력"] = f"{won(p.room * 10000)} (연 납입한도 1,800만원 이내)"
     snap["source"] = BRIEFING_SOURCE
     return snap
@@ -909,13 +951,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
 
     pending = [b["range"] for b in selected if b["range"]]
     return {
-        "customer": {"성명": p.nm, "연령": p.ag, "투자성향": p.rk, "위험등급": p.grade,
-                     "평가금액": (f"{won(p.bal)} (상위 {p.balPct}%)" if p.balPct is not None
-                                else won(p.bal)),
-                     "수익률": f"{p.ret}% (하위 {p.retPct}%)",
-                     "위험자산": f"{p.risk_asset}% (한도 {RISK_ASSET_CAP_PCT}%)",
-                     "거래채널": "비대면" if p.nonface else "대면",
-                     "소득구간": _BRACKET_LABEL.get(p.income_bracket or "", "구간 미확인")},
+        "customer": _customer_header(p),
         "briefing": _briefing(p),
         "conditions": [f"{c}:{CONDS[c]}" for c in conds],
         # 왜 이 고객님인가요 — 최대 3개, 정량 중심(REQUIREMENTS.md ②). 코드가 수치를 산출하고,

@@ -95,7 +95,7 @@ LLM 설정은 이 폴더가 아니라 **umbrella 루트 `.env`** 에 둔다(`../
 | `system_strategies.json` | 게이트 결과로 발동하는 조건부 전략(예: 투자성향 재진단) |
 | `products.json` | 상품 — 위험등급·최소금액·비대면·위험자산 산입·예금자보호(+ ⑤용 지역·자산군·운용전략·특징) |
 | `baselines.json` | 기대효과 비교 기준선 (전부 KB 사실 출처) |
-| `capabilities.json` | 시스템 기능 지원 여부 |
+| `capabilities.json` | 시스템 기능 지원 여부(예: `cap.lms_send`). consult_agent 의 `agent_help` 의도(메타 질문)·06_에이전트_기능정의/01 ② "가능 여부 즉시 확인"(고객 계좌 상태 조회)과는 다른 개념 |
 | `assets.json` | 고객 발송 가능 콘텐츠 + 이벤트·세미나 일정(⑨) |
 | `top_holdings.json` | 수익률 상위 1% 고객 상품 사례(④, 비개인화·참고용) |
 | `portfolios.json` | 적합 상품 추천의 '포트폴리오' 후보(⑤) |
@@ -150,7 +150,7 @@ strategy_agent/
 | `engine.py` `TOP_N` / `ALT_N` | 3 / 3 | 문장에 넣을 실행 항목 수 / 「다른 제안」 노출 수 |
 | `engine.py` `EFFECT_BANDS` | 1.0/0.5%p | 수익률 개선폭 → 정성 등급(큼·보통·작음) 경계 |
 | `engine.py` `MIN_ALLOC` / `PROTECTION_LIMIT` | 100만원 / 5,000만원 | 배분액 하한 / 예금자보호 한도 |
-| `customer.py` `RISK_ASSET_CAP_PCT` / `MAT_WINDOW_DAYS` | 70 / 90 | 위험자산 투자한도 / 만기 요건 인정 범위 |
+| `customer.py` `RISK_ASSET_CAP_PCT` / `MAT_WINDOW_DAYS` | 70 / 30 | 위험자산 투자한도 / 만기 요건 인정 범위("만기 1개월 전 안내" — 세그먼트 9·방법론 18) |
 
 ## 주의
 

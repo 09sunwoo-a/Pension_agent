@@ -1,4 +1,8 @@
-"""메타 질문("뭘 도와줄 수 있어?") 응답 노드 — 지식베이스 메타데이터만으로 답한다(LLM 없음)."""
+"""메타 질문("뭘 도와줄 수 있어?") 응답 노드 `agent_help` — 지식베이스 메타데이터만으로 답한다(LLM 없음).
+
+이름이 `capabilities` 가 아닌 이유는 router.INTENTS 의 주석 참고 — 06_에이전트_기능정의/01 ② "가능 여부
+즉시 확인"(고객 계좌 상태 조회)과 구분하기 위해서다. 이 노드는 '에이전트 자신'이 무엇을 돕는지만 답한다.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ from typing import Any
 from router import AgentState, _kb
 
 
-def capabilities(state: AgentState) -> dict[str, Any]:
+def agent_help(state: AgentState) -> dict[str, Any]:
     """지식베이스 메타데이터만으로 생성한다. 새 장(chapter)이 추가돼도
     코드를 고치지 않아도 자동으로 최신 내용이 반영된다."""
     by_type: dict[str, list[dict]] = {}

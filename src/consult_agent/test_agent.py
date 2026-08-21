@@ -39,7 +39,7 @@ _OVERRIDES: dict[str, dict] = {
     "이탈 위험이 높은 고객을 어떻게 골라내나요": {"stage": "이탈방어", "intent": "guide"},
 }
 
-# (질문, 기대하는 1순위 카드 / FALLBACK / CAPABILITY)
+# (질문, 기대하는 1순위 카드 / FALLBACK / AGENT_HELP)
 CASES = [
     ("사업자 고객인데 수수료 부담된다고 하시네요", "ch01_new.p02"),
     ("고객이 주식이 더 나을 것 같다는데 어떻게 말하지?", "ch01_new.p04"),
@@ -51,7 +51,7 @@ CASES = [
     ("주택청약 금리 어떻게 되나요?", "FALLBACK"),
     ("오늘 점심 뭐 먹지", "FALLBACK"),
     (_AMBIGUOUS_Q, "FALLBACK"),
-    ("네가 답변할 수 있는 화법은 뭐가 있어?", "CAPABILITY"),
+    ("네가 답변할 수 있는 화법은 뭐가 있어?", "AGENT_HELP"),
     ("증권사는 수수료 무료라는데요", "ch02_retirement.p05"),
     ("근데 수수료가 비싸잖아요", "ch03_transfer.p05"),
     ("1억원 정도 쓸 곳이 있어서 그냥 해지하려고요", "ch02_retirement.p03"),
@@ -66,7 +66,7 @@ _OBJ_HINTS = [
     ("증권사", "타사 보유"), ("다른 금융", "타사 보유"), ("이미", "타사 보유"),
 ]
 
-_CAPABILITY_HINTS = ("화법이 뭐가 있", "화법은 뭐가 있", "도와줄", "어떤 상황을 도와", "뭘 할 수 있")
+_AGENT_HELP_HINTS = ("화법이 뭐가 있", "화법은 뭐가 있", "도와줄", "어떤 상황을 도와", "뭘 할 수 있")
 
 
 def stub_understand(state):
@@ -76,7 +76,7 @@ def stub_understand(state):
     if q in _OVERRIDES:
         return {"intent": _OVERRIDES[q].get("intent", "situation"), "utterance": q, "broaden_count": 0}
     return {
-        "intent": "capability" if any(k in q for k in _CAPABILITY_HINTS) else "situation",
+        "intent": "agent_help" if any(k in q for k in _AGENT_HELP_HINTS) else "situation",
         "utterance": q,
         "broaden_count": 0,
     }
@@ -202,9 +202,9 @@ def main() -> int:
     passed = 0
     for question, expected in CASES:
         out = agent.invoke({"question": question})
-        if expected == "CAPABILITY":
-            ok = out.get("intent") == "capability" and bool(out.get("answer")) and not out.get("sources")
-            found = "capabilities 노드 응답" if ok else f"intent={out.get('intent')!r}"
+        if expected == "AGENT_HELP":
+            ok = out.get("intent") == "agent_help" and bool(out.get("answer")) and not out.get("sources")
+            found = "agent_help 노드 응답" if ok else f"intent={out.get('intent')!r}"
         else:
             top = out["sources"][0]["id"] if out["sources"] else "FALLBACK"
             ok = top == expected

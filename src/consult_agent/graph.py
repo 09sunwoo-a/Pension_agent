@@ -33,7 +33,7 @@ from common.session_store import append_turn  # noqa: E402
 from briefing_qa import briefing_qa
 from correction import correction
 from lms import lms_send
-from meta import capabilities
+from meta import agent_help
 from pitch import broaden, fallback, llm_rerank, respond, retrieve_node, situation_slots, verify
 from router import (
     HISTORY_LIMIT,
@@ -49,7 +49,7 @@ from router import (
 def build_agent():
     g = StateGraph(AgentState)
     g.add_node("understand", understand)
-    g.add_node("capabilities", capabilities)
+    g.add_node("agent_help", agent_help)
     g.add_node("situation_slots", situation_slots)
     g.add_node("retrieve", retrieve_node)
     g.add_node("broaden", broaden)
@@ -64,14 +64,14 @@ def build_agent():
     g.add_edge(START, "understand")
     g.add_conditional_edges(
         "understand", route_intent,
-        ["capabilities", "situation_slots", "briefing_qa", "lms_send", "correction"],
+        ["agent_help", "situation_slots", "briefing_qa", "lms_send", "correction"],
     )
     g.add_edge("situation_slots", "retrieve")
     g.add_conditional_edges("retrieve", route, ["verify", "broaden", "llm_rerank"])
     g.add_conditional_edges("llm_rerank", route_rerank, ["verify", "fallback"])
     g.add_conditional_edges("verify", route_verify, ["respond", "fallback"])
     g.add_edge("broaden", "retrieve")
-    g.add_edge("capabilities", END)
+    g.add_edge("agent_help", END)
     g.add_edge("respond", END)
     g.add_edge("fallback", END)
     g.add_edge("briefing_qa", END)

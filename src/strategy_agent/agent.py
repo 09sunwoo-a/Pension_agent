@@ -572,6 +572,7 @@ def _fallback(facts: dict, out: dict[str, Any], use_llm: bool) -> dict[str, Any]
 def _print(r: dict) -> None:
     f = r["facts"]
     print(f"\n■ {r['customer']}  ·  요건 {len(f['conditions'])}건")
+    print(f"  {engine.customer_header_line(f['customer'])}")  # 상단 항목(REQUIREMENTS.md §3.1)
     print("  " + ", ".join(c.split(":", 1)[1] for c in f["conditions"]))
     if f.get("why_this_customer"):
         print(f"\n  [{sections.title('why_this_customer')}]")
