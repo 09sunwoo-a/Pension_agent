@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>퇴직연금 사후관리 에이전트 — 프로토타입</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}
+:root{
+ --bg:#F1F3F6;--card:#fff;--ink:#1B1E24;--mut:#6B7280;--line:#E3E6EB;
+ --pri:#2B4EAE;--priS:#EEF2FD;--warn:#B45309;--warnS:#FEF3E2;--ok:#047857;--okS:#E7F6F0;
+ --dn:#B91C1C;--dnS:#FDEDED;--acc:#F0B429;
+}
+body{background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+ -webkit-font-smoothing:antialiased}
+b,strong{font-weight:700}
+.top{position:sticky;top:0;z-index:30;display:flex;justify-content:space-between;align-items:center;gap:16px;
+ padding:14px 24px;background:#fff;border-bottom:1px solid var(--line)}
+.tl b{font-size:18px;letter-spacing:-.4px}
+.tl span{margin-left:10px;color:var(--mut);font-size:13px}
+.tr{display:flex;gap:8px}
+.tr button{font:inherit;font-size:13px;padding:8px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--mut)}
+.tr .prim{background:var(--pri);border-color:var(--pri);color:#fff;font-weight:600}
+.tr .gh2{border-color:var(--pri);color:var(--pri);font-weight:600}
+.batchbar{display:flex;flex-wrap:wrap;gap:6px 22px;padding:9px 24px;background:#22252B;color:#C9CDD4;font-size:12px;letter-spacing:-.2px}
+.batchbar b{color:#fff;font-weight:600;margin-right:5px}
+main{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;margin-bottom:14px}
+/* ---- 목록 ---- */
+.lh{display:flex;align-items:baseline;gap:12px;margin:6px 2px 16px}
+.lh h1{font-size:21px;letter-spacing:-.5px}
+.lh span{color:var(--mut);font-size:13px}
+.lg2{display:grid;gap:12px}
+.lc{display:block;width:100%;text-align:left;font:inherit;cursor:pointer;background:#fff;border:1px solid var(--line);
+ border-radius:14px;padding:18px 20px;transition:.15s}
+.lc:hover{border-color:var(--pri);box-shadow:0 3px 14px rgba(43,78,174,.10);transform:translateY(-1px)}
+.lct{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.lch{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+.lch b{font-size:18px;letter-spacing:-.3px}
+.lch span{color:var(--mut);font-size:13px}
+.lch em{font-style:normal;margin-left:auto;font-size:12px;color:var(--pri);background:var(--priS);padding:3px 9px;border-radius:20px;font-weight:600}
+.lc p{margin:7px 0 12px;color:#3F4652;font-size:14px}
+.lcf{display:flex;flex-wrap:wrap;gap:8px 20px;padding-top:11px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--mut)}
+.lcf b{color:var(--ink);margin-left:5px}
+.lcf b.neg{color:var(--dn)} .lcf b.dn{color:var(--warn)} .lcf b.up{color:var(--ok)}
+.foot{margin-top:16px;color:var(--mut);font-size:12.5px;padding:0 3px}
+/* ---- 태그 ---- */
+.tag{font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:6px;background:#F2F3F5;color:#5A6070;white-space:nowrap}
+.tag.t0{background:var(--dnS);color:var(--dn)}
+.tag.t1{background:var(--warnS);color:var(--warn)}
+.tag.t2{background:var(--priS);color:var(--pri)}
+/* ---- 프로파일 ---- */
+.prof{padding:20px 22px}
+.prow{display:flex;flex-wrap:wrap;align-items:center;gap:0 26px;padding-bottom:16px;border-bottom:1px solid var(--line)}
+.avatar{width:46px;height:46px;border-radius:50%;background:var(--pri);color:#fff;display:grid;place-items:center;font-weight:700;font-size:18px}
+.pname{margin-right:8px}
+.pname h2{font-size:20px;letter-spacing:-.4px}
+.pname h2 span{font-size:14px;font-weight:500;color:var(--mut)}
+.pin{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.pf dt{font-size:11.5px;color:var(--mut);margin-bottom:1px}
+.pf dd{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.pf dd.hl{color:var(--pri)}
+.pcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:14px;padding-top:16px}
+.pc{border:1px solid var(--line);border-radius:10px;padding:12px 13px;background:#FCFCFD}
+.pc dt{font-size:11.5px;color:var(--mut);margin-bottom:5px}
+.pc dd{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.pc dd.big{color:var(--pri)} .pc dd.warn{color:var(--warn)} .pc dd.ok{color:var(--ok)} .pc dd.mute{color:var(--mut);font-size:14px}
+.pc small{display:block;margin-top:4px;font-size:11px;color:var(--mut);line-height:1.45}
+.tagbox .tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:2px}
+.bar{height:6px;border-radius:4px;background:#E9ECF1;overflow:hidden;margin:8px 0 2px}
+.bar i{display:block;height:100%;border-radius:4px;background:var(--pri)}
+.bar.tax i{background:var(--ok)}
+/* ---- 섹션 ---- */
+.sec{overflow:hidden}
+.sh{display:flex;align-items:center;gap:11px;width:100%;padding:16px 20px;background:none;border:0;font:inherit;cursor:pointer;text-align:left}
+.sh h3{font-size:16px;letter-spacing:-.35px;flex:1}
+.nm{width:25px;height:25px;border-radius:50%;background:var(--priS);color:var(--pri);display:grid;place-items:center;font-size:13px;font-weight:700;flex:none}
+.chev{color:#AAB0BA;font-size:17px;transition:.2s;line-height:1}
+.sec.open .chev{transform:rotate(180deg)}
+.sb{display:none;padding:0 20px 20px}
+.sec.open .sb{display:block}
+.lead{font-size:16px;font-weight:700;letter-spacing:-.3px;margin-bottom:7px}
+.body{color:#3F4652;font-size:14.5px}
+.src{display:block;margin-top:11px;font-size:11.5px;color:#9AA1AC}
+.note{margin-top:12px;padding:11px 13px;background:var(--warnS);border-radius:9px;font-size:13px;color:#6B4415;line-height:1.6}
+/* ---- ② 근거 ---- */
+.rs{list-style:none;display:grid;gap:9px}
+.rs li{display:flex;flex-wrap:wrap;gap:3px 12px;align-items:baseline;padding:12px 14px;background:#FAFBFC;border:1px solid var(--line);border-radius:10px}
+.rs li b{font-size:14.5px;font-variant-numeric:tabular-nums}
+.rs li span{font-size:13px;color:var(--mut)}
+/* ---- ③ ---- */
+.coach{padding:14px 16px;background:var(--priS);border-radius:11px;margin-bottom:16px}
+.coach b{display:block;font-size:13px;color:var(--pri);margin-bottom:5px}
+.coach p{font-size:14.5px;color:#2A3040;line-height:1.65}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.mixbox{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.dn{position:relative;flex:none}
+.dnc{position:absolute;inset:0;display:grid;place-content:center;text-align:center}
+.dnc small{display:block;font-size:10.5px;color:var(--mut)}
+.dnc b{font-size:13px;letter-spacing:-.3px}
+.lg{list-style:none;display:grid;gap:8px;font-size:13px;min-width:172px}
+.lg li{display:flex;align-items:center;gap:7px}
+.lg i{width:9px;height:9px;border-radius:2px;flex:none}
+.lg span{color:var(--mut)}
+.lg b{margin-left:auto;font-variant-numeric:tabular-nums;font-size:12.5px}
+.lg em{font-style:normal;width:44px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+table.cmp{width:100%;border-collapse:collapse;font-size:13px}
+table.cmp caption{text-align:left;font-size:12px;color:var(--mut);padding-bottom:7px}
+table.cmp th{text-align:right;font-size:11.5px;color:var(--mut);font-weight:600;padding:5px 8px;border-bottom:1px solid var(--line)}
+table.cmp th:first-child{text-align:left}
+table.cmp td{padding:8px;border-bottom:1px solid #F1F3F6;text-align:right;font-variant-numeric:tabular-nums}
+table.cmp td:first-child{text-align:left;color:var(--mut)}
+table.cmp td.w{width:44%}
+table.cmp .up{color:var(--dn)} table.cmp .dn{color:var(--ok)}
+tr.me td{background:var(--priS)}
+.you{font-size:10.5px;background:var(--pri);color:#fff;padding:1px 6px;border-radius:9px;margin-left:5px;font-weight:600}
+.pcts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.pt{padding:12px;border:1px solid var(--line);border-radius:10px;text-align:center;background:#FAFBFC}
+.pt small{display:block;font-size:11.5px;color:var(--mut)}
+.pt b{display:block;font-size:19px;letter-spacing:-.5px;margin:3px 0}
+.pt b.dn{color:var(--dn)} .pt b.up{color:var(--ok)}
+.pt em{font-style:normal;font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+.dcd{margin-top:16px}
+/* ---- ⑤ ---- */
+.recohead b{font-size:15px;display:block;margin-bottom:5px}
+.recohead p{font-size:14px;color:#3F4652}
+.gradebox{margin-top:14px;border:1px solid var(--line);border-radius:11px;padding:14px 16px;background:#FAFBFC}
+.gh{display:flex;flex-wrap:wrap;align-items:center;gap:9px;margin-bottom:10px}
+.gh b{font-size:15px}
+.gh em{font-style:normal;font-size:12px;color:var(--mut);margin-left:auto}
+.badge{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:6px}
+.g-초저위험{background:var(--okS);color:var(--ok)} .g-저위험{background:var(--priS);color:var(--pri)}
+.g-중위험{background:var(--warnS);color:var(--warn)} .g-고위험{background:var(--dnS);color:var(--dn)}
+/* ---- ⑥⑦⑧ ---- */
+.tk,.ob,.rf{border:1px solid var(--line);border-radius:11px;padding:14px 16px;background:#FAFBFC}
+.tk b,.rf b{display:block;font-size:14px;margin-bottom:3px}
+.tk p{margin-top:9px;font-size:14.5px;color:#2A3040;line-height:1.7}
+.ob .oq{display:flex;gap:8px;align-items:baseline;font-size:14.5px;font-weight:700;margin-bottom:8px}
+.ob .oq span{font-size:11px;font-weight:700;background:var(--dnS);color:var(--dn);padding:2px 8px;border-radius:6px;flex:none}
+.ob .od{font-size:12.5px;color:var(--mut);padding-bottom:8px;border-bottom:1px dashed var(--line)}
+.ob .od b{color:var(--pri)} .ob .od em{font-style:normal;margin-left:6px;color:#9AA1AC}
+.ob p{margin-top:9px;font-size:14px;color:#2A3040;line-height:1.7}
+.rf p{font-size:13.5px;color:#3F4652}
+.hidden-note{padding:16px 20px;border-style:dashed;background:#FAFBFC}
+.hidden-note b{font-size:14px;display:block;margin-bottom:4px}
+.hidden-note p{font-size:14px;color:var(--pri);font-weight:600;margin-bottom:6px}
+.fx{max-width:1080px;margin:0 auto;padding:0 20px 40px;color:#9AA1AC;font-size:11.5px;line-height:1.7}
+@media(max-width:640px){.pcts{grid-template-columns:1fr}.prow{gap:0 18px}.batchbar{gap:4px 14px}}
+</style></head><body>
+<header class="top">
+  <div class="tl"><b>퇴직연금 사후관리 에이전트</b><span>여의도종합금융센터</span></div>
+  <div class="tr"><button class="gh2" onclick="home()" id="btnHome" hidden>← 고객 목록</button>
+  <button class="ghost">PDF 다운로드</button><button class="prim">상담 이력 등록</button></div>
+</header>
+<div class="batchbar">
+  <span><b>배치 기준</b> 2026.07.31</span><span><b>화면 기준일</b> 2026.08.19</span>
+  <span><b>코호트</b> 4개 · 23,706명</span>
+  <span><b>참조 수익률</b> IRP 평균 7.97% ('26.1Q) · 정기예금 3.02% · 고유계정대 2.52% ('26.5)</span>
+</div>
+<main>
+<div id="list">
+  <div class="lh"><h1>오늘의 타겟 고객</h1><span>판정 순위 순 · 4명</span></div>
+  <div class="lg2"><button class="lc" onclick="go('C1')"><div class="lct"><span class="tag t0">이탈위험</span><span class="tag t1">디폴트옵션 미설정</span><span class="tag t2">원리금보장 편중</span></div><div class="lch"><b>노현석</b><span>만 50세 · 안정추구형</span><em>현금성자산 편중 — 이탈 고위험</em></div><p>적립금 60%가 고유계정대에 2년 5개월째 운용지시 없이 남아 있음</p><div class="lcf"><span>고유계정대 비중 <b>60.0%</b></span><span>평가금액 <b>6,840만원</b></span><span>최근 1년 <b class="dn">+2.72%</b></span></div></button><button class="lc" onclick="go('C6')"><div class="lct"><span class="tag t0">만기 임박</span><span class="tag t1">원리금보장 편중</span><span class="tag t2">연금개시 가능</span></div><div class="lch"><b>남기평</b><span>만 55세 · 안정추구형</span><em>원리금보장상품 만기 임박</em></div><p>정기예금 6,200만원 만기 D-22 — 손실 없이 구조를 바꿀 수 있는 시점</p><div class="lcf"><span>만기까지 <b>D-22</b></span><span>평가금액 <b>1억 2,400만원</b></span><span>최근 1년 <b class="dn">+3.22%</b></span></div></button><button class="lc" onclick="go('C3')"><div class="lct"><span class="tag t0">성향–디폴트옵션 불일치</span><span class="tag t1">수익률 하위</span><span class="tag t2">원리금보장 편중</span></div><div class="lch"><b>김자산</b><span>만 43세 · 적극투자형</span><em>투자성향–디폴트옵션 불일치</em></div><p>적극투자형인데 디폴트옵션이 초저위험으로 등록돼 있음</p><div class="lcf"><span>원리금보장성 비중 <b>70.0%</b></span><span>평가금액 <b>4,268만원</b></span><span>최근 1년 <b class="dn">+2.51%</b></span></div></button><button class="lc" onclick="go('C12')"><div class="lct"><span class="tag t0">연금수령 중</span><span class="tag t1">원리금보장 편중</span></div><div class="lch"><b>도영란</b><span>만 63세 · 안정추구형</span><em>연금수령 중 — 투자상품 권유 제외</em></div><p>연금수령 중 — 투자상품 권유 제외 대상, 수령방식과 수수료 면제 점검</p><div class="lcf"><span>연금수령 <b>수령 중</b></span><span>평가금액 <b>1억 4,230만원</b></span><span>최근 1년 <b class="dn">+3.13%</b></span></div></button></div>
+  <p class="foot">고객 카드를 누르면 상세 브리핑으로 이동합니다. 판정 순위는 이탈신호 → 이탈위험 → 시한 이벤트 → 제도 불일치 → 구조 → 성과 순입니다.</p>
+</div>
+<div class="panel" id="p-C1" hidden><section class="card prof">
+<div class="prow"><div class="avatar">노</div><div class="pname"><h2>노현석 <span>고객님</span></h2><div class="pin">KB-PIN 204118-93****</div></div>
+<div class="pf"><dt>생년월일</dt><dd>1975.11.03</dd></div>
+<div class="pf"><dt>나이</dt><dd>만 50세</dd></div>
+<div class="pf"><dt>성별</dt><dd>남</dd></div>
+<div class="pf"><dt>스타클럽등급</dt><dd>골드</dd></div>
+<div class="pf"><dt>투자성향</dt><dd class="hl">안정추구형</dd></div>
+<div class="pf"><dt>최근 접촉일</dt><dd>2024.03.20</dd></div>
+</div>
+<div class="pcards">
+<div class="pc"><dt>신규가입일</dt><dd>2024.03.18</dd><small>2년 5개월</small></div>
+<div class="pc"><dt>평가금액</dt><dd class="big">68,400,000원</dd><small>6,840만원</small></div>
+<div class="pc"><dt>디폴트옵션</dt><dd class="warn">미설정</dd><small>등록 필요</small></div>
+<div class="pc"><dt>세액공제 잔여한도</dt><dd>9,000,000원</dd>
+<div class="bar tax"><i style="width:0.0%"></i></div><small>연금저축 합산 900만원 기준 · 잔여 100%</small></div>
+<div class="pc tagbox"><dt>AI 분석 태그</dt><div class="tags"><span class="tag t0">이탈위험</span><span class="tag t1">디폴트옵션 미설정</span><span class="tag t2">원리금보장 편중</span></div></div>
+</div></section>
+<section class="card sec s1" data-sec="1"><button class="sh" onclick="tg(this)"><span class="nm">①</span><h3>AI 브리핑</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="lead">적립금 60%가 고유계정대에 2년 5개월째 머물러 있습니다.</p><p class="body">평가금액은 코호트 상위 6%인데 4,104만원이 운용지시 없이 대기 상태입니다. 이 조건은 이탈률이 일반 고객의 1.3배로 관측된 구간입니다. 어떤 상품을 고를지보다 운용지시가 없다는 사실을 먼저 짚고, 상품군은 그대로 두는 선에서 디폴트옵션 등록부터 제안해보세요.</p>
+<p class="src">직원 대상 코칭 문체 · 정량값은 시스템 산출값 인용</p></div></section>
+<section class="card sec s2" data-sec="2"><button class="sh" onclick="tg(this)"><span class="nm">②</span><h3>왜 이 고객님인가요?</h3><span class="chev">⌄</span></button><div class="sb">
+<ul class="rs"><li><b>고유계정대 41,040,000원 · 비중 60%</b><span>코호트 평균 14.2% 대비 <b>+45.8%p</b></span></li><li><b>최근 1년 +2.72%</b><span>5,236명 중 하위 22% (1,152위) · IRP 평균 7.97% 대비 <b>−5.25%p</b></span></li><li><b>이탈위험 판정 충족</b><span>해당 조건 고객 이탈률 <b>14.8%</b> · 일반 고객 11.8% ('25.11~'26.4 이탈고객 분석)</span></li></ul>
+<p class="src">대조 기준 — 50~54세 · 가입 5년 미만 · 5,236명 · 2026.07.31 배치</p></div></section>
+<section class="card sec s3" data-sec="3"><button class="sh" onclick="tg(this)"><span class="nm">③</span><h3>현재 운용상태</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="coach"><b>AI 코칭 제안</b><p>고유계정대 60%는 운용지시가 없다는 뜻입니다. 상품을 고르기 전에 운용지시 자체를 먼저 제안하고, 투자 이력이 없는 고객이므로 상품군은 유지한 채 방치만 해소하는 방향으로 접근해보세요.</p></div>
+<div class="grid2"><div class="mixbox"><div class="dn"><svg viewBox="0 0 132 132" width="132" height="132" role="img" aria-label="자산 구성"><circle cx="66" cy="66" r="52" fill="none" stroke="#8AA4D6" stroke-width="20" stroke-dasharray="196.035 130.690" stroke-dashoffset="0.000" transform="rotate(-90 66 66)"/><circle cx="66" cy="66" r="52" fill="none" stroke="#F0B429" stroke-width="20" stroke-dasharray="130.690 196.035" stroke-dashoffset="-196.035" transform="rotate(-90 66 66)"/></svg><div class="dnc"><small>평가금액</small><b>6,840만원</b></div></div>
+<ul class="lg">
+<li><i style="background:#8AA4D6"></i><span>고유계정대</span><b>41,040,000원</b><em>60%</em></li>
+<li><i style="background:#3E63C8"></i><span>실적배당형</span><b>0원</b><em>0%</em></li>
+<li><i style="background:#F0B429"></i><span>원리금보장형</span><b>27,360,000원</b><em>40%</em></li>
+</ul></div>
+<div><table class="cmp"><caption>코호트 대조 — 50~54세 · 가입 5년 미만</caption><tr><th></th><th>고객</th><th>코호트 평균</th><th>차이</th></tr>
+<tr><td>고유계정대</td><td><b>60%</b></td><td>14.2%</td><td class="up">+45.8%p</td></tr>
+<tr><td>실적배당형</td><td><b>0%</b></td><td>22.6%</td><td class="up">−22.6%p</td></tr>
+<tr><td>원리금보장형</td><td><b>40%</b></td><td>63.2%</td><td class="dn">−23.2%p</td></tr>
+<tr><td>원리금보장성 합계</td><td><b>100%</b></td><td>77.4%</td><td class="up">+22.6%p</td></tr>
+</table>
+<div class="pcts"><div class="pt"><small>수익률 백분위</small><b class="dn">하위 22%</b><em>+2.72% · 1,152위 / 5,236명</em></div>
+<div class="pt"><small>평가금액 백분위</small><b class="up">상위 6%</b><em>314위 / 5,236명</em></div></div>
+</div></div>
+<p class="src">백분위는 코호트 분위분포에서 선형보간으로 산출 · 유사 고객 기준</p></div></section>
+<section class="card sec s4" data-sec="4"><button class="sh" onclick="tg(this)"><span class="nm">④</span><h3>수익률 상위 1% 고객은 어떻게 운용하고 있을까요?</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="body">같은 코호트에서 최근 1년 수익률 상위 1%에 든 <b>52명</b>의 운용 특성입니다. 평균 수익률 <b>+18.42%</b>.</p>
+<div class="grid2"><table class="cmp"><caption>자산 구성</caption><tr><th></th><th>상위 1%</th><th>고객</th></tr>
+<tr><td>고유계정대</td><td><b>2.8%</b></td><td>60%</td></tr>
+<tr><td>실적배당형</td><td><b>64.3%</b></td><td>0%</td></tr>
+<tr><td>원리금보장형</td><td><b>32.9%</b></td><td>40%</td></tr>
+</table><table class="cmp"><caption>실적배당형 상품군 보유율</caption>
+<tr><td>TDF</td><td class="w"><div class="bar"><i style="width:71.2%;background:#3E63C8"></i></div></td><td>71.2%</td></tr>
+<tr><td>해외주식형</td><td class="w"><div class="bar"><i style="width:53.8%;background:#3E63C8"></i></div></td><td>53.8%</td></tr>
+<tr><td>채권형</td><td class="w"><div class="bar"><i style="width:40.4%;background:#3E63C8"></i></div></td><td>40.4%</td></tr>
+<tr><td>국내주식형</td><td class="w"><div class="bar"><i style="width:26.9%;background:#3E63C8"></i></div></td><td>26.9%</td></tr>
+<tr><td>ETF</td><td class="w"><div class="bar"><i style="width:23.1%;background:#3E63C8"></i></div></td><td>23.1%</td></tr>
+</table></div>
+<table class="cmp dcd"><caption>디폴트옵션 등급 분포 — 상위 1%% vs 코호트 전체</caption><tr><th>등급</th><th>상위 1%</th><th>코호트 전체</th></tr>
+<tr><td>고위험</td><td>28.8%</td><td>2.3%</td></tr>
+<tr><td>중위험</td><td>46.2%</td><td>11.5%</td></tr>
+<tr><td>저위험</td><td>17.3%</td><td>18.7%</td></tr>
+<tr><td>초저위험</td><td>5.8%</td><td>29.1%</td></tr>
+<tr class="me"><td>미설정 <span class="you">고객</span></td><td>1.9%</td><td>38.4%</td></tr>
+</table>
+<p class="src">배치 산출 · 보유 상품명과 보유비중은 표시하지 않음 — 이 영역은 비교 참고이며 상품 추천이 아님</p></div></section>
+<section class="card sec s5" data-sec="5"><button class="sh" onclick="tg(this)"><span class="nm">⑤</span><h3>이런 상품이 적합할 수 있어요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="recohead"><b>디폴트옵션 「지켜드림」 등록 + 원리금보장 금리 상향</b><p>실적배당 보유와 과거 펀드 이력이 없어 위험 상향 대상이 아닙니다. 원리금보장 범위 안에서 방치를 해소하는 것이 첫 제안입니다.</p><span class="src">근거 관리방법론 1-1 · 9-1 · 10</span></div>
+<div class="gradebox"><div class="gh"><b>안정형 「지켜드림」</b><span class="badge g-초저위험">초저위험</span><em>가입 가능 성향 — 모든 성향</em></div><table class="cmp">
+<tr><td><b>지켜드림</b></td><td>시중은행 정기예금 100%</td></tr>
+</table></div>
+<p class="note">원리금보장 금리는 매월 바뀌므로 당월 금리·잔여한도를 <b>[04-12-17A] New퇴직연금상품조회</b>에서 확인하고 저축은행 정기예금·GIC와 비교하세요. (F65)</p>
+<p class="src">디폴트옵션 포트폴리오 구성은 F17(2026.07 기준) · 개별 펀드 상품명과 수익률은 상품 DB 연동 후 표시</p></div></section>
+<section class="card sec s6" data-sec="6"><button class="sh" onclick="tg(this)"><span class="nm">⑥</span><h3>이렇게 말해보세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="tk"><b>1안 · 대기자금 운용지시</b><span class="src">화법 20</span><p>“고객님 IRP에 4,104만원이 운용지시 없이 대기 상태로 남아 있어요. 이 자금은 하루 단위로 바뀌는 대기성 금리만 붙고 있어서, 정기예금으로만 운용되는 안정형으로 옮겨두시는 것만으로도 달라집니다.”</p></div>
+<div class="tk"><b>2안 · 같은 안정형에서 금리만</b><span class="src">화법 21</span><p>“지금 계좌는 예금하고 대기자금뿐이라, 위험을 더 지시라는 말씀이 아니에요. 같은 안정형 안에서 금리만 올리는 방법이 있어서 안내드리려고 연락드렸습니다.”</p></div>
+</div><p class="src">대고객 화법 · 화면에 표시된 값만 인용 · 세액공제 환급 예상액은 제시하지 않음</p></div></section>
+<section class="card sec s7" data-sec="7"><button class="sh" onclick="tg(this)"><span class="nm">⑦</span><h3>예상 반론 및 대응 화법</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="ob"><div class="oq"><span>반론 1</span>"고유계정대 금리가 더 높다던데요"</div><div class="od"><b>대응 방향</b> 금리의 크기가 아니라 성격으로 반박 <em>화법 10 · 관리방법론 2</em></div><p>“고유계정대는 하루 단위로 바뀌는 대기성 금리예요. 지금 높아 보여도 확정된 금리가 아니라서, 1년을 두고 보면 정기예금 쪽이 앞서는 경우가 많습니다.”</p></div>
+<div class="ob"><div class="oq"><span>반론 2</span>"예금만 해서 관리 필요 없어요"</div><div class="od"><b>대응 방향</b> 금리 갈아타기가 곧 관리라는 프레임으로 <em>화법 9</em></div><p>“예금만 하셔도 관리는 필요해요. 같은 예금이어도 어디에 넣느냐로 금리가 달라지고, 그걸 만기마다 확인하는 게 관리거든요.”</p></div>
+</div></div></section>
+<section class="card sec s8" data-sec="8"><button class="sh" onclick="tg(this)"><span class="nm">⑧</span><h3>상담에 참고하세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="rf"><b>고유계정대 금리는 콜금리 수준의 일변동 대기성 금리</b><p>금리 수치로 비교하지 말고 확정금리가 아니라는 <b>성격</b>으로 설명하세요.</p><span class="src">F59 · 관리방법론 2</span></div>
+<div class="rf"><b>원리금보장 금리는 고정 팩트로 인용할 수 없음</b><p>매월 변경되므로 어떤 자료의 수치도 쓸 수 없습니다. [04-12-17A]에서 당월 금리·잔여한도를 확인한 뒤 상담하세요.</p><span class="src">F65</span></div>
+</div></div></section></div><div class="panel" id="p-C6" hidden><section class="card prof">
+<div class="prow"><div class="avatar">남</div><div class="pname"><h2>남기평 <span>고객님</span></h2><div class="pin">KB-PIN 640825-31****</div></div>
+<div class="pf"><dt>생년월일</dt><dd>1971.06.08</dd></div>
+<div class="pf"><dt>나이</dt><dd>만 55세</dd></div>
+<div class="pf"><dt>성별</dt><dd>남</dd></div>
+<div class="pf"><dt>스타클럽등급</dt><dd>VIP</dd></div>
+<div class="pf"><dt>투자성향</dt><dd class="hl">안정추구형</dd></div>
+<div class="pf"><dt>최근 접촉일</dt><dd>2026.08.05</dd></div>
+</div>
+<div class="pcards">
+<div class="pc"><dt>신규가입일</dt><dd>2016.09.22</dd><small>9년 10개월</small></div>
+<div class="pc"><dt>평가금액</dt><dd class="big">124,000,000원</dd><small>1억 2,400만원</small></div>
+<div class="pc"><dt>디폴트옵션</dt><dd class="ok">안정투자형</dd><small>저위험</small></div>
+<div class="pc"><dt>세액공제 잔여한도</dt><dd>0원</dd>
+<div class="bar tax"><i style="width:100.0%"></i></div><small>연금저축 합산 900만원 기준 · 잔여 0%</small></div>
+<div class="pc tagbox"><dt>AI 분석 태그</dt><div class="tags"><span class="tag t0">만기 임박</span><span class="tag t1">원리금보장 편중</span><span class="tag t2">연금개시 가능</span></div></div>
+</div></section>
+<section class="card sec s1" data-sec="1"><button class="sh" onclick="tg(this)"><span class="nm">①</span><h3>AI 브리핑</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="lead">정기예금 6,200만원 만기가 22일 남았습니다.</p><p class="body">원리금보장성 자산이 90%이고 그중 6,200만원이 9월 10일 만기입니다. 2023년 7월부터 자동 재예치가 폐지돼 방치하면 만기 자금이 현금성자산으로 상환됩니다. 만기는 손실 없이 구조를 바꿀 수 있는 시점이므로 재예치와 함께 운용 방향을 같이 정해보세요.</p>
+<p class="src">직원 대상 코칭 문체 · 정량값은 시스템 산출값 인용</p></div></section>
+<section class="card sec s2" data-sec="2"><button class="sh" onclick="tg(this)"><span class="nm">②</span><h3>왜 이 고객님인가요?</h3><span class="chev">⌄</span></button><div class="sb">
+<ul class="rs"><li><b>만기 62,000,000원 · 2026.09.10 (D-22)</b><span>계좌 적립금의 <b>50%</b></span></li><li><b>원리금보장성 90%</b><span>코호트 평균 81.7% 대비 <b>+8.3%p</b></span></li><li><b>최근 1년 +3.22%</b><span>6,940명 중 하위 27% (1,874위) · IRP 평균 대비 <b>−4.75%p</b></span></li></ul>
+<p class="src">대조 기준 — 55~59세 · 가입 5~10년 · 6,940명 · 2026.07.31 배치</p></div></section>
+<section class="card sec s3" data-sec="3"><button class="sh" onclick="tg(this)"><span class="nm">③</span><h3>현재 운용상태</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="coach"><b>AI 코칭 제안</b><p>만기 6,200만원이 계좌 적립금의 50%입니다. 방치하면 자동 재예치가 아니라 현금성자산으로 상환돼 수익률이 지금보다 더 내려갑니다. 재예치 시점에 운용 방향을 함께 정해보세요.</p></div>
+<div class="grid2"><div class="mixbox"><div class="dn"><svg viewBox="0 0 132 132" width="132" height="132" role="img" aria-label="자산 구성"><circle cx="66" cy="66" r="52" fill="none" stroke="#3E63C8" stroke-width="20" stroke-dasharray="32.673 294.053" stroke-dashoffset="0.000" transform="rotate(-90 66 66)"/><circle cx="66" cy="66" r="52" fill="none" stroke="#F0B429" stroke-width="20" stroke-dasharray="294.053 32.673" stroke-dashoffset="-32.673" transform="rotate(-90 66 66)"/></svg><div class="dnc"><small>평가금액</small><b>1억 2,400만원</b></div></div>
+<ul class="lg">
+<li><i style="background:#8AA4D6"></i><span>고유계정대</span><b>0원</b><em>0%</em></li>
+<li><i style="background:#3E63C8"></i><span>실적배당형</span><b>12,400,000원</b><em>10%</em></li>
+<li><i style="background:#F0B429"></i><span>원리금보장형</span><b>111,600,000원</b><em>90%</em></li>
+</ul></div>
+<div><table class="cmp"><caption>코호트 대조 — 55~59세 · 가입 5~10년</caption><tr><th></th><th>고객</th><th>코호트 평균</th><th>차이</th></tr>
+<tr><td>고유계정대</td><td><b>0%</b></td><td>7.1%</td><td class="dn">−7.1%p</td></tr>
+<tr><td>실적배당형</td><td><b>10%</b></td><td>18.3%</td><td class="up">−8.3%p</td></tr>
+<tr><td>원리금보장형</td><td><b>90%</b></td><td>74.6%</td><td class="up">+15.4%p</td></tr>
+<tr><td>원리금보장성 합계</td><td><b>90%</b></td><td>81.7%</td><td class="up">+8.3%p</td></tr>
+</table>
+<div class="pcts"><div class="pt"><small>수익률 백분위</small><b class="dn">하위 27%</b><em>+3.22% · 1,874위 / 6,940명</em></div>
+<div class="pt"><small>평가금액 백분위</small><b class="up">상위 3%</b><em>208위 / 6,940명</em></div></div>
+</div></div>
+<p class="src">백분위는 코호트 분위분포에서 선형보간으로 산출 · 유사 고객 기준</p></div></section>
+<section class="card sec s4" data-sec="4"><button class="sh" onclick="tg(this)"><span class="nm">④</span><h3>수익률 상위 1% 고객은 어떻게 운용하고 있을까요?</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="body">같은 코호트에서 최근 1년 수익률 상위 1%에 든 <b>69명</b>의 운용 특성입니다. 평균 수익률 <b>+15.86%</b>.</p>
+<div class="grid2"><table class="cmp"><caption>자산 구성</caption><tr><th></th><th>상위 1%</th><th>고객</th></tr>
+<tr><td>고유계정대</td><td><b>3.2%</b></td><td>0%</td></tr>
+<tr><td>실적배당형</td><td><b>55.7%</b></td><td>10%</td></tr>
+<tr><td>원리금보장형</td><td><b>41.1%</b></td><td>90%</td></tr>
+</table><table class="cmp"><caption>실적배당형 상품군 보유율</caption>
+<tr><td>TDF</td><td class="w"><div class="bar"><i style="width:81.2%;background:#3E63C8"></i></div></td><td>81.2%</td></tr>
+<tr><td>채권형</td><td class="w"><div class="bar"><i style="width:53.6%;background:#3E63C8"></i></div></td><td>53.6%</td></tr>
+<tr><td>해외주식형</td><td class="w"><div class="bar"><i style="width:44.9%;background:#3E63C8"></i></div></td><td>44.9%</td></tr>
+<tr><td>국내주식형</td><td class="w"><div class="bar"><i style="width:18.8%;background:#3E63C8"></i></div></td><td>18.8%</td></tr>
+<tr><td>ETF</td><td class="w"><div class="bar"><i style="width:15.9%;background:#3E63C8"></i></div></td><td>15.9%</td></tr>
+</table></div>
+<table class="cmp dcd"><caption>디폴트옵션 등급 분포 — 상위 1%% vs 코호트 전체</caption><tr><th>등급</th><th>상위 1%</th><th>코호트 전체</th></tr>
+<tr><td>고위험</td><td>17.4%</td><td>1.7%</td></tr>
+<tr><td>중위험</td><td>49.3%</td><td>11.8%</td></tr>
+<tr class="me"><td>저위험 <span class="you">고객</span></td><td>24.6%</td><td>25.6%</td></tr>
+<tr><td>초저위험</td><td>7.2%</td><td>41.7%</td></tr>
+<tr><td>미설정</td><td>1.4%</td><td>19.2%</td></tr>
+</table>
+<p class="src">배치 산출 · 보유 상품명과 보유비중은 표시하지 않음 — 이 영역은 비교 참고이며 상품 추천이 아님</p></div></section>
+<section class="card sec s5" data-sec="5"><button class="sh" onclick="tg(this)"><span class="nm">⑤</span><h3>이런 상품이 적합할 수 있어요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="recohead"><b>만기 자금 재설계 — 「알파드림」 등급 검토 + 당월 금리 비교</b><p>실적배당 10%를 보유해 투자 이력이 있으나 안정추구형이라 주식비중 상한이 20%입니다. 등급 상향과 금리 상향을 나란히 두고 고르게 하세요.</p><span class="src">근거 관리방법론 18 · 9 · 16 · F18</span></div>
+<div class="gradebox"><div class="gh"><b>안정투자형 「알파드림」</b><span class="badge g-저위험">저위험</span><em>가입 가능 성향 — 안정추구형 이상</em></div><table class="cmp">
+<tr><td><b>알파드림1</b></td><td>특수은행 정기예금 70% + TDF 30%</td></tr>
+<tr><td><b>알파드림2</b></td><td>시중은행 정기예금 50% + TDF 50%</td></tr>
+<tr><td><b>알파드림3</b></td><td>시중은행 정기예금 35% + GIC 35% + TDF 30%</td></tr>
+</table></div>
+<p class="note">원리금보장을 유지할 경우 저축은행 정기예금·GIC와 금리를 비교합니다. 당월 금리·잔여한도는 <b>[04-12-17A]</b>에서 확인하세요. 만기 전 상품은 <b>예약변경</b>, 보유 중인 상품은 <b>교체매매</b>로 처리합니다. (관리방법론 16 · 21 · F65)</p>
+<p class="src">디폴트옵션 포트폴리오 구성은 F17(2026.07 기준) · 개별 펀드 상품명과 수익률은 상품 DB 연동 후 표시</p></div></section>
+<section class="card sec s6" data-sec="6"><button class="sh" onclick="tg(this)"><span class="nm">⑥</span><h3>이렇게 말해보세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="tk"><b>1안 · 만기 안내와 재예치</b><span class="src">화법 25</span><p>“9월 10일에 정기예금 6,200만원 만기가 돌아와서 미리 연락드렸어요. 만기 자금을 그냥 두시면 대기성 자금으로 넘어가기 때문에, 그 전에 어디에 두실지 정해두시면 좋겠습니다.”</p></div>
+<div class="tk"><b>2안 · 만기를 재설계 시점으로</b><span class="src">화법 26</span><p>“만기는 손해 없이 바꿀 수 있는 시점이에요. 전부 옮기시라는 게 아니라, 일부만 성향에 맞는 쪽으로 나눠두시는 안을 같이 보시면 어떨까요?”</p></div>
+</div><p class="src">대고객 화법 · 화면에 표시된 값만 인용 · 세액공제 환급 예상액은 제시하지 않음</p></div></section>
+<section class="card sec s7" data-sec="7"><button class="sh" onclick="tg(this)"><span class="nm">⑦</span><h3>예상 반론 및 대응 화법</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="ob"><div class="oq"><span>반론 1</span>"예금만 해서 관리 필요 없어요"</div><div class="od"><b>대응 방향</b> 금리 갈아타기가 곧 관리라는 프레임으로 <em>화법 9</em></div><p>“예금만 하셔도 만기마다 어디에 넣을지는 정하셔야 해요. 지금은 자동으로 재예치가 되지 않기 때문에 더 그렇습니다.”</p></div>
+<div class="ob"><div class="oq"><span>반론 2</span>"직접 관리해야 해서 귀찮아요"</div><div class="od"><b>대응 방향</b> 자동화 3종으로 부담을 덜기 <em>화법 8</em></div><p>“그래서 디폴트옵션을 미리 등록해두시면 만기 때 따로 신경 쓰지 않으셔도 등록해두신 대로 운용됩니다.”</p></div>
+</div></div></section>
+<section class="card sec s8" data-sec="8"><button class="sh" onclick="tg(this)"><span class="nm">⑧</span><h3>상담에 참고하세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="rf"><b>정기예금 자동 재예치는 2023년 7월 폐지</b><p>만기 후 운용지시가 없으면 현금성자산으로 상환됩니다. 방치하면 이탈위험 구간으로 넘어갑니다.</p><span class="src">F18</span></div>
+<div class="rf"><b>만기 전 상품은 예약변경, 보유 상품은 교체매매</b><p>실행 방식이 다릅니다. 만기 전에 예약해두면 만기일에 자동 처리됩니다.</p><span class="src">관리방법론 21</span></div>
+</div></div></section></div><div class="panel" id="p-C3" hidden><section class="card prof">
+<div class="prow"><div class="avatar">김</div><div class="pname"><h2>김자산 <span>고객님</span></h2><div class="pin">KB-PIN 105636-28****</div></div>
+<div class="pf"><dt>생년월일</dt><dd>1983.07.12</dd></div>
+<div class="pf"><dt>나이</dt><dd>만 43세</dd></div>
+<div class="pf"><dt>성별</dt><dd>남</dd></div>
+<div class="pf"><dt>스타클럽등급</dt><dd>VIP</dd></div>
+<div class="pf"><dt>투자성향</dt><dd class="hl">적극투자형</dd></div>
+<div class="pf"><dt>최근 접촉일</dt><dd>2025.05.12</dd></div>
+</div>
+<div class="pcards">
+<div class="pc"><dt>신규가입일</dt><dd>2019.03.25</dd><small>7년 4개월</small></div>
+<div class="pc"><dt>평가금액</dt><dd class="big">42,680,000원</dd><small>4,268만원</small></div>
+<div class="pc"><dt>디폴트옵션</dt><dd class="warn">안정형</dd><small>초저위험</small></div>
+<div class="pc"><dt>세액공제 잔여한도</dt><dd>3,600,000원</dd>
+<div class="bar tax"><i style="width:60.0%"></i></div><small>연금저축 합산 900만원 기준 · 잔여 40%</small></div>
+<div class="pc tagbox"><dt>AI 분석 태그</dt><div class="tags"><span class="tag t0">성향–디폴트옵션 불일치</span><span class="tag t1">수익률 하위</span><span class="tag t2">원리금보장 편중</span></div></div>
+</div></section>
+<section class="card sec s1" data-sec="1"><button class="sh" onclick="tg(this)"><span class="nm">①</span><h3>AI 브리핑</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="lead">적극투자형인데 디폴트옵션이 초저위험으로 등록돼 있습니다.</p><p class="body">평가금액은 코호트 상위 9%인데 최근 1년 수익률은 하위 18%입니다. 등록된 디폴트옵션이 정기예금 100%로만 구성된 초저위험이라 원리금보장성 자산이 70%까지 올라간 것이 원인입니다. 성향과 등록 등급이 다르다는 사실부터 짚고 등급 상향을 제안해보세요.</p>
+<p class="src">직원 대상 코칭 문체 · 정량값은 시스템 산출값 인용</p></div></section>
+<section class="card sec s2" data-sec="2"><button class="sh" onclick="tg(this)"><span class="nm">②</span><h3>왜 이 고객님인가요?</h3><span class="chev">⌄</span></button><div class="sb">
+<ul class="rs"><li><b>평가금액 4,268만원</b><span>8,412명 중 상위 9% (757위)</span></li><li><b>최근 1년 +2.51%</b><span>하위 18% (1,514위) · IRP 평균 7.97% 대비 <b>−5.46%p</b></span></li><li><b>투자성향 적극투자형 · 디폴트옵션 초저위험</b><span>주식비중 상한 <b>50%</b>인데 실제 20% · 등록 등급은 정기예금 100% 구성</span></li></ul>
+<p class="src">대조 기준 — 40~44세 · 가입 5~10년 · 8,412명 · 2026.07.31 배치</p></div></section>
+<section class="card sec s3" data-sec="3"><button class="sh" onclick="tg(this)"><span class="nm">③</span><h3>현재 운용상태</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="coach"><b>AI 코칭 제안</b><p>원리금보장성 자산이 70%로 코호트 평균 65.9%보다 높고, 무엇보다 등록된 디폴트옵션이 정기예금 100%로만 구성된 초저위험입니다. 적극투자형 성향에서 선택할 수 있는 폭 자체가 좁혀져 있습니다.</p></div>
+<div class="grid2"><div class="mixbox"><div class="dn"><svg viewBox="0 0 132 132" width="132" height="132" role="img" aria-label="자산 구성"><circle cx="66" cy="66" r="52" fill="none" stroke="#8AA4D6" stroke-width="20" stroke-dasharray="32.673 294.053" stroke-dashoffset="0.000" transform="rotate(-90 66 66)"/><circle cx="66" cy="66" r="52" fill="none" stroke="#3E63C8" stroke-width="20" stroke-dasharray="98.018 228.708" stroke-dashoffset="-32.673" transform="rotate(-90 66 66)"/><circle cx="66" cy="66" r="52" fill="none" stroke="#F0B429" stroke-width="20" stroke-dasharray="196.035 130.690" stroke-dashoffset="-130.690" transform="rotate(-90 66 66)"/></svg><div class="dnc"><small>평가금액</small><b>4,268만원</b></div></div>
+<ul class="lg">
+<li><i style="background:#8AA4D6"></i><span>고유계정대</span><b>4,268,000원</b><em>10%</em></li>
+<li><i style="background:#3E63C8"></i><span>실적배당형</span><b>12,804,000원</b><em>30%</em></li>
+<li><i style="background:#F0B429"></i><span>원리금보장형</span><b>25,608,000원</b><em>60%</em></li>
+</ul></div>
+<div><table class="cmp"><caption>코호트 대조 — 40~44세 · 가입 5~10년</caption><tr><th></th><th>고객</th><th>코호트 평균</th><th>차이</th></tr>
+<tr><td>고유계정대</td><td><b>10%</b></td><td>8.4%</td><td class="up">+1.6%p</td></tr>
+<tr><td>실적배당형</td><td><b>30%</b></td><td>34.1%</td><td class="up">−4.1%p</td></tr>
+<tr><td>원리금보장형</td><td><b>60%</b></td><td>57.5%</td><td class="up">+2.5%p</td></tr>
+<tr><td>원리금보장성 합계</td><td><b>70%</b></td><td>65.9%</td><td class="up">+4.1%p</td></tr>
+</table>
+<div class="pcts"><div class="pt"><small>수익률 백분위</small><b class="dn">하위 18%</b><em>+2.51% · 1,514위 / 8,412명</em></div>
+<div class="pt"><small>평가금액 백분위</small><b class="up">상위 9%</b><em>757위 / 8,412명</em></div></div>
+</div></div>
+<p class="src">백분위는 코호트 분위분포에서 선형보간으로 산출 · 유사 고객 기준</p></div></section>
+<section class="card sec s4" data-sec="4"><button class="sh" onclick="tg(this)"><span class="nm">④</span><h3>수익률 상위 1% 고객은 어떻게 운용하고 있을까요?</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="body">같은 코호트에서 최근 1년 수익률 상위 1%에 든 <b>84명</b>의 운용 특성입니다. 평균 수익률 <b>+21.07%</b>.</p>
+<div class="grid2"><table class="cmp"><caption>자산 구성</caption><tr><th></th><th>상위 1%</th><th>고객</th></tr>
+<tr><td>고유계정대</td><td><b>2.1%</b></td><td>10%</td></tr>
+<tr><td>실적배당형</td><td><b>71.8%</b></td><td>30%</td></tr>
+<tr><td>원리금보장형</td><td><b>26.1%</b></td><td>60%</td></tr>
+</table><table class="cmp"><caption>실적배당형 상품군 보유율</caption>
+<tr><td>TDF</td><td class="w"><div class="bar"><i style="width:77.4%;background:#3E63C8"></i></div></td><td>77.4%</td></tr>
+<tr><td>해외주식형</td><td class="w"><div class="bar"><i style="width:61.9%;background:#3E63C8"></i></div></td><td>61.9%</td></tr>
+<tr><td>채권형</td><td class="w"><div class="bar"><i style="width:35.7%;background:#3E63C8"></i></div></td><td>35.7%</td></tr>
+<tr><td>국내주식형</td><td class="w"><div class="bar"><i style="width:29.8%;background:#3E63C8"></i></div></td><td>29.8%</td></tr>
+<tr><td>ETF</td><td class="w"><div class="bar"><i style="width:27.4%;background:#3E63C8"></i></div></td><td>27.4%</td></tr>
+</table></div>
+<table class="cmp dcd"><caption>디폴트옵션 등급 분포 — 상위 1%% vs 코호트 전체</caption><tr><th>등급</th><th>상위 1%</th><th>코호트 전체</th></tr>
+<tr><td>고위험</td><td>35.7%</td><td>4.4%</td></tr>
+<tr><td>중위험</td><td>41.7%</td><td>17.9%</td></tr>
+<tr><td>저위험</td><td>15.5%</td><td>24.3%</td></tr>
+<tr class="me"><td>초저위험 <span class="you">고객</span></td><td>6%</td><td>31.8%</td></tr>
+<tr><td>미설정</td><td>1.2%</td><td>21.6%</td></tr>
+</table>
+<p class="src">배치 산출 · 보유 상품명과 보유비중은 표시하지 않음 — 이 영역은 비교 참고이며 상품 추천이 아님</p></div></section>
+<section class="card sec s5" data-sec="5"><button class="sh" onclick="tg(this)"><span class="nm">⑤</span><h3>이런 상품이 적합할 수 있어요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="recohead"><b>디폴트옵션 「뿔려드림」으로 등급 상향</b><p>실적배당 30%를 보유해 투자 이력이 있는 고객이므로 포트폴리오 이동 대상입니다. 적극투자형이 등록할 수 있는 최고 등급은 중위험입니다.</p><span class="src">근거 관리방법론 5 · 9-2 · F17</span></div>
+<div class="gradebox"><div class="gh"><b>중립투자형 「뿔려드림」</b><span class="badge g-중위험">중위험</span><em>가입 가능 성향 — 위험중립형 이상</em></div><table class="cmp">
+<tr><td><b>뿔려드림1</b></td><td>시중은행 정기예금 30% + TDF 70%</td></tr>
+<tr><td><b>뿔려드림2</b></td><td>자산배분형 펀드 100%</td></tr>
+<tr><td><b>뿔려드림3</b></td><td>자산배분형 펀드 80% + GIC 20%</td></tr>
+</table></div>
+<p class="note">초저위험에서 상향할 때는 <b>2단계 거래</b>임을 미리 안내하세요. 실행 후 주식비중이 적극투자형 상한 <b>50%</b>를 넘지 않는지 확인이 필요합니다. (관리방법론 22 · F17)</p>
+<p class="src">디폴트옵션 포트폴리오 구성은 F17(2026.07 기준) · 개별 펀드 상품명과 수익률은 상품 DB 연동 후 표시</p></div></section>
+<section class="card sec s6" data-sec="6"><button class="sh" onclick="tg(this)"><span class="nm">⑥</span><h3>이렇게 말해보세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="tk"><b>1안 · 성향과 등록 등급 불일치</b><span class="src">화법 23</span><p>“고객님 투자성향은 적극투자형으로 등록돼 있는데, 지금 디폴트옵션은 정기예금으로만 운용되는 초저위험 등급이에요. 성향에 맞게 한 단계 올려보시겠어요?”</p></div>
+<div class="tk"><b>2안 · 세액공제 잔여한도</b><span class="src">화법 29</span><p>“올해 세액공제 받으실 수 있는 한도가 아직 남아 있어요. 연말이 지나면 그냥 사라지는 혜택이에요.”</p></div>
+</div><p class="src">대고객 화법 · 화면에 표시된 값만 인용 · 세액공제 환급 예상액은 제시하지 않음</p></div></section>
+<section class="card sec s7" data-sec="7"><button class="sh" onclick="tg(this)"><span class="nm">⑦</span><h3>예상 반론 및 대응 화법</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="ob"><div class="oq"><span>반론 1</span>"디폴트옵션은 싫어요"</div><div class="od"><b>대응 방향</b> 규모를 줄여 부담을 낮추고 되돌릴 수 있음을 알리기 <em>화법 11 · 관리방법론 20</em></div><p>“전부 바꾸시는 게 아니라 일부만 먼저 해보실 수 있고, 언제든 되돌리실 수 있어요.”</p></div>
+<div class="ob"><div class="oq"><span>반론 2</span>"갈아탔다가 더 안 좋아지는 거 아니에요?"</div><div class="od"><b>대응 방향</b> 수익률을 단정하지 않고 운용 여건의 차이로 <em>화법 14</em></div><p>“어느 쪽이 더 오른다고 말씀드릴 수는 없어요. 다만 지금 등록된 등급은 정기예금으로만 운용되는 구조라, 고객님 성향에서 선택할 수 있는 폭 자체가 좁습니다.”</p></div>
+</div></div></section>
+<section class="card sec s8" data-sec="8"><button class="sh" onclick="tg(this)"><span class="nm">⑧</span><h3>상담에 참고하세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="rf"><b>초저위험 디폴트옵션 상향은 2단계 거래</b><p>한 번에 처리되지 않습니다. 고객에게 미리 안내하지 않으면 중간 단계에서 문의가 들어옵니다.</p><span class="src">관리방법론 22</span></div>
+<div class="rf"><b>수익률이 낮다는 말 대신 세 기준선과의 격차로</b><p>IRP 평균 7.97% · 시중은행 정기예금 3.02% · 고유계정대 2.52%와의 차이가 방치의 기회비용입니다.</p><span class="src">관리방법론 3 · F58</span></div>
+</div></div></section></div><div class="panel" id="p-C12" hidden><section class="card prof">
+<div class="prow"><div class="avatar">도</div><div class="pname"><h2>도영란 <span>고객님</span></h2><div class="pin">KB-PIN 146783-67****</div></div>
+<div class="pf"><dt>생년월일</dt><dd>1963.01.19</dd></div>
+<div class="pf"><dt>나이</dt><dd>만 63세</dd></div>
+<div class="pf"><dt>성별</dt><dd>여</dd></div>
+<div class="pf"><dt>스타클럽등급</dt><dd>VIP</dd></div>
+<div class="pf"><dt>투자성향</dt><dd class="hl">안정추구형</dd></div>
+<div class="pf"><dt>최근 접촉일</dt><dd>2026.04.16</dd></div>
+</div>
+<div class="pcards">
+<div class="pc"><dt>신규가입일</dt><dd>2013.02.15</dd><small>13년 6개월</small></div>
+<div class="pc"><dt>평가금액</dt><dd class="big">142,300,000원</dd><small>1억 4,230만원</small></div>
+<div class="pc"><dt>디폴트옵션</dt><dd class="warn">안정형</dd><small>초저위험</small></div>
+<div class="pc"><dt>세액공제 잔여한도</dt><dd class="mute">표시 안 함</dd><small>연금개시 후 추가납입 불가 · F44</small></div>
+<div class="pc tagbox"><dt>AI 분석 태그</dt><div class="tags"><span class="tag t0">연금수령 중</span><span class="tag t1">원리금보장 편중</span></div></div>
+</div></section>
+<section class="card sec s1" data-sec="1"><button class="sh" onclick="tg(this)"><span class="nm">①</span><h3>AI 브리핑</h3><span class="chev">⌄</span></button><div class="sb">
+<p class="lead">연금수령 중이라 투자상품 권유 대상이 아닙니다.</p><p class="body">적립식 분산투자를 권유하면 고유대 자금이 투자상품에 잠겨 연금수령액이 줄어들 수 있습니다. 이 화면에서는 상품 추천과 대고객 권유 화법을 제공하지 않습니다. 수령방식이 지금 계획에 맞는지와 수수료 면제가 적용되고 있는지를 점검하는 상담으로 진행해보세요.</p>
+<p class="src">직원 대상 코칭 문체 · 정량값은 시스템 산출값 인용</p></div></section>
+<section class="card sec s2" data-sec="2"><button class="sh" onclick="tg(this)"><span class="nm">②</span><h3>왜 이 고객님인가요?</h3><span class="chev">⌄</span></button><div class="sb">
+<ul class="rs"><li><b>연금수령 중</b><span>투자상품·투자일임 권유 제외 대상 · 추가납입 불가</span></li><li><b>원리금보장성 85%</b><span>코호트 평균 87.6% 수준</span></li><li><b>최근 1년 +3.13%</b><span>3,118명 중 하위 26% (811위)</span></li></ul>
+<p class="src">대조 기준 — 60~64세 · 가입 10년 이상 · 3,118명 · 2026.07.31 배치</p></div></section>
+<section class="card sec s3" data-sec="3"><button class="sh" onclick="tg(this)"><span class="nm">③</span><h3>현재 운용상태</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="coach"><b>AI 코칭 제안</b><p>수령 중에도 남은 적립금은 계속 운용됩니다. 다만 신규 투자 권유가 아니라, 수령방식 점검과 수수료 면제 적용 확인이 이 상담의 내용입니다.</p></div>
+<div class="grid2"><div class="mixbox"><div class="dn"><svg viewBox="0 0 132 132" width="132" height="132" role="img" aria-label="자산 구성"><circle cx="66" cy="66" r="52" fill="none" stroke="#8AA4D6" stroke-width="20" stroke-dasharray="16.336 310.389" stroke-dashoffset="0.000" transform="rotate(-90 66 66)"/><circle cx="66" cy="66" r="52" fill="none" stroke="#3E63C8" stroke-width="20" stroke-dasharray="49.009 277.717" stroke-dashoffset="-16.336" transform="rotate(-90 66 66)"/><circle cx="66" cy="66" r="52" fill="none" stroke="#F0B429" stroke-width="20" stroke-dasharray="261.381 65.345" stroke-dashoffset="-65.345" transform="rotate(-90 66 66)"/></svg><div class="dnc"><small>평가금액</small><b>1억 4,230만원</b></div></div>
+<ul class="lg">
+<li><i style="background:#8AA4D6"></i><span>고유계정대</span><b>7,115,000원</b><em>5%</em></li>
+<li><i style="background:#3E63C8"></i><span>실적배당형</span><b>21,345,000원</b><em>15%</em></li>
+<li><i style="background:#F0B429"></i><span>원리금보장형</span><b>113,840,000원</b><em>80%</em></li>
+</ul></div>
+<div><table class="cmp"><caption>코호트 대조 — 60~64세 · 가입 10년 이상</caption><tr><th></th><th>고객</th><th>코호트 평균</th><th>차이</th></tr>
+<tr><td>고유계정대</td><td><b>5%</b></td><td>6.8%</td><td class="dn">−1.8%p</td></tr>
+<tr><td>실적배당형</td><td><b>15%</b></td><td>12.4%</td><td class="dn">+2.6%p</td></tr>
+<tr><td>원리금보장형</td><td><b>80%</b></td><td>80.8%</td><td class="dn">−0.8%p</td></tr>
+<tr><td>원리금보장성 합계</td><td><b>85%</b></td><td>87.6%</td><td class="dn">−2.6%p</td></tr>
+</table>
+<div class="pcts"><div class="pt"><small>수익률 백분위</small><b class="dn">하위 26%</b><em>+3.13% · 811위 / 3,118명</em></div>
+<div class="pt"><small>평가금액 백분위</small><b class="up">상위 2%</b><em>62위 / 3,118명</em></div></div>
+</div></div>
+<p class="src">백분위는 코호트 분위분포에서 선형보간으로 산출 · 유사 고객 기준</p></div></section>
+<section class="card sec s7" data-sec="7"><button class="sh" onclick="tg(this)"><span class="nm">⑦</span><h3>예상 반론 및 대응 화법</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="ob"><div class="oq"><span>반론 1</span>"쓸 곳이 있어서 해지하려고요"</div><div class="od"><b>대응 방향</b> 해지 대신 필요한 금액만 인출로 바꾸기 <em>화법 12 · 관리방법론 32</em></div><p>“해지하시면 세액공제 받으신 원금과 수익에 기타소득세 16.5%가 붙습니다. 지금 수령 중이시니 필요한 금액만 인출하시는 편이 세금 면에서 유리해요.”</p></div>
+<div class="ob"><div class="oq"><span>반론 2</span>"수수료는 계속 나가는 거 아니에요?"</div><div class="od"><b>대응 방향</b> 면제 적용 여부를 그 자리에서 확인 <em>F52</em></div><p>“연금 수령을 시작하시면 운용관리·자산관리 수수료가 면제됩니다. 지금 면제가 적용되고 있는지 함께 확인해 드릴게요.”</p></div>
+</div></div></section>
+<section class="card sec s8" data-sec="8"><button class="sh" onclick="tg(this)"><span class="nm">⑧</span><h3>상담에 참고하세요</h3><span class="chev">⌄</span></button><div class="sb">
+<div class="grid2">
+<div class="rf"><b>연금수령 방식은 기간지정·금액지정·자유인출 3가지</b><p>수령 중 ETF 운용은 자유인출 방식에서만 가능합니다. 현재 방식을 먼저 확인하세요.</p><span class="src">F34</span></div>
+<div class="rf"><b>연금개시 후에는 추가납입이 불가</b><p>세액공제 잔여한도 카드를 표시하지 않는 이유입니다. 타사 이전도 제한됩니다.</p><span class="src">F44</span></div>
+</div></div></section>
+<section class="card hidden-note"><b>이 케이스에서 표시하지 않는 섹션</b><p>④ 수익률 상위 1% 고객은 어떻게 운용하고 있을까요? · ⑤ 이런 상품이 적합할 수 있어요 · ⑥ 이렇게 말해보세요</p><span class="src">연금수령 중 고객은 투자상품·투자일임 권유 제외 대상입니다 (세그먼트 55-1 · F28). 상품 추천과 대고객 권유 화법을 생성하지 않고, 비교 참고 영역도 상담 축과 무관해 제외합니다.</span></section></div>
+</main>
+<footer class="fx">본 화면은 시연용 프로토타입입니다. 고객 정보는 가상이며, 상품·제도·수치 근거는 저장소의 주제별 추출지식(고객세그먼트·IRP관리방법론·영업화법·제도상품팩트)에서만 도출했습니다.</footer>
+<script>function tg(b){b.parentElement.classList.toggle('open')}
+function go(id){
+  document.getElementById('list').hidden=true;
+  document.querySelectorAll('.panel').forEach(p=>p.hidden=true);
+  document.getElementById('p-'+id).hidden=false;
+  document.getElementById('btnHome').hidden=false;
+  document.querySelectorAll('#p-'+id+' .sec').forEach((s,i)=>s.classList.toggle('open',i===0));
+  window.scrollTo(0,0);
+}
+function home(){
+  document.querySelectorAll('.panel').forEach(p=>p.hidden=true);
+  document.getElementById('list').hidden=false;
+  document.getElementById('btnHome').hidden=true;
+  window.scrollTo(0,0);
+}
+</script></body></html>
