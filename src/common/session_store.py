@@ -7,7 +7,7 @@
 저장소에서 제외한다.
 
 consult_agent 는 매 턴 `append_turn()`으로 기록만 하고, strategy_agent 는 브리핑 화면의
-"상담 이력"(요건정의서 §14)을 위해 `summarize_for_briefing()`으로 읽기만 한다 — 어느 쪽도
+"상담 이력"(REQUIREMENTS.md §14)을 위해 `summarize_for_briefing()`으로 읽기만 한다 — 어느 쪽도
 서로의 소유 데이터에 쓰지 않는다("코드=사실" 경계를 대화이력에도 그대로 적용).
 """
 
@@ -64,7 +64,7 @@ def append_turn(
             "started_at": turn["ts"],
             "employee_id": employee_id,
             "turns": [],
-            "outcome": None,  # 요건정의서 §19(상담결과 반영)를 위한 예약 필드. 이번엔 채우지 않는다.
+            "outcome": None,  # REQUIREMENTS.md §19(상담결과 반영)를 위한 예약 필드. 이번엔 채우지 않는다.
         }
         doc["sessions"].append(session)
     session["turns"].append(turn)

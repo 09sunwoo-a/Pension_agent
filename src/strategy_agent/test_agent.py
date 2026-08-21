@@ -60,8 +60,8 @@ def check_order_mismatch_fallback() -> None:
 
     out = A.propose(p)
     check(
-        out["source"] == "규칙" and "임의로" in out["reason"],
-        "propose(): order 가 항목 id 와 불일치하면 규칙 폴백",
+        out["source"] == "미생성" and out["sentence"] == "" and "임의로" in out["reason"],
+        "propose(): order 가 항목 id 와 불일치하면 sentence 를 비움(규칙 문장으로 얼버무리지 않음)",
         out["reason"],
     )
     _restore_llm()
@@ -86,9 +86,51 @@ def check_sentence_verify_rejects_fabrication() -> None:
 
     out = A.propose(p)
     check(
-        out["source"] == "규칙" and out["rejected"],
-        "propose(): sentence 에 재료 밖 수치가 있으면 verify 거부 → 규칙 폴백",
+        out["source"] == "미생성" and out["sentence"] == "" and out["rejected"],
+        "propose(): sentence 에 재료 밖 수치가 있으면 verify 거부 → sentence 비움",
         str(out["rejected"]),
+    )
+    _restore_llm()
+
+
+# ─────────────────────────────────────────────────────────────
+# ② 왜 이 고객님인가요 — 정상 생성 및 재료 이탈 거부
+# ─────────────────────────────────────────────────────────────
+
+def check_why_customer_accepts_grounded() -> None:
+    p = _BY_NAME["김민수"]  # balPct 값이 있는 페르소나
+    facts = engine.prepare(p)
+    stub_lines = [f"평가금액이 유사 고객 상위 {p.balPct}% 수준이라 관리 대상으로 떴어요."]
+
+    llm.available = lambda: True
+    llm.generate = lambda *a, **k: json.dumps({"lines": stub_lines}, ensure_ascii=False)
+    A.llm = llm
+
+    A._write_why_this_customer(facts)
+    check(
+        facts["why_this_customer"] == stub_lines,
+        "② _write_why_this_customer(): 재료 안 값이면 LLM 문장으로 교체",
+        str(facts["why_this_customer"]),
+    )
+    _restore_llm()
+
+
+def check_why_customer_rejects_fabrication() -> None:
+    p = _BY_NAME["김민수"]
+    facts = engine.prepare(p)
+    rule_lines = list(facts["why_this_customer"])
+
+    llm.available = lambda: True
+    llm.generate = lambda *a, **k: json.dumps(
+        {"lines": ["평가금액이 유사 고객 상위 1% 수준이에요."]}, ensure_ascii=False,
+    )
+    A.llm = llm
+
+    A._write_why_this_customer(facts)
+    check(
+        facts["why_this_customer"] == rule_lines,
+        "② _write_why_this_customer(): 재료 밖 수치가 있으면 규칙 문장 그대로 유지",
+        str(facts["why_this_customer"]),
     )
     _restore_llm()
 
@@ -162,7 +204,7 @@ def check_recommend_accepts_valid_pick() -> None:
     }, ensure_ascii=False)
     A.llm = llm
 
-    reco = A._recommend(p)
+    reco = A._recommend(p, engine.prepare(p))
     check(reco is not None and reco["product"]["name"], "⑤ _recommend(): 유효한 id 선택 시 결과 반환",
           str(reco))
     check(reco is not None and reco.get("portfolio") is not None, "⑤ _recommend(): 포트폴리오도 함께 반영")
@@ -178,7 +220,7 @@ def check_recommend_rejects_out_of_pool_id() -> None:
     }, ensure_ascii=False)
     A.llm = llm
 
-    reco = A._recommend(p)
+    reco = A._recommend(p, engine.prepare(p))
     check(reco is None, "⑤ _recommend(): 후보 목록 밖 id 는 거부(None 반환)")
     _restore_llm()
 
@@ -198,7 +240,7 @@ def check_recommend_rejects_fabricated_number() -> None:
     }, ensure_ascii=False)
     A.llm = llm
 
-    reco = A._recommend(p)
+    reco = A._recommend(p, engine.prepare(p))
     check(reco is None, "⑤ _recommend(): 추천 사유에 재료 밖 수치가 있으면 거부(None 반환)")
     _restore_llm()
 
@@ -206,6 +248,8 @@ def check_recommend_rejects_fabricated_number() -> None:
 def main() -> int:
     check_order_mismatch_fallback()
     check_sentence_verify_rejects_fabrication()
+    check_why_customer_accepts_grounded()
+    check_why_customer_rejects_fabrication()
     check_talking_script_accepts_grounded()
     check_talking_script_rejects_fabrication()
     check_recommend_accepts_valid_pick()

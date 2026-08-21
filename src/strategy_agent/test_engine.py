@@ -18,6 +18,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import engine  # noqa: E402
+import sections  # noqa: E402
 from customer import PERSONAS, Profile, conditions  # noqa: E402
 
 # agent 는 여기서(위 engine.validate 로 sys.path 에 ../consult_agent 가 삽입되기 전에) 임포트한다.
@@ -135,7 +136,8 @@ e, _ = with_specs(lambda s: _spec(s, "st.dor_contact").__setitem__(
     "clause", "MyStar에서 보유상품·수익률을 확인하고 유선 접촉"))
 check(any("로직화대상" in x for x in e), "절 내 조회 지시 검출")
 
-# 조회 데이터는 briefing 으로 제시된다. 근거는 가이드 p02(상품 보유 현황 확인)이다.
+# 조회 데이터는 briefing 으로 제시된다. 근거는 가이드의 '상품 보유 현황 확인' 카드다
+# (engine.BRIEFING_SOURCE — 아래 문자열은 그 상수와 일치해야 한다).
 for nm, f in FACTS.items():
     bf = f.get("briefing") or {}
     p = BY_NAME[nm]
@@ -457,7 +459,7 @@ check(any("시급성문구" in x for x in e), "절 내 시한 표현 검출")
 _lee = FACTS["이현우"]
 check(bool(_lee["talking_points"]), "이현우: 상담 화법 노출")
 check(all(tp["talk"].strip() for tp in _lee["talking_points"]), "상담 화법 내용 존재")
-check("상담 화법" in _artifact("이현우"), "이현우: 산출물에 상담 화법 섹션")
+check(sections.title("talking_points") in _artifact("이현우"), "이현우: 산출물에 상담 화법 섹션")
 # 화법은 직원(접촉) 전략에만, 내부 조회 지시어 없이 정의된다.
 for _s in engine.SPECS + engine.SYSTEM_STRATEGIES:
     if _s.get("talk"):
@@ -531,7 +533,7 @@ check(engine._value_tag({"kind": "납입", "impact": {"kind": "tax_credit"}}, "�
 # 산출물은 단일 장문 지시가 아니라 카드 구조(추천 상품·대상)로 제시된다.
 _kim_art = _artifact("김민수")
 check("추천 상품" in _kim_art and "대상" in _kim_art, "김민수: 산출물이 카드(추천 상품·대상) 구조")
-check("[전략 제안]" in _kim_art, "김민수: 전략 제안 섹션 유지")
+check(f"[{sections.title('ai_briefing')}]" in _kim_art, "김민수: AI 브리핑 섹션 유지")
 # 등급 문자('큼/보통/작음/—')는 카드 핵심가치 자리에 노출되지 않는다(핵심가치는 _value_tag).
 for nm, f in FACTS.items():
     for it in f["items"]:

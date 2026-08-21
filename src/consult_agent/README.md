@@ -16,19 +16,36 @@ r["sources"]   # [{"id": "ch01_new.p02", "title": "...", "score": 6.33, "page": 
 r2 = ask("그럼 안 된다고 하면요?", history=r["history"])   # 후속 질문 — 이전 맥락 이어받음
 
 # 브리핑질의·LMS발송·수정은 customer_id 가 필요하다(현재 열려 있는 브리핑 화면의 고객).
-# 넘기면 모든 턴이 common/session_data 에 상담이력으로도 함께 기록된다(요건정의서 §14).
+# 넘기면 모든 턴이 common/session_data 에 상담이력으로도 함께 기록된다(REQUIREMENTS.md §14).
 r3 = ask("이 고객 평가금액 얼마야?", customer_id="C1", session_id="branch-101-2026-08-20")
 ```
 
+아래 명령은 전부 `src/` 에서 실행한다고 가정한다(`cd src`).
+
 ```bash
-pip install -r requirements.txt
+pip install -r consult_agent/requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...
 
-python graph.py "고객이 주식이 더 낫다는데 뭐라고 하지?"   # 단발 실행
-python graph.py                                          # REPL (후속 질문 확인용)
-python test_agent.py                                     # API 키 없이 검색·라우팅 검증
-python kb.py                                              # 지식베이스 점검 리포트
+# 화법 코칭 — 고객 화면 불필요, 단발 실행
+python consult_agent/graph.py "고객이 주식이 더 낫다는데 뭐라고 하지?"
+
+# 고객 화면이 열려 있는 상태로 테스트 — -c/--customer 로 customer_id 지정
+python consult_agent/graph.py "이현우 고객 투자성향 뭐야?" -c C3
+
+# 실제로 주고받는 멀티턴 테스트 — REPL, 답변 보고 다음 질문을 그때그때 입력
+python consult_agent/graph.py -c C3
+python consult_agent/graph.py            # 고객 화면 없이 화법 코칭만 REPL로
+
+# 멀티턴을 재현 가능한 한 줄로 — 인자를 여러 개 주면 순서대로 한 턴씩(맥락 이어서) 실행. 회귀 테스트·버그 리포트용
+python consult_agent/graph.py -c C3 "이현우 고객 투자성향 뭐야?" "그럼 최근 3개월 수익률은?"
+
+python consult_agent/test_agent.py       # API 키 없이 검색·라우팅 검증
+python consult_agent/kb.py               # 지식베이스 점검 리포트
 ```
+
+`-c`/`--customer`를 넘기지 않으면 `briefing_qa`/`lms_send`/`correction` 세 의도는 "고객 화면을 먼저
+열어주세요"라고 안전하게 답한다(customer_id 목록은 `strategy_agent/customer.py`의 `PERSONAS` 참고 —
+예: 이현우=`C3`).
 
 ---
 
@@ -47,9 +64,9 @@ consult_agent/
 ├── llm.py                   LLM 클라이언트·모델 설정 (환경 이전 시 여기만 수정)
 ├── kb.py                   지식베이스 로드 · 검색 · 검증
 ├── data/
-│   ├── ch01_new.json        1장 「신규」— 연금왕찐천재_1장_신규_마케팅화법.pdf
-│   ├── ch02_retirement.json 2장 「퇴직금」— 연금왕찐천재_2장_퇴직금 마케팅화법.pdf
-│   ├── ch03_transfer.json   3장 「계약이전」— 연금왕찐천재_3장_계약이전 화법.pdf
+│   ├── pitch_ch01_new.json        1장 「신규」— 연금왕찐천재_1장_신규_마케팅화법.pdf
+│   ├── pitch_ch02_retirement.json 2장 「퇴직금」— 연금왕찐천재_2장_퇴직금 마케팅화법.pdf
+│   ├── pitch_ch03_transfer.json   3장 「계약이전」— 연금왕찐천재_3장_계약이전 화법.pdf
 │   ├── guide01_yield_mgmt.json  IRP 수익률 관리 가이드
 │   └── _TEMPLATE.json       새 PDF 추가용 템플릿 ('_' 로 시작하면 로더가 건너뜀)
 ├── test_agent.py            검색·라우팅 테스트 (API 키 불필요)
@@ -112,7 +129,7 @@ START → understand ─┬─(situation/guide) → situation_slots → retrieve
   넘김)가 있어야 동작한다 — 없으면 "고객을 찾을 수 없다"고 안전하게 답한다.
 - **오답 차단 2단계**: ① `retrieve`가 발화·주제 유사도(`MIN_TOPICAL`)로 무관한 질문을 거르고, ② 그래도 주제어만 겹쳐 딸려온 카드는 `verify`가 질문 의도와 대조해 걸러 `fallback`시킴. 확신이 낮으면 억지 답변 대신 "화법 없음"으로 정직하게 응답.
 - 검색은 결정적(deterministic) — 같은 질문엔 같은 카드. 재검색은 `broaden_count`로 최대 2회 제한.
-- `retrieve`는 `stage`/`customer_type`으로 먼저 후보를 좁힌 뒤 채점 — 챕터 간 같은 라벨(예: "수수료 비교"가 퇴직금·계약이전에 둘 다 있음)이 섞이지 않음. 세부 로직·근거는 `nodes.py`/`kb.py` 코드 주석 참고.
+- `retrieve`는 `stage`/`customer_type`으로 먼저 후보를 좁힌 뒤 채점 — 챕터 간 같은 라벨(예: "수수료 비교"가 퇴직금·계약이전에 둘 다 있음)이 섞이지 않음. 세부 로직·근거는 `pitch.py`/`kb.py` 코드 주석 참고.
 - 후속 질문은 `ask()`가 돌려준 `history`를 다음 호출에 그대로 넘기면 됨(세션 유지는 호출자 책임, 최근 4턴만 반영).
 
 ---
@@ -151,7 +168,7 @@ START → understand ─┬─(situation/guide) → situation_slots → retrieve
 
 | 위치 | 값 | 의미 |
 |---|---|---|
-| `nodes.py` `TOP_K` | 3 | 프롬프트에 넣을 카드 수. 늘리면 맥락↑ 토큰↑ |
+| `pitch.py` `TOP_K` | 3 | 프롬프트에 넣을 카드 수. 늘리면 맥락↑ 토큰↑ |
 | `kb.py` `MIN_TOPICAL` | 0.5 | 낮추면 fallback이 줄고 오답이 늘어남 (실측: 유관 0.55~2.1 / 무관 0.00~0.42) |
 
 ---

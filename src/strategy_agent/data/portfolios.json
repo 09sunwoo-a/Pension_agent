@@ -2,7 +2,7 @@
   "meta": {
     "title": "적합 상품 추천용 포트폴리오 후보",
     "as_of": "2026-08-19",
-    "note": "요건정의서 ⑤ '이런 상품이 적합할 수 있어요'의 '포트폴리오 1개' 후보. allocation.product_id 는 products.json 의 상품 id 를 참조한다 — engine.candidate_pool_for_recommendation() 이 구성 상품 전부가 적합성 게이트를 통과할 때만 후보로 노출한다. 요건정의서 §8.2 예시 구성(채권 40%+채권 30%+주식 30%)을 본 저장소의 실제 상품 카탈로그(P01~P12)로 재구성한 자리표시자 데이터 — 데이터 담당자가 실제 추천 포트폴리오로 교체해야 한다.",
+    "note": "REQUIREMENTS.md ⑤ '이런 상품이 적합할 수 있어요'의 '포트폴리오 1개' 후보. allocation.product_id 는 products.json 의 상품 id 를 참조한다 — engine.candidate_pool_for_recommendation() 이 구성 상품 전부가 적합성 게이트를 통과할 때만 후보로 노출한다. REQUIREMENTS.md §8.2 예시 구성(채권 40%+채권 30%+주식 30%)을 본 저장소의 실제 상품 카탈로그(P01~P12)로 재구성한 자리표시자 데이터 — 데이터 담당자가 실제 추천 포트폴리오로 교체해야 한다.",
     "kind": "portfolio"
   },
   "records": [

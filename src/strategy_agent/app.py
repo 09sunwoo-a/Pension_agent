@@ -11,6 +11,7 @@ from datetime import datetime
 from customer import PERSONAS
 from agent import propose
 import engine
+import sections
 
 # consult_agent(대화형 에이전트) 교차 로드용 — common.agent_loader 가 두 에이전트를
 # 한 프로세스에서 안전하게 함께 임포트하게 해준다(자세한 이유는 그 파일 docstring 참고).
@@ -118,7 +119,7 @@ with tab2:
         target_res = results[target_name]
         f = target_res["facts"]
         
-        # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — 요건정의서 ①~⑨ +
+        # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — REQUIREMENTS.md ①~⑨ +
         # §14 상담이력 전체를 화면 순서(①AI브리핑→②근거→③운용상태→...→⑨안내)로 노출한다.
         # ── 헤더: ■ 고객 · 요건 N건
         st.markdown(f"#### ■ {target_name} · 요건 {len(f['conditions'])}건")
@@ -126,7 +127,7 @@ with tab2:
 
         # ── ② 왜 이 고객님인가요 (최대 3줄, 코드 산출)
         if f.get("why_this_customer"):
-            st.markdown("**[② 왜 이 고객님인가요]**")
+            st.markdown(f"**[{sections.title('why_this_customer')}]**")
             for line in f["why_this_customer"]:
                 st.markdown(f"- {line}")
 
@@ -134,13 +135,13 @@ with tab2:
         bf = f["briefing"]
         src = "; ".join(engine.format_sources([bf["source"]]))
         holdings = " | ".join(f"{k} {v}" for k, v in bf.items() if k != "source")
-        st.markdown(f"**[③ 현재 운용상태]** {holdings}")
+        st.markdown(f"**[{sections.title('current_state')}]** {holdings}")
         st.caption(f"근거 · {src}")
 
         st.divider()
 
         # ── ① AI 브리핑 (sentence — 종합 제안 문장, 2~3문장) + 근거 해설(insight)
-        st.markdown("**[① AI 브리핑]**")
+        st.markdown(f"**[{sections.title('ai_briefing')}]**")
         if target_res.get("tier") == "LLM판단":
             st.warning(f"⚠ 행내 전략 미매칭 · LLM 참고 의견(검토 필요)\n\n{target_res['sentence']}")
         elif not f["items"]:
@@ -170,13 +171,13 @@ with tab2:
 
         # ── ④ 수익률 상위 1% 고객님들이 많이 담은 상품은? (비개인화·참고용)
         if f.get("top_holdings"):
-            st.markdown("**[④ 수익률 상위 1% 고객님들이 많이 담은 상품은?]** *(이 고객 대상 추천 아님, 참고용)*")
+            st.markdown(f"**[{sections.BY_KEY['top_holdings'].full_title}]** *({sections.BY_KEY['top_holdings'].note})*")
             for th in f["top_holdings"]:
                 st.markdown(f"- {th['product_name']} — {th['description']} (최근 1년 {th['return_1y']}%)")
 
         # ── ⑤ 이런 상품이 적합할 수 있어요 (LLM 상품 1개 + 포트폴리오 1개, 폐쇄 후보군에서 선택)
         reco = f.get("recommendation")
-        st.markdown("**[⑤ 이런 상품이 적합할 수 있어요]**")
+        st.markdown(f"**[{sections.title('recommendation')}]**")
         if reco:
             with st.container(border=True):
                 prod = reco["product"]
@@ -198,13 +199,13 @@ with tab2:
 
         # ── ⑥ 이렇게 말해보세요 (대고객 화법, script 있으면 그것을 우선 노출)
         if f.get("talking_points"):
-            st.markdown("**[⑥ 이렇게 말해보세요]**")
+            st.markdown(f"**[{sections.title('talking_points')}]**")
             for tp in f["talking_points"]:
                 st.markdown(f"- ({tp['title']}) {tp.get('script') or tp['talk']}")
 
         # ── ⑦ 예상 반론 및 대응 화법
         if f.get("objections"):
-            st.markdown("**[⑦ 예상 반론 및 대응 화법]**")
+            st.markdown(f"**[{sections.title('objections')}]**")
             for ob in f["objections"]:
                 st.markdown(f"- \"{ob['objection']}\" → {ob['response']}")
 
@@ -226,7 +227,7 @@ with tab2:
 
         # ── ⑧ 상담에 참고하세요 (노하우/가이드 스니펫)
         if f.get("consult_resources"):
-            st.markdown("**[⑧ 상담에 참고하세요]**")
+            st.markdown(f"**[{sections.title('consult_resources')}]**")
             for res in f["consult_resources"]:
                 st.markdown(f"- {res['title']} — {res['snippet']}")
 
@@ -239,7 +240,7 @@ with tab2:
         # ── ⑨ 고객님께 안내해보세요 (가장 임박한 이벤트 1개 + 세미나 1개)
         outreach = f.get("outreach") or {}
         if outreach.get("event") or outreach.get("seminar"):
-            st.markdown("**[⑨ 고객님께 안내해보세요]**")
+            st.markdown(f"**[{sections.title('outreach')}]**")
             for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
                 if item:
                     st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")

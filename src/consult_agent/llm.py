@@ -2,7 +2,7 @@
 
 구현·모델·프로바이더 전환·.env 로딩은 전부 common/llm.py 한 곳에 있다.
 이 파일은 (1) umbrella 를 import 경로에 올리고 (2) 공용 함수를 재노출만 한다.
-그래서 nodes.py 의 `from llm import generate` 는 그대로 두어도 공용 구현을 쓴다.
+그래서 각 노드 파일의 `from llm import generate` 는 그대로 두어도 공용 구현을 쓴다.
 """
 
 from __future__ import annotations

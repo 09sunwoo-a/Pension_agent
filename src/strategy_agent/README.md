@@ -103,8 +103,9 @@ LLM 설정은 이 폴더가 아니라 **umbrella 루트 `.env`** 에 둔다(`../
 **상품·전략·기준선·발송자료 추가는 코드 수정 불필요** — JSON 만 채운다. 요건(`CONDS`) 신설만
 `customer.py` 수정 필요. 저작 절차와 프롬프트 → **[../AUTHORING.md](../AUTHORING.md)**.
 
-`top_holdings.json`·`portfolios.json`과 `assets.json`의 이벤트·세미나 레코드는 요건정의서의
-예시를 옮긴 자리표시자 데이터다 — 실제 콘텐츠로 교체하는 것은 데이터 담당자 몫이다.
+`top_holdings.json`·`portfolios.json`과 `assets.json`의 이벤트·세미나 레코드는
+[../../docs/REQUIREMENTS.md](../../docs/REQUIREMENTS.md)의 예시를 옮긴 자리표시자 데이터다 —
+실제 콘텐츠로 교체하는 것은 데이터 담당자 몫이다.
 
 ## AI 브리핑 — 9개 섹션 + 상담이력
 
@@ -113,8 +114,8 @@ LLM 설정은 이 폴더가 아니라 **umbrella 루트 `.env`** 에 둔다(`../
 
 | 섹션 | facts 키 | 산출 |
 |---|---|---|
-| ① AI 브리핑 | `sentence`/`insight` | LLM(재료 안에서), 폴백 시 규칙 |
-| ② 왜 이 고객님인가요 | `why_this_customer` | 코드(≤3줄, LLM 없음) |
+| ① AI 브리핑 | `sentence`/`insight` | LLM(재료 안에서) — 실패 시 명시적 미생성(규칙 문장 대체 없음) |
+| ② 왜 이 고객님인가요 | `why_this_customer` | 코드(수치) + LLM(해석 문장) + verify, 실패 시 규칙 문장 폴백 |
 | ③ 현재 운용상태 | `briefing["운용현황(3분류)"]` | 코드(`cash_idle_pct` 없으면 생략) |
 | ④ 상위 1% 상품 사례 | `top_holdings` | 코드(고객 필터 없음) |
 | ⑤ 적합 상품·포트폴리오 | `recommendation` | LLM(폐쇄 후보군에서 선택 + verify) |

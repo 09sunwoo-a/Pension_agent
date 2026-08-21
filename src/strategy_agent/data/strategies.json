@@ -11,7 +11,7 @@
       "briefing": "절은 판단·행동만 담는다. 시스템이 이미 입력값(Profile)으로 보유한 데이터의 조회·확인(예: 가이드 p02 'MyStar 에서 보유상품·수익률 확인')은 전략이 아니라 engine._briefing() 이 산출하는 사실이다. 'MyStar'·'단말' 등 조회 지시어가 절에 있으면 engine.validate() 가 [로직화대상] 으로 차단한다.",
       "slots": "{product_action} 은 상품과 동작이 결합된 구(예: 'KB GIC 확정금리(연 3.65%)로 재예치')이며, 분기가 둘이면 '실적배당 희망 시 …, 원리금보장 희망 시 …' 형태로 결합된다. {asset} 은 조사가 부착된 발송 자료명, {trim_target} 은 축소 대상 표기이다.",
       "benefit": "카드 렌더링용 한 줄 혜택 문구. 절(clause)이 '무엇을 얼마나' 를 담는다면 benefit 은 '왜 고객에게 이로운가' 를 한 문장으로 담는다. 판단근거(evidence)의 수치 나열과 달리 슬롯 없는 완결 문장으로 쓴다. 누락 시 engine 이 evidence 로 폴백한다.",
-      "talk": "직원(actor='직원') 접촉 전략에만 정의하는 상담 추천 화법. 콜스크립트(sources) 절차를 요약한 대화 순서이며, 'MyStar'·'단말' 등 내부 조회 지시어는 담지 않는다(engine.validate() 가 [로직화대상] 으로 차단).",
+      "talk": "직원(actor='직원') 접촉 전략에만 정의하는 상담 추천 화법. 콜스크립트(sources) 절차를 요약한 대화 순서이며, 'MyStar'·'단말' 등 내부 조회 지시어는 담지 않는다(engine.validate() 가 [로직화대상] 으로 차단). pitch_refs 로 화법 카드를 참조하는 전략에는 두지 않는다 — 둘 다 없으면 그 전략은 ⑥ 화법 후보에서 빠진다.",
       "time_pressure": "절(clause)에는 '금주 내'·'당장' 처럼 데이터로 확정되지 않은 시한 표현을 넣지 않는다. 시급성은 urgency 필드와 실행 순서로 표현하며, 'D-{matDD}' 처럼 Profile 값으로 산출되는 기한만 절에 담는다. 위반 시 engine.validate() 가 [시급성문구] 로 차단한다.",
       "resolves": "겹치는 전략을 하나로 정리하는 선언. 리스트이며 원소마다 policy 가 다르다 — 'always'(target 을 무조건 흡수) · 'conditional'(target 을 condition 이 참일 때만 흡수, condition 은 {field,op,value|value_of,mul} 비교식이며 리스트면 AND) · 'max_amount'(같은 group 태그를 가진 전략들 중 계산된 금액이 가장 큰 것만 남김). 새 조건부 흡수 규칙은 이 필드에 조건식만 추가하면 되고 engine.py 를 수정할 필요가 없다."
     },

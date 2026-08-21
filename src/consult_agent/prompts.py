@@ -1,6 +1,6 @@
 """LLM에 보내는 프롬프트 템플릿.
 
-문구만 고칠 때 노드 로직(nodes.py)을 건드리지 않도록 분리했다.
+문구만 고칠 때 노드 로직(pitch.py·router.py 등)을 건드리지 않도록 분리했다.
 """
 
 from __future__ import annotations

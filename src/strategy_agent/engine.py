@@ -127,8 +127,11 @@ ACTOR_SUFFIX = {"운용": "하도록 제안", "납입": "하도록 제안", "설
 # 자산 구성비(Profile.port) 인덱스별 라벨. 보유 현황 briefing 렌더링에 사용한다.
 PORT_LABELS = ("예금", "채권형", "TDF·MP", "섹터ETF")
 
-# 보유 현황 briefing 의 근거. 가이드 p02 '상품 보유 현황 확인'(MyStar 조회)을 코드로 대체한다.
-# 조회 데이터가 이미 Profile 에 들어와 있으므로, 조회를 전략 문장의 지시로 남기지 않는다.
+# 보유 현황 briefing 의 근거. 가이드의 '상품 보유 현황 확인'(MyStar 조회) 절차를 코드로
+# 대체한다 — 조회 데이터가 이미 Profile 에 들어와 있으므로 조회를 전략 문장의 지시로 남기지
+# 않는다. 값은 KB 카드 id 이며(consult_agent/data/guide01_yield_mgmt.json), 원문 문서는
+# 01_행내가이드문서_…/01_고객관리_수익률관리/개인형IRP_고객관리_가이드_Series1.md 다.
+# 카드 id 의 pNN 은 청크 순번이지 PDF 쪽번호가 아니다(카드 자체의 page 필드와 별개).
 BRIEFING_SOURCE = "guide01_yield_mgmt.p02"
 
 # 시스템이 이미 보유한 데이터의 조회·확인 지시어. 절이 아니라 briefing(코드)으로 표현한다.
@@ -526,7 +529,7 @@ def _card(spec: dict, products: dict[str, str], amount: str | None,
 def customer_facing_asset(branch: str | None = None) -> dict | None:
     """고객 발송이 승인된 자료 1건. 미등록 시 None 을 반환한다.
 
-    content_type 이 있는 레코드(이벤트·세미나 — 요건정의서 ⑨, next_event_and_seminar() 가
+    content_type 이 있는 레코드(이벤트·세미나 — REQUIREMENTS.md ⑨, next_event_and_seminar() 가
     다룬다)는 여기서 제외한다 — 같은 asset kind·같은 customer_facing 필드를 쓰지만 이 함수가
     찾는 '전략에 첨부할 발송 자료'와는 다른 성격의 콘텐츠다."""
     rows = [a for a in ASSETS if a.get("customer_facing") is True and not a.get("content_type")]
@@ -597,7 +600,7 @@ _BRACKET_LABEL = {"5500이하": "5,500만원 이하", "5500초과": "5,500만원
 
 
 def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
-    """3분류 운용현황 — 고유계정대/실적배당형/원리금보장형(요건정의서 ③).
+    """3분류 운용현황 — 고유계정대/실적배당형/원리금보장형(REQUIREMENTS.md ③).
 
     cash_idle_pct(고유계정대 비중)가 없으면 None — 화면은 이 경우 3분류 표시를 생략한다
     (customer.py::Profile.cash_idle_pct 참고). 고유계정대는 port[0](예금)의 부분집합으로
@@ -614,26 +617,35 @@ def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
 
 
 def _why_this_customer(p: Profile, conds: list[str]) -> list[str]:
-    """AI 브리핑 근거 최대 3개, 정량 중심 1줄씩(요건정의서 ② "왜 이 고객님인가요?").
+    """AI 브리핑 근거 최대 3개, 정량 중심 1줄씩(REQUIREMENTS.md ② "왜 이 고객님인가요?").
 
-    결정론적 코드 산출 — LLM 이 만들지 않는다. balPct 가 없는 페르소나는 해당 줄만
-    생략한다(상류 조인 값이라 이 엔진이 직접 계산할 수 없다).
+    결정론적 코드 산출. agent._write_why_this_customer() 가 이 값을 LLM 해석 문장으로
+    교체할 수 있는 재료 겸 폴백으로 쓴다(REQUIREMENTS.md §15 — 이 항목은 Rule·LLM 이 함께 표시된
+    접점이라, LLM 이 없거나 실패해도 이 규칙 문장이 그대로 유효한 결과다). balPct 가
+    없는 페르소나는 해당 줄만 생략한다(상류 조인 값이라 이 엔진이 직접 계산할 수 없다).
     """
     lines: list[str] = []
     if p.balPct is not None:
         lines.append(f"평가금액 {won(p.bal)}으로 유사 고객 상위 {p.balPct}% 수준이에요.")
     lines.append(f"최근 1년 수익률은 {p.ret}%로 유사 고객 하위 {p.retPct}% 수준이에요.")
     if "mis" in conds:
-        lines.append(f"{p.rk} 성향 대비 원리금보장형 비중이 {p.port[0]}%로 높아요.")
+        # 'mis' 는 성향에 따라 정반대를 뜻한다 — 보수 성향은 위험자산 과다로, 공격 성향은
+        # 원리금보장형 과다로 성립한다(customer.conditions()). 한쪽 문구만 쓰면 "안정추구형
+        # 인데 원리금보장형 10%가 높다"처럼 사실과 반대인 근거가 화면에 나간다.
+        if p.rk in ("적극투자형", "공격투자형"):
+            lines.append(f"{p.rk} 성향 대비 원리금보장형 비중이 {p.port[0]}%로 높아요.")
+        else:
+            lines.append(f"{p.rk} 성향 대비 위험자산 비중이 {p.risk_asset}%로 높아요.")
     return lines[:3]
 
 
 def _briefing(p: Profile) -> dict:
     """상담 준비용 보유 현황 스냅샷.
 
-    가이드 p02(상품 보유 현황 확인)는 직원에게 'MyStar 단말에서 보유 상품·만기·수익률을
-    조회'하도록 지시한다. 그 데이터는 타겟리스트·MyStar 를 조인한 Profile 로 이미 시스템에
-    들어와 있으므로, 조회를 전략 문장의 지시로 남기지 않고 시스템이 제시하는 사실로 돌린다.
+    가이드의 '상품 보유 현황 확인' 절차(BRIEFING_SOURCE 참고)는 직원에게 'MyStar 단말에서
+    보유 상품·만기·수익률을 조회'하도록 지시한다. 그 데이터는 타겟리스트·MyStar 를 조인한
+    Profile 로 이미 시스템에 들어와 있으므로, 조회를 전략 문장의 지시로 남기지 않고 시스템이
+    제시하는 사실로 돌린다.
     전략(clause)은 판단·행동만 담고, 이미 보유한 데이터의 제시는 여기(코드)에서 처리한다.
     """
     comp = " · ".join(f"{lbl} {pct}%" for lbl, pct in zip(PORT_LABELS, p.port) if pct)
@@ -871,8 +883,8 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         b["card"] = _card(spec, products_fmt, won(b["amount"]) if b["amount"] else None,
                           _effect_grade(b["yield_delta"]), clause_action,
                           spec.get("benefit") or b["evidence"])
-        # 상담 화법 — pitch_refs 로 연결된 화법 카드를 고객유형에 맞춰 실시간 조회한다
-        # (레거시 talk 필드가 있는 전략은 pitch_talk() 안에서 그쪽으로 폴백).
+        # 상담 화법 — pitch_refs 로 연결된 화법 카드를 고객유형에 맞춰 실시간 조회하고,
+        # 참조가 없는 전략은 자체 talk 필드를 쓴다(둘 다 pitch_talk() 안에서 처리).
         b["talk"] = pitch_talk(spec, p.customer_type)
 
     # 11) 다른 제안 — 메인 문장 밖 전략의 절을 렌더링한다. 선정 항목과 동일한 슬롯 규칙을
@@ -898,16 +910,29 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     pending = [b["range"] for b in selected if b["range"]]
     return {
         "customer": {"성명": p.nm, "연령": p.ag, "투자성향": p.rk, "위험등급": p.grade,
-                     "적립금": won(p.bal), "수익률": f"{p.ret}% (하위 {p.retPct}%)",
+                     "평가금액": (f"{won(p.bal)} (상위 {p.balPct}%)" if p.balPct is not None
+                                else won(p.bal)),
+                     "수익률": f"{p.ret}% (하위 {p.retPct}%)",
                      "위험자산": f"{p.risk_asset}% (한도 {RISK_ASSET_CAP_PCT}%)",
-                     "거래채널": "비대면" if p.nonface else "대면"},
+                     "거래채널": "비대면" if p.nonface else "대면",
+                     "소득구간": _BRACKET_LABEL.get(p.income_bracket or "", "구간 미확인")},
         "briefing": _briefing(p),
         "conditions": [f"{c}:{CONDS[c]}" for c in conds],
-        # 왜 이 고객님인가요 — 최대 3개, 정량 중심(요건정의서 ②). 코드 산출, LLM 개입 없음.
+        # 왜 이 고객님인가요 — 최대 3개, 정량 중심(REQUIREMENTS.md ②). 코드가 수치를 산출하고,
+        # agent._write_why_this_customer() 가 LLM 해석 문장으로 교체를 시도한다(REQUIREMENTS.md §15).
+        # LLM 이 없거나 실패하면 이 규칙 문장이 그대로 남는다.
         "why_this_customer": _why_this_customer(p, conds),
-        # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(요건정의서 ④).
+        # 현재 운용상태 AI 코칭 — 국소 진단 2문장(REQUIREMENTS.md ③ §6.1). REQUIREMENTS.md §15 가 이 섹션을
+        # LLM 전용으로 지정했으므로 규칙 폴백을 두지 않는다 — agent._write_coaching() 이
+        # 채우고, LLM 이 없거나 실패하면 None 으로 남아 화면이 '생성되지 않음'을 표시한다.
+        # ⑤ 추천(_recommend)이 이미 쓰는 방식과 같다.
+        "coaching": None,
+        # LLM 전용 섹션 중 이번 호출에서 생성되지 않은 것과 그 사유. 화면이 "규칙으로 쓴 문장을
+        # AI 산출로 오인"하지 않도록, 빈 이유를 사람이 읽을 수 있게 남긴다.
+        "llm_skipped": {},
+        # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(REQUIREMENTS.md ④).
         "top_holdings": top_reference_products(),
-        # 고객님께 안내해보세요 — 가장 임박한 이벤트 1개 + 세미나 1개(요건정의서 ⑨).
+        # 고객님께 안내해보세요 — 가장 임박한 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨).
         "outreach": next_event_and_seminar(),
         "items": [{
             "id": b["spec"]["id"], "title": b["spec"]["title"], "kind": b["spec"]["kind"],
@@ -922,13 +947,22 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             "source_titles": format_sources(b["spec"].get("sources", [])),
             "regulation": b["spec"].get("regulation", ""),
         } for b in selected],
-        # 상담 화법 — 정확히 2개를 보장한다(요건정의서 ⑥). 렌더러가 별도 섹션으로 노출한다.
+        # 상담 화법 — 정확히 2개를 보장한다(REQUIREMENTS.md ⑥). 렌더러가 별도 섹션으로 노출한다.
         "talking_points": pick_talking_points(p, selected, alternatives),
-        # 예상 반론 — 정확히 2개를 보장한다(요건정의서 ⑦).
+        # 예상 반론 — 정확히 2개를 보장한다(REQUIREMENTS.md ⑦).
         "objections": pick_objections(p, selected),
-        # 상담에 참고하세요 — 노하우/가이드 스니펫 최대 2개(요건정의서 ⑧).
+        # 상담에 참고하세요 — 노하우/가이드 스니펫 최대 2개(REQUIREMENTS.md ⑧).
         "consult_resources": consult_resources(p, conds),
-        # 상담 이력 — consult_agent 가 기록한 대화이력 요약(요건정의서 §14). 읽기만 한다 —
+        # ⑦·⑧·⑨ 의 넓은 후보군. REQUIREMENTS.md §15 가 이 셋을 'DB(Rule) + 선별(LLM)' 으로 지정하므로,
+        # 조회·필터·정렬까지만 여기서 하고 최종 선별은 agent._select_db_sections() 가 맡는다.
+        # 위 세 필드(objections·consult_resources·outreach)는 LLM 선별이 실패했을 때 그대로
+        # 남는 규칙 기본값이다.
+        "pools": {
+            "objections": objection_candidates(p, selected),
+            "consult_resources": consult_resource_candidates(p),
+            "outreach": outreach_candidates(),
+        },
+        # 상담 이력 — consult_agent 가 기록한 대화이력 요약(REQUIREMENTS.md §14). 읽기만 한다 —
         # strategy_agent 는 세션 저장소에 쓰지 않는다("코드=사실" 경계를 대화이력에도 유지).
         "consult_history": summarize_for_briefing(p.id),
         # 근거 규정 — 규정 근거가 붙은 선정 항목. 적합성 원칙 등 판단의 출처를 추적 가능하게 한다.
@@ -955,7 +989,8 @@ def _perf_branch_blocked(final: list[dict], dropped: list[str], blocked: dict) -
     """실적배당 경로가 적합성 사유로 전량 차단되었는지 판정한다.
 
     행내 가이드의 핵심 절차는 실적배당 상품 안내이므로, 이 경로가 통째로 막힌 고객에게는
-    성향 재진단이 선행되어야 한다. 목업과 기존 정의에는 이 경로가 없었다.
+    성향 재진단이 선행되어야 한다. 근거 등급이 '추정'이라 플레이북(strategies.json)이 아니라
+    SYSTEM_STRATEGIES(코드)로 따로 관리하는 조건부 안전망이다.
     """
     if not any("위험등급" in v for v in blocked.values()):
         return False
@@ -995,6 +1030,111 @@ def compose_rule(facts: dict) -> str:
         return f"{clauses[0]}하고, {clauses[1]}하세요."
     mid = ", ".join(c + "하고" for c in clauses[1:-1])
     return f"{clauses[0]}한 뒤, {mid}, {clauses[-1]}하세요."
+
+
+def _josa(word: str, with_batchim: str, without_batchim: str) -> str:
+    """앞 단어의 받침 유무에 맞는 조사를 고른다('상품을' / '가이드를').
+
+    끝 글자가 한글이 아니면(영문·기호로 끝나는 상품명) 받침 없음으로 본다 — 'CP2-E와'
+    처럼 모음으로 읽히는 경우가 대부분이라 이쪽이 덜 틀린다.
+    """
+    ch = next((c for c in reversed(word) if c.isalnum()), "")
+    has = "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28
+    return with_batchim if has else without_batchim
+
+
+def _join_ko(names: list[str]) -> str:
+    """항목 이름을 '와/과'로 잇는다. 조사는 바로 앞 이름의 받침을 따른다."""
+    if not names:
+        return ""
+    if len(names) == 1:
+        return names[0]
+    head = ", ".join(names[:-1])
+    return f"{head}{_josa(names[-2], '과', '와')} {names[-1]}"
+
+
+def _sentences(text: str) -> list[str]:
+    """문장 단위로 쪼갠다. 종결부호 뒤 공백만 경계로 본다."""
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+
+
+def section_summaries(facts: dict, sentence: str, insight: str) -> dict[str, dict[str, str]]:
+    """섹션별 '접힘 상태' 요약 2줄 — 굵은 요약 한 줄 + 부연 한 줄.
+
+    화면은 ①~⑨ 를 모두 접어두고 이 두 줄만 보여준 뒤 펼치게 한다
+    (docs/REQUIREMENTS.md §2 — 섹션 정의와 접힘 규칙).
+
+    전부 코드 합성이다 — 재료(facts)에 이미 있는 문장·이름·개수만 재배열하므로 LLM 을 태우지
+    않고, 따라서 verify() 도 불필요하다(재료 이탈이 원천적으로 불가능하다). 상품명은 축약하지
+    않고 원문 그대로 쓴다 — 금융상품명을 코드가 임의로 줄이면 다른 상품으로 읽힐 수 있다.
+    내용이 없는 섹션은 키 자체를 만들지 않으므로, 화면은 키 존재 여부로 노출을 판단하면 된다.
+    """
+    out: dict[str, dict[str, str]] = {}
+
+    lines = _sentences(sentence)
+    if lines:
+        out["ai_briefing"] = {"headline": lines[0],
+                              "detail": " ".join(lines[1:]) or insight}
+
+    why = facts.get("why_this_customer") or []
+    if why:
+        out["why_this_customer"] = {"headline": why[0], "detail": " ".join(why[1:])}
+
+    if facts.get("coaching"):
+        out["current_state"] = dict(facts["coaching"])
+
+    top = facts.get("top_holdings") or []
+    if top:
+        names = [t["product_name"] for t in top]
+        out["top_holdings"] = {
+            "headline": f"{_join_ko(names)}{_josa(names[-1], '을', '를')} 많이 담고 있어요.",
+            "detail": "이 고객 대상 추천이 아니라, 고성과 고객의 운용 사례로 참고해보세요.",
+        }
+
+    reco = facts.get("recommendation")
+    if reco:
+        names = [reco["product"]["name"]]
+        if reco.get("portfolio"):
+            names.append(reco["portfolio"]["name"])
+        out["recommendation"] = {
+            "headline": f"{_join_ko(names)}{_josa(names[-1], '을', '를')} 추천해요.",
+            "detail": reco.get("combined_reason") or reco["product"]["reason"],
+        }
+
+    points = facts.get("talking_points") or []
+    if points:
+        title = points[0]["title"]
+        out["talking_points"] = {
+            "headline": f"{title}{_josa(title, '을', '를')} 짚어 이렇게 말해볼까요?",
+            "detail": points[0].get("script") or points[0]["talk"],
+        }
+
+    obj = facts.get("objections") or []
+    if obj:
+        out["objections"] = {
+            "headline": f"“{obj[0]['objection']}” 는 고객에게 이렇게 대응해보세요.",
+            "detail": obj[0]["response"],
+        }
+
+    res = facts.get("consult_resources") or []
+    if res:
+        names = [r["title"] for r in res]
+        out["consult_resources"] = {
+            "headline": f"{_join_ko(names)}{_josa(names[-1], '을', '를')} 확인해보세요.",
+            "detail": "상담의 설득력을 높이는 당행 노하우·가이드예요.",
+        }
+
+    outreach = facts.get("outreach") or {}
+    picks = [(lbl, outreach[k]) for lbl, k in (("이벤트", "event"), ("세미나", "seminar"))
+             if outreach.get(k)]
+    if picks:
+        labelled = [f"{it['name']} {lbl}" for lbl, it in picks]
+        out["outreach"] = {
+            "headline": f"{_join_ko(labelled)}{_josa(labelled[-1], '을', '를')} 안내해보세요.",
+            "detail": "고객의 관심도를 높이고 상담 후속 접점으로 활용하세요.",
+        }
+
+    return out
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1072,12 +1212,18 @@ def _get_pitch_kb_module():
 
 
 def pitch_talk(spec: dict, customer_type: str | None) -> str:
-    """spec.pitch_refs 로 연결된 화법 카드의 핵심 포인트·주의사항을 그 자리에서 가져온다.
+    """전략의 상담 화법을 가져온다. 두 갈래를 모두 지원한다.
 
-    내용을 strategies.json 에 복사해두지 않는다 — consult_agent 쪽 카드가 나중에 수정돼도 다음
-    호출부터 바로 반영되므로, 옛 talk 필드가 갖고 있던 '따로 관리되다 원본과 어긋나는' 문제가
-    구조적으로 생기지 않는다. customer_type 이 일치하는 참조가 없으면 "공통" 참조로, 그마저
-    없으면 옛 talk 필드(레거시, 마이그레이션 유예 중)로 폴백한다.
+    ① `pitch_refs` 가 있으면 연결된 화법 카드의 핵심 포인트·주의사항을 그 자리에서 조회한다.
+    내용을 strategies.json 에 복사해두지 않으므로, consult_agent 쪽 카드가 수정되면 다음
+    호출부터 바로 반영된다 — '따로 관리되다 원본과 어긋나는' 문제가 생기지 않는다.
+    customer_type 이 일치하는 참조를 먼저 찾고, 없으면 "공통" 참조를 쓴다.
+
+    ② `talk` 필드는 pitch_refs 가 없는 전략의 화법이다(현재 st.chn_retain·st.dor_contact).
+    카드 참조가 준비되지 않은 전략과, 화법 KB 자체를 못 읽는 상황(kb is None — 두 에이전트가
+    한 프로세스에 없을 때)을 함께 받는다. 폐기 대상이 아니라 이 두 경로의 정상 공급원이다.
+
+    반환값이 빈 문자열이면 그 전략은 ⑥ 화법 후보에서 제외된다(pick_talking_points 참고).
     """
     refs = spec.get("pitch_refs") or []
     pick = next((r for r in refs if r.get("customer_type") == customer_type), None) \
@@ -1099,7 +1245,7 @@ def product_return(r: dict) -> float | None:
 
 
 def candidate_pool_for_recommendation(p: Profile) -> dict[str, list[dict]]:
-    """⑤ '이런 상품이 적합할 수 있어요' 의 폐쇄 후보군(요건정의서 ⑤).
+    """⑤ '이런 상품이 적합할 수 있어요' 의 폐쇄 후보군(REQUIREMENTS.md ⑤).
 
     적합성 게이트(위험등급 상한·거래채널 — static_candidates() 가 개별 전략에 쓰는 것과 같은
     gate_static())를 통과한 상품·포트폴리오만 담는다. LLM 은 이 안에서만 상품 1개·포트폴리오
@@ -1141,7 +1287,7 @@ def recommendation_facts(p: Profile, product: dict, portfolio: dict | None) -> d
             if row:
                 products[f"포트폴리오_{row['id']}"] = f"{_product_label(row)} 비중 {a['weight_pct']}%"
     return {
-        "customer": {"연령": p.ag, "적립금": won(p.bal), "투자성향": p.rk, "수익률": f"{p.ret}%"},
+        "customer": {"연령": p.ag, "평가금액": won(p.bal), "투자성향": p.rk, "수익률": f"{p.ret}%"},
         "conditions": [],
         "briefing": {},
         "items": [{"clause": "", "evidence": "", "amount": None, "formula": "",
@@ -1174,7 +1320,7 @@ def render_recommendation(
 
 
 def consult_resources(p: Profile, conds: list[str], n: int = 2) -> list[dict]:
-    """상담에 참고하세요 — 당행 노하우/가이드 스니펫 n개(기본 2개, 요건정의서 ⑧).
+    """상담에 참고하세요 — 당행 노하우/가이드 스니펫 n개(기본 2개, REQUIREMENTS.md ⑧).
 
     프로파일만 입력이라 자연어 질문이 없다 — 성립 요건 라벨을 의사-발화로 합성해
     consult_agent.kb.retrieve() 를 그대로 호출한다(신규 검색 로직 없이 기존 n-gram+태그
@@ -1196,10 +1342,10 @@ def consult_resources(p: Profile, conds: list[str], n: int = 2) -> list[dict]:
 
 
 def top_reference_products(n: int = 2) -> list[dict]:
-    """수익률 상위 1% 고객 상품 사례 n개(기본 2개) — 요건정의서 ④.
+    """수익률 상위 1% 고객 상품 사례 n개(기본 2개) — REQUIREMENTS.md ④.
 
     고객별 필터가 없다 — 이 섹션 자체가 "이 고객에 대한 추천"이 아니라 고성과 고객의 실제
-    운용 사례를 비교·참고 정보로 보여주는 것이라고 요건정의서가 명시한다(§7). 수익률 내림차순
+    운용 사례를 비교·참고 정보로 보여주는 것이기 때문이다(REQUIREMENTS.md §7). 수익률 내림차순
     상위만 뽑는 순수 데이터 조회이며 LLM 이 개입하지 않는다.
     """
     ranked = sorted(TOP_HOLDINGS, key=lambda r: r["return_1y"], reverse=True)
@@ -1210,8 +1356,34 @@ def top_reference_products(n: int = 2) -> list[dict]:
     ]
 
 
+def _outreach_row(a: dict) -> dict:
+    return {
+        "name": a["name"], "start_date": a["start_date"], "end_date": a["end_date"],
+        "channel": a.get("channel"), "lms_message": a.get("lms_message"),
+    }
+
+
+def outreach_candidates(today: date | None = None) -> dict[str, list[dict]]:
+    """⑨ 안내 콘텐츠의 후보군 — 종료되지 않은 이벤트·세미나 전체를 임박 순으로 돌려준다.
+
+    REQUIREMENTS.md §15 는 세미나/이벤트를 '콘텐츠 DB(Rule) + 선별(LLM)' 로 지정한다. 종료 콘텐츠 제외와
+    임박 순 정렬은 규칙(여기)이 하고, 그중 어느 것이 이 고객에게 맞는지는 LLM 이 고른다
+    (agent._select_outreach). LLM 이 없으면 next_event_and_seminar() 의 첫 건이 그대로 쓰인다.
+    """
+    today = today or TODAY
+    out: dict[str, list[dict]] = {}
+    for content_type, key in (("이벤트", "event"), ("세미나", "seminar")):
+        rows = [
+            a for a in ASSETS
+            if a.get("content_type") == content_type and a.get("end_date")
+            and date.fromisoformat(a["end_date"]) >= today
+        ]
+        out[key] = [_outreach_row(a) for a in sorted(rows, key=lambda a: a["start_date"])]
+    return out
+
+
 def next_event_and_seminar(today: date | None = None) -> dict[str, dict | None]:
-    """가장 임박한 이벤트 1개 + 세미나 1개(요건정의서 ⑨ "고객님께 안내해보세요").
+    """가장 임박한 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨ "고객님께 안내해보세요").
 
     content_type 별로 종료되지 않은 것(end_date >= today) 중 start_date 오름차순 첫 건을
     고른다 — 진행 중이거나 미래 일정인 콘텐츠를 우선하고 종료된 콘텐츠는 노출하지 않는다는
@@ -1237,7 +1409,7 @@ def next_event_and_seminar(today: date | None = None) -> dict[str, dict | None]:
 
 
 def pick_talking_points(p: Profile, selected: list[dict], alternatives: list[dict], n: int = 2) -> list[dict]:
-    """대고객 TM 화법을 정확히 n개(기본 2개) 보장한다(요건정의서 ⑥ "이렇게 말해보세요").
+    """대고객 TM 화법을 정확히 n개(기본 2개) 보장한다(REQUIREMENTS.md ⑥ "이렇게 말해보세요").
 
     선정 항목(selected) 중 화법이 있는 것만으로는 개수가 보장되지 않는다 — 접촉 성격의
     전략만 pitch_refs/talk 를 갖기 때문이다(예: C5·C6 페르소나는 0개). 모자라면 대안
@@ -1274,7 +1446,7 @@ def _objection_entry(card: dict) -> dict:
 
     objection 은 고객이 실제로 할 법한 말(trigger_examples 첫 문장, 없으면 카드 제목),
     response 는 카드의 대사(dialogue 중 '행원' 발화 첫 줄)를 그대로 쓴다 — key_points 는
-    직원용 요약 불릿이라 '자연스러운 문장'을 요구하는 요건정의서 ⑦ 표시에는 부적합하다.
+    직원용 요약 불릿이라 '자연스러운 문장'을 요구하는 REQUIREMENTS.md ⑦ 표시에는 부적합하다.
     """
     triggers = card.get("trigger_examples") or []
     reply = next((d["text"] for d in (card.get("dialogue") or []) if d.get("speaker") == "행원"), None)
@@ -1285,7 +1457,7 @@ def _objection_entry(card: dict) -> dict:
 
 
 def pick_objections(p: Profile, selected: list[dict], n: int = 2) -> list[dict]:
-    """예상 반론 카드를 정확히 n개(기본 2개) 선별한다(요건정의서 ⑦ "예상 반론 및 대응 화법").
+    """예상 반론 카드를 정확히 n개(기본 2개) 선별한다(REQUIREMENTS.md ⑦ "예상 반론 및 대응 화법").
 
     1차: 선정 항목(selected)에 저작된 objection_refs 를 customer_type 매칭으로 취합한다
     (pitch_talk() 과 같은 방식 — 내용을 복사하지 않고 매 요청마다 consult_agent 쪽 원본을
@@ -1325,6 +1497,47 @@ def pick_objections(p: Profile, selected: list[dict], n: int = 2) -> list[dict]:
             picked_ids.append(cid)
 
     return [_objection_entry(by_id[cid]) for cid in picked_ids[:n]]
+
+
+def _type_eligible(card: dict, p: Profile) -> bool:
+    """이 고객에게 노출 가능한 카드인지(고객유형 적합성)만 본다. 관련도 판단은 하지 않는다."""
+    types = card["tags"].get("customer_type") or []
+    return not p.customer_type or p.customer_type in types or "공통" in types
+
+
+def objection_candidates(p: Profile, selected: list[dict]) -> list[dict]:
+    """⑦ 예상 반론의 후보군 — 이 고객에게 노출 가능한 objection 카드 '전체'.
+
+    REQUIREMENTS.md §15 가 예상 반론을 '반론 DB(Rule) + 선별(LLM)' 로 지정한다. 그래서 규칙은 적격
+    판정(고객유형)까지만 하고, 어느 반론이 이 고객 상담에 실제로 나올 법한지는 LLM 이 고른다
+    (agent._select_db_sections).
+
+    pick_objections() 와 역할이 다르다 — 그쪽은 '규칙만으로 2개를 확정' 하는 폴백이라 저작
+    순서·id 순 같은 임의 우선순위를 쓴다. 여기서 그 우선순위를 쓰면 LLM 이 규칙이 이미 고른
+    것 중에서만 고르게 되어 선별의 의미가 없어지므로, 후보를 좁히지 않는다.
+    """
+    kb = _get_pitch_kb()
+    if kb is None or not selected:
+        return []
+    return [_objection_entry(c) for c in sorted(kb.pitches, key=lambda c: c["id"])
+            if c["type"] == "objection" and _type_eligible(c, p)]
+
+
+def consult_resource_candidates(p: Profile) -> list[dict]:
+    """⑧ 상담 참고 리소스의 후보군 — 노출 가능한 guide 카드 '전체'.
+
+    consult_resources() 는 요건 라벨을 의사-발화로 합성해 n-gram 스코어링으로 상위 n개를
+    남기는데, 그건 관련도 랭킹이라 §15 가 LLM 에 맡긴 몫이다. 여기서는 걸러내지 않고 넘긴다.
+    """
+    kb = _get_pitch_kb()
+    if kb is None:
+        return []
+    return [
+        {"title": c["title"],
+         "snippet": " ".join((c.get("key_points") or [])[:2]) or (c.get("content") or "")}
+        for c in sorted(kb.pitches, key=lambda c: c["id"])
+        if c["type"] == "guide" and _type_eligible(c, p)
+    ]
 
 
 def _source_blob(kb, sid: str) -> str | None:

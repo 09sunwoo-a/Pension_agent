@@ -7,20 +7,24 @@
 ## 디렉토리
 
 ```
-pension_aftercare_agent/
+src/
 ├─ common/          공용 인프라 — LLM 클라이언트 · 데이터 규격(store·schema·kinds) · 세션이력 · 두 에이전트 교차 로더
 ├─ consult_agent/   직원 상담 대화 에이전트 — 화법 코칭을 시작으로 브리핑 질의·상담이력 등으로 넓어지는 자리 (LangGraph)
 ├─ strategy_agent/  전략 제안 에이전트 — 고객 1명 종합 → 전략 문장·근거·TOP3 (+평가 대시보드)
+├─ bff/             프론트 서빙 게이트웨이 — FastAPI JSON API + React 프론트(frontend/)
 ├─ market/          시황 소스 — 뉴스·금리를 지식으로 정제 (플레이스홀더)
 ├─ .env             공용 LLM 설정 (커밋 금지) · .env.example 참고
 └─ AUTHORING.md     데이터 소스 추가 가이드 (사내 규정·상품 등 + 저작 프롬프트)
 ```
 
+요건(화면 ①~⑨ · 상담이력 등)의 기준은 [../docs/REQUIREMENTS.md](../docs/REQUIREMENTS.md) 하나다.
+코드 주석은 외부 기획안·목업 파일을 직접 인용하지 않고 이 문서를 가리킨다.
+
 `consult_agent`는 원래 화법(pitch) 코칭 전용이었으나("pitch_agent"), 직원과의 대화 전반을
 다루는 방향으로 넓어지고 있어 이름을 바꿨다. 화법 검색 자체("pitch" 종류의 카드, `pitch_refs`)는
 여전히 이 에이전트가 다루는 기능 중 하나라 그 이름들은 그대로 남아 있다.
 
-향후: `knowhow_agent/`(영업 노하우, 팀원) · `bff/`(프론트 서빙 게이트웨이)는 같은 방식으로 붙는다.
+향후: `knowhow_agent/`(영업 노하우, 팀원)는 같은 방식으로 붙는다.
 
 ## 구조
 

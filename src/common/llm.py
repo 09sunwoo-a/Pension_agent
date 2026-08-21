@@ -1,6 +1,6 @@
 """공용 LLM 클라이언트 — 프로바이더 전환. 환경이 바뀌면 이 파일만 손대면 되도록 격리한다.
 
-호출부(nodes.py·engine.py·agent.py 등)는 provider 세부(메시지 형식·헤더·텍스트 추출)를
+호출부(pitch.py·engine.py·agent.py 등)는 provider 세부(메시지 형식·헤더·텍스트 추출)를
 몰라도 되도록 generate()/agenerate() 만 쓴다.
 
 ━━ 프로바이더 ━━

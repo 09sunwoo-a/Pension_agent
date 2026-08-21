@@ -76,9 +76,14 @@ def load_agent_modules(agent_dir: str, module_names: list[str]) -> dict[str, Mod
 
 
 def load_strategy_agent() -> dict[str, ModuleType]:
-    """strategy_agent 의 공개 진입점(engine·customer·agent)을 완전정규화 이름으로 적재한다."""
+    """strategy_agent 의 공개 진입점(engine·customer·agent·sections)을 완전정규화 이름으로 적재한다.
+
+    순서는 의존관계를 따른다 — customer·llm·prompts·sections 는 잎 모듈이고, engine·agent 가
+    그것들을 쓴다. sections 를 engine 보다 뒤에 두면 engine 이 `import sections` 하는 시점에
+    짧은 이름이 아직 걸려 있지 않아 적재가 깨진다.
+    """
     return load_agent_modules(
-        "strategy_agent", ["customer", "llm", "prompts", "engine", "agent"]
+        "strategy_agent", ["customer", "llm", "prompts", "sections", "engine", "agent"]
     )
 
 
