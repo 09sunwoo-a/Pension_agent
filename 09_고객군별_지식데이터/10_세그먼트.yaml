@@ -17,6 +17,47 @@ meta:
     adopted: true 인 값 하나만 recommended_target에 반영했다.
     adopted 선택은 이 문서 작성 시점의 제안이며 팀 확정 대상이다.
 
+# ── 고객군 간 관계 ──────────────────────────────────────────
+# 한 고객이 여러 고객군에 동시에 걸린다. 무엇을 먼저 보고, 어디로 넘기는가.
+routing:
+  # 동시 해당 시 처리 순서 (위에서부터)
+  precedence:
+    - segment: SEG-04
+      when: "전출 알림이 수신된 경우"
+      reason: "이벤트형이고 기한이 있다 — 다른 모든 고객군에 우선한다"
+    - segment: SEG-05
+      when: "ISA 만기·퇴직금 60일 타이머가 돌고 있는 경우"
+      reason: "지나면 기회가 소멸한다 (기한 > 조회형)"
+    - segment: SEG-06
+      when: "만기 D-30 상품이 있는 경우"
+      reason: "고객이 이상하게 여기지 않는 접촉 명분이고, 방치 시 SEG-02·03으로 전이된다"
+    - segment: SEG-02
+      when: "편중 조건에 해당하는 경우"
+      reason: "이탈률 1.3배 — 예방 트랙 중 근거가 가장 강하다"
+    - segment: SEG-01
+      when: "수익률 격차가 큰 경우"
+      reason: "원인(구성/상품)이 특정될 때만 제안이 나온다"
+    - segment: SEG-03
+      when: "위 어느 것에도 안 걸리지만 접점이 없는 경우"
+      reason: "상시 트랙 — 관계 형성 자체가 목적"
+
+  # 고객군 사이의 상태 전이 (방치하면 이렇게 옮겨간다)
+  transitions:
+    - {from: SEG-06, to: SEG-02, trigger: "만기 후 운용지시 없음", note: "자동 재예치 폐지로 만기자금이 현금성자산으로 상환된다"}
+    - {from: SEG-03, to: SEG-02, trigger: "퇴직금 입금 후 미운용 지속", note: "금액이 커서 즉시 편중 계좌가 된다"}
+    - {from: SEG-02, to: SEG-04, trigger: "편중 상태 방치", note: "이탈위험도 1.3배"}
+    - {from: SEG-03, to: SEG-04, trigger: "미접촉 지속", note: "관리되지 않은 계좌의 이탈은 막을 수 없다"}
+    - {from: SEG-01, to: SEG-02, trigger: "부진 펀드 매도만 하고 매수 미실행", note: "매도 대금이 현금성자산으로 남는다"}
+    - {from: SEG-04, to: SEG-05, trigger: "방어 성공 & 퇴직금 포함", note: "인출 설계 상담으로 이어진다"}
+    - {from: SEG-05, to: SEG-03, trigger: "입금 후 운용지시 없음", note: "자금이 들어와도 운용되지 않으면 방치다"}
+
+  # 어느 고객군에서도 공통으로 빼는 조건
+  common_exclusions:
+    - {rule: "연금개시·수령 중 계좌", applies_to: [SEG-01, SEG-02, SEG-03, SEG-05, SEG-06], source: KU-G-002}
+    - {rule: "'연금지급설계' 등록 계좌 (추가납 한정)", applies_to: [SEG-05], source: KU-G-011}
+    - {rule: "PB센터 관리고객 (본부 TM 명세 기준)", applies_to: [SEG-01, SEG-02], source: KU-M-010}
+    - {rule: "계좌 상태 제약 — 상품변경 진행중·환매불가·퇴직금 미입금", applies_to: [SEG-04], source: KU-M-016}
+
 segments:
 
 # ─────────────────────────────────────────────────────────────
@@ -226,6 +267,7 @@ segments:
         value: "PB센터"
         as_of: "2023~24"
         source: KU-M-010
+        note: "PB센터 관리고객은 본부 TM 명세에서 제외 — 담당 PB가 별도 관리"
       - field: "투자성향==공격투자형 AND 디폴트옵션==초저위험"
         op: "=="
         value: true
@@ -236,6 +278,7 @@ segments:
         op: "=="
         value: true
         source: KU-G-002
+        note: "투자상품 권유 제외 — 고유대 자금이 잠기면 연금수령액이 줄어든다"
 
   threshold_variants:
     - value: "고유계정대 보유비율 50% 이상 (또는 고유대+시중은행 정기예금 100%), 적립금 1천만원 이상"
