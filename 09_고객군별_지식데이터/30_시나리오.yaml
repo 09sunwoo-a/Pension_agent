@@ -1,0 +1,609 @@
+%YAML 1.2
+---
+# ============================================================
+# 30_시나리오.yaml — 고객군별 케이스 시나리오
+# 규격: 00_스키마.md § 3
+# 원칙: 분기 조건은 반드시 '고객에게 물을 질문'으로 뒤집어 적는다
+# ============================================================
+
+meta:
+  version: "1.0"
+  as_of: "2026-08-23"
+  count: 19
+  note: |
+    시나리오는 '한 고객군 안에서 고객 상태·응답에 따라 갈리는 경로'다.
+    turns의 say는 지식유닛 ID를 가리키며, 본문은 21_지식유닛_화법.yaml에만 존재한다.
+
+scenarios:
+
+# ══════════ SEG-01 수익률 저조 ══════════
+- id: SC-01-A
+  segment: SEG-01
+  name: "수익률 저조 · 전액 원리금보장 — 원인은 구성이다"
+  entry_condition:
+    - {field: 원리금보장상품_비중, op: "==", value: 1.00}
+    - {field: 계좌_1년수익률, op: "<", value: "당행 IRP 평균 - 5%p"}
+  qualifying_questions:
+    - ask: "퇴직연금 운용하시면서 궁금하시거나 상담하고 싶으신 내용이 있으신지요?"
+      branches: ["없다 → 전담직원 인사 프레임 유지", "수익이 안 난다 → 원인 설명으로 바로 진입"]
+    - ask: "예금 말고 펀드 같은 상품은 해보신 적 있으세요?"
+      branches: ["없다 → 안전자산 선호형, 규모를 30%로 낮춰 제안", "있다 → 분산투자 가능형, 포트폴리오 제안"]
+    - ask: "이 자금은 몇 년쯤 뒤에 쓰실 계획이세요?"
+      branches: ["10년 이상 → 장기 프레임 사용", "5년 이내·인출 예정 → 투자상품 권유 중단, 인출 설계로 전환"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-017, purpose: "중립적 용건으로 문 열기"}
+    - {step: 2, actor: 행원, say: KU-S-008, purpose: "시장 상황으로 개인 실패감 완화 (지적 금지)"}
+    - {step: 3, actor: 행원, say: KU-M-002, purpose: "동일 연령대 상위 고객 운용현황 대조 — 근거 제시"}
+    - {step: 4, actor: 행원, say: KU-S-006, purpose: "저수익 원인을 '구성'으로 규정 + 일부 전환 제안"}
+    - {step: 5, actor: 행원, say: KU-S-016, purpose: "규모를 낮춰 닫기 (일부만 + 되돌릴 수 있음)"}
+  objection_cards: [KU-S-002, KU-S-003, KU-S-009]
+  success_action:
+    cart_items: ["원리금보장 일부(30% 또는 500만~1천만원) → 추천펀드·TDF 전환"]
+    procedure_ku: [KU-P-002, KU-P-003]
+    memo_template: "수익률 {n}% · 원인(전액 원리금보장) 안내, {금액}원 실적배당 전환 합의. 6개월 뒤 재점검 약속."
+  partial_action:
+    cart_items: ["금액을 더 줄여 재제안 / 내점 상담 예약"]
+    note: "비대면에서 특정 펀드를 말할 수 없으므로 상품 선택은 내점 또는 앱으로 넘긴다"
+  fail_action:
+    say: KU-S-004
+    followup: "3개월 뒤 또는 다음 만기 시점 재접촉 예약"
+  prohibited: [KU-G-001, KU-G-003, KU-G-005, KU-G-002]
+  expected_conversion: null
+
+- id: SC-01-B
+  segment: SEG-01
+  name: "수익률 저조 · 부진 펀드 보유 — 사과하고 갈아탄다"
+  entry_condition:
+    - {field: 환매추천펀드_해당여부, op: "==", value: true}
+  qualifying_questions:
+    - ask: "지금 보유하신 상품, 언제쯤 가입하신 건지 기억나세요?"
+      branches: ["오래됨 → 판매중단·운용 여건 변화 설명", "최근 → 시장 요인 설명 후 유지 검토"]
+    - ask: "지금 매도하시면 손실이 확정되는데, 그래도 갈아타는 게 나을지 같이 보실까요?"
+      branches: ["동의 → 교체 진행", "거부 → 일부만 교체 재제안"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-017, purpose: "중립적 오프너"}
+    - {step: 2, actor: 행원, say: KU-S-007, purpose: "감정 인정 → 판매중단 사유 → 교체 권유"}
+    - {step: 3, actor: 행원, say: KU-S-022, purpose: "관리 미흡 사과 + 매도·재추천이라는 구체 액션"}
+    - {step: 4, actor: 행원, say: KU-S-016, purpose: "일부만 먼저로 닫기"}
+  objection_cards: [KU-S-002, KU-S-003]
+  success_action:
+    cart_items: ["부진 펀드 매도", "대체 상품 매수 (내점 또는 앱)"]
+    procedure_ku: [KU-P-002, KU-P-003]
+    memo_template: "환매추천펀드 {상품명} 보유 안내, 매도·교체 합의. 대체 상품은 {경로}로 선택 예정."
+  partial_action:
+    cart_items: ["매도만 합의, 매수는 보류 → 현금성자산 방치 위험 경고 필요"]
+    note: "매도만 하고 끝나면 SEG-02(편중)로 전이된다 — 반드시 매수까지 세트로"
+  fail_action:
+    say: KU-S-004
+    followup: "다음 분기 환매추천 목록 갱신 시 재확인"
+  prohibited: [KU-G-001, KU-G-003, KU-G-005]
+  expected_conversion: null
+
+- id: SC-01-C
+  segment: SEG-01
+  name: "수익률 저조 · '안전하게만' 고수 고객 — 숫자로 기회비용을 보인다"
+  entry_condition:
+    - {field: 투자성향, op: in, value: ["안정형", "안정추구형"]}
+    - {field: 계좌_1년수익률, op: "<", value: "정기예금 평균"}
+  qualifying_questions:
+    - ask: "지금 이 자금, 앞으로 몇 년을 더 가져가실까요?"
+      branches: ["15년 이상 → 72의 법칙·장기 프레임", "5년 이내 → 안전자산 내 금리 상향으로만 제안"]
+    - ask: "원금이 줄어드는 게 걱정이신 거죠?"
+      branches: ["그렇다 → 원리금보장 내 금리 상향(SEG-06 트랙)", "아니다, 잘 몰라서 → 상품 설명 후 소액 제안"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-017, purpose: "오프너"}
+    - {step: 2, actor: 행원, say: KU-E-011, purpose: "세 기준선 격차를 금액으로 환산해 제시"}
+    - {step: 3, actor: 행원, say: KU-S-009, purpose: "72의 법칙 — '두 배 되는 데 몇 년'"}
+    - {step: 4, actor: 행원, say: KU-S-016, purpose: "소액·가역 클로징"}
+  objection_cards: [KU-S-009, KU-S-015, KU-S-002]
+  success_action:
+    cart_items: ["일부 전환 또는 고금리 원리금보장 상품 교체"]
+    procedure_ku: [KU-P-002]
+    memo_template: "기준선 격차 {n}%p 안내, {금액}원 전환 합의."
+  partial_action:
+    cart_items: ["안전자산 내 금리 상향만 합의 → SEG-06 트랙으로 연결"]
+  fail_action:
+    say: KU-S-010
+    followup: "6개월 뒤 수익률 점검 예약 — 관계 유지가 목표"
+  prohibited: [KU-G-001, KU-G-005, KU-G-002]
+  expected_conversion: null
+
+# ══════════ SEG-02 자산편중 ══════════
+- id: SC-02-A
+  segment: SEG-02
+  name: "현금성자산 방치 — 인지시키고 희망 유형을 물어 분기 (Mission 1)"
+  entry_condition:
+    - {field: 고유계정대_보유비율, op: ">=", value: 0.50}
+    - {field: 오탐제거_2조건, op: "==", value: "통과"}
+  qualifying_questions:
+    - ask: "계좌에 운용지시가 안 된 현금성자산이 {금액}원 있는데 알고 계셨어요?"
+      branches: ["몰랐다 → 인지 유도 성공, 바로 대안 제시", "알고 있다 → 이유를 묻는다(사용 계획 여부 재확인)"]
+    - ask: "펀드 같은 실적배당형과 원금이 보존되는 원리금보장형 중 어느 쪽을 희망하세요?"
+      branches: ["원리금보장 → GIC·저축은행 정기예금 (SC-02-B로)", "실적배당 → 추천펀드·TDF", "모르겠다 → 디폴트옵션을 표준 대안으로"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-M-004, purpose: "접촉 전 오탐 제거 — 입금사유·변동 여부 확인"}
+    - {step: 1, actor: 행원, say: KU-S-005, purpose: "통화 가능 여부 (3분이면 가능한데)"}
+    - {step: 2, actor: 행원, say: KU-S-011, purpose: "Step2~4 — 현황 → 금리 비교 → 희망 유형 질문"}
+    - {step: 3, actor: 행원, say: KU-S-016, purpose: "규모를 낮춰 닫기"}
+  objection_cards: [KU-S-015, KU-S-009, KU-S-004]
+  success_action:
+    cart_items: ["현금성자산 {금액}원 → {상품} 교체매매"]
+    procedure_ku: [KU-P-002, KU-P-003]
+    memo_template: "현금성자산 {비율}% 안내, {금액}원 전환 합의. 상품변경 URL 발송 — 직원명 수기 입력 안내 완료."
+  partial_action:
+    cart_items: ["일부만 합의 → 나머지는 6개월 뒤 재점검 항목으로"]
+  fail_action:
+    say: KU-S-004
+    followup: "다음 만기 시점 또는 3개월 뒤 재접촉"
+  prohibited: [KU-G-004, KU-G-002, KU-G-006, KU-G-013]
+  expected_conversion: null
+
+- id: SC-02-B
+  segment: SEG-02
+  name: "현금성자산 + 시중은행 정기예금 100% — 같은 안전성에서 금리만 올린다 (Mission 2)"
+  entry_condition:
+    - {field: "고유계정대+시중은행정기예금_보유비율", op: "==", value: 1.00}
+  qualifying_questions:
+    - ask: "지금 보유하신 정기예금 금리가 몇 %인지 알고 계세요?"
+      branches: ["모른다 → 실측 금리 제시가 곧 오프너", "안다 → 곧바로 대안 금리와 비교"]
+    - ask: "예금자보호가 되는 상품 안에서 금리만 더 높은 걸로 바꾸시는 건 어떠세요?"
+      branches: ["긍정 → GIC·저축은행 정기예금 제안", "타행 상품이라 유지하고 싶다 → 만기 시점 재접촉 예약"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-M-027, purpose: "당월 특별제공상품 금리 조회 (상담 전 필수)"}
+    - {step: 1, actor: 행원, say: KU-S-014, purpose: "인정 → 금리 대 금리 비교 → 대안 제시"}
+    - {step: 2, actor: 행원, say: KU-F-002, purpose: "예금자보호 1억원으로 안전성 우려 해소"}
+    - {step: 3, actor: 행원, say: KU-F-021, purpose: "금리가 비슷하면 실물이전 불가 상품으로 유도 (락인)"}
+  objection_cards: [KU-S-015, KU-S-004]
+  success_action:
+    cart_items: ["시중은행 정기예금 매도 → GIC 또는 저축은행 정기예금 매수"]
+    procedure_ku: [KU-M-007, KU-P-002]
+    memo_template: "보유 정기예금 {금리}% vs 대안 {금리}% 비교 안내, {금액}원 교체 합의."
+  partial_action:
+    cart_items: ["만기 도래분부터 순차 교체 → SEG-06 트랙으로 연결"]
+  fail_action:
+    say: KU-S-004
+    followup: "보유 상품 만기 D-30 시점 재접촉 예약"
+  prohibited: [KU-G-004, KU-G-005, KU-G-013]
+  expected_conversion: null
+
+- id: SC-02-C
+  segment: SEG-02
+  name: "원리금보장 100% — 디폴트옵션(저위험 이상)을 표준 대안으로"
+  entry_condition:
+    - {field: 원리금보장상품_비중, op: "==", value: 1.00}
+    - {field: 적립금_평가금액, op: ">=", value: 3000000}
+  qualifying_questions:
+    - ask: "디폴트옵션은 등록해 두셨을까요?"
+      branches: ["미등록 → 등록 + 교체매매 세트 (SC-03-B와 동일 처리)", "초저위험 등록 → 2단계 상향 안내", "저위험 이상 → 보유상품 구성만 조정"]
+    - ask: "투자성향 검사는 언제 하셨어요?"
+      branches: ["오래됨/공격투자형인데 초저위험 → 불일치를 근거로 상향", "안정형 → 원리금보장 내 금리 상향으로"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-005, purpose: "용건 — 원리금보장상품만으로 구성되어 있어 수익률 관리 안내"}
+    - {step: 2, actor: 행원, say: KU-S-006, purpose: "구성이 원인임을 짚고 일부 전환"}
+    - {step: 3, actor: 행원, say: KU-F-005, purpose: "디폴트옵션 설명 요구 시 제도 개요"}
+    - {step: 4, actor: 행원, say: KU-M-014, purpose: "⚠ 초저위험 → 저위험 이상은 2단계 거래임을 미리 알린다"}
+  objection_cards: [KU-S-009, KU-S-015, KU-S-004]
+  success_action:
+    cart_items: ["디폴트옵션 등급 변경 (등록/변경)", "보유상품 변경 (매도 + 매수)"]
+    procedure_ku: [KU-P-011, KU-P-002]
+    memo_template: "원리금보장 100% 안내, 디폴트옵션 {등급} 상향 합의. ⓐ등록변경 + ⓑ보유상품변경 2단계 처리 완료 여부 확인 필요."
+  partial_action:
+    cart_items: ["ⓐ만 처리된 경우 → ⓑ 미완료 알림 필수"]
+    note: "여기서 멈추면 절반 처리 — 자금이 움직이지 않는다"
+  fail_action:
+    say: KU-S-016
+    followup: "6개월 뒤 재점검"
+  prohibited: [KU-G-004, KU-G-003, KU-G-002]
+  expected_conversion: null
+
+# ══════════ SEG-03 방치 ══════════
+- id: SC-03-A
+  segment: SEG-03
+  name: "퇴직금 입금 후 운용지시 미실행 — 편중으로 전이되기 전에 잡는다"
+  entry_condition:
+    - {field: 퇴직금_입금여부, op: "==", value: true}
+    - {field: 운용지시_실행여부, op: "==", value: false}
+  qualifying_questions:
+    - ask: "퇴직금이 IRP로 잘 들어온 건 확인하셨죠? 지금 어떤 상품으로 운용되고 있는지도 보셨어요?"
+      branches: ["몰랐다 → 미운용 상태 인지시키기", "알고 있다 → 사용 계획 여부 확인"]
+    - ask: "이 자금 중 당장 쓰실 부분이 있으세요?"
+      branches: ["있다 → 그 금액은 남기고 나머지만 운용", "없다 → 전액 운용 설계"]
+    - ask: "연금으로 나눠 받으실 계획이세요, 일시금으로 쓰실 계획이세요?"
+      branches: ["연금 → 투자가능기간을 수령 종료 시점까지 재계산", "일시금 → 인출 설계 우선, 투자상품 권유 중단"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-M-013, purpose: "운용지시 여부·금액 확인"}
+    - {step: 1, actor: 행원, say: KU-S-017, purpose: "전담직원 인사 오프너"}
+    - {step: 2, actor: 행원, say: KU-S-011, purpose: "미운용 금액 인지 + 희망 유형 질문"}
+    - {step: 3, actor: 행원, say: KU-S-018, purpose: "방치 = 연금수령액 감소 프레이밍"}
+  objection_cards: [KU-S-019, KU-S-015, KU-S-004]
+  success_action:
+    cart_items: ["미운용 자금 {금액}원 운용지시", "디폴트옵션 등록(미등록 시)"]
+    procedure_ku: [KU-P-002, KU-P-011]
+    memo_template: "퇴직금 입금 후 미운용 {금액}원 안내, 운용지시 합의."
+  partial_action:
+    cart_items: ["일부만 운용 → 잔여분은 다음 접촉 항목"]
+  fail_action:
+    say: KU-S-004
+    followup: "1개월 뒤 운용지시 실행 여부 재확인"
+  prohibited: [KU-G-002, KU-G-004, KU-G-003]
+  expected_conversion: null
+
+- id: SC-03-B
+  segment: SEG-03
+  name: "디폴트옵션 미등록 + 현금성자산 보유 — 등록과 교체매매를 세트로"
+  entry_condition:
+    - {field: 디폴트옵션_등록여부, op: "==", value: false}
+    - {field: 현금성자산_금액, op: ">", value: 0}
+  qualifying_questions:
+    - ask: "만기된 예금이 자동으로 재예치되지 않는다는 건 알고 계셨어요?"
+      branches: ["몰랐다 → 제도 변경 설명이 곧 명분", "안다 → 바로 등록 권유"]
+    - ask: "스타뱅킹으로 연금상품 관리해 보신 적 있으세요?"
+      branches: ["있다 → 링크 발송 (권유직원 입력 안내 필수)", "없다 → 내점 상담예약 또는 [04-12-660] 상담연계"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-038, purpose: "재예치 폐지를 근거로 등록 권유"}
+    - {step: 2, actor: 행원, say: KU-S-013, purpose: "기존 자금 교체매매 + 향후 만기 자동화를 세트로"}
+    - {step: 3, actor: 행원, say: KU-F-004, purpose: "적용 유예기간 안내 (2주 / 4+2주 / 옵트인 즉시)"}
+    - {step: 4, actor: 행원, say: KU-P-003, purpose: "URL 발송 시 권유직원 수기 입력 안내"}
+  objection_cards: [KU-S-019, KU-S-004]
+  success_action:
+    cart_items: ["디폴트옵션 사전지정 등록", "고유대 자금 교체매매"]
+    procedure_ku: [KU-P-011, KU-P-004]
+    memo_template: "디폴트옵션 미등록 + 현금성자산 {금액}원 안내, 등록·교체매매 세트 합의."
+  partial_action:
+    cart_items: ["등록만 완료 → 교체매매 미완료 알림 필수"]
+    note: "⚠ 등록만으로는 기존 고유대 자금이 움직이지 않는다"
+  fail_action:
+    say: KU-S-004
+    followup: "다음 만기 시점 재접촉"
+  prohibited: [KU-G-004, KU-G-007, KU-G-002]
+  expected_conversion: null
+
+- id: SC-03-C
+  segment: SEG-03
+  name: "관리 사각지대(비대면 신규·권유직원 부재) — 관계를 여는 첫 접촉"
+  entry_condition:
+    - {field: "비대면신규 AND 권유직원_부재", op: "==", value: true}
+  qualifying_questions:
+    - ask: "혹시 연금 관련해서 지금까지 상담받으신 적 있으세요?"
+      branches: ["없다 → 전담 지정과 정기 점검 약속이 핵심 제안", "있다 → 다른 지점·기관 관리 상태 확인"]
+    - ask: "다른 금융기관에도 연금 계좌가 있으세요?"
+      branches: ["있다 → 세금우대조회로 보유 지형 정리 제안", "없다 → 당행 계좌 관리에 집중"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-P-004, purpose: "발송 중복·동의 확인"}
+    - {step: 1, actor: 행원, say: KU-S-017, purpose: "전담직원 인사 — 첫 접점 만들기"}
+    - {step: 2, actor: 행원, say: KU-S-001, purpose: "고객이 모르는 자기 현황을 정리해 보여주는 프레임"}
+    - {step: 3, actor: 행원, say: KU-M-011, purpose: "6개월~1년 정기 점검 주기 약속"}
+    - {step: 4, actor: 행원, say: KU-P-005, purpose: "셀프 점검 경로 안내"}
+  objection_cards: [KU-S-019, KU-S-004, KU-S-003]
+  success_action:
+    cart_items: ["전담직원 지정", "정기 점검 일정 등록"]
+    procedure_ku: [KU-P-005]
+    memo_template: "관리 사각 계좌 첫 접촉. 전담 지정 완료, {날짜} 정기 점검 예약."
+  partial_action:
+    cart_items: ["연락처·상담 동의만 확보 → 다음 접촉 기반"]
+  fail_action:
+    say: KU-S-004
+    followup: "6개월 뒤 재접촉 — 관계 형성 자체가 목표"
+  prohibited: [KU-G-006, KU-G-007, KU-G-004]
+  expected_conversion: null
+
+# ══════════ SEG-04 이탈가능성 높음 ══════════
+- id: SC-04-A
+  segment: SEG-04
+  name: "전출 알림 수신 — 경청 우선 6단계 (모든 이탈 케이스의 골격)"
+  entry_condition:
+    - {field: 계약이전_전출신청_접수, op: "==", value: true}
+  qualifying_questions:
+    - ask: "계약이전 신청이 접수되어 연락드렸습니다. 퇴직연금을 관리하시면서 어떤 불편이 있으셨나요?"
+      branches:
+        - "수수료 → SC-04-B"
+        - "ETF·상품 라인업 → SC-04-C"
+        - "수익률·관리 소홀 → SC-04-D"
+        - "대출 동반 → KU-S-028로 판단 기준 분리"
+        - "이유를 말하지 않음 → 진행 절차 안내 후 재통화 약속"
+    - ask: "이전은 현금으로 옮기시는 건가요, 상품 그대로 옮기시는 건가요?"
+      branches: ["현금이전 → 중도해지 손실 계산 제시", "실물이전 → 이전 불가 상품 확인 후 손실 제시"]
+    - ask: "지금 계좌에 퇴직금이 들어 있으신가요?"
+      branches: ["있다 → SC-04-D 말미의 인출 설계 2차 방어로 반드시 연결", "없다 → 사유별 대안으로 종료"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-M-017, purpose: "통화 전 4단계 사전 진단 — 손실을 숫자로 준비"}
+    - {step: 1, actor: 행원, say: KU-S-025, purpose: "Step01~03 인사·목적, 그리고 경청"}
+    - {step: 2, actor: 고객, say: null, purpose: "이탈 사유 발화 — 여기서 분기가 결정된다"}
+    - {step: 3, actor: 행원, say: KU-S-026, purpose: "Step04 보유 상품별 손실 리스크를 금액으로"}
+    - {step: 4, actor: 행원, say: KU-M-015, purpose: "Step05 사유별 대안 (하위 시나리오로 분기)"}
+    - {step: 5, actor: 행원, say: KU-S-027, purpose: "Step06 성공/실패별 클로징"}
+  objection_cards: [KU-S-020, KU-S-021, KU-S-022, KU-S-028]
+  success_action:
+    cart_items: ["전출 취소 처리", "약속한 개선 조치(리밸런싱·수수료 전환) 등록"]
+    procedure_ku: [KU-P-006]
+    memo_template: "전출 신청 접수({일자}) 방어. 이탈 사유: {사유}. 대안 {내용} 제시 후 취소 합의. 녹취·CRM 등록 완료."
+  partial_action:
+    cart_items: ["결정 유보 — 재통화 약속"]
+    note: "VIP는 '통화 한 번만 해보시고 결정' 형태의 최소 행동 요청이 표준 (KU-S-024)"
+  fail_action:
+    say: KU-S-027
+    followup: "이전 완료 후 재유치 트랙으로 이관 · 필요 시 KB증권 소개(KU-M-018)"
+  prohibited: [KU-G-008, KU-G-009, KU-G-005, KU-G-010]
+  expected_conversion: null
+
+- id: SC-04-B
+  segment: SEG-04
+  name: "이탈 사유 = 수수료 — 조건 분기로 면제 카드를 먼저 꺼낸다"
+  entry_condition:
+    - {field: 이탈사유, op: "==", value: "수수료"}
+  qualifying_questions:
+    - ask: "만 55세는 넘으셨을까요?"
+      branches: ["예 → 연금개시 시 수수료 면제 / 수시인출 등록으로도 면제", "아니오 → 다음 질문"]
+    - ask: "지금 계좌에 퇴직금이 5천만원 이상 들어 있으신가요?"
+      branches: ["예 → 비대면 전환 시 퇴직금 수수료 면제", "아니오 → 대면→비대면 전환 인하"]
+    - ask: "이 계좌, 창구에서 만드신 계좌인가요?"
+      branches: ["예 → 비대면 전환 대상", "아니오(비대면) → 요율 비교와 관리 가치로 전환"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-F-010, purpose: "[04-12-613]으로 현재·전환 후 수수료를 숫자로 확보"}
+    - {step: 1, actor: 행원, say: KU-S-020, purpose: "조건 분기별 면제·인하 카드"}
+    - {step: 2, actor: 행원, say: KU-F-011, purpose: "장기할인 논거 (사실 확인된 범위 내에서)"}
+    - {step: 3, actor: 행원, say: KU-S-020, purpose: "그래도 발생하면 '수수료보다 관리'로 프레임 전환"}
+  objection_cards: [KU-S-020, KU-S-003]
+  success_action:
+    cart_items: ["비대면계좌 전환", "전출 취소"]
+    procedure_ku: [KU-P-003, KU-P-006]
+    memo_template: "수수료 불만 → {면제조건} 안내, 비대면 전환 합의. 적용 시점 고지 완료."
+  partial_action:
+    cart_items: ["수수료 비교표만 발송 → 재통화 약속"]
+  fail_action:
+    say: KU-S-027
+    followup: "KB증권 소개 검토(KU-M-018)"
+  prohibited: [KU-G-009, KU-G-005, KU-G-008]
+  expected_conversion: null
+
+- id: SC-04-C
+  segment: SEG-04
+  name: "이탈 사유 = ETF·상품 라인업 — 인정하고 라인업 안에서 답을 찾는다"
+  entry_condition:
+    - {field: 이탈사유, op: in, value: ["ETF 투자 목적", "ETF 상품 수 불만"]}
+  qualifying_questions:
+    - ask: "어떤 지수나 테마에 투자하고 싶으신 건가요?"
+      branches: ["대표지수 → 당행 라인업 내 동일 지수 상품 제시", "특정 테마 → 90/10 원칙 또는 계좌 분리 제안"]
+    - ask: "적립금 전체를 ETF로 운용하고 싶으신 건가요?"
+      branches: ["예 → 주식형·혼합형 70% + 채권형·채권혼합형 30% 조합 제시", "일부 → 비중 설계"]
+    - ask: "직접 매매를 자주 하실 계획이세요?"
+      branches: ["예 → 3분 체결·금액주문 설명 + 잦은 매매의 위험 안내", "아니오 → TDF·포트폴리오가 더 적합"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-021, purpose: "종수 열위를 인정하고 '선별 라인업'으로 전환"}
+    - {step: 2, actor: 행원, say: KU-F-008, purpose: "ETF 거래 방식(비대면 전용·3분 체결·금액주문) 설명"}
+    - {step: 3, actor: 행원, say: KU-F-007, purpose: "70% 한도 안에서 실질 주식비중을 최대로 구성하는 방법"}
+    - {step: 4, actor: 행원, say: KU-E-007, purpose: "ETF vs 공모펀드 3년 수익률 논거 (기준 확인 후)"}
+  objection_cards: [KU-S-021, KU-S-002]
+  success_action:
+    cart_items: ["ETF 편입 운용지시 (현금성자산 전환 후 매수 2단계)", "전출 취소"]
+    procedure_ku: [KU-P-002]
+    memo_template: "ETF 사유 이탈 → 라인업 내 {상품} 제시, 운용지시 합의."
+  partial_action:
+    cart_items: ["원하는 상품이 없는 경우 → 계좌 분리·유사상품 대안 제시"]
+  fail_action:
+    say: KU-S-027
+    followup: "KB증권 소개 검토(KU-M-018)"
+  prohibited: [KU-G-009, KU-G-005, KU-G-008]
+  expected_conversion: null
+
+- id: SC-04-D
+  segment: SEG-04
+  name: "이탈 사유 = 수익률·관리 불만 — 사과가 먼저, 그리고 퇴직금이면 한 번 더"
+  entry_condition:
+    - {field: 이탈사유, op: in, value: ["수익률 부진", "자산관리 미흡"]}
+  qualifying_questions:
+    - ask: "지금 어떤 상품으로 운용되고 계신지 함께 보실까요?"
+      branches: ["전액 원리금보장 → 구성이 원인임을 설명", "부진 펀드 보유 → 사과 후 매도·재추천"]
+    - ask: "고객님은 저희 VIP 고객님이신데, 어떤 점이 가장 불편하셨나요?"
+      branches: ["관리 접점 → 1:1 상담 서비스 제안 + 결정 유보", "수익률 → 위 분기로"]
+    - ask: "지금 계좌에 퇴직금이 들어 있으신가요?"
+      branches: ["있다 → 인출 설계·골든라이프센터로 2차 방어", "없다 → 리밸런싱 합의로 종료"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-022, purpose: "사과 → 원인 규명 → 즉시 리밸런싱 3단"}
+    - {step: 2, actor: 행원, say: KU-S-024, purpose: "VIP인 경우 등급 인정 → 1:1 상담 → 결정 유보"}
+    - {step: 3, actor: 행원, say: KU-S-023, purpose: "퇴직금 포함 시 인출 설계로 주제 전환 (2차 방어)"}
+    - {step: 4, actor: 행원, say: KU-S-027, purpose: "클로징"}
+  objection_cards: [KU-S-002, KU-S-003, KU-S-022]
+  success_action:
+    cart_items: ["리밸런싱 실행", "골든라이프센터 상담 예약", "전출 취소"]
+    procedure_ku: [KU-P-006]
+    memo_template: "수익률·관리 불만 → 사과 및 원인 안내, 리밸런싱 합의. 골든라이프센터 예약 {일자}."
+  partial_action:
+    cart_items: ["1:1 상담 예약만 확보 → 결정 유보 상태 유지"]
+    note: "이 상태에서 약속한 관리 행동을 실제로 이행하지 않으면 재이탈로 직결된다"
+  fail_action:
+    say: KU-S-027
+    followup: "1개월 뒤 상태 재확인 · 재유치 트랙 이관"
+  prohibited: [KU-G-008, KU-G-005, KU-G-001, KU-G-009]
+  expected_conversion: null
+
+# ══════════ SEG-05 세액공제·추가입금 ══════════
+- id: SC-05-A
+  segment: SEG-05
+  name: "ISA 만기 — 60일 골든타임 (기한 트랙 최우선)"
+  entry_condition:
+    - {field: ISA_만기도래_또는_만기해지후_60일미경과, op: "==", value: true}
+    - {field: 연금개시여부, op: "==", value: false}
+  qualifying_questions:
+    - ask: "ISA 만기자금, 당장 사용하실 계획이 있으세요?"
+      branches: ["없다 → 전액 전환 제안", "일부 필요 → 부분 전환 (전부·일부 선택 가능)"]
+    - ask: "연말정산 환급을 늘리는 게 목표세요, 노후 재원으로 옮기시는 게 목표세요?"
+      branches: ["환급 → 3040 피칭 (전환금 10% 추가 공제)", "노후 재원 → 5060 피칭", "종합과세 회피 → 고액자산가 피칭"]
+    - ask: "다른 금융기관 ISA도 있으신가요?"
+      branches: ["있다 → 마이데이터로 만기 확인 후 함께 설계", "없다 → 당행 건만 처리"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-G-011, purpose: "[02-12-223] 연금개시 여부 확인 (필수 선행)"}
+    - {step: 1, actor: 행원, say: KU-S-032, purpose: "60일 골든타임 + 두 가지 혜택"}
+    - {step: 2, actor: 행원, say: KU-S-034, purpose: "고객 유형별 피칭으로 전환"}
+    - {step: 3, actor: 행원, say: KU-M-024, purpose: "3년 주기 재순환 사이클 제시 (클로징)"}
+  objection_cards: [KU-S-031, KU-S-004]
+  success_action:
+    cart_items: ["ISA 만기자금 {금액}원 IRP 입금", "세액공제 이월 전환 신청(별도)"]
+    procedure_ku: [KU-P-009]
+    memo_template: "ISA 만기({일자}) 자금 {금액}원 IRP 전환 합의. 추가 공제 한도 {금액}원 안내."
+  partial_action:
+    cart_items: ["일부만 전환 → 잔여 기한 내 재접촉 예약"]
+  fail_action:
+    say: KU-S-004
+    followup: "만기 후 60일 D-7 시점 재접촉 (기한 소멸 전 마지막 기회)"
+  prohibited: [KU-G-011, KU-G-005]
+  expected_conversion: null
+
+- id: SC-05-B
+  segment: SEG-05
+  name: "세액공제 잔여한도 — 자동이체 증액 (습관 트랙)"
+  entry_condition:
+    - {field: 당해_세액공제_잔여한도, op: ">", value: 0}
+    - {field: 최근3년_납입이력, op: "==", value: true}
+  qualifying_questions:
+    - ask: "작년에 IRP에 얼마 넣으셨는지 기억나세요?"
+      branches: ["모른다 → 연도별 납입액 표 제시가 곧 오프너", "안다 → 잔여한도로 바로 진입"]
+    - ask: "다른 금융기관 연금계좌에도 납입하고 계세요?"
+      branches: ["있다 → [06-12-151] 합산 한도 확인 필수", "없다 → 당행 기준으로 진행"]
+    - ask: "매달 자동이체로 하시는 게 편하세요, 연말에 한 번에 넣으시는 게 편하세요?"
+      branches: ["자동이체 → 증액 제안", "일시 납입 → 11월 마감 안내 + 재접촉 예약"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-P-008, purpose: "연합회 합산 한도 + 연금개시 여부 확인"}
+    - {step: 1, actor: 행원, say: KU-S-029, purpose: "작년 미소진 사실 확인 + 자동이체 증액 제안"}
+    - {step: 2, actor: 행원, say: KU-S-035, purpose: "환급액을 금액으로 체감시키기"}
+    - {step: 3, actor: 행원, say: KU-M-022, purpose: "11월이 실질 마감임을 알리고 시점을 못 박는다"}
+  objection_cards: [KU-S-031, KU-S-019, KU-S-004]
+  success_action:
+    cart_items: ["자동이체 증액 등록 또는 추가 입금"]
+    procedure_ku: [KU-P-008]
+    memo_template: "잔여한도 {금액}원 안내, 자동이체 {금액}원 증액 합의."
+  partial_action:
+    cart_items: ["소액(자기부담금 최소 단위)만 합의 → 연말 재접촉"]
+  fail_action:
+    say: KU-S-029
+    followup: "11월 첫 주 재접촉 예약"
+  prohibited: [KU-G-011, KU-G-013]
+  expected_conversion: null
+
+- id: SC-05-C
+  segment: SEG-05
+  name: "퇴직금 통장 수령 — 60일 내 IRP 입금으로 세금을 돌려받는다"
+  entry_condition:
+    - {field: 퇴직금_입출금통장_수령, op: "==", value: true}
+    - {field: 지급일_경과일수, op: "<=", value: 60}
+  qualifying_questions:
+    - ask: "만 55세는 넘으셨을까요?"
+      branches: ["예 → IRP 의무수령 + 연금수령한도 내 퇴직소득세 30% 감면 논거", "아니오 → 환급·과세이연 논거"]
+    - ask: "이 자금 중 당장 쓰셔야 할 부분이 얼마나 되세요?"
+      branches: ["전액 필요 → 일부만이라도 경유 제안", "여유 있음 → 전액 입금 설계"]
+    - ask: "퇴직 후 건강보험료 부담은 생각해 보셨어요?"
+      branches: ["걱정한다 → 건보료 논거가 결정타", "아니다 → 환급 금액 논거 중심"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-033, purpose: "환급 논리 + 금액 예시 + 만55세·건보료 논거"}
+    - {step: 2, actor: 행원, say: KU-F-016, purpose: "60일 기한과 부분 입금 가능 사실"}
+    - {step: 3, actor: 행원, say: KU-E-009, purpose: "(내부) 기대 전환율 26.5% — 접촉량 판단"}
+  objection_cards: [KU-S-004, KU-S-031]
+  success_action:
+    cart_items: ["퇴직금 IRP 입금", "과세이연 등록 및 서류 발송", "입금 후 운용지시 (SC-03-A로 연결)"]
+    procedure_ku: [KU-P-009]
+    memo_template: "퇴직금 통장 수령({일자}) 확인, 60일 내 IRP 입금 {금액}원 합의. 과세이연 등록 예정."
+  partial_action:
+    cart_items: ["일부 금액만 입금 → 나머지는 기한 내 재검토"]
+  fail_action:
+    say: KU-S-004
+    followup: "지급일 D+50 재접촉 (기한 소멸 전 마지막 기회)"
+  prohibited: [KU-G-005, KU-G-011]
+  expected_conversion:
+    baseline: "26.5%"
+    as_of: "2025.03~2026.02"
+    source: KU-E-009
+
+# ══════════ SEG-06 예금·GIC 만기예정 ══════════
+- id: SC-06-A
+  segment: SEG-06
+  name: "만기 D-30 · 안전자산 선호형 — 같은 안전성에서 금리만 올린다"
+  entry_condition:
+    - {field: 보유상품_만기잔여일수, op: "<=", value: 30}
+    - {field: 펀드이력, op: "==", value: false}
+  qualifying_questions:
+    - ask: "정기예금으로만 운용하시는 건 원금손실 걱정 때문이시죠?"
+      branches: ["그렇다 → 원리금보장 내 금리 상향으로 확정", "아니다, 몰라서 → SC-06-B 검토"]
+    - ask: "만기 전인데 지금 신청이 가능한지 궁금하시죠?"
+      branches: ["예 → 만기 1개월 전부터 예약변경 가능 안내 + URL 발송"]
+    - ask: "스타뱅킹 쓰고 계세요?"
+      branches: ["예 → 예약변경 URL 발송", "아니오 → 내점 예약 또는 [04-12-660] 상담연계(원리금보장만 가능)"]
+  turns:
+    - {step: 0, actor: 행원, say: KU-M-027, purpose: "당월 특별제공상품 금리 조회 (월말 매수 주의)"}
+    - {step: 1, actor: 행원, say: KU-S-036, purpose: "만기 사실 알림 → 이유 대신 말해주기 → 대안 제시"}
+    - {step: 2, actor: 행원, say: KU-F-002, purpose: "예금자보호 1억원"}
+    - {step: 3, actor: 행원, say: KU-S-039, purpose: "'금리 갈아타기가 곧 관리' 비유로 명분 강화"}
+    - {step: 4, actor: 행원, say: KU-P-011, purpose: "만기 예약변경 실행"}
+  objection_cards: [KU-S-015, KU-S-004]
+  success_action:
+    cart_items: ["만기 예약변경 (저축은행 정기예금 또는 GIC)"]
+    procedure_ku: [KU-P-011, KU-P-003]
+    memo_template: "만기({일자}) {금액}원 안내, {상품} {금리}% 재예치 예약 합의."
+  partial_action:
+    cart_items: ["일부만 재예치, 나머지는 만기일 재상담"]
+  fail_action:
+    say: KU-S-004
+    followup: "만기일 +7일 현금성자산 상환 여부 확인 → SEG-02·SEG-03 라우팅"
+  prohibited: [KU-G-004, KU-G-013, KU-G-005]
+  expected_conversion: null
+
+- id: SC-06-B
+  segment: SEG-06
+  name: "만기 D-30 · 분산투자 가능형 — 일부를 추천펀드·TDF로"
+  entry_condition:
+    - {field: 보유상품_만기잔여일수, op: "<=", value: 30}
+    - {field: 펀드이력, op: "==", value: true}
+  qualifying_questions:
+    - ask: "만기 후 일부 금액을 펀드 같은 상품으로 운용해 보시는 건 어떠세요?"
+      branches: ["긍정 → 규모 협의", "부정 → SC-06-A 트랙으로"]
+    - ask: "은퇴가 언제쯤이세요?"
+      branches: ["연도 확인 → TDF 빈티지 산출", "연금 수령 중·예정 → 투자가능기간 재계산 또는 권유 중단"]
+    - ask: "전체 중 어느 정도를 투자상품으로 가져가면 편하시겠어요?"
+      branches: ["30% 수준 → 표준 제안", "그 이상 → 위험자산 70% 한도 확인"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-037, purpose: "손실 가능성 인정 → 장기 프레임 → 일부 운용 제안"}
+    - {step: 2, actor: 행원, say: KU-F-009, purpose: "TDF 빈티지 설명 (은퇴 연도 계산)"}
+    - {step: 3, actor: 행원, say: KU-F-007, purpose: "위험자산 70% 한도 안내"}
+    - {step: 4, actor: 행원, say: KU-S-016, purpose: "일부만 먼저 클로징"}
+  objection_cards: [KU-S-009, KU-S-004, KU-S-010]
+  success_action:
+    cart_items: ["만기 예약변경 — 일부 원리금보장 재예치 + 일부 TDF·추천펀드"]
+    procedure_ku: [KU-P-011, KU-P-003]
+    memo_template: "만기({일자}) {금액}원 중 {금액}원 실적배당 전환 합의. 상품 선택은 {경로}."
+  partial_action:
+    cart_items: ["전액 재예치로 후퇴 → 6개월 뒤 재점검"]
+  fail_action:
+    say: KU-S-004
+    followup: "다음 만기 D-30 재접촉"
+  prohibited: [KU-G-003, KU-G-002, KU-G-005]
+  expected_conversion: null
+
+- id: SC-06-C
+  segment: SEG-06
+  name: "만기 D-30 · 디폴트옵션 미등록 — 예방적 등록 (최우선 트랙)"
+  entry_condition:
+    - {field: 보유상품_만기잔여일수, op: "<=", value: 30}
+    - {field: 디폴트옵션_등록여부, op: "==", value: false}
+    - {field: 적립금_평가금액, op: ">=", value: 5000000}
+  qualifying_questions:
+    - ask: "만기된 예금이 예전처럼 자동으로 재예치되지 않는다는 건 알고 계셨어요?"
+      branches: ["몰랐다 → 제도 설명이 곧 명분", "안다 → 바로 등록·예약변경 권유"]
+    - ask: "투자성향은 어느 정도로 보고 계세요?"
+      branches: ["안정형 → 저위험 등급 제안", "중립 이상 → 중·고위험 등급 검토"]
+  turns:
+    - {step: 1, actor: 행원, say: KU-S-038, purpose: "재예치 폐지 근거 → 사전지정 등록 권유"}
+    - {step: 2, actor: 행원, say: KU-F-005, purpose: "디폴트옵션 제도·등급 설명"}
+    - {step: 3, actor: 행원, say: KU-M-014, purpose: "기존 고유대 자금 교체매매를 세트로"}
+    - {step: 4, actor: 행원, say: KU-P-011, purpose: "등록 + 만기 예약변경 동시 처리"}
+  objection_cards: [KU-S-019, KU-S-015, KU-S-004]
+  success_action:
+    cart_items: ["디폴트옵션 사전지정 등록", "만기 예약변경", "기존 고유대 교체매매(있는 경우)"]
+    procedure_ku: [KU-P-011, KU-P-004]
+    memo_template: "만기({일자}) + 디폴트옵션 미등록 안내, 등록 및 예약변경 합의."
+  partial_action:
+    cart_items: ["등록만 완료 → 교체매매 미완료 알림"]
+    note: "⚠ 등록만으로는 기존 자금이 움직이지 않는다"
+  fail_action:
+    say: KU-S-004
+    followup: "만기일 +7일 상태 확인 → 미조치면 SEG-03으로 라우팅"
+  prohibited: [KU-G-004, KU-G-007, KU-G-013]
+  expected_conversion: null

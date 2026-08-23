@@ -1,0 +1,1047 @@
+%YAML 1.2
+---
+# ============================================================
+# 22_지식유닛_팩트_절차_금지.yaml (3/3) — 팩트(F) · 절차(P) · 금지(G)
+# 규격: 00_스키마.md § 2
+# ============================================================
+
+meta:
+  version: "1.0"
+  as_of: "2026-08-23"
+  part: "3/3 — fact, procedure, guardrail"
+
+units:
+
+# ─────────────── fact (제도·상품 팩트) ───────────────
+- id: KU-F-001
+  type: fact
+  title: "고유계정대(현금성자산) 금리의 성격 — 콜금리 수준 일변동 대기성 금리"
+  segments: [SEG-02]
+  trigger: "현금성자산의 이자를 설명할 때"
+  body: |
+    고유계정대에 적용되는 금리는 상품 금리가 아니라 자금이 대기하는 동안 적용되는
+    초단기 변동금리(콜금리 수준)다. 매일 변동한다.
+    조회: [04-12-642] 고유계정대 이자조회
+  numbers:
+    - {label: "고유계정대 평균", value: "2.52%", as_of: "2026.05", verify: false}
+    - {label: "고유계정대 실측", value: "2.76%", as_of: "2026.08.03", verify: false}
+  screens: ["[04-12-642]"]
+  cautions: ["금리 전망을 말하지 않고 당일 실측치로만 비교한다"]
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F59", org: "-", date: "2026"}
+  origin_ref: "팩트 F59"
+  trust: 본부공식
+  disclosure: 표현변경후
+  status: 기준시점병기조건부
+  confidence: high
+  related: [KU-S-015, KU-E-011]
+
+- id: KU-F-002
+  type: fact
+  title: "예금자보호 한도 — 1인당 1억원"
+  segments: [SEG-02, SEG-06]
+  trigger: "저축은행 정기예금·GIC의 안전성을 설명할 때"
+  body: |
+    예금자보호 한도는 1인당 1억원(판매회사별 보호상품 합산)이다.
+    2021년 자료의 "5천만원" 표기는 제도 변경 전 기준으로 실효.
+  numbers:
+    - {label: "예금자보호 한도", value: "1억원", as_of: "2026.06", verify: false}
+  screens: []
+  cautions: ["과거 자료의 5천만원 표기를 그대로 인용하지 않는다"]
+  source: {doc: "KBthink / Series1", section: "F22", org: "-", date: "2026"}
+  origin_ref: "팩트 F22 / 방법론 117번"
+  trust: 대외공개
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-S-014, KU-S-036]
+
+- id: KU-F-003
+  type: fact
+  title: "원리금보장상품 특성 — GIC / ELB·DLB"
+  segments: [SEG-02, SEG-06]
+  trigger: "재예치 상품을 비교 설명할 때"
+  body: |
+    GIC(이율보증형보험)는 보험사가 확정이율을 보증하는 상품으로,
+    일반 정기예금 대비 금리가 높은 경우가 많고 예금자보호 대상이다.
+    ELB·DLB는 원금보장형 파생결합사채로 조건에 따라 수익률이 달라진다.
+    당행 특별제공상품은 주로 GIC(3년제)와 저축은행 정기예금으로 구성된다.
+  numbers: []
+  screens: ["[04-12-17A]"]
+  cautions: ["원리금보장상품은 상담 전 잔여한도를 반드시 확인"]
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F23", org: "-", date: "2026"}
+  origin_ref: "팩트 F23"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-019]
+
+- id: KU-F-004
+  type: fact
+  title: "디폴트옵션 적용 유예기간 — 신규 입금 2주 / 만기 후 6주(4+2주) / 옵트인 즉시"
+  segments: [SEG-03, SEG-06]
+  trigger: "미조치 판정 전 상태 확인 / 고객에게 적용 시점을 안내할 때"
+  body: |
+    ① 신규 입금 후 2주간 운용지시가 없으면 적용
+    ② 기존 상품 만기 후 6주 — 만기일부터 4주간 지시 없으면 가입자 안내 후 2주 뒤 적용
+    ③ 옵트인(Opt-In) — 대기 기간 없이 즉시 운용. 단 이미 디폴트옵션 운용 중이면 같은 상품으로만 가능
+  numbers:
+    - {label: "신규 입금 유예", value: "2주", as_of: "2026.07", verify: false}
+    - {label: "만기 후 유예", value: "6주 (4+2주)", as_of: "2026.07", verify: false}
+  screens: []
+  cautions: ["유예 중인 계좌를 '미조치'로 판정하지 않는다"]
+  source: {doc: "KB Think 디폴트옵션 제도", section: "적용 케이스·FAQ", org: "-", date: "2026.07"}
+  origin_ref: "팩트 F16 / 화법 71번 원문4"
+  trust: 대외공개
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-005, KU-F-006]
+
+- id: KU-F-005
+  type: fact
+  title: "디폴트옵션 제도 개요 — 위험등급 4단계·포트폴리오 10종·성향 대응"
+  segments: [SEG-03]
+  trigger: "디폴트옵션이 무엇인지 설명을 요구받을 때"
+  body: |
+    가입자가 별도의 운용지시를 하지 않는 경우 사전에 정해둔 방법으로 퇴직연금을 운용하는 제도.
+    위험등급은 초저위험 / 저위험 / 중위험 / 고위험 4단계이며,
+    당행 포트폴리오는 10종(예금 / 예금+TDF / TDF 100% 구성)으로 투자성향별 가입 가능 등급이 정해진다.
+    초저위험은 정기예금만으로 구성된다.
+  numbers:
+    - {label: "포트폴리오 종수", value: "10종", as_of: "2026.07", verify: false}
+  screens: []
+  cautions: []
+  source: {doc: "KB Think / 오늘의할일 스크립트", section: "F16·F17", org: "-", date: "2026.07"}
+  origin_ref: "팩트 F16·F17"
+  trust: 대외공개
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-004]
+
+- id: KU-F-006
+  type: fact
+  title: "정기예금 자동 재예치 폐지 (2023.7) — 만기 후 현금성자산으로 상환"
+  segments: [SEG-06, SEG-03]
+  trigger: "만기 안내의 근거를 제시할 때"
+  body: |
+    2023년 7월 근로자퇴직급여보장법 개정으로 디폴트옵션이 시행되면서
+    퇴직연금 내 정기예금의 자동 재예치 제도가 폐지됐다.
+    만기 시 재운용 지시가 없으면 만기자금은 대기 중인 현금성자산으로 상환되고,
+    디폴트옵션이 등록돼 있으면 유예기간 후 디폴트옵션으로 운용된다.
+  numbers:
+    - {label: "시행일", value: "2023.07.12", as_of: "2023", verify: false}
+  screens: []
+  cautions: ["'이제 시행되었습니다'류 도입기 표현은 실효"]
+  source: {doc: "오늘의할일 시트34 / KB Think", section: "F18", org: "-", date: "2023~2026"}
+  origin_ref: "팩트 F18"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-M-025, KU-S-038]
+
+- id: KU-F-007
+  type: fact
+  title: "위험자산 70% 한도 — 범위·초과 시 조치·예외"
+  segments: [SEG-02, SEG-06]
+  trigger: "실적배당 비중을 올릴 때 / 한도 초과 계좌를 발견했을 때"
+  body: |
+    위험자산은 전체 적립금의 70%까지 보유할 수 있다.
+    초과 시 해소 방법은 두 가지뿐 — ① 안전자산 교체매매 ② 추가입금 후 안전자산 운용지시.
+    예외: 적격TDF·디폴트옵션은 100% 운용 가능.
+    70% 한도 안에서 실질 주식비중은 최대 약 94%까지 구성할 수 있다.
+    확인: [04-12-354] 컴플라이언스 위반점검 현황조회 → 조회구분 '위험자산투자한도위반'
+    (고객명·위반기준일·위반일수·한도초과상품·초과금액·보유가능금액 확인)
+  numbers:
+    - {label: "위험자산 한도", value: "70%", as_of: "2026", verify: false}
+  screens: ["[04-12-354]"]
+  cautions: ["위반일수 데이터로 방치 기간 기준 우선순위를 매길 수 있다"]
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트 / Hot Tip 205618", section: "F12·F13·F14", org: "-", date: "2026.04"}
+  origin_ref: "팩트 F12·F13·F14 / SEG 54번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-008]
+
+- id: KU-F-008
+  type: fact
+  title: "투자가능상품 3분류와 5종 — 상품군별 보수 서열"
+  segments: [SEG-02, SEG-06]
+  trigger: "상품 선택지를 설명할 때"
+  body: |
+    3분류: 원리금보장형 / 실적배당형 / 디폴트옵션
+    5종: 정기예금·GIC·ELB(원리금보장) / 펀드·ETF(실적배당)
+    보수 서열은 일반적으로 ETF < 인덱스펀드 < 액티브펀드 순으로 낮다.
+    ETF 거래는 비대면 전용이며 3분 주기 분할매매·금액주문 방식이다.
+  numbers:
+    - {label: "ETF 취급 종수", value: "약 260종", as_of: "2026.07", verify: true}
+  screens: ["[04-12-17A]"]
+  cautions: ["ETF 편입은 현금성자산 전환 후 매수의 2단계이며 15:15가 당일 체결 분기점"]
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F11·F19·F20", org: "-", date: "2026"}
+  origin_ref: "팩트 F11·F19·F20"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-007, KU-S-021]
+
+- id: KU-F-009
+  type: fact
+  title: "TDF — 빈티지 선택 공식과 글라이드 패스"
+  segments: [SEG-06, SEG-02]
+  trigger: "TDF를 제안할 때"
+  body: |
+    TDF는 상품을 고르는 게 아니라 은퇴 연도를 계산하는 상품이다.
+    빈티지 = 고객의 은퇴 예상 연도. 숫자가 클수록 주식 비중이 높고,
+    은퇴 시점이 가까워질수록 자동으로 위험자산 비중이 줄어든다(글라이드 패스).
+    헤지형·언헤지형 선택도 함께 안내한다.
+    오프너 한 문장: "은퇴가 언제쯤이세요?"
+  numbers:
+    - {label: "라인업", value: "18종", as_of: "2026", verify: true}
+  screens: ["[04-12-17A]"]
+  cautions:
+    - "과거 자료의 예시 빈티지(2015-2025 등)를 그대로 쓰지 않고 고객 은퇴시점으로 재산정"
+    - "연금으로 나눠 받을 고객은 투자가능기간을 '연금 수령 종료 시점'까지 다시 계산"
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F15", org: "-", date: "2026"}
+  origin_ref: "팩트 F15 / 방법론 11·61·68번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-S-037]
+
+- id: KU-F-010
+  type: fact
+  title: "수수료 — 요율 구간과 면제·인하 3분기"
+  segments: [SEG-04]
+  trigger: "수수료 불만에 숫자로 답해야 할 때"
+  body: |
+    대고객 표준(KBthink 공개 기준): 사용자부담금 연 0%~0.45% / 가입자부담금 연 0.21%~0.28%.
+    면제·인하 카드 3분기:
+    ① 만 55세 이상 + 연금 수령 개시 → 운용·자산관리 수수료 면제
+    ② 퇴직금 5천만원 이상 + 비대면 계좌 → 연금개시 전에도 면제
+    ③ 그 외 → 대면 계좌를 비대면으로 전환 시 인하 (2025.10부터 가능)
+    부과 방식: 매년 후취. 대면→비대면 전환 시 전환일 다음날 이후 첫 납입일부터 적용.
+    조회: [04-12-613] 수수료 예상조회로 현재·전환 후 수수료를 숫자로 확보.
+  numbers:
+    - {label: "사용자부담금", value: "연 0%~0.45%", as_of: "2026.06", verify: false}
+    - {label: "가입자부담금", value: "연 0.21%~0.28%", as_of: "2026.06", verify: false}
+  screens: ["[04-12-613]"]
+  cautions:
+    - "자료별 수수료율이 4갈래로 상충 — 대고객 인용은 KBthink 공개 기준으로 통일"
+    - "⚠ 사전 고지: 전환 적용 시점을 반드시 함께 말한다"
+  source: {doc: "KB Think / 보물지도 / 스타런 교육영상", section: "F50·F52·F53·F55", org: "-", date: "2026"}
+  origin_ref: "팩트 F50·F52·F53·F55 / SEG 12·37번"
+  trust: 대외공개
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-S-020, KU-F-011]
+
+- id: KU-F-011
+  type: fact
+  title: "장기계약 할인과 가입기간 승계 비대칭"
+  segments: [SEG-04]
+  trigger: "증권사 이전을 막는 추가 논거가 필요할 때"
+  body: |
+    장기계약 할인: 2년차 10% ~ 8년차 이상 20%. DB/DC → IRP 전환 시 소급 적용.
+    현장 논거: 타 금융기관 → KB로 이전 시 과거 가입기간이 인정되어 장기할인이 적용되지만,
+    KB → 증권사 이전 시에는 가입기간이 소멸한다는 설명이 반복된다.
+  numbers:
+    - {label: "장기할인율", value: "2년차 10% ~ 8년차 이상 20%", as_of: "2026.03", verify: false}
+  screens: []
+  cautions:
+    - "가입기간 승계 비대칭은 타사 정책에 대한 주장 — 사실 확인 전 대고객 사용 금지"
+    - "타사 비방으로 읽히지 않게 표현을 다듬는다 (KU-G-009)"
+  source: {doc: "보물지도 / Hot Tip 204696", section: "F51·F57", org: "-", date: "2026"}
+  origin_ref: "팩트 F51·F57 / 화법 59번"
+  trust: 현장팁
+  disclosure: 표현변경후
+  status: 검증필요
+  confidence: medium
+  related: [KU-F-010, KU-G-009]
+
+- id: KU-F-012
+  type: fact
+  title: "실물이전 제도 — 2024.10 시행, 동일 제도·동일 상품 조건"
+  segments: [SEG-04]
+  trigger: "계약이전 방식과 손실 여부를 설명할 때"
+  body: |
+    2024년 10월 말 시행. 동일 제도·동일 상품일 때만 실물 그대로 이전되고,
+    사업자 단독 제공 상품은 현금화된다.
+    타사 보유 상품과 당행 라인업 대조는 [04-12-333]에서 신청 전에 한다.
+    타행 디폴트옵션은 사전 해지해야 이전된다.
+    신청이 곧 확정이 아니며 「본인 의사확인」에서 고객이 최종 결정한다.
+  numbers:
+    - {label: "시행", value: "2024.10", as_of: "2024", verify: false}
+  screens: ["[04-12-333]", "[06-AD-020]", "[04-12-646]"]
+  cautions: []
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트 / 05_업무처리절차", section: "F25 / 절차 30·31·32", org: "-", date: "2024~2026"}
+  origin_ref: "팩트 F25 / 절차 30~32번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-M-016, KU-E-008]
+
+- id: KU-F-013
+  type: fact
+  title: "납입한도와 세액공제 — 1,800만원 / 900만원 / 16.5%·13.2% / 최대 148.5만원"
+  segments: [SEG-05]
+  trigger: "추가납 상담의 기본 수치"
+  body: |
+    · 연간 납입한도 1,800만원 (연금저축·DC 개인부담금 합산)
+    · 세액공제 한도 900만원 (연금저축 단독은 600만원, IRP 포함 시 900만원)
+    · 공제율 총급여 5,500만원 이하 16.5% / 초과 13.2%
+    · 최대 환급 148.5만원 (900만원 × 16.5%)
+    한도는 당행+타행 합산 기준이므로 [06-12-151] 연합회 한도 조회로 확인한다.
+  numbers:
+    - {label: "연간 납입한도", value: "1,800만원", as_of: "2026", verify: false}
+    - {label: "세액공제 한도", value: "900만원", as_of: "2026", verify: false}
+    - {label: "공제율", value: "16.5% / 13.2%", as_of: "2026", verify: false}
+    - {label: "최대 환급", value: "148.5만원", as_of: "2026", verify: false}
+  screens: ["[06-12-151]"]
+  cautions: []
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F1·F2·F3", org: "-", date: "2026"}
+  origin_ref: "팩트 F1·F2·F3"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-S-029, KU-P-008]
+
+- id: KU-F-014
+  type: fact
+  title: "ISA 만기 전환 특례 — 60일·전환금 10%(300만원 한도)·납입한도 예외"
+  segments: [SEG-05]
+  trigger: "ISA 만기자금 전환을 설명할 때"
+  body: |
+    · 만기일로부터 60일 이내 IRP 입금 (전부 또는 일부)
+    · 전환금액의 10%(최대 300만원)까지 세액공제 한도 추가 → 기본 900만원 + 300만원 = 1,200만원
+    · 연 1,800만원 납입한도와 무관하게 전액 전환 가능
+    · 횟수 무제한, 타행 ISA도 대상
+    처리: [01-12-213] 'ISA 만기자금 입금'. 세액공제 이월은 전환 신청을 별도로 한다.
+  numbers:
+    - {label: "기한", value: "60일", as_of: "2026.03", verify: false}
+    - {label: "추가 공제", value: "전환금액 10%, 최대 300만원", as_of: "2026.03", verify: true}
+  screens: ["[01-12-213]", "[04-10-099]"]
+  cautions:
+    - "총급여 구간별 상세값(300만원 / 1,388,000원)과 '최대 300만원'의 현행 기준 확인 필요"
+  source: {doc: "보물지도 / 05_업무처리절차 48번", section: "F4", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "팩트 F4 / 절차 48번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 기준시점병기조건부
+  confidence: high
+  related: [KU-M-024, KU-S-032]
+
+- id: KU-F-015
+  type: fact
+  title: "세액공제 초과분(900만~1,800만원) — 과세이연 + 인출 시 과세제외 + 이연 공제 신청"
+  segments: [SEG-05]
+  trigger: "1,800만원 한도까지 채우기를 권할 때"
+  body: |
+    · 세액공제를 받지 않은 납입분도 운용 중 과세이연 혜택을 받는다
+    · 수령 시 세액공제 받지 않은 적립금에는 과세하지 않는다
+    · 올해 초과 납입분을 다음 해 세액공제분으로 이연 신청할 수 있다
+    · 운용 중 이자·배당·평가차익은 비과세 재투자되고 금융소득종합과세에서 제외된다
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F5·F7", org: "-", date: "2026"}
+  origin_ref: "팩트 F5·F7"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-S-030, KU-E-010]
+
+- id: KU-F-016
+  type: fact
+  title: "퇴직금 60일 내 IRP 입금 — 퇴직소득세 환급(과세이연)"
+  segments: [SEG-05]
+  trigger: "퇴직금을 통장으로 받은 고객을 상담할 때"
+  body: |
+    퇴직급여 지급일로부터 60일 이내에 IRP로 입금하면 차감된 퇴직소득세를 환급받는다.
+    이미 일시금으로 받은 뒤에도, 일부 금액만으로도 가능하다.
+    만 55세 이상은 퇴직금 IRP 의무수령 대상이며, 예외는 만 55세 이후 퇴직 또는 300만원 이하뿐이다.
+    인출 시에는 연금수령한도 내에서 퇴직소득세 30~50% 감면(수령 연차에 따라 3단)을 받는다.
+    처리: [06-12-501] 등록 → 60일 내 입금 → 서류 발송 → 수정 요청 → 세금 환급(익월 10일 회계부 전금).
+  numbers:
+    - {label: "기한", value: "지급일로부터 60일", as_of: "2026", verify: false}
+    - {label: "퇴직소득세 감면", value: "30% / 40% / 50% 3단", as_of: "2026", verify: false}
+  screens: ["[06-12-501]", "[02-12-221]", "[04-12-199]"]
+  cautions:
+    - "원천징수영수증은 항목 번호가 아니라 항목 이름으로 확인 (번호가 자료마다 다름)"
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트 / 05_업무처리절차", section: "F47·F33·F40 / 절차 41~46", org: "-", date: "2026"}
+  origin_ref: "팩트 F33·F40·F47 / 절차 41·46번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-S-033, KU-E-009]
+
+- id: KU-F-017
+  type: fact
+  title: "추가납입 특례 — 주택 다운사이징 / 기초연금수급자 부동산 양도차익 (각 1억원)"
+  segments: [SEG-05]
+  trigger: "시니어 고객의 부동산 자금이 화제에 오를 때"
+  body: |
+    납입한도(1,800만원) 밖에서 추가 유입이 가능한 두 경로가 있다.
+    ① 주택 다운사이징 차액 (1억원 한도)
+    ② 기초연금수급자의 부동산 양도차익 (1억원 한도)
+  numbers:
+    - {label: "각 한도", value: "1억원", as_of: "2026", verify: false}
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F6", org: "-", date: "2026"}
+  origin_ref: "팩트 F6 / 방법론 89번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-013]
+
+- id: KU-F-018
+  type: fact
+  title: "원리금보장상품 금리는 고정 팩트로 인용 불가 — 조회 화면으로만 안내"
+  segments: [SEG-06, SEG-02]
+  trigger: "금리를 말해야 할 때"
+  body: |
+    원리금보장상품 금리는 월 단위로 확정·변동되므로 지식데이터에 고정값으로 넣지 않는다.
+    상담 전 [04-12-17A] NEW 퇴직연금상품조회 또는 당월 「퇴직연금 원리금보장 특별제공상품 안내」
+    (연금사업본부 홈페이지, 매월 마지막 영업일 게시)로 확인한다.
+    화법에서는 {금리} 슬롯으로 비워 둔다.
+  numbers: []
+  screens: ["[04-12-17A]"]
+  cautions: ["7/31 매수 시 8월 금리가 적용된다 — 월말 매수 주의"]
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트 / 05_업무처리절차 15번", section: "F65", org: "-", date: "2026"}
+  origin_ref: "팩트 F65 / 절차 15번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-027, KU-F-019]
+
+- id: KU-F-019
+  type: fact
+  title: "특별제공상품 금리 실측 이력 (기준시점 필수) — 참고용"
+  segments: [SEG-06]
+  trigger: "금리 격차의 크기를 감각적으로 판단할 때 (내부용)"
+  body: |
+    현장 자료에 기록된 실측치 — 상담 인용이 아니라 격차 감각용이다.
+    · KB손해보험 퇴직연금 GIC 3년: 3.15%('25.9) / 3.00%('25.10) / 3.05%('25.11)
+    · 디폴트옵션 안정형 3년 고정: 2% 초반 (같은 시기)
+    · 개인형IRP 정기예금: 3년 3.8% / 1년 3.46% ('26.5.13 기준)
+    → 특별제공상품과 디폴트옵션 초저위험의 격차가 약 1%p 수준으로 반복 관찰된다.
+  numbers:
+    - {label: "GIC 3년", value: "3.00~3.15%", as_of: "2025.09~11", verify: false}
+    - {label: "디폴트옵션 안정형", value: "2% 초반", as_of: "2025.09~11", verify: true}
+    - {label: "IRP 정기예금", value: "3년 3.8% / 1년 3.46%", as_of: "2026.05.13", verify: false}
+  screens: ["[04-12-17A]"]
+  cautions:
+    - "⚠ 이 수치를 상담에 그대로 인용하지 않는다 — 반드시 당월 자료로 대체"
+  source: {doc: "Hot Tip 203753 / 206004", section: "-", org: "서전주지점 / 부산종합금융센터", date: "2025.10~2026.05"}
+  origin_ref: "화법 70번 / 방법론 76번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 기준시점병기조건부
+  confidence: medium
+  related: [KU-F-018]
+
+- id: KU-F-020
+  type: fact
+  title: "수익률·순위 인용 규칙 — 기준시점·비교모집단·출처를 붙여서만"
+  segments: [SEG-01, SEG-04]
+  trigger: "당행 수익률·순위를 말하려 할 때"
+  body: |
+    자료별 기준연도가 2024·2025·2026 세 갈래로 갈린다.
+    · 실적배당 은행권 1위: '24.3분기 14.61% / '25.1분기말 / '26.1분기
+    · 디폴트옵션 고위험 은행권 1위: '24.2분기 20.59%
+    · 디폴트옵션 개인형IRP 은행권 1위·전체 42개사 중 2위: '25.4분기
+    · 금감원 공시 원리금비보장 장기수익률: 3·7년 1위, 5·10년 2위 ('26.1분기)
+    상담 시점에 가장 가까운 공시로 갱신해 쓰고, 확신이 없으면 정성 표현으로만 말한다.
+  numbers: []
+  screens: []
+  cautions:
+    - "분기 표기 없이 '1위'만 말하는 것은 금지 (KU-G-005)"
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트 / 05_업무처리절차 69번", section: "F60·F62·F63", org: "-", date: "2024~2026"}
+  origin_ref: "팩트 F60·F62 / 절차 69번"
+  trust: 본부공식
+  disclosure: 표현변경후
+  status: 기준시점병기조건부
+  confidence: medium
+  related: [KU-E-013, KU-G-005]
+
+- id: KU-F-021
+  type: fact
+  title: "타사로 실물이전이 불가한 당행 원리금보장상품 — 락인 설계 재료"
+  segments: [SEG-06, SEG-04]
+  trigger: "제안 상품 간 금리가 비슷할 때 / 자금 유출이 예상될 때"
+  body: |
+    KB라이프생명 GIC, 수협은행 정기예금 등 당행 단독 제공 상품은 타사로 실물이전이 되지 않는다.
+    금리가 비슷하다면 이런 상품으로 유도하는 것이 사전 이탈 잠금(락인) 설계다.
+    디폴트옵션 상품도 실물이전 대상에서 제외된다.
+  numbers: []
+  screens: ["[04-12-333]"]
+  cautions:
+    - "고객에게는 '이전이 안 된다'가 아니라 금리·안전성 논거로 설명한다"
+    - "이전 시 현금화 손실이 발생할 수 있음은 사전 고지 대상"
+  source: {doc: "06_주제별_추출지식/04_제도상품팩트", section: "F24", org: "-", date: "2026"}
+  origin_ref: "팩트 F24 / 방법론 42·108번"
+  trust: 본부공식
+  disclosure: 표현변경후
+  status: 확정
+  confidence: high
+  related: [KU-S-014, KU-M-016]
+
+# ─────────────── procedure (업무처리 절차) ───────────────
+- id: KU-P-001
+  type: procedure
+  title: "적립금·수익률 조회 경로와 진단 0단계"
+  segments: [SEG-01]
+  trigger: "고객 계좌를 처음 열 때"
+  body: |
+    1. [04-12-642] 적립금 및 수익률 조회 — 기본 화면 (싱글뷰 우클릭 또는 화면번호 직접 호출)
+    2. 본부 표준 흐름: [04-12-641] 보유현황 → [06-12-151] 한도 → 대화
+    3. 현장 표준 흐름: 싱글뷰 → [04-10-099] 세금우대조회 (연금 보유 지형을 여는 진단 0단계)
+    4. 비교 근거는 [06-12-631] 고객포털, 추천 포트폴리오는 WiseNet에서 준비
+  numbers: []
+  screens: ["[04-12-642]", "[04-12-641]", "[04-10-099]", "[06-12-631]", "[06-12-151]"]
+  cautions: []
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "1·2·6번", org: "-", date: "2026"}
+  origin_ref: "절차 1·2·6번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-008]
+
+- id: KU-P-002
+  type: procedure
+  title: "보유상품 교체매매 3경로와 채널별 제약"
+  segments: [SEG-02]
+  trigger: "리밸런싱 실행 채널을 정할 때"
+  body: |
+    1. KB스타뱅킹 (현장 표준 — 창구는 시간이 오래 걸리고 녹취가 발생한다)
+    2. 영업점 창구
+    3. 전용상담센터 전화 (1599-0099 / 1833-3700) — 원리금보장상품만 처리 가능
+    내점·비대면이 모두 어려우면 [04-12-660] 상담연계등록에 「퇴직연금 교체매매」로 등록한다.
+    (상담 후 상담내용을 상세히 작성해야 함)
+  numbers: []
+  screens: ["[04-12-660]"]
+  cautions:
+    - "스타뱅킹 접속 링크·메뉴 경로는 자료마다 달라 하드코딩 금지"
+    - "컨설팅센터 연계는 '예금 → 예금'만 가능"
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "16·17·27·60번", org: "-", date: "2026"}
+  origin_ref: "절차 16·17·27·60번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-P-003]
+
+- id: KU-P-003
+  type: procedure
+  title: "비대면 상품변경 시 '권유직원' 입력 안내 — 안 하면 실적이 증발한다"
+  segments: [SEG-02, SEG-03]
+  trigger: "고객에게 상품변경 URL을 발송할 때"
+  body: |
+    URL로 상품변경을 하면 발송한 직원의 이름·점코드가 자동 입력되지 않는다.
+    고객이 관리희망부점과 직원명을 수기로 입력해야 실적이 인정된다.
+    발송 시 이 안내를 반드시 함께 한다. 미입력 시 정정 화면은 [06-12-625].
+    비대면계좌 전환은 '변경 전 계좌가 대면계좌'면 대상이며,
+    변경일 다음날부터 첫 도래 수수료 납입일에 적용된다.
+  numbers: []
+  screens: ["[06-12-625]", "[75-08-110]"]
+  cautions:
+    - "⚠ 이 안내를 빠뜨리면 처리는 되고 실적만 사라진다"
+  source: {doc: "Hot Tip 207754 / 05_업무처리절차", section: "25·26번", org: "영등포하이테크종합금융센터", date: "2026.08"}
+  origin_ref: "절차 25·26번 / 화법 69번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-P-002]
+
+- id: KU-P-004
+  type: procedure
+  title: "발송 전 확인 — 동의 채널·중복 발송"
+  segments: [SEG-03]
+  trigger: "고객에게 링크·안내를 발송하기 직전"
+  body: |
+    1. 발송 화면 3종: [75-08-110] 콘텐츠 지정 발송 / [75-08-850] 모바일브랜치 LMS / 싱글뷰 「url발송하기」
+    2. [75-08-430] 고객별 발송조회로 본부 자동발송 LMS와의 중복을 확인
+    3. 발송은 '동의 고객 + 동의 채널'에 한정 — 화면 3곳에서 SMS거절·마케팅거절 여부 확인
+  numbers: []
+  screens: ["[75-08-110]", "[75-08-850]", "[75-08-430]"]
+  cautions: ["중복 발송은 고객 피로도를 높이고 민원으로 이어진다"]
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "57·58·59번", org: "-", date: "2026"}
+  origin_ref: "절차 57·58·59번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-G-007]
+
+- id: KU-P-005
+  type: procedure
+  title: "고객 셀프 점검·변경 경로 안내 — 접촉 부담 없이 사이클을 돌린다"
+  segments: [SEG-03]
+  trigger: "재접촉 빈도를 늘리기 어려운 계좌"
+  body: |
+    스타뱅킹에서 고객이 직접 확인·변경할 수 있는 경로를 가르쳐 둔다.
+    · 가입상품관리 > 퇴직연금 > 적립금·수익률 조회
+    · 상품 매매(교체매매·만기 예약변경)
+    · 정보·서류관리 > 계좌정보 > 비대면계좌로 간편전환
+    · 「전문가상담 예약」으로 KB골든라이프센터 연결
+  numbers: []
+  screens: []
+  cautions: ["앱 메뉴 경로는 개편될 수 있으므로 하드코딩하지 않는다"]
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론", section: "84번", org: "-", date: "2026"}
+  origin_ref: "방법론 84번 / 화법 37번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-M-011]
+
+- id: KU-P-006
+  type: procedure
+  title: "이탈방어 성공 시 처리 3단 — 녹취 → 전출취소 → CRM 등록"
+  segments: [SEG-04]
+  trigger: "고객이 이전 신청을 취소하기로 했을 때"
+  body: |
+    1. [72-01-801] 개인싱글뷰 통화버튼으로 취소의사 녹취
+    2. [06-AD-080] 전출취소(해제) 실행
+    3. CRM에 상담내용 등록
+    고객이 직접 취소하는 경로: 카카오톡 알림톡 [이전의사확인 바로가기] → [이전 미동의],
+    또는 스타뱅킹에서 이전 신청 취소.
+  numbers: []
+  screens: ["[72-01-801]", "[06-AD-080]"]
+  cautions:
+    - "⚠ 녹취 없이 취소 처리하면 증적이 남지 않는다"
+    - "CRM 기록은 다음 상담의 재료가 된다 — 미뤄서는 안 되는 마지막 단계"
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1 / 05_업무처리절차 34번", section: "이탈방어", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "절차 34번 / 화법 36번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-027]
+
+- id: KU-P-007
+  type: procedure
+  title: "이전의사 확인 절차와 진행 추적 — 무응답 구간이 마지막 기회"
+  segments: [SEG-04]
+  trigger: "전출 진행 상태를 감시할 때"
+  body: |
+    진행 순서: 1차 알림톡 Link(당일 18시 이후) → 2차 AI콜봇(익일 10시·14시) → 미확인 시 자동취소.
+    상대 기관의 회유 전화는 최대 3번까지 올 수 있다.
+    전입 건이 고객 동의 없이 취소·거절되면 [04-12-646]으로 전문을 확인하고 사유별로 재신청한다.
+    [06-AD-080]을 수시로 조회해 상태 변화를 감시한다 —
+    "고객은 동의 완료된 줄 알고 계셨다"는 사고가 반복된다.
+  numbers: []
+  screens: ["[06-AD-080]", "[04-12-646]"]
+  cautions:
+    - "무응답으로 자동취소되는 구간이 마지막 방어 기회다"
+  source: {doc: "06_주제별_추출지식/05_업무처리절차 / Hot Tip 203917", section: "33·35번", org: "-", date: "2025~2026"}
+  origin_ref: "절차 33·35번 / 방법론 107번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-P-006]
+
+- id: KU-P-008
+  type: procedure
+  title: "잔여한도 확인 2경로 — 타사 납입분까지 본다"
+  segments: [SEG-05]
+  trigger: "추가납 권유 전"
+  body: |
+    1. [06-12-151] 개인부담금 연합회 한도 조회 (기본)
+    2. 타사 연금납입정보: 전자증명서 출력 [06-7E-001] 또는 [06-10-182] 집중조회
+       — 둘 다 금융거래정보제공요청동의서 징구 필수
+    3. [04-12-644] 퇴직연금 거래내역으로 당해 입금 이력 확인
+    4. [02-12-223]으로 연금개시 여부 확인 (개시 계좌는 추가입금 불가)
+  numbers: []
+  screens: ["[06-12-151]", "[06-7E-001]", "[06-10-182]", "[04-12-644]", "[02-12-223]"]
+  cautions:
+    - "⚠ 동의서 없이 타 기관 연금정보를 조회하지 않는다"
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "5·12번", org: "-", date: "2026"}
+  origin_ref: "절차 5·12번 / 방법론 55번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-G-011, KU-F-013]
+
+- id: KU-P-009
+  type: procedure
+  title: "ISA 만기자금 입금 처리"
+  segments: [SEG-05]
+  trigger: "ISA 만기자금을 IRP로 옮기기로 합의했을 때"
+  body: |
+    1. 대상 확인: [04-10-099] 세금우대관련조회 (저축종류 83 — 만기 ISA 전환)
+       또는 경영정보시스템 수신만기도래계좌명세(과목 099)
+    2. 만기일로부터 60일 이내 [01-12-213] 'ISA 만기자금 입금'으로 처리
+    3. 세액공제 이월은 전환 신청을 별도로 진행
+    타행 ISA는 마이데이터로 만기 시점을 확인한다.
+  numbers: []
+  screens: ["[04-10-099]", "[01-12-213]"]
+  cautions:
+    - "ISA 해지금액 입금 시 자동 발송되는 안내문자를 후속 마케팅 트리거로 활용 가능"
+  source: {doc: "06_주제별_추출지식/05_업무처리절차 48번 / Hot Tip 204287", section: "-", org: "-", date: "2026"}
+  origin_ref: "절차 48번 / SEG 45번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-F-014]
+
+- id: KU-P-010
+  type: procedure
+  title: "세액공제 미신청금액 등록 — 계약해지·연금개시 전 필수 점검"
+  segments: [SEG-05]
+  trigger: "고객이 해지 또는 연금개시를 앞두고 있을 때"
+  body: |
+    '연금보험료 등 소득·세액공제 확인서'로 세액공제 미신청금액을 확인해
+    [06-12-622]에 납입연도별로 등록한다.
+    등록하지 않으면 이미 세금을 낸 원금에 다시 과세될 수 있다.
+    ISA 전환 고객의 이월공제는 [06-12-651]·[06-12-627]과 연결된다.
+  numbers: []
+  screens: ["[06-12-622]", "[06-12-651]", "[06-12-627]"]
+  cautions:
+    - "화면번호가 게시글 간 갈린다 — 현행 화면 확인 필요"
+    - "'미등록 시 이중과세' 인과는 자료에 명시 문장이 없다 — 팀 검증 대상"
+  source: {doc: "Hot Tip 199713 / 200518 / 05_업무처리절차 13번", section: "-", org: "연금상품부", date: "2025.03"}
+  origin_ref: "절차 13번 / SEG 46번 / 팩트 F8"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-G-012]
+
+- id: KU-P-011
+  type: procedure
+  title: "만기 자금 처리 — 만기 1개월 전 예약변경"
+  segments: [SEG-06]
+  trigger: "만기 D-30 고객의 실행 단계"
+  body: |
+    1. 만기 1개월 전부터 예약변경 거래가 가능하다
+    2. 디폴트옵션 미등록이면 사전지정 등록 + 만기 예약변경을 함께 처리
+    3. 비대면 실행이면 상품변경 URL 발송 (권유직원 수기 입력 안내 필수 — KU-P-003)
+    4. 디폴트옵션 등급 상향은 ⓐ 사전지정운용제도 등록/변경 → ⓑ 보유상품 변경 2단계
+  numbers: []
+  screens: ["[75-08-110]"]
+  cautions:
+    - "⚠ ⓐ에서 멈추면 절반 처리"
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "20·21번", org: "-", date: "2026"}
+  origin_ref: "절차 20·21번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-014, KU-P-003]
+
+- id: KU-P-012
+  type: procedure
+  title: "매월 첫째 주 만기명세 관리 — 만기 사이클의 운영 루틴"
+  segments: [SEG-06]
+  trigger: "월 단위 관리 루틴"
+  body: |
+    1. 매월 첫째 주에 만기 도래 고객 명세를 뽑는다
+       (경영정보시스템 > 영업지원 > 실적관리 > 수신상품(퇴직연금))
+    2. 매월 마지막 영업일에 게시되는 다음 달 「퇴직연금 원리금보장 특별제공상품 안내」를 확보한다
+    3. 만기 1개월 전 안내 → 예약변경 → 다음 만기 예약을 반복한다
+  numbers: []
+  screens: []
+  cautions: ["월말 매수는 다음 달 금리가 적용된다"]
+  source: {doc: "Hot Tip 9737 / 203753", section: "-", org: "부동산사업부(P) / 서전주지점", date: "2023~2025"}
+  origin_ref: "절차 21번 / 방법론 78번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-027, KU-S-040]
+
+# ─────────────── guardrail (하지 말 것) ───────────────
+- id: KU-G-001
+  type: guardrail
+  title: "수익률 저조 고객에게 수익률을 직접 지적하지 않는다"
+  segments: [SEG-01]
+  trigger: "수익률 하위 고객 접촉 전"
+  body: |
+    금지: "수익률이 너무 낮으시네요" 같은 직접 지적.
+    대체: 개선방안을 먼저 준비하고, 동일 연령대 상위 고객 운용현황 대조로 접근한다.
+    원문 규정: "수익률이 저조한 고객의 경우 상담에 민감할 수 있으니 주의해 주시기 바라며,
+    현재 운용현황을 면밀히 살펴보고 수익률을 개선할 수 있는 방안을 기초로 상담을 진행해 주세요."
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "연금고객 수익률 KPI 고객관리 시나리오 / 05_업무처리절차 71번", section: "-", org: "-", date: "2021~"}
+  origin_ref: "절차 71번 / SEG 10번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-008, KU-M-002]
+
+- id: KU-G-002
+  type: guardrail
+  title: "연금개시 중·수령 예정 고객에게 투자상품을 권유하지 않는다"
+  segments: [SEG-01, SEG-02, SEG-03, SEG-06]
+  trigger: "제안 직전 계좌 상태 확인"
+  body: |
+    금지: 연금개시 중이거나 수령 예정인 고객에게 적립식 분산투자·투자상품 편입 권유.
+    이유: 고유대 자금이 투자상품에 잠겨 연금수령액이 줄어든다.
+    대체: 인출 설계·수령방식 상담으로 주제를 바꾼다.
+    참고: AI투자일임도 연금 수령 개시(금액·기간지정) 고객, 미성년자, 외국인,
+    투자성향 '안정형'은 가입 불가.
+  numbers: []
+  screens: ["[02-12-223]"]
+  cautions:
+    - "'제가 낭패를 본 경험이 있어 연금수령 예정이거나 수령 중인 고객은 하지 마세요' — 현장 실패담 기반"
+    - "개별 직원 경험 기반 판단이므로 본부 확인 대상"
+  source: {doc: "Hot Tip 199130 / KB Think", section: "-", org: "연산동종합금융센터", date: "2025.02"}
+  origin_ref: "SEG 55-1·55-3번 / 방법론 59번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-G-011]
+
+- id: KU-G-003
+  type: guardrail
+  title: "비대면(전화·문자)에서 특정 펀드를 권유하지 않는다 — 금소법"
+  segments: [SEG-01, SEG-02, SEG-06]
+  trigger: "전화·문자로 실적배당 상품을 안내할 때"
+  body: |
+    금지: 통화·문자에서 특정 펀드상품명을 언급한 권유.
+    이유: 금융소비자보호법 위반 소지 — 은행은 투자중개업 라이선스가 없어 완전판매 프로세스를 적용받는다.
+    대체: 테마(추천상품·TDF)로만 안내하고, 상품 선택은 내점 또는 고객의 앱 직접 선택으로 넘긴다.
+    원문: "비대면을 통한 펀드 권유는 금융소비자보호법 위반의 소지가 있으므로
+    특정 펀드상품을 언급하지 마시고, 되도록 '내점'하셔서 제안을 받아보시기를 권유하세요."
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "연금고객 수익률 KPI 고객관리 시나리오 / 05_업무처리절차 65번", section: "-", org: "-", date: "2021~"}
+  origin_ref: "절차 65번 / 화법 28번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-008, KU-S-012]
+
+- id: KU-G-004
+  type: guardrail
+  title: "내부 용어를 고객에게 쓰지 않는다 — '고유계정대' → '현금성자산'"
+  segments: [SEG-02, SEG-03, SEG-06]
+  trigger: "모든 대고객 발화"
+  body: |
+    금지: "고유계정대", "고유대", "미운용자산" 같은 내부 용어.
+    대체: "현금성자산", "운용지시가 되지 않은 자산", "대기 중인 자금".
+    같은 원칙으로 KPI·실적 관련 표현(득점·인정·평가대상)도 고객 앞에서 쓰지 않는다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/03_영업화법 48번 / 05_업무처리절차 71번", section: "-", org: "-", date: "-"}
+  origin_ref: "화법 48번 / 절차 71번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-G-013]
+
+- id: KU-G-005
+  type: guardrail
+  title: "수익률·순위는 기준시점·비교모집단·출처를 붙여서만 말한다"
+  segments: [SEG-01, SEG-02, SEG-03, SEG-04, SEG-05, SEG-06]
+  trigger: "숫자를 말하려 할 때 (전 고객군 공통)"
+  body: |
+    금지: "저희가 1위예요", "약 0.2%쯤", 미래 수익률 단정.
+    대체: "'25년 4분기 공시 기준, 개인형IRP 디폴트옵션 은행권 1위입니다" 처럼
+    기준시점·모집단·출처를 붙인다. 금액은 원 단위로.
+    확신이 없으면 정성 표현("우수한 편입니다")으로만 말한다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/05_업무처리절차 69·70번", section: "-", org: "-", date: "2026"}
+  origin_ref: "절차 69·70번 / 07_에이전트_기능정의 원칙 4"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-F-020, KU-E-013]
+
+- id: KU-G-006
+  type: guardrail
+  title: "통화에서 고객 개인정보·금융거래정보를 언급하지 않는다"
+  segments: [SEG-02, SEG-03]
+  trigger: "전화 상담 중"
+  body: |
+    금지: 카드사용내역, 인터넷거래내역, 거래지점현황 등 금융거래정보 언급.
+    타 기관 연금정보 조회·원천징수영수증 발급에는 금융거래정보제공요청동의서를 먼저 징구한다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "67·68번", org: "-", date: "2026"}
+  origin_ref: "절차 67·68번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-P-008]
+
+- id: KU-G-007
+  type: guardrail
+  title: "발송은 '동의 고객 + 동의 채널'에만 — 중복 발송 확인 후"
+  segments: [SEG-03]
+  trigger: "링크·안내 발송 직전"
+  body: |
+    금지: SMS거절·마케팅거절 고객 대상 발송, 본부 자동발송 LMS와 중복된 발송.
+    확인: [75-08-430] 고객별 발송조회 + 화면 3곳의 거절 여부.
+  numbers: []
+  screens: ["[75-08-430]"]
+  cautions: []
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "58·59번", org: "-", date: "2026"}
+  origin_ref: "절차 58·59번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-P-004]
+
+- id: KU-G-008
+  type: guardrail
+  title: "이탈 사유를 특정하기 전에 대안을 제시하지 않는다"
+  segments: [SEG-04]
+  trigger: "이탈 상담 진행 중"
+  body: |
+    금지: 인사 직후 곧바로 수수료 면제·상품 대안을 꺼내는 것.
+    이유: 사유를 모른 채 꺼낸 대안은 "역시 설득하려는 전화"로 읽히고, 남은 카드를 태운다.
+    대체: Step03에서 경청으로 사유를 특정한 뒤 Step05에서 사유별로 분기한다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "이탈방어 스크립트 Key Point", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "방법론 39번 / 화법 47번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-019, KU-S-025]
+
+- id: KU-G-009
+  type: guardrail
+  title: "타사 비교·미래수익 단정은 완충 화법으로만 — 확인 없는 단언 금지"
+  segments: [SEG-04]
+  trigger: "증권사·타행과 비교할 때"
+  body: |
+    금지: 내부 교육용 타사 표현을 그대로 옮기는 것,
+    확인 없는 "저희도 상품 다 있어요", 타사 수수료·가입기간 정책에 대한 단정.
+    대체: 우리 조건을 사실대로 말하고, 타사에 대해서는 "제가 확인해서 정확히 알려드리겠습니다"로 미룬다.
+    불리한 점은 인정한 뒤 강점 2개로 닫는다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/05_업무처리절차 70번 / 화법 59번", section: "-", org: "-", date: "2026"}
+  origin_ref: "절차 70번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-F-011, KU-S-021]
+
+- id: KU-G-010
+  type: guardrail
+  title: "대고객 제시 자료는 KBthink 심의필만 — 대외비·사내 게시글은 화면에 띄우지 않는다"
+  segments: [SEG-04]
+  trigger: "고객에게 자료를 보여주려 할 때"
+  body: |
+    자료 공개등급: 대외비 PDF(보물지도·Series1·마스터북) / 내부 교안 / 사내 게시글 / KBthink 심의필.
+    대고객 사용은 KBthink만 가능하며, 그것도 심의 유효기간 내 URL 원문 확인이 조건이다.
+    변환 자료 자체에 실고객 명세·직원 실명·준식별 정보가 남아 있으므로
+    에이전트 인덱싱 전에 제거·비식별 처리가 필요하다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/05_업무처리절차", section: "72·73번", org: "-", date: "2026"}
+  origin_ref: "절차 72·73번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: []
+
+- id: KU-G-011
+  type: guardrail
+  title: "연금개시·연금지급설계 등록 계좌에 추가입금을 권유하지 않는다"
+  segments: [SEG-05]
+  trigger: "추가납 세그먼트 추출 시 · 접촉 전"
+  body: |
+    금지: 연금개시된 계좌 또는 '연금지급설계'로 등록된 계좌에 추가납입 권유.
+    확인: [02-12-223] 연금개시 여부 (필수 선행).
+    대체: 적립형 IRP를 새로 개설해 입금할 수 있다 —
+    단 새 계좌는 연금수령요건이 새로 적용(리셋)됨을 반드시 고지한다.
+    계약이전으로 받으면 가입일 승계가 가능하다.
+  numbers: []
+  screens: ["[02-12-223]"]
+  cautions:
+    - "⚠ 설득을 다 해놓고 거래가 튕기는 참사를 막는 유일한 확인"
+    - "'연금지급설계' 등록 여부의 조회 화면이 자료에 없음 — 확인 필요"
+  source: {doc: "Hot Tip 203950 / 05_업무처리절차 5·52·53번", section: "-", org: "덕정지점", date: "2025.11"}
+  origin_ref: "SEG 49·55-2번 / 절차 5·52·53번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-020, KU-G-002]
+
+- id: KU-G-012
+  type: guardrail
+  title: "세액공제 미신청금액을 등록하지 않은 채 해지·연금개시를 진행하지 않는다"
+  segments: [SEG-05]
+  trigger: "고객이 해지 또는 연금개시를 요청했을 때"
+  body: |
+    금지: 미신청금액 확인·등록 없이 해지·개시 처리.
+    절차: '연금보험료 등 소득·세액공제 확인서' 확인 → [06-12-622] 납입연도별 등록 → 처리.
+    또한 세액공제를 받지 않은 납입분이 있는 해지 요청은
+    7월 1일 이후로 미루면 추징을 피할 수 있는 경우가 있다.
+  numbers: []
+  screens: ["[06-12-622]"]
+  cautions:
+    - "'미등록 시 이중과세'라는 인과는 자료에 명시 문장이 없어 팀 검증 대상"
+  source: {doc: "Hot Tip 199713 / 200518", section: "-", org: "연금상품부", date: "2025.03"}
+  origin_ref: "SEG 46번 / 방법론 99번 / 팩트 F8"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-P-010]
+
+- id: KU-G-013
+  type: guardrail
+  title: "KPI 실적 인정 요건을 고객 이익 논거로 바꿔 말하지 않는다"
+  segments: [SEG-02, SEG-05, SEG-06]
+  trigger: "실적 요건에 맞춰 상품·금액을 제안하려 할 때"
+  body: |
+    금지: "1천만원 이상 저축은행이나 TDF로 바꾸셔야 해요"처럼 인정 요건을 그대로 옮기는 것.
+    이유: 평가 최적해와 고객 최적해가 어긋날 수 있다
+    (시중은행 정기예금이 고객에게 최선인 경우에도 실적은 미인정).
+    대체: 고객에게는 금리 개선폭·수익률 격차·안전성으로만 설명하고,
+    실적 요건은 접촉 순서와 실행 규모를 정하는 내부 정렬에만 쓴다.
+  numbers: []
+  screens: []
+  cautions:
+    - "이 원칙은 '고객 이익과 어긋나는 득점 지식의 반영 범위'에 대한 팀 결정 사항이다"
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론 111번 / 07_에이전트_기능정의", section: "-", org: "-", date: "2026"}
+  origin_ref: "방법론 111번 / SEG 40·44번"
+  trust: 정리자해석
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-012, KU-M-023, KU-G-004]

@@ -1,0 +1,1227 @@
+%YAML 1.2
+---
+# ============================================================
+# 10_세그먼트.yaml — 고객군 6종 정의
+# 규격: 00_스키마.md § 1
+# 원천: 06_주제별_추출지식/01_고객세그먼트.md, 02_IRP관리방법론.md,
+#       04_제도상품팩트.md, 05_업무처리절차.md
+# 작성: 2026-08-23
+# ============================================================
+
+meta:
+  version: "1.0"
+  as_of: "2026-08-23"
+  scope: "당행 개인형IRP 보유 고객의 사후관리 (신규유치·기업형 DB/DC 제외)"
+  note: |
+    임계값이 자료마다 다른 항목은 threshold_variants에 전부 적재하고,
+    adopted: true 인 값 하나만 recommended_target에 반영했다.
+    adopted 선택은 이 문서 작성 시점의 제안이며 팀 확정 대상이다.
+
+segments:
+
+# ─────────────────────────────────────────────────────────────
+- id: SEG-01
+  name: "수익률 저조"
+  aliases: ["수익률 하위 고객", "관리 포인트 D", "수익률·자산관리 불만 고객"]
+  one_line: "적립금은 있으나 수익률이 기준선에 크게 못 미치는 고객 — 지적이 아니라 개선안으로 접근한다"
+  business_goal: [수익률제고, 이탈방어]
+
+  population:
+    base: "당행 개인형IRP 보유 고객"
+    include:
+      - field: 계좌_1년수익률
+        op: "<="
+        value: null
+        as_of: null
+        source: KU-E-011
+        note: "현행(2026) 자료에 정량 임계값이 없다. recommended_target의 격차 기준을 사용한다"
+      - any_of:
+          - field: 원리금보장상품_비중
+            op: "=="
+            value: 1.00
+            as_of: "2024"
+            source: KU-M-009
+            note: "유형 A — 저수익 원인이 구성에 있음"
+          - field: 성과저조펀드_보유여부
+            op: "=="
+            value: true
+            as_of: "2023~24"
+            source: KU-M-010
+            note: "유형 B — 저수익 원인이 개별 상품에 있음"
+    exclude:
+      - field: 고객관리점
+        op: "=="
+        value: "PB센터"
+        as_of: "2023~24"
+        source: KU-M-010
+        note: "환매추천펀드 기준 명세의 본부 제외 조건"
+      - field: 연금개시여부
+        op: "=="
+        value: true
+        source: KU-G-002
+        note: "투자상품 권유 제외 (연금수령액 감소)"
+
+  threshold_variants:
+    - value: "1년 수익률 1.50% 이하 또는 부점 내 하위 30%"
+      source: "KPI시나리오 2021 (SEG doc 24번)"
+      as_of: "2021"
+      purpose: "KPI 평가대상 선정"
+      adopted: false
+      note: "실효. 금리 환경이 달라 그대로 쓰면 과다·과소 추출"
+    - value: "IRP 고객 1년 평균 수익률과의 격차 -5%p 이상"
+      source: "방법론 3번(세 기준선) 기반 제안값"
+      as_of: "2026.08"
+      purpose: "타깃 추출 기본값 제안"
+      adopted: true
+      note: "정리자 제안값 — 팀 확정 필요. 기준선 수치는 KU-E-011에서 매 분기 갱신"
+
+  recommended_target:
+    rule: "적립금 300만원 이상 AND (원리금보장 100% 운용 OR 환매추천펀드 보유) AND 1년 수익률이 당행 IRP 평균 대비 -5%p 이상 열위"
+    expected_scale: "미산출 — 데이터 확보 후 산정 필요"
+    rationale: |
+      '수익률 저조'만으로는 임계값이 없어 모집단이 정의되지 않는다.
+      원인 유형(구성 문제 / 상품 문제)을 조건에 포함시켜야 시나리오가 갈리고 제안이 나온다.
+      원인 없는 저조 계좌는 접촉해도 제안할 것이 없다.
+
+  false_positive_filters:
+    - check: "최근 6개월 내 신규·전입 계좌인가"
+      action: "운용기간이 짧아 수익률이 낮은 것이므로 제외"
+      source: KU-M-002
+      confidence: low
+      note: "정리자 제안 — 원자료에 명시 없음"
+    - check: "연금개시·수령 중인가"
+      action: "제외 (KU-G-002)"
+      source: KU-G-002
+    - check: "수익률 저조가 시장 전반 요인인가"
+      action: "제외하지 않되, 오프너에서 시장 상황을 먼저 언급해 개인 실패감을 완화한다"
+      source: KU-S-008
+
+  priority:
+    sort_keys: ["적립금 내림차순", "기준선 격차 큰 순", "최근 접촉 없는 순"]
+    scoring: null
+
+  data_requirements:
+    - 적립금_평가금액
+    - 계좌_1년수익률
+    - 상품구성_3층(현금성/원리금보장/실적배당)
+    - 보유펀드_수익률
+    - 환매추천펀드_해당여부
+    - 최근접촉일자
+    - 만연령
+    - 투자성향분석결과
+
+  lookup_screens:
+    - code: "[04-12-642]"
+      name: "적립금 및 수익률 조회"
+      purpose: "수익률·상품구성 기본 진단 화면"
+    - code: "[06-12-631]"
+      name: "퇴직연금 고객포털 > 퇴직연금 컨설팅"
+      purpose: "동일 연령대 수익률 상위 고객 운용현황 대조 (비교그룹)"
+    - code: "[04-50-007]"
+      name: "공모펀드 조회(폐기계좌 포함)"
+      purpose: "투자 경험 유무 교차 확인 → 안전선호/분산가능 분기"
+
+  why_now:
+    - claim: "방치의 기회비용을 세 기준선과의 격차로 제시한다"
+      number: "IRP 고객 1년 평균 7.97% / 시중은행 정기예금 3.02% / 고유계정대 2.52%"
+      as_of: "수익률 2026.1Q, 금리 2026.05"
+      ku: KU-E-011
+    - claim: "퇴직연금 저수익의 구조적 원인은 정기예금 편중"
+      number: "퇴직연금 5년 2.35% vs 국민연금 6.21%"
+      as_of: "2023"
+      ku: KU-E-012
+    - claim: "수익률 불만은 대표적 이탈 사유 — 수익률 관리가 곧 이탈방어"
+      number: null
+      as_of: "2026.03"
+      ku: KU-E-004
+
+  kpi_link: null
+
+  briefing_slots:
+    why_target: "수익률 {n}% · 당행 IRP 평균 {avg}% 대비 {gap}%p 열위 · 원인: {구성편중|상품부진}"
+    snapshot: "적립금 / 3층 구성 / 보유펀드별 수익률 / 만기 임박 상품"
+    customer_unknown: "동일 연령대 상위 고객의 운용 구성 (비교그룹 조회 결과)"
+    today_offer: "offers[0]"
+    expected_objections: [KU-S-002, KU-S-003, KU-S-009]
+    do_not: [KU-G-001, KU-G-003, KU-G-005]
+    precheck_screens: ["[06-12-631]", "[04-12-642]"]
+
+  offers:
+    - rank: 1
+      action: "부진 상품 매도 + 시황에 맞는 상품 재추천"
+      ku: KU-S-007
+      condition: "부진 실적배당상품 보유"
+    - rank: 2
+      action: "일부 자금(30% 수준)의 실적배당 전환"
+      ku: KU-S-006
+      condition: "전액 원리금보장 운용"
+    - rank: 3
+      action: "동일 연령대 상위 고객 운용현황 대조 후 분산투자 제안"
+      ku: KU-M-002
+      condition: "직접 지적이 어려운 민감 고객"
+
+  knowledge_units:
+    - {ku: KU-E-011, role: "진단 기준선"}
+    - {ku: KU-E-012, role: "구조적 원인 논거"}
+    - {ku: KU-E-013, role: "당행 성과 반박 근거"}
+    - {ku: KU-M-001, role: "3층 진단"}
+    - {ku: KU-M-002, role: "비교그룹 대조 방법"}
+    - {ku: KU-M-009, role: "유형 A 대응 원칙"}
+    - {ku: KU-M-010, role: "유형 B 대응 원칙"}
+    - {ku: KU-S-006, role: "유형 A 화법"}
+    - {ku: KU-S-007, role: "유형 B 화법"}
+    - {ku: KU-S-008, role: "민감 응대 오프너"}
+    - {ku: KU-S-009, role: "저금리 안주 반론 (72의 법칙)"}
+    - {ku: KU-S-010, role: "모니터링 주기 안내"}
+    - {ku: KU-F-020, role: "실적배당 수익률 공시 인용 규칙"}
+    - {ku: KU-P-001, role: "수익률 조회 경로"}
+
+  scenarios: [SC-01-A, SC-01-B, SC-01-C]
+
+  guardrails: [KU-G-001, KU-G-003, KU-G-005, KU-G-002]
+
+  followup:
+    - trigger: "제안 수용"
+      interval: "6개월"
+      action: "수익률 재점검 예약 (KU-M-011)"
+    - trigger: "제안 거절"
+      interval: "3개월"
+      action: "다음 만기·이벤트 시점에 재접촉 예약"
+
+  open_questions:
+    - "'수익률 저조'의 정량 임계값 — 현행 본부 기준이 없어 팀 정의 필요 (SEG doc 10번)"
+    - "환매추천펀드 목록의 현행 운영 여부 (분기별 갱신 여부) — SEG doc 8번 검토메모"
+    - "[06-12-631] 비교그룹 조회 화면의 현행 여부 — 2021~22년 자료 기반"
+
+# ─────────────────────────────────────────────────────────────
+- id: SEG-02
+  name: "자산편중"
+  aliases: ["현금성자산·정기예금 편중", "고유대 과다 보유", "원리금보장 100% 운용"]
+  one_line: "적립금이 현금성자산·원리금보장상품 한쪽에 몰려 있는 고객 — 이탈률이 일반의 1.3배인 본부 최우선 관리군"
+  business_goal: [수익률제고, 이탈방어]
+
+  population:
+    base: "당행 개인형IRP 보유 고객 · 적립금 1천만원 이상"
+    include:
+      - any_of:
+          - field: 고유계정대_보유비율
+            op: ">="
+            value: 0.50
+            as_of: "2026.05"
+            source: KU-E-001
+          - field: "고유계정대+시중은행정기예금_보유비율"
+            op: "=="
+            value: 1.00
+            as_of: "2026.05"
+            source: KU-E-001
+          - field: 원리금보장상품_보유비율
+            op: "=="
+            value: 1.00
+            as_of: "2023~24"
+            source: KU-M-009
+            note: "디폴트옵션 초저위험 포함"
+    exclude:
+      - field: 고객관리점
+        op: "=="
+        value: "PB센터"
+        as_of: "2023~24"
+        source: KU-M-010
+      - field: "투자성향==공격투자형 AND 디폴트옵션==초저위험"
+        op: "=="
+        value: true
+        as_of: "2023~24"
+        source: KU-M-003
+        note: "성향-운용 불일치 건은 별도 관리 (SEG doc 5번)"
+      - field: 연금개시여부
+        op: "=="
+        value: true
+        source: KU-G-002
+
+  threshold_variants:
+    - value: "고유계정대 보유비율 50% 이상 (또는 고유대+시중은행 정기예금 100%), 적립금 1천만원 이상"
+      source: "Series1 (SEG doc 1번)"
+      as_of: "2026.05"
+      purpose: "이탈위험 선별 — 본부 최우선 세그먼트"
+      adopted: true
+    - value: "적립금 1천만원 이상 & 고유대 또는 시중은행 정기예금 1천만원 이상"
+      source: "Hot Tip 207754·207088 (SEG doc 40번)"
+      as_of: "2026.07~08"
+      purpose: "2026 하반기 KPI 고객수 인정 요건"
+      adopted: false
+      note: "실적 인정 기준이지 고객 이익 기준이 아니다. 접촉 대상 정렬에만 참고"
+    - value: "대기 현금성자산 7,500만원 이상"
+      source: "오늘의할일 시트25 (SEG doc 3번)"
+      as_of: "2023~24"
+      purpose: "TM 콜 배분 (고비용 채널 우선순위)"
+      adopted: false
+    - value: "현금성자산 100만원 이상"
+      source: "KPI시나리오 2021 (SEG doc 3번)"
+      as_of: "2021"
+      purpose: "대량 LMS 자동발송"
+      adopted: false
+    - value: "디폴트옵션 미동의 & 현금성 대기자산 10만원 이상"
+      source: "Hot Tip 9737 (SEG doc 41번)"
+      as_of: "2023.09"
+      purpose: "디폴트옵션 시행기 대량 안내"
+      adopted: false
+    - value: "적립금 300만원 이상 & 원리금보장 100%"
+      source: "오늘의할일 시트32 (SEG doc 4번)"
+      as_of: "2023~24"
+      purpose: "원리금보장 편중 TM"
+      adopted: false
+      note: "원 시트에 '구 스크립트(참고용)' 표기 — 현행 여부 확인 필요"
+
+  recommended_target:
+    rule: "적립금 1천만원 이상 AND 고유계정대 보유비율 50% 이상 AND 1개월 이상 금액 변동 없음 AND 입금사유가 교체매매·연금지급이 아님"
+    expected_scale: "본부 타깃리스트로 제공되는 규모"
+    rationale: |
+      임계값이 다섯 갈래로 병존하는데, 이탈률 1.3배라는 유일한 정량 근거가 붙은 것은 50% 기준이다(KU-E-001).
+      여기에 오탐 제거 2조건(KU-M-004)을 필수로 붙여야 접촉이 헛돌지 않는다.
+      금액 기준(7,500만원·1천만원)은 모집단 정의가 아니라 접촉 순서 정렬에 쓴다.
+
+  false_positive_filters:
+    - check: "현금성자산이 1개월 이상 금액 변동 없이 유지되는가"
+      action: "변동이 있으면 접촉 보류 (사용계획 자금 가능성)"
+      source: KU-M-004
+    - check: "[04-12-644] 입금 사유가 '교체매매' 또는 '연금지급'인가"
+      action: "해당하면 제외 — 정상 대기 자금"
+      source: KU-M-004
+    - check: "중도해지 손실이 개선 이익보다 큰가 (정기예금 보유 시)"
+      action: "[04-12-642] 연계 중도해지 예상조회·리밸런싱 계산기로 확인 후 후순위 배치"
+      source: KU-M-006
+
+  priority:
+    sort_keys: ["고유계정대 금액 내림차순", "적립금 내림차순", "최근 접촉 없는 순"]
+    scoring:
+      method: "요건 충족 개수 스코어링"
+      source: "디폴트옵션 1단계 Quick 타깃 4요건 (SEG doc 25번)"
+      note: "모집단이 넓을 때 충족 요건 수로 상위 절단"
+
+  data_requirements:
+    - 적립금_평가금액
+    - 고유계정대_금액
+    - 고유계정대_보유비율
+    - 시중은행정기예금_금액
+    - 원리금보장상품_비중
+    - 현금성자산_최근1개월_변동여부
+    - 최근입금사유
+    - 디폴트옵션_등록여부
+    - 투자성향분석결과
+    - 계좌개설유형(대면/비대면)
+
+  lookup_screens:
+    - code: "[04-12-642]"
+      name: "적립금 및 수익률 조회"
+      purpose: "3층 구성·고유계정대 이자율·중도해지 계산기 진입"
+    - code: "[04-12-644]"
+      name: "퇴직연금 거래내역 조회"
+      purpose: "입금사유 확인 (오탐 제거 필수)"
+    - code: "[04-12-657]"
+      name: "미운용 현금성자산 부점 일괄 조회"
+      purpose: "부점 단위 대상 추출"
+    - code: "[04-12-17A]"
+      name: "NEW 퇴직연금상품조회"
+      purpose: "제안 상품 선정 · 원리금보장 잔여한도 확인"
+
+  why_now:
+    - claim: "편중 계좌의 이탈위험도가 일반 고객의 1.3배"
+      number: "이탈률 14.8% vs 11.8%"
+      as_of: "2025.11~2026.04 이탈고객 분석"
+      ku: KU-E-001
+    - claim: "고유계정대는 상품을 선택하지 않은 상태 — 대기성 초단기 금리"
+      number: "고유계정대 2.52%(2026.05) / 2.76%(2026.08.03) vs IRP 평균 7.97%(2026.1Q)"
+      as_of: "표기된 각 시점"
+      ku: KU-E-011
+    - claim: "편중 계좌를 잃으면 KPI 가중치 손실"
+      number: "△1.65"
+      as_of: "2026"
+      ku: KU-E-002
+      disclosure: 사내전용
+
+  kpi_link:
+    name: "2026 하반기 개인형IRP 고객수 (배점 30점)"
+    recognition: "수탁고 1천만원 이상 계좌에서 고유대 또는 시중은행 정기예금 1천만원 이상 매도 후 저축은행 또는 TDF로 상품변경 (최초 1회 한, 시중은행 정기예금 매수 미인정)"
+    as_of: "2026 하반기"
+    source: KU-M-012
+    caution: "평가 최적해가 고객 최적해와 어긋날 수 있다. 고객에게는 금리 개선폭으로 설명한다"
+
+  briefing_slots:
+    why_target: "고유계정대 {비율}% ({금액}원) · 편중 고객 이탈률 1.3배 (본부 최우선 관리군)"
+    snapshot: "적립금 = 현금성 {a}% | 원리금보장 {b}% | 실적배당 {c}% · 고유대 적용금리 {r}% ({as_of} 기준)"
+    customer_unknown: "미운용 현금성자산 금액과 그 적용금리 — 대부분 고객이 모른다"
+    today_offer: "offers[0]"
+    expected_objections: [KU-S-011, KU-S-012, KU-S-013]
+    do_not: [KU-G-004, KU-G-002, KU-G-006]
+    precheck_screens: ["[04-12-644]", "[04-12-642]"]
+
+  offers:
+    - rank: 1
+      action: "현금성자산 일부(500만~1천만원)를 고금리 원리금보장상품으로 교체매매"
+      ku: KU-S-011
+      condition: "원리금보장 희망 · 안전자산 선호형"
+    - rank: 2
+      action: "디폴트옵션(저위험 이상) 등록 + 기존 고유대 자금 교체매매 세트"
+      ku: KU-S-013
+      condition: "디폴트옵션 미등록"
+    - rank: 3
+      action: "일부 금액(전체의 30% 수준)을 추천펀드·TDF로 운용"
+      ku: KU-S-012
+      condition: "펀드 이력 있음 · 분산투자 가능형"
+
+  knowledge_units:
+    - {ku: KU-E-001, role: "why_now 핵심 근거"}
+    - {ku: KU-E-002, role: "KPI 압력 (사내전용)"}
+    - {ku: KU-E-011, role: "금리·수익률 기준선"}
+    - {ku: KU-M-001, role: "3층 진단"}
+    - {ku: KU-M-003, role: "성향 2갈래 분기"}
+    - {ku: KU-M-004, role: "오탐 제거"}
+    - {ku: KU-M-005, role: "일부·가역 재제안"}
+    - {ku: KU-M-006, role: "중도해지 유불리 판정"}
+    - {ku: KU-M-007, role: "매도 우선순위 4단"}
+    - {ku: KU-M-012, role: "리밸런싱 표준 단위 (사내전용)"}
+    - {ku: KU-S-011, role: "방치 현금성자산 권유 화법"}
+    - {ku: KU-S-012, role: "분산투자 가능형 화법"}
+    - {ku: KU-S-013, role: "디폴트옵션 세트 화법"}
+    - {ku: KU-S-014, role: "동일 안전성·금리 상향 화법 (Mission 2)"}
+    - {ku: KU-S-015, role: "'고유계정대에도 이자 붙는다' 반론"}
+    - {ku: KU-S-016, role: "'일부만 먼저' 클로징"}
+    - {ku: KU-F-001, role: "고유계정대 금리 성격"}
+    - {ku: KU-F-002, role: "예금자보호 1억원"}
+    - {ku: KU-F-003, role: "GIC·저축은행 정기예금 특성"}
+    - {ku: KU-P-002, role: "교체매매 3경로"}
+    - {ku: KU-P-003, role: "비대면 상품변경 권유직원 입력"}
+
+  scenarios: [SC-02-A, SC-02-B, SC-02-C]
+
+  guardrails: [KU-G-004, KU-G-002, KU-G-006, KU-G-005]
+
+  followup:
+    - trigger: "일부 전환 합의"
+      interval: "6개월~1년"
+      action: "재점검 약속을 그 자리에서 예약 (KU-M-005)"
+    - trigger: "디폴트옵션 등록만 완료"
+      interval: "즉시"
+      action: "기존 고유대 자금 교체매매가 남아 있는지 확인 — 등록만으로는 자금이 움직이지 않는다"
+
+  open_questions:
+    - "다섯 갈래 임계값 중 목적별 기본값 확정 (SEG doc 3·40·41번)"
+    - "부산역지점 확장 조건(디폴트옵션 안정형 합산) 채택 여부 (SEG doc 1번)"
+    - "매도 우선순위 4단이 본부 공식 규칙인지 (SEG doc 42번)"
+
+# ─────────────────────────────────────────────────────────────
+- id: SEG-03
+  name: "방치"
+  aliases: ["관리 사각지대", "미운용 계좌", "디폴트옵션 미지정", "무권유 비대면 신규"]
+  one_line: "운용지시도 관리 접점도 없는 계좌 — 이탈 통보가 오기 전에 손을 대야 하는 유일한 구간"
+  business_goal: [관리사이클, 이탈방어, 수익률제고]
+
+  population:
+    base: "당행 개인형IRP 보유 고객"
+    include:
+      - any_of:
+          - field: 운용지시_실행여부
+            op: "=="
+            value: false
+            as_of: "2026"
+            source: KU-M-013
+            note: "유형 A — 퇴직금·자금 입금 후 운용지시 미실행"
+          - field: 디폴트옵션_등록여부
+            op: "=="
+            value: false
+            as_of: "2026"
+            source: KU-M-014
+            note: "유형 B — 디폴트옵션 미지정"
+          - field: "비대면신규 AND 권유직원_부재"
+            op: "=="
+            value: true
+            as_of: "2026.03"
+            source: KU-E-003
+            note: "유형 C — 관리 접점 자체가 없음"
+          - field: 최근접촉경과월수
+            op: ">="
+            value: 6
+            as_of: "2026"
+            source: KU-M-011
+            note: "유형 D — 미접촉 방치"
+    exclude:
+      - field: 계좌잔액
+        op: "=="
+        value: 0
+        note: "0원 계좌는 방치가 아니라 자금 유입 대기 — SEG-05로 라우팅"
+        source: KU-M-020
+      - field: 연금개시여부
+        op: "=="
+        value: true
+        source: KU-G-002
+        note: "수령 중 계좌는 방치 판정에서 제외 (별도 관리)"
+
+  threshold_variants:
+    - value: "비대면 신규 & 권유직원 미존재"
+      source: "보물지도 타겟리스트 '이탈방지' 유형 (SEG doc 11번)"
+      as_of: "2026.03"
+      purpose: "본부 제공 이탈방지 타깃"
+      adopted: true
+    - value: "디폴트옵션 미지정 전체 (조건 없음)"
+      source: "맞춤형 타깃 요청, 내외동지점 (SEG doc 7번)"
+      as_of: "2026"
+      purpose: "이탈 관리"
+      adopted: false
+      note: "모집단이 지나치게 넓다. 우선순위 스코어링 없이는 사용 불가"
+    - value: "퇴직금 입금 & 운용지시 없음 또는 일부만"
+      source: "맞춤형 타깃 요청, 충청·호남영업추진그룹 (SEG doc 18번)"
+      as_of: "2026"
+      purpose: "고객관리 및 리밸런싱"
+      adopted: true
+      note: "금액이 커서 방치 시 SEG-02로 즉시 전이"
+    - value: "신탁형ISA 현금성자산 500만원 이상 2개월 경과"
+      source: "SEG doc 28번 (참고)"
+      as_of: "미상"
+      purpose: "임계값 설계 참고 — '금액 + 경과기간' 2축"
+      adopted: false
+
+  recommended_target:
+    rule: "퇴직금 입금 후 운용지시 미실행 계좌 (1순위) → 비대면 신규 & 권유직원 부재 & 적립금 1천만원 이상 (2순위)"
+    expected_scale: "미산출"
+    rationale: |
+      '방치'는 정의가 넓어 그대로 쓰면 전 고객이 걸린다.
+      금액이 크고 시점이 특정되는 것(퇴직금 입금 직후)부터 좁히면
+      SEG-02(편중)로 전이되기 전에 잡을 수 있어 예방 효과가 가장 크다.
+      디폴트옵션 미지정 전수는 요건 충족수 스코어링으로 상위만 잘라 쓴다.
+
+  false_positive_filters:
+    - check: "입금 직후(2주 이내)인가"
+      action: "디폴트옵션 적용 유예기간(최초 입금 2주) 중일 수 있음 — 안내는 하되 '미조치'로 판정하지 않는다"
+      source: KU-F-004
+    - check: "만기 후 6주(4+2주) 유예 중인가"
+      action: "디폴트옵션 자동 적용 대기 구간 — 상태를 확인하고 안내"
+      source: KU-F-004
+    - check: "현금성자산이 연금지급·교체매매 대기 자금인가"
+      action: "제외 (KU-M-004)"
+      source: KU-M-004
+
+  priority:
+    sort_keys: ["적립금 내림차순", "방치 경과기간 내림차순", "퇴직금 포함 여부"]
+    scoring:
+      method: "요건 충족 개수 (디폴트옵션 미등록 / 현금성자산 보유 / 미접촉 6개월+ / 권유직원 부재)"
+      source: "SEG doc 25번 방법론 전용"
+
+  data_requirements:
+    - 운용지시_실행여부
+    - 운용지시_금액(적립금 대비)
+    - 디폴트옵션_등록여부
+    - 계좌개설경로(대면/비대면)
+    - 권유직원_존재여부
+    - 전담직원_지정여부
+    - 최근접촉일자
+    - 퇴직금_입금여부·입금일
+    - 현금성자산_금액
+
+  lookup_screens:
+    - code: "[04-12-657]"
+      name: "미운용 현금성자산 부점 일괄 조회"
+      purpose: "부점 단위 방치 계좌 스캔"
+    - code: "[04-12-644]"
+      name: "퇴직연금 거래내역 조회"
+      purpose: "입금 이력·사유 확인"
+    - code: "[06-12-625]"
+      name: "권유직원 정정"
+      purpose: "권유직원 미입력 계좌 정정"
+    - code: "[75-08-430]"
+      name: "고객별 발송조회"
+      purpose: "본부 자동발송 LMS와 중복 확인 후 접촉"
+
+  why_now:
+    - claim: "관리되지 않은 퇴직연금의 이탈은 막을 수 없다 — 이탈방어의 진짜 시점은 통보 전이다"
+      number: null
+      as_of: "2025.10"
+      ku: KU-E-005
+    - claim: "전입 고객의 개선 요구 1위가 '고객관리'이고, 조건 충족 시 재이탈 의향이 82.5%"
+      number: "설문 171명 · 82.5%"
+      as_of: "2026 초"
+      ku: KU-E-006
+    - claim: "퇴직금은 입금이 끝이 아니다 — 미운용 방치는 곧 편중 계좌로 전이된다"
+      number: null
+      as_of: "2026"
+      ku: KU-M-013
+
+  kpi_link:
+    name: "본부 타겟리스트 '이탈방지' 유형"
+    recognition: "우리 지점 관리 IRP 중 비대면 신규 및 권유직원 미존재 고객 / 전담직원별 IRP 계좌 수익률 및 상품 만기도래 현황"
+    as_of: "2026.03"
+    source: KU-E-003
+    caution: null
+
+  briefing_slots:
+    why_target: "{방치유형} · 최근 접촉 {n}개월 전 · 미운용 자금 {금액}원"
+    snapshot: "적립금 / 운용지시 실행 여부 / 디폴트옵션 등록 여부 / 최근 접촉 이력"
+    customer_unknown: "연간 납입액·공제액과 미운용 금액 — 정보 비대칭 해소가 최강의 오프너"
+    today_offer: "offers[0]"
+    expected_objections: [KU-S-017, KU-S-018, KU-S-019]
+    do_not: [KU-G-006, KU-G-004, KU-G-007]
+    precheck_screens: ["[75-08-430]", "[04-12-644]"]
+
+  offers:
+    - rank: 1
+      action: "디폴트옵션 등록 + 고유대 자금 교체매매 세트 처리"
+      ku: KU-S-013
+      condition: "디폴트옵션 미등록 & 현금성자산 보유"
+    - rank: 2
+      action: "퇴직금 입금 자금의 운용지시 실행 (상품 선택 상담)"
+      ku: KU-S-011
+      condition: "퇴직금 입금 후 미운용"
+    - rank: 3
+      action: "전담직원 지정 + 정기 점검 주기(6개월~1년) 약속"
+      ku: KU-M-011
+      condition: "권유직원 부재 계좌"
+
+  knowledge_units:
+    - {ku: KU-E-003, role: "본부 타깃 정의"}
+    - {ku: KU-E-005, role: "관리소홀→이탈 인과"}
+    - {ku: KU-E-006, role: "전입고객 재이탈 82.5%"}
+    - {ku: KU-M-011, role: "관리 사이클 4수칙·점검 주기"}
+    - {ku: KU-M-013, role: "퇴직금 입금 후 운용지시 점검"}
+    - {ku: KU-M-014, role: "디폴트옵션 등록+교체매매 세트 원칙"}
+    - {ku: KU-M-004, role: "오탐 제거"}
+    - {ku: KU-M-005, role: "일부·가역 재제안"}
+    - {ku: KU-S-017, role: "중립적 오프너 (해피콜 첫 마디)"}
+    - {ku: KU-S-018, role: "'방치가 곧 연금수령액 감소' 손실 프레이밍"}
+    - {ku: KU-S-019, role: "'귀찮아요' 자동화 3종 대응"}
+    - {ku: KU-S-013, role: "세트 화법"}
+    - {ku: KU-F-004, role: "디폴트옵션 적용 유예기간"}
+    - {ku: KU-F-005, role: "디폴트옵션 제도 개요"}
+    - {ku: KU-P-004, role: "발송 동의·중복 확인"}
+    - {ku: KU-P-005, role: "셀프 점검 경로 안내"}
+
+  scenarios: [SC-03-A, SC-03-B, SC-03-C]
+
+  guardrails: [KU-G-006, KU-G-004, KU-G-007, KU-G-002]
+
+  followup:
+    - trigger: "접촉 완료 (합의 여부 무관)"
+      interval: "6개월~1년"
+      action: "수익률 정기 점검 예약 — 재접촉 명분을 그 자리에서 심는다"
+    - trigger: "권유직원 부재 계좌"
+      interval: "즉시"
+      action: "전담 지정 후 관리 사이클 편입"
+
+  open_questions:
+    - "'방치' 판정의 경과기간 기준 (미접촉 6개월? 미운용 1개월?) — 팀 정의 필요"
+    - "디폴트옵션 미지정 잔존 고객의 현재 규모·특성 (SEG doc 7번)"
+    - "'관리 접점 부재 = 이탈 고위험' 인과는 정리자 해석 — 본부 확인 필요 (SEG doc 11번)"
+
+# ─────────────────────────────────────────────────────────────
+- id: SEG-04
+  name: "이탈가능성 높음"
+  aliases: ["이탈 고위험군", "계약이전(전출) 신청 고객", "재이탈 위험군"]
+  one_line: "전출 알림이 왔거나, 이탈 신호가 겹쳐 쌓인 고객 — 사유를 특정하기 전에는 대안을 꺼내지 않는다"
+  business_goal: [이탈방어]
+
+  population:
+    base: "당행 개인형IRP 보유 고객"
+    include:
+      - any_of:
+          - field: 계약이전_전출신청_접수
+            op: "=="
+            value: true
+            as_of: "2026.03"
+            source: KU-E-004
+            note: "이벤트형 — 알림 수신 시점에 발동. 시급성 최상"
+          - field: 이탈신호_충족개수
+            op: ">="
+            value: 2
+            as_of: "2026.08"
+            source: KU-M-015
+            note: "조회형 — 아래 signal_set 중 2개 이상"
+    exclude:
+      - field: 계좌상태
+        op: in
+        value: ["상품변경 진행중", "환매불가상품 보유", "퇴직금 일부 미입금"]
+        source: KU-M-016
+        note: "이전 자체가 진행되지 않는 상태 — 방어 우선순위 조정"
+
+  signal_set:
+    - {signal: "고유계정대 50% 이상 또는 고유대+시중은행 정기예금 100%", weight: "이탈률 1.3배", ku: KU-E-001}
+    - {signal: "타행에서 전입한 이력 있음", weight: "재이탈 의향 82.5%", ku: KU-E-006}
+    - {signal: "ETF 투자 성향 또는 ETF 라인업 불만 표명", weight: "증권사 이탈 고객의 82%가 ETF 투자자", ku: KU-E-007}
+    - {signal: "대면 개설 계좌 & 수수료 문의 이력", weight: "면제 카드가 있는데 안내가 안 된 상태", ku: KU-F-010}
+    - {signal: "6개월 이상 미접촉 (관리 사각)", weight: "관리소홀이 이탈의 선행 원인", ku: KU-E-005}
+    - {signal: "KB스타클럽 VIP·그랜드 이상 등급", weight: "이탈 시 손실 규모 — 사유가 아닌 등급 축 가중", ku: KU-S-024}
+
+  threshold_variants:
+    - value: "계약이전(전출) 알림 수신"
+      source: "보물지도 (SEG doc 2번)"
+      as_of: "2026.03"
+      purpose: "이벤트형 방어 트리거"
+      adopted: true
+    - value: "이탈 사유 5유형 분류 (ETF목적 / ETF상품수 / 수수료 / 대출동반 / 수익률·관리)"
+      source: "스타런 이탈방지 교육 5편 (SEG doc 33번)"
+      as_of: "2024 추정"
+      purpose: "사유별 대응 분기"
+      adopted: true
+      note: "현장판은 4분류 (ETF 라인업 / 수익률 / 수수료 / 관리 소홀) — SEG doc 50번"
+    - value: "최근 3년 내 타사 이탈 완료 고객"
+      source: "맞춤형 타깃 요청 6개 부점 (SEG doc 20번)"
+      as_of: "2026"
+      purpose: "재유치"
+      adopted: false
+      note: "방어가 아니라 재유치 — 별도 트랙으로 분리 권장"
+
+  recommended_target:
+    rule: "① 전출 알림 수신 계좌 전건(즉시) ② 신호 2개 이상 중첩 & 적립금 1천만원 이상(예방)"
+    expected_scale: "①은 알림 발생 건수 그대로, ②는 SEG-02와 상당 부분 중첩"
+    rationale: |
+      본부 인력 4명으로 전행 전출 신청을 소화할 수 없어 영업점 직접 방어가 지정됐다(KU-E-004).
+      ①은 모집단을 좁힐 이유가 없다 — 전건이 대상이다.
+      ②는 예방 트랙이며, 단일 신호로는 오탐이 많아 2개 이상 중첩을 기준으로 잡았다.
+
+  false_positive_filters:
+    - check: "이전 유형이 현금이전인가 실물이전인가"
+      action: "현금이전이면 중도해지 손실 계산, 실물이전이면 이전 가능 상품 대조 — 준비 내용이 다르다"
+      source: KU-M-017
+    - check: "실물이전 불가 사유 5종에 해당하는가"
+      action: "해당하면 이전 자체가 진행되지 않음 — 시간 여유가 있으니 대화 설계를 다르게"
+      source: KU-M-016
+    - check: "적립금에 퇴직금이 포함되어 있는가"
+      action: "포함되면 인출 설계로 주제를 바꿔 한 번 더 방어 (KU-S-023)"
+      source: KU-S-023
+
+  priority:
+    sort_keys: ["전출 알림 수신일 오름차순(기한 임박)", "적립금 내림차순", "스타클럽 등급"]
+    scoring: null
+
+  data_requirements:
+    - 계약이전_전출신청_상태·접수일
+    - 이전유형(현금/실물)
+    - 보유상품별_만기일·수익률
+    - 중도해지_예상손실액
+    - 실물이전_가능여부
+    - 계좌개설유형(대면/비대면)
+    - 퇴직금_포함여부·금액
+    - 스타클럽등급
+    - 전입이력
+    - 최근접촉일자
+
+  lookup_screens:
+    - code: "[72-01-801]"
+      name: "개인싱글뷰조회"
+      purpose: "계약이전 알림 후 첫 조회 · 통화(녹취) · url발송을 이 화면에서"
+    - code: "[06-AD-080]"
+      name: "전출조회 / 전출취소(해제)"
+      purpose: "진행 상태 감시 · 방어 성공 시 취소 처리"
+    - code: "[06-AD-020]"
+      name: "실물이전 가능여부 결과조회"
+      purpose: "이전 가능 상품 대조"
+    - code: "[04-12-333]"
+      name: "실물이전상품 대조"
+      purpose: "타사 보유 상품과 당행 라인업 비교"
+    - code: "[04-12-613]"
+      name: "수수료 관리 > 수수료 예상조회"
+      purpose: "수수료 불만 응대 전 현재·전환 후 수수료 숫자 확보"
+    - code: "[04-12-646]"
+      name: "개인형IRP 이체목록"
+      purpose: "거절·취소 전문 확인"
+
+  why_now:
+    - claim: "이탈 사유를 들어보면 지킬 수 있는 고객이 생각보다 많다"
+      number: null
+      as_of: "2026.03"
+      ku: KU-E-004
+    - claim: "증권사 이탈 고객의 약 82%가 ETF 투자자"
+      number: "82% (STT 전사 수치 — 원자료 대조 권장)"
+      as_of: "2024 추정"
+      ku: KU-E-007
+    - claim: "'24년 계약이탈 48% 증가, 개인 IRP는 92% 급증 — 구조적 흐름"
+      number: "48% / 92%"
+      as_of: "2024"
+      ku: KU-E-008
+
+  kpi_link:
+    name: "KB계열사 이전 보전"
+    recognition: "방어 불가 시 KB증권 소개 → 시너지성과관리시스템 소개등록 [06-10-800]"
+    as_of: "2025~2026"
+    source: KU-M-018
+    caution: "보전율이 자료별로 70%(2025 상반기)와 80%(보물지도)로 상충 — 현행 확인 필요"
+
+  briefing_slots:
+    why_target: "전출 신청 접수 {일자} · 이전유형 {현금/실물} · 예상 손실 {금액}원"
+    snapshot: "보유 상품별 만기·수익률 / 중도해지 손실 / 실물이전 불가 상품 / 퇴직금 포함 여부"
+    customer_unknown: "지금 옮기면 잃는 것 — 중도해지 이자손실, 환매 기간 중 운용 중단, 장기할인 소멸"
+    today_offer: "사유 특정 전에는 제안하지 않는다 (KU-M-019)"
+    expected_objections: [KU-S-020, KU-S-021, KU-S-022]
+    do_not: [KU-G-008, KU-G-009, KU-G-005]
+    precheck_screens: ["[72-01-801]", "[06-AD-080]", "[04-12-642]", "[06-AD-020]"]
+
+  offers:
+    - rank: 0
+      action: "경청 — 이탈 사유 특정 (사유 전에 대안 금지)"
+      ku: KU-M-019
+      condition: "전 케이스 공통 선행"
+    - rank: 1
+      action: "사유별 대안 제시 (수수료 / ETF / 수익률·관리 / 대출동반)"
+      ku: KU-M-015
+      condition: "사유 특정 후"
+    - rank: 2
+      action: "퇴직금 포함 시 인출 설계·골든라이프센터 연계로 2차 방어"
+      ku: KU-S-023
+      condition: "적립금에 퇴직금 포함"
+    - rank: 3
+      action: "방어 불가 시 KB증권 소개 (계열사 유지)"
+      ku: KU-M-018
+      condition: "증권사 이탈 확정적"
+
+  knowledge_units:
+    - {ku: KU-E-001, role: "편중 신호 가중"}
+    - {ku: KU-E-004, role: "방어 명분"}
+    - {ku: KU-E-005, role: "관리소홀 인과"}
+    - {ku: KU-E-006, role: "전입고객 재이탈"}
+    - {ku: KU-E-007, role: "ETF 이탈 82%"}
+    - {ku: KU-E-008, role: "이탈 구조 추세"}
+    - {ku: KU-M-015, role: "사유별 5분기"}
+    - {ku: KU-M-016, role: "실물이전 불가 5종"}
+    - {ku: KU-M-017, role: "전출 알림 4단계 사전 진단"}
+    - {ku: KU-M-018, role: "KB증권 차선책"}
+    - {ku: KU-M-019, role: "경청 우선 원칙"}
+    - {ku: KU-S-020, role: "수수료 무료 반론 (분기형)"}
+    - {ku: KU-S-021, role: "ETF 종수 반론"}
+    - {ku: KU-S-022, role: "수익률·관리 불만 (사과 선행형)"}
+    - {ku: KU-S-023, role: "퇴직금 2차 방어"}
+    - {ku: KU-S-024, role: "VIP 등급 화법"}
+    - {ku: KU-S-025, role: "전출 알림 6단계 프레임"}
+    - {ku: KU-S-026, role: "보유 상품별 손실 리스크 안내"}
+    - {ku: KU-S-027, role: "성공/실패별 클로징"}
+    - {ku: KU-S-028, role: "대출 동반 이전 분리 화법"}
+    - {ku: KU-F-010, role: "수수료 면제·인하 3분기"}
+    - {ku: KU-F-011, role: "장기계약 할인·승계 비대칭"}
+    - {ku: KU-F-012, role: "실물이전 제도"}
+    - {ku: KU-P-006, role: "이탈방어 성공 시 처리 3단"}
+    - {ku: KU-P-007, role: "이전의사 확인 절차 (알림톡→AI콜봇→자동취소)"}
+
+  scenarios: [SC-04-A, SC-04-B, SC-04-C, SC-04-D]
+
+  guardrails: [KU-G-008, KU-G-009, KU-G-005, KU-G-010]
+
+  followup:
+    - trigger: "방어 성공"
+      interval: "즉시"
+      action: "녹취 → [06-AD-080] 전출취소 → CRM 상담내용 등록 (KU-P-006)"
+    - trigger: "방어 성공 후"
+      interval: "1개월"
+      action: "약속한 관리 행동(리밸런싱·수수료 전환)을 실제로 이행했는지 확인 — 미이행이 재이탈 사유"
+    - trigger: "방어 실패"
+      interval: "이전 완료 후"
+      action: "재유치 트랙으로 이관 (SEG doc 20번)"
+
+  open_questions:
+    - "이탈 신호 중첩 2개 기준은 정리자 제안 — 실제 이탈률로 검증 필요"
+    - "본부 관점(ETF 보유자=위험군)과 현장 관점(ETF 미보유자=잠재군)이 정반대 모집단 (SEG doc 34번)"
+    - "KB증권 보전율 70% vs 80% 상충 (SEG doc 39번 / 화법 35번)"
+    - "'과거 가입기간 미인정·장기할인 소멸'은 타사 정책 주장 — 사실 확인 후에만 사용"
+
+# ─────────────────────────────────────────────────────────────
+- id: SEG-05
+  name: "세액공제·추가입금"
+  aliases: ["추가납 세그먼트", "잔여한도 보유 고객", "ISA 만기자금 전환 대상"]
+  one_line: "납입 여력이 남아 있는 고객 — 기한이 붙은 자금 이벤트(ISA·퇴직금 60일)가 최우선이고, 연금개시 계좌는 반드시 뺀다"
+  business_goal: [자금유입]
+
+  population:
+    base: "당행 개인형IRP 보유 고객 · 적립용 계좌"
+    include:
+      - any_of:
+          - field: 당해_세액공제_잔여한도
+            op: ">"
+            value: 0
+            as_of: "2026"
+            source: KU-F-013
+            note: "유형 A — 세액공제 미소진"
+          - field: "전년_납입있음 AND 당해_납입없음"
+            op: "=="
+            value: true
+            as_of: "2026"
+            source: KU-M-021
+            note: "유형 B — 납입 중단 신호"
+          - field: ISA_만기도래_또는_만기해지후_60일미경과
+            op: "=="
+            value: true
+            as_of: "2026"
+            source: KU-F-014
+            note: "유형 C — 기한부 자금 이벤트"
+          - field: 당해_입금액
+            op: "<"
+            value: 18000000
+            as_of: "2026"
+            source: KU-F-015
+            note: "유형 D — 과세이연 목적 납입 여력"
+    exclude:
+      - field: 연금개시여부
+        op: "=="
+        value: true
+        as_of: "2026"
+        source: KU-G-011
+        note: "연금개시 계좌는 추가입금 불가 — [02-12-223]으로 반드시 사전 확인"
+      - field: 연금지급설계_등록여부
+        op: "=="
+        value: true
+        as_of: "2025.11"
+        source: KU-G-011
+        note: "추가 납입 제한 — 적립형 IRP 신규 개설로 우회 (대가 고지 필요)"
+
+  threshold_variants:
+    - value: "최근 3년(2023~2025) 납입 이력 있고 당해 잔여한도 보유"
+      source: "맞춤형 타깃 요청 6개 부점 (SEG doc 13번)"
+      as_of: "2026"
+      purpose: "현장 수요가 가장 집중된 추가납 조건"
+      adopted: true
+      note: "'최근 3년 납입 이력'의 해석(연 1회 이상/3년 연속)이 신청서마다 다름 — 팀 확정 필요"
+    - value: "전년 납입액 900만원 미만"
+      source: "보물지도 추가납 절 (SEG doc 15번)"
+      as_of: "2026.03"
+      purpose: "세액공제 미실현 고객"
+      adopted: false
+      note: "900만원은 당행+타행 합산 기준 — 당행분만으로 추출 시 과다 추출"
+    - value: "자기부담금 30만원 미만 계좌 우선 → 당해 입금 없음·1,800만원 미만 → 그 외"
+      source: "Hot Tip 207754 (SEG doc 44번)"
+      as_of: "2026.08"
+      purpose: "접촉 우선순위 3단 (직원 득점 효율 순)"
+      adopted: false
+      note: "고객 편익 순이 아님 — 정렬에만 사용, 대고객 언급 금지"
+    - value: "ISA 만기 2~1개월 전"
+      source: "Hot Tip 204287 (SEG doc 45번)"
+      as_of: "2026.01"
+      purpose: "만기 후 60일 기한의 사전관리 버전"
+      adopted: true
+
+  recommended_target:
+    rule: "① ISA 만기 D-60 ~ 만기 후 60일 이내(기한 트랙, 최우선) ② 최근 3년 납입 이력 & 당해 잔여한도 보유(습관 트랙) — 두 트랙 모두 연금개시·연금지급설계 계좌 제외"
+    expected_scale: "미산출"
+    rationale: |
+      추가납 조건은 13~16·44번이 사실상 같은 모집단을 다르게 자른 것이다.
+      구분해야 할 유일한 축은 '기한이 있는가'다 — ISA 60일·퇴직금 60일은 지나면 기회가 소멸하고,
+      잔여한도는 연중 언제든 가능하다. 기한 트랙을 먼저 소화하고 습관 트랙을 상시로 돌린다.
+      납입 이력이 있는 고객이 권유 성공률이 높다는 전제는 현장 6개 부점의 요청으로 뒷받침된다.
+
+  false_positive_filters:
+    - check: "[02-12-223] 연금개시 여부"
+      action: "개시 계좌는 추가입금 불가 — 접촉 전 필수 확인"
+      source: KU-G-011
+    - check: "[06-12-151] 연합회 한도 (타사 납입분 포함)"
+      action: "당행 납입액만으로 판단하면 이미 한도를 채운 고객을 접촉하게 된다"
+      source: KU-P-008
+    - check: "'연금지급설계' 등록 여부"
+      action: "등록 계좌는 추가납 제외 — 적립형 IRP 신규 개설 안내로 전환"
+      source: KU-G-011
+
+  priority:
+    sort_keys: ["기한 잔여일수 오름차순", "잔여한도 금액 내림차순", "전년 납입액 내림차순"]
+    scoring:
+      method: "기한 이벤트 > 잔여한도 금액 > 납입 습관"
+      source: "07_에이전트_기능정의 ④ '이벤트·기한 > 조회형'"
+
+  data_requirements:
+    - 연도별_납입금액(23/24/25/26)
+    - 당해_세액공제_잔여한도
+    - 연합회_한도(타사 포함)
+    - ISA_만기일·만기해지일
+    - 퇴직금_지급일
+    - 연금개시여부
+    - 연금지급설계_등록여부
+    - 자기부담금_당해_누적액
+    - 총급여구간(세액공제율 판정)
+    - 금융소득종합과세_대상여부
+
+  lookup_screens:
+    - code: "[06-12-151]"
+      name: "개인부담금 연합회 한도 조회"
+      purpose: "당행+타행 합산 잔여한도 (필수)"
+    - code: "[04-12-644]"
+      name: "퇴직연금 거래내역 조회"
+      purpose: "당해 입금 이력"
+    - code: "[02-12-223]"
+      name: "연금개시 여부 확인"
+      purpose: "추가입금 가능 여부 (필수 선행)"
+    - code: "[04-10-099]"
+      name: "세금우대관련조회"
+      purpose: "ISA 만기 전환 대상 확인 (저축종류 83) · 연금 보유 지형 오프너"
+    - code: "[01-12-213]"
+      name: "ISA 만기자금 입금"
+      purpose: "만기일로부터 60일 내 IRP 입금 처리"
+    - code: "[06-12-622]"
+      name: "세액공제 미신청금액 등록"
+      purpose: "계약해지·연금개시 전 필수 점검"
+
+  why_now:
+    - claim: "ISA 만기자금은 60일 이내 전환 시 납입한도와 무관하게 전액 이동 + 전환금액 10%(최대 300만원) 추가 세액공제"
+      number: "60일 / 10% / 최대 300만원 (기본 900만원 + 300만원 = 1,200만원)"
+      as_of: "2026.03"
+      ku: KU-F-014
+    - claim: "퇴직금을 통장으로 받았어도 지급일로부터 60일 내 IRP 입금 시 퇴직소득세 전액 환급"
+      number: "60일 · 전환 성공률 26.5%"
+      as_of: "2025.03~2026.02"
+      ku: KU-E-009
+    - claim: "세액공제는 '납입 시점' 기준이라 11월이 실질 마감"
+      number: null
+      as_of: "2026"
+      ku: KU-M-022
+
+  kpi_link:
+    name: "개인형IRP 고객수 — 자기부담금 기준"
+    recognition: "자기부담금 30만원 입금 시 0.05점 (2026 하반기 기준)"
+    as_of: "2026 하반기"
+    source: KU-M-023
+    caution: "직원 득점 효율 서열이며 고객 편익 순이 아니다 — 정렬에만 사용"
+
+  briefing_slots:
+    why_target: "올해 납입 {금액}원 (작년 {금액}원) · 잔여 세액공제 한도 {금액}원 · {기한이벤트} D-{n}"
+    snapshot: "연도별 납입액 / 연합회 합산 한도 / 연금개시 여부 / 계좌 성격(적립용·퇴직용)"
+    customer_unknown: "본인이 얼마를 납입하고 공제받는지 모르는 고객이 대부분 — 이 표 자체가 오프너"
+    today_offer: "offers[0]"
+    expected_objections: [KU-S-029, KU-S-030, KU-S-031]
+    do_not: [KU-G-011, KU-G-012]
+    precheck_screens: ["[02-12-223]", "[06-12-151]", "[04-12-644]"]
+
+  offers:
+    - rank: 1
+      action: "ISA 만기자금 IRP 전환 (60일 골든타임 + 추가 세액공제)"
+      ku: KU-S-032
+      condition: "ISA 만기 도래·해지 후 60일 미경과"
+    - rank: 2
+      action: "자동이체 증액으로 세액공제 한도 채우기"
+      ku: KU-S-029
+      condition: "잔여한도 보유 & 납입 습관 있음"
+    - rank: 3
+      action: "연 1,800만원 한도까지 과세이연 목적 납입"
+      ku: KU-S-030
+      condition: "절세 관심·금융소득종합과세 대상"
+    - rank: 4
+      action: "퇴직금 60일 내 IRP 입금 (퇴직소득세 환급)"
+      ku: KU-S-033
+      condition: "퇴직금을 입출금통장으로 수령"
+
+  knowledge_units:
+    - {ku: KU-E-009, role: "퇴직금 전환 성공률 기준선"}
+    - {ku: KU-E-010, role: "E-E-T 과세체계 프레임"}
+    - {ku: KU-M-021, role: "납입 중단 신호 해석"}
+    - {ku: KU-M-022, role: "추가납 마케팅 시점 설계"}
+    - {ku: KU-M-023, role: "접촉 우선순위 3단 (사내전용)"}
+    - {ku: KU-M-024, role: "ISA 60일 + 3년 재순환 설계"}
+    - {ku: KU-S-029, role: "자동이체 증액 화법"}
+    - {ku: KU-S-030, role: "1,800만원 한도 화법"}
+    - {ku: KU-S-031, role: "'지금 쓸 돈도 없어요' 대응"}
+    - {ku: KU-S-032, role: "ISA 만기 60일 골든타임 화법"}
+    - {ku: KU-S-033, role: "퇴직금 통장 수령 고객 화법"}
+    - {ku: KU-S-034, role: "ISA 만기 유형별 피칭 (3040/5060/고액자산가)"}
+    - {ku: KU-S-035, role: "세액공제 체감 비유 (적금 환산)"}
+    - {ku: KU-F-013, role: "납입한도·세액공제율"}
+    - {ku: KU-F-014, role: "ISA 전환 특례"}
+    - {ku: KU-F-015, role: "세액공제 초과분 과세이연·이월공제"}
+    - {ku: KU-F-016, role: "퇴직금 60일 과세이연"}
+    - {ku: KU-F-017, role: "추가납입 특례 (주택 다운사이징 등)"}
+    - {ku: KU-P-008, role: "잔여한도 확인 2경로"}
+    - {ku: KU-P-009, role: "ISA 만기자금 입금 처리"}
+    - {ku: KU-P-010, role: "세액공제 미신청금액 등록"}
+
+  scenarios: [SC-05-A, SC-05-B, SC-05-C]
+
+  guardrails: [KU-G-011, KU-G-012, KU-G-005]
+
+  followup:
+    - trigger: "ISA 만기 전 접촉"
+      interval: "만기일 D-7"
+      action: "재접촉 예약 — 만기 후 60일 타이머 시작"
+    - trigger: "ISA 전환 완료"
+      interval: "3년"
+      action: "ISA 재가입 → 만기 → IRP 전환 사이클 재개"
+    - trigger: "잔여한도 미소진 상태로 종료"
+      interval: "11월 첫 주"
+      action: "연말 마감 전 재접촉 (세액공제는 납입 시점 기준)"
+
+  open_questions:
+    - "'최근 3년 납입 이력'의 정의 확정 (SEG doc 13번)"
+    - "ISA 전환 추가공제 한도 — '최대 300만원'과 총급여 구간별 상세값(300만원/1,388,000원) 중 현행 확인 (SEG doc 45번)"
+    - "세액공제 미신청금액 등록 화면 [06-12-622] / [06-12-627]·[06-12-651] 갈림 — 현행 확인"
+    - "'연금지급설계' 등록 여부의 조회 화면이 자료에 없음"
+
+# ─────────────────────────────────────────────────────────────
+- id: SEG-06
+  name: "예금·GIC 만기예정"
+  aliases: ["만기 1개월 전 원리금보장상품 보유", "만기 임박 & 디폴트옵션 미등록"]
+  one_line: "만기가 곧 재설계 창구인 고객 — 자동 재예치가 폐지돼 방치하면 만기자금이 그대로 현금성자산이 된다"
+  business_goal: [수익률제고, 이탈방어, 관리사이클]
+
+  population:
+    base: "당행 개인형IRP 보유 고객 · 원리금보장상품(시중·저축은행 정기예금, GIC, ELB) 보유"
+    include:
+      - field: 보유상품_만기잔여일수
+        op: "<="
+        value: 30
+        as_of: "2026.03"
+        source: KU-M-025
+        note: "본부 원칙 — 만기 1개월 전 반드시 만기 안내"
+      - field: 만기도래상품_금액
+        op: ">="
+        value: 100000
+        as_of: "2023~24"
+        source: KU-M-026
+    exclude:
+      - field: 연금개시여부
+        op: "=="
+        value: true
+        source: KU-G-002
+        note: "수령 중 계좌는 인출 설계와 충돌 — 별도 판단"
+
+  threshold_variants:
+    - value: "만기 1개월 이내 (금액 조건 없음)"
+      source: "보물지도 기존 고객 관리 4원칙 (SEG doc 9번)"
+      as_of: "2026.03"
+      purpose: "만기 안내 필수 행동"
+      adopted: true
+    - value: "1개월 내 만기도래 10만원 이상 & 적립금 500만원 이상 & 디폴트옵션 미등록"
+      source: "오늘의할일 시트34 (SEG doc 6번)"
+      as_of: "2023~24"
+      purpose: "예방적 디폴트옵션 등록 유도"
+      adopted: true
+      note: "만기 트랙 중 우선순위 최상 — 방치 시 SEG-02·SEG-03으로 즉시 전이"
+    - value: "익월 만기금액 1천만원 이상"
+      source: "2021 자료 (SEG doc 9번 검토메모)"
+      as_of: "2021"
+      purpose: "금액 기준 절단"
+      adopted: false
+      note: "판독 불확실 — 현행 기준 여부 확인 필요"
+    - value: "디폴트옵션 안정형 · 기업·하나·신한 3년제 상품 보유"
+      source: "Hot Tip 207088 (SEG doc 42번)"
+      as_of: "2026.07"
+      purpose: "중도해지 유불리 확인 대상"
+      adopted: false
+      note: "만기 전 교체 검토 트랙 — 만기 트랙과 별개"
+
+  recommended_target:
+    rule: "만기 D-30 이내 원리금보장상품 10만원 이상 보유 AND 디폴트옵션 미등록 (1순위) → 디폴트옵션 등록 완료 계좌 중 만기 D-30 (2순위, 재예치 금리 상향 목적)"
+    expected_scale: "매월 첫째 주 만기명세 규모"
+    rationale: |
+      만기는 유일하게 '고객이 이상하게 여기지 않는' 접촉 명분이고, 기한이 붙어 자동으로 우선순위가 정해진다.
+      디폴트옵션 미등록 여부로 두 트랙을 가르는 이유는 방치 시 결과가 다르기 때문이다 —
+      미등록이면 만기자금이 현금성자산으로 상환되어 편중 계좌가 되고, 등록돼 있으면 자동 운용되지만 금리가 낮을 수 있다.
+
+  false_positive_filters:
+    - check: "만기 자금이 인출·연금지급 예정 자금인가"
+      action: "예정이면 재예치 권유 대신 인출 설계로 전환"
+      source: KU-M-004
+    - check: "중도해지 손실 vs 개선 이익"
+      action: "만기 전 교체를 검토할 때만 — [04-12-642] 연계 계산기로 유불리 확인 후 판단"
+      source: KU-M-006
+    - check: "당월 특별제공상품 금리를 확인했는가"
+      action: "금리는 월 단위 확정 — 월말 매수 시 다음 달 금리가 적용된다"
+      source: KU-F-018
+
+  priority:
+    sort_keys: ["만기일 오름차순", "만기금액 내림차순", "디폴트옵션 미등록 우선"]
+    scoring: null
+
+  data_requirements:
+    - 보유상품_상품명·유형(정기예금/GIC/ELB)
+    - 만기일·만기잔여일수
+    - 만기도래금액
+    - 적립금_평가금액
+    - 디폴트옵션_등록여부·등급
+    - 현재_적용금리
+    - 당월_특별제공상품_금리
+    - 투자성향·펀드이력
+    - 중도해지_예상손실액
+
+  lookup_screens:
+    - code: "[04-12-642]"
+      name: "적립금 및 수익률 조회"
+      purpose: "보유상품 만기 확인 · 중도해지 예상조회·리밸런싱 계산기 진입"
+    - code: "[04-12-17A]"
+      name: "NEW 퇴직연금상품조회"
+      purpose: "재예치 상품 선정 · 원리금보장상품 잔여한도 확인 (상담 전 필수)"
+    - code: "경영정보시스템"
+      name: "영업지원 > 실적관리 > 수신상품(퇴직연금)"
+      purpose: "만기 명세 조회 (매월 첫째 주)"
+    - code: "[75-08-110]"
+      name: "콘텐츠 지정 발송"
+      purpose: "만기 예약변경 URL 발송"
+
+  why_now:
+    - claim: "정기예금 자동 재예치가 폐지되어 운용지시가 없으면 만기자금은 현금성자산으로 상환된다"
+      number: null
+      as_of: "2023.07"
+      ku: KU-F-006
+    - claim: "퇴직연금 정기예금 만기는 리밸런싱할 수 있는 최적의 시점"
+      number: null
+      as_of: "2021.02"
+      ku: KU-M-025
+    - claim: "특별제공 GIC와 디폴트옵션 안정형의 실측 금리 격차"
+      number: "GIC 3년 3.00~3.15%('25.9~11) vs 디폴트옵션 안정형 3년 고정 2% 초반"
+      as_of: "2025.09~11"
+      ku: KU-F-019
+      caution: "금리는 월 단위 변경 — 상담 전 당월 자료 조회 필수"
+
+  kpi_link:
+    name: "2026 하반기 개인형IRP 고객수 (SEG-02와 공유)"
+    recognition: "고유대 또는 시중은행 정기예금 1천만원 이상 매도 후 저축은행 또는 TDF로 변경 시 인정"
+    as_of: "2026 하반기"
+    source: KU-M-012
+    caution: "만기 자금을 시중은행 정기예금으로 재예치하면 실적 미인정 — 다만 고객 최적해와 어긋날 수 있음"
+
+  briefing_slots:
+    why_target: "{상품명} 만기 {일자} (D-{n}) · {금액}원 · 디폴트옵션 {등록/미등록}"
+    snapshot: "만기 상품·금액·현재 적용금리 / 당월 특별제공상품 금리 / 적립금 3층 구성"
+    customer_unknown: "자동 재예치가 폐지되어 그냥 두면 대기 자금이 된다는 사실"
+    today_offer: "offers[0]"
+    expected_objections: [KU-S-036, KU-S-013, KU-S-016]
+    do_not: [KU-G-004, KU-G-013, KU-G-005]
+    precheck_screens: ["[04-12-17A]", "[04-12-642]"]
+
+  offers:
+    - rank: 1
+      action: "만기 예약변경으로 고금리 원리금보장상품(저축은행 정기예금·GIC) 재예치"
+      ku: KU-S-036
+      condition: "안전자산 선호형 (펀드 이력 없음)"
+    - rank: 2
+      action: "만기자금 일부를 추천펀드·TDF로 운용"
+      ku: KU-S-037
+      condition: "분산투자 가능형 (펀드 이력 있음)"
+    - rank: 3
+      action: "디폴트옵션(저위험 이상) 사전지정 등록 + 만기 예약변경"
+      ku: KU-S-038
+      condition: "디폴트옵션 미등록"
+
+  knowledge_units:
+    - {ku: KU-M-003, role: "안전선호/분산가능 2갈래 분기"}
+    - {ku: KU-M-005, role: "일부·가역 재제안"}
+    - {ku: KU-M-006, role: "중도해지 유불리 판정"}
+    - {ku: KU-M-007, role: "매도 우선순위 4단"}
+    - {ku: KU-M-025, role: "만기를 재설계 창구로 쓰는 원칙"}
+    - {ku: KU-M-026, role: "예약변경 vs 교체매매 실행 방식"}
+    - {ku: KU-M-027, role: "월 단위 금리 확정 — 월말 매수 주의"}
+    - {ku: KU-S-036, role: "안전선호형 재예치 화법"}
+    - {ku: KU-S-037, role: "분산가능형 일부 운용 화법"}
+    - {ku: KU-S-038, role: "재예치 폐지 근거 디폴트옵션 등록 화법"}
+    - {ku: KU-S-039, role: "'금리 갈아타기가 곧 관리' 생활 비유"}
+    - {ku: KU-S-040, role: "재접촉 명분 화법 (작년에 해드린 상품 만기)"}
+    - {ku: KU-F-006, role: "자동 재예치 폐지"}
+    - {ku: KU-F-018, role: "원리금보장 금리는 조회로만"}
+    - {ku: KU-F-019, role: "특별제공상품 금리 실측 (기준시점 필수)"}
+    - {ku: KU-F-002, role: "예금자보호 1억원"}
+    - {ku: KU-F-003, role: "GIC·ELB 특성"}
+    - {ku: KU-F-021, role: "실물이전 불가 원리금보장상품 (락인 설계)"}
+    - {ku: KU-P-011, role: "만기 예약변경 처리"}
+    - {ku: KU-P-012, role: "매월 첫째 주 만기명세 관리"}
+
+  scenarios: [SC-06-A, SC-06-B, SC-06-C]
+
+  guardrails: [KU-G-004, KU-G-013, KU-G-005, KU-G-002]
+
+  followup:
+    - trigger: "재예치 완료"
+      interval: "만기일 D-30"
+      action: "다음 만기 재접촉 예약 — 만기 사이클이 곧 관리 사이클"
+    - trigger: "미조치"
+      interval: "만기일 +7일"
+      action: "현금성자산 상환 여부 확인 → SEG-02·SEG-03으로 라우팅"
+
+  open_questions:
+    - "'익월 만기금액 1천만원 이상' 금액 기준의 현행 여부 (SEG doc 9번)"
+    - "저축은행 3년제가 디폴트옵션 초저위험보다 금리가 높다는 서술과 KBthink 서술의 비교 대상 상충 (화법 71번)"
+    - "매도 우선순위 4단이 시스템 계산기 순위인지 본부 공식 규칙인지 (SEG doc 42번)"

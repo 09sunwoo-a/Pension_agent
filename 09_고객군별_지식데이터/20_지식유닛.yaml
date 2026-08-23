@@ -1,0 +1,934 @@
+%YAML 1.2
+---
+# ============================================================
+# 20_지식유닛.yaml (1/3) — 근거(E) · 방법론(M)
+# 규격: 00_스키마.md § 2
+# ============================================================
+
+meta:
+  version: "1.0"
+  as_of: "2026-08-23"
+  part: "1/3 — evidence, method"
+  note: |
+    지식유닛은 이 파일과 21·22번 파일에 나누어 담는다(유형별 분책).
+    같은 지식은 한 곳에만 존재하며, 고객군은 ID로만 참조한다.
+
+units:
+
+# ─────────────── evidence (근거 데이터) ───────────────
+- id: KU-E-001
+  type: evidence
+  title: "편중 계좌의 이탈위험도는 일반 고객의 1.3배"
+  segments: [SEG-02, SEG-04]
+  trigger: "편중 고객에게 접촉 명분을 제시할 때 / 리밸런싱을 최우선에 두는 이유를 설명할 때"
+  body: |
+    '25.11~'26.4(6개월) 이탈고객 분석 결과, ① 고유계정대를 50% 이상 보유하거나
+    ② 고유계정대 및 시중은행 정기예금을 100% 보유 중인 고객의 이탈위험도가
+    일반 고객 대비 1.3배 높았다 (이탈률 14.8% vs 11.8%).
+    본부가 리밸런싱 관리 최우선 세그먼트로 지정한 근거이며, 총 적립금 1천만원 이상 고객에게
+    타깃리스트가 제공된다.
+  numbers:
+    - {label: "편중 고객 이탈률", value: "14.8%", as_of: "2025.11~2026.04", verify: false}
+    - {label: "일반 고객 이탈률", value: "11.8%", as_of: "2025.11~2026.04", verify: false}
+    - {label: "배수", value: "1.3배", as_of: "2025.11~2026.04", verify: false}
+  screens: []
+  cautions:
+    - "고객에게는 '이탈률'이라는 단어를 쓰지 않는다 — 행원의 확신을 위한 내부 근거다"
+  source: {doc: "개인형IRP 고객관리 가이드 Series 1", section: "고객관리 대상 조회", org: "연금컨설팅부", date: "2026.05"}
+  origin_ref: "SEG 1번 / 방법론 46번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-E-002, KU-M-001]
+
+- id: KU-E-002
+  type: evidence
+  title: "편중 계좌를 잃으면 KPI 가중치 △1.65"
+  segments: [SEG-02]
+  trigger: "리밸런싱 실행 우선순위를 정할 때 (내부 동기)"
+  body: |
+    편중 계좌의 이탈은 KPI 가중치 △1.65의 손실로 연결된다.
+    방법론을 실행하게 만드는 제도적 압력으로, 행원의 접촉 우선순위 판단에만 쓴다.
+  numbers:
+    - {label: "KPI 가중치 손실", value: "△1.65", as_of: "2026", verify: true}
+  screens: []
+  cautions: ["고객 앞에서 언급 금지"]
+  source: {doc: "개인형IRP 고객관리 가이드 Series 1", section: "-", org: "연금컨설팅부", date: "2026.05"}
+  origin_ref: "방법론 49번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: medium
+  related: [KU-E-001]
+
+- id: KU-E-003
+  type: evidence
+  title: "본부 '이탈방지' 타깃 정의 — 비대면 신규 & 권유직원 미존재"
+  segments: [SEG-03]
+  trigger: "관리 사각지대 계좌를 정의할 때"
+  body: |
+    본부가 영업점에 제공하는 타겟리스트의 '이탈방지' 유형은
+    「우리 지점 관리 IRP 중 비대면 신규 및 권유직원 미존재 고객」과
+    「전담직원별 IRP 계좌 수익률 및 상품 만기도래 현황」 두 가지다.
+    명세 경로: WiseNet > Info Zone > 연금(퇴직연금) > 마케팅 컨텐츠 > 타겟리스트
+  numbers: []
+  screens: []
+  cautions:
+    - "'관리 접점 부재 = 이탈 고위험'이라는 인과 설명은 원자료에 없는 해석이다"
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "타겟리스트 표", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "SEG 11번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-E-005]
+
+- id: KU-E-004
+  type: evidence
+  title: "전출 알림은 확정 이탈이 아니다 — 지킬 수 있는 고객이 생각보다 많다"
+  segments: [SEG-04]
+  trigger: "전출 알림을 받고 접촉을 망설일 때"
+  body: |
+    "고객의 이탈 사유를 들어보면, 지킬 수 있는 고객이 생각보다 많아요.
+    계약이전(전출) 알림을 받으시면, 고객께 직접 전화하여 소중한 고객을 놓치지 않도록
+    이탈 방어에 힘써 주세요."
+    본부 인력(연금컨설팅부 마케팅추진/관리팀 4명)만으로 전행 신청 건을 소화할 수 없어
+    영업점 직접 방어 대상으로 지정됐다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "보물 지키기 > 이탈 고객 방어", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "SEG 2번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-019, KU-S-025]
+
+- id: KU-E-005
+  type: evidence
+  title: "이탈방어의 진짜 시점은 통보 전 — 관리되지 않은 계좌의 이탈은 막을 수 없다"
+  segments: [SEG-03, SEG-04]
+  trigger: "방치 계좌를 접촉해야 하는 이유를 설명할 때"
+  body: |
+    "관리되지 않은 퇴직연금의 이탈은 막을 수 없다."
+    이탈은 관리 소홀의 결과라는 인과가 행내 자료와 현장 경험 공통의 결론이다.
+    따라서 미접촉·방치 계좌를 보이게 만드는 것이 이탈방어의 시작이다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "Hot Tip 203753 퇴직연금 Total Marketing 사례", section: "-", org: "서전주지점", date: "2025.10"}
+  origin_ref: "방법론 103번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-E-003, KU-E-006]
+
+- id: KU-E-006
+  type: evidence
+  title: "전입 고객 설문 — 재이탈 의향 82.5%, 개선 요구 1위는 '고객관리'"
+  segments: [SEG-03, SEG-04]
+  trigger: "타행에서 전입한 이력이 있는 고객을 위험군으로 볼 때"
+  body: |
+    2026년 초 전입고객 설문(171명): 조건 충족 시 재이탈 의향 82.5%.
+    가장 많이 지적된 개선사항은 '고객 관리'였다.
+    전입 고객은 유치 성공 시점이 아니라 관리 시작 시점으로 봐야 한다.
+  numbers:
+    - {label: "응답자", value: "171명", as_of: "2026 초", verify: false}
+    - {label: "재이탈 의향", value: "82.5%", as_of: "2026 초", verify: false}
+  screens: []
+  cautions:
+    - "자료는 설문 결과만 제시할 뿐 '전입 이력 고객'을 관리 세그먼트로 정의하지 않았다 — 세그먼트화는 해석"
+    - "전입 이력 데이터의 시스템 조회 가능 여부 미확인"
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "고객관리 설문조사", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "SEG 21번 / 방법론 48번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: medium
+  related: [KU-E-005]
+
+- id: KU-E-007
+  type: evidence
+  title: "증권사 이탈 고객의 약 82%가 ETF 투자자 — 단 3년 수익률은 공모펀드가 7%p 우위"
+  segments: [SEG-04]
+  trigger: "ETF를 이유로 증권사 이전을 말하는 고객을 최고위험군으로 판단할 때"
+  body: |
+    미래에셋증권으로 이동한 고객을 분석한 결과 약 82%가 ETF 투자를 하고 있었다.
+    다만 ETF와 공모펀드의 3년 수익률 비교에서는 공모펀드가 약 7%p 높았다 —
+    "ETF가 더 낫다"는 인식이 근거가 약하다는 반론 재료다.
+    현장은 역방향 관점도 쓴다: 정기예금·펀드로만 운용 중인 고객을 증권사 이탈 잠재군으로 보고
+    ETF 100% 운용지시(주식형·혼합형 70% + 채권형·혼합형 30%)로 선제 방어.
+  numbers:
+    - {label: "이탈 고객 중 ETF 투자자 비중", value: "약 82%", as_of: "2024 추정", verify: true}
+    - {label: "3년 수익률 격차 (공모펀드 우위)", value: "약 7%p", as_of: "미상", verify: true}
+  screens: []
+  cautions:
+    - "82%는 STT 전사 수치 — 원자료 대조 권장. '올해'의 기준 시점도 미상"
+    - "본부 관점(ETF 보유자=위험군)과 현장 관점(ETF 미보유자=잠재군)은 정반대 모집단"
+  source: {doc: "스타런 교육영상 [통합] 연금고객 이탈방지 상담 해결책", section: "패널 토론", org: "연금사업부", date: "2024 추정"}
+  origin_ref: "SEG 34번 / 방법론 114번"
+  trust: 현장팁
+  disclosure: 표현변경후
+  status: 검증필요
+  confidence: medium
+  related: [KU-S-021]
+
+- id: KU-E-008
+  type: evidence
+  title: "'24년 계약이탈 48% 증가, 개인 IRP는 92% 급증 — 이탈은 구조적 흐름"
+  segments: [SEG-04]
+  trigger: "이탈 대응을 상시 업무로 편성해야 하는 이유"
+  body: |
+    2024년 퇴직연금 계약이탈이 전년 대비 48% 증가했고, 개인형IRP는 92% 급증했다.
+    실물이전 제도 시행(2024.10) 이후 증권사 이탈이 가속됐다.
+    개별 고객의 문제가 아니라 시장 구조의 변화이므로 상시 방어 체계가 필요하다.
+  numbers:
+    - {label: "계약이탈 증가율", value: "48%", as_of: "2024", verify: true}
+    - {label: "개인 IRP 이탈 증가율", value: "92%", as_of: "2024", verify: true}
+  screens: []
+  cautions: ["기준연도(2024)를 반드시 병기"]
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론", section: "근거⑨", org: "-", date: "2024"}
+  origin_ref: "방법론 116번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 기준시점병기조건부
+  confidence: medium
+  related: [KU-F-012]
+
+- id: KU-E-009
+  type: evidence
+  title: "퇴직금 IRP 전환 성공률 26.5% — 접촉의 기대 전환율 기준선"
+  segments: [SEG-05]
+  trigger: "퇴직금 통장 수령 고객 접촉의 기대효과를 판단할 때"
+  body: |
+    입출금통장에 '퇴직금' 적요로 입금된 486,846명 중 개인형IRP로 입금한 고객은 129,226명 = 26.5%
+    (2025.3.1~2026.2.24).
+    네 명 중 한 명은 전환된다 — 접촉량 설계와 기대치 관리의 기준선.
+  numbers:
+    - {label: "모집단", value: "486,846명", as_of: "2025.03~2026.02", verify: false}
+    - {label: "전환", value: "129,226명", as_of: "2025.03~2026.02", verify: false}
+    - {label: "전환율", value: "26.5%", as_of: "2025.03~2026.02", verify: false}
+  screens: []
+  cautions: []
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "4. 퇴직금", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "방법론 47번 / 화법 32번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-033, KU-F-016]
+
+- id: KU-E-010
+  type: evidence
+  title: "E-E-T 과세체계 — 추가납입 설득을 하나로 묶는 프레임"
+  segments: [SEG-05]
+  trigger: "왜 IRP에 더 넣어야 하는지를 큰 그림으로 설명할 때"
+  body: |
+    납입 단계 공제(Exempt) → 운용 단계 과세이연(Exempt) → 수령 단계 과세(Taxed).
+    세 단계가 각각 혜택이므로 "평생 절세 통장"이라는 하나의 프레임으로 설명한다.
+    운용 중 이자·배당·평가차익은 비과세로 재투자되고 금융소득종합과세에서 제외된다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론", section: "참고 121번", org: "-", date: "-"}
+  origin_ref: "방법론 121번 / 화법 96번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-015, KU-S-030]
+
+- id: KU-E-011
+  type: evidence
+  title: "수익률 진단의 세 기준선 — IRP 평균 7.97% / 정기예금 3.02% / 고유계정대 2.52%"
+  segments: [SEG-01, SEG-02]
+  trigger: "수익률이 낮아 보이는 계좌를 진단할 때 / 방치의 기회비용을 수치로 제시할 때"
+  body: |
+    절대값이 아니라 세 기준선과의 '격차'로 진단한다.
+    ① IRP 고객 1년 평균 수익률 7.97% ('26.1분기)
+    ② 시중은행 정기예금(1년) 평균 3.02% ('26.5월)
+    ③ 고유계정대 평균 2.52% ('26.5월) — 현장 실측 2.76% ('26.8.3)
+    ②·③에 머문 고객에게 ①과의 차이가 방치의 기회비용이며, 리밸런싱 제안의 정량 근거다.
+    상담 순서: 현재 적용금리 안내 → 대안 상품 금리 비교.
+  numbers:
+    - {label: "IRP 고객 1년 평균 수익률", value: "7.97%", as_of: "2026.1Q", verify: false}
+    - {label: "시중은행 정기예금 1년 평균", value: "3.02%", as_of: "2026.05", verify: false}
+    - {label: "고유계정대 평균", value: "2.52%", as_of: "2026.05", verify: false}
+    - {label: "고유계정대 실측", value: "2.76%", as_of: "2026.08.03", verify: false}
+  screens: ["[04-12-642]"]
+  cautions:
+    - "매 분기·매월 갱신 대상. 기준시점 없이 인용 금지"
+  source: {doc: "개인형IRP 고객관리 가이드 Series 1", section: "-", org: "연금컨설팅부", date: "2026.05"}
+  origin_ref: "방법론 3번 / 팩트 F58·F59"
+  trust: 본부공식
+  disclosure: 표현변경후
+  status: 기준시점병기조건부
+  confidence: high
+  related: [KU-F-001, KU-M-002]
+
+- id: KU-E-012
+  type: evidence
+  title: "퇴직연금 5년 2.35% vs 국민연금 6.21% — 원인은 정기예금 90% 편중"
+  segments: [SEG-01]
+  trigger: "투자 필요성 자체를 설득해야 할 때"
+  body: |
+    퇴직연금 5년 수익률 2.35%에 비해 국민연금은 6.21%였고, 원인으로 정기예금 90% 편중이 지목된다.
+    "수익률이 낮은 게 아니라 굴리지 않은 것"이라는 프레임의 근거.
+  numbers:
+    - {label: "퇴직연금 5년 수익률", value: "2.35%", as_of: "2023", verify: true}
+    - {label: "국민연금 수익률", value: "6.21%", as_of: "2023", verify: true}
+  screens: []
+  cautions: ["기준연도(2023) 병기 필수. 최신 공시로 갱신 권장"]
+  source: {doc: "스타런 투자교육 퇴직연금 수익률이 낮은 이유", section: "-", org: "-", date: "2023 추정"}
+  origin_ref: "방법론 112번 / 팩트 F66 / 화법 88번"
+  trust: 현장팁
+  disclosure: 표현변경후
+  status: 기준시점병기조건부
+  confidence: medium
+  related: [KU-S-009]
+
+- id: KU-E-013
+  type: evidence
+  title: "당행 실적배당·디폴트옵션 수익률 순위 — 성과 자랑이 아니라 운용지시 권유의 근거"
+  segments: [SEG-01, SEG-04]
+  trigger: "'수익률이 낮아서 옮기겠다'는 고객에게 당행 성과를 제시할 때"
+  body: |
+    당행 개인형IRP 실적배당상품 수익률은 은행권 1위 기록이 반복 보고된다.
+    다만 기준분기가 자료마다 갈린다 — '24.3분기 14.61% / '25.1분기말 / '26.1분기,
+    디폴트옵션 고위험은 '24.2분기 20.59%, 디폴트옵션 전체는 '25.4분기 개인형IRP 은행권 1위·전체 42개사 중 2위.
+    핵심 메시지는 "아무리 수익률이 높고 관리를 잘해도, 투자자산을 가입하지 않으면 소용이 없다"이다.
+  numbers:
+    - {label: "실적배당 은행권 1위", value: "14.61%", as_of: "2024.3Q", verify: true}
+    - {label: "디폴트옵션 고위험 은행권 1위", value: "20.59%", as_of: "2024.2Q", verify: true}
+    - {label: "디폴트옵션 개인형IRP 1위·전체 2위", value: "-", as_of: "2025.4Q", verify: true}
+  screens: []
+  cautions:
+    - "분기 표기 없이 '1위'만 말하면 안 된다 — 상담 시점에 가장 가까운 공시로 갱신"
+    - "수익률·순위는 기준시점·비교모집단·출처를 붙여서만 말한다 (KU-G-005)"
+  source: {doc: "스타런 교육영상 / Hot Tip 199181 / 보물지도", section: "-", org: "복수", date: "2024~2026"}
+  origin_ref: "방법론 115번 / 팩트 F60·F62 / 화법 63번"
+  trust: 본부공식
+  disclosure: 표현변경후
+  status: 기준시점병기조건부
+  confidence: medium
+  related: [KU-G-005, KU-S-022]
+
+# ─────────────── method (방법론) ───────────────
+- id: KU-M-001
+  type: method
+  title: "자산 구성은 현금성자산 / 원리금보장 / 실적배당 3층으로 읽는다"
+  segments: [SEG-01, SEG-02]
+  trigger: "계좌를 처음 열었을 때 — 진단의 1단계"
+  body: |
+    적립금을 세 층으로 나눠 읽고 층별로 액션이 결정된다.
+    ① 현금성자산(고유계정대) 금액이 큰 계좌 → 상품 운용지시부터 제안
+    ② 시중은행 정기예금 만기가 임박한 계좌 → 만기 시점에 맞춰 재운용 안내 (→ SEG-06)
+    ③ 보유 상품 수익률이 낮은 계좌 → 고금리 원리금보장상품 변경 안내
+  numbers: []
+  screens: ["[04-12-642]"]
+  cautions: []
+  source: {doc: "개인형IRP 고객관리 가이드 Series 1", section: "리밸런싱 도전하기", org: "연금컨설팅부", date: "2026.05"}
+  origin_ref: "방법론 1·1-1·1-2·1-3번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-004, KU-E-011]
+
+- id: KU-M-002
+  type: method
+  title: "수익률 낮은 계좌는 지적 대신 동일 연령대 상위 고객의 운용현황과 대조한다"
+  segments: [SEG-01]
+  trigger: "수익률 하위 고객에게 리밸런싱을 제안해야 하는데 직접 지적이 민감할 때"
+  body: |
+    [06-12-631] 퇴직연금 고객포털 > '퇴직연금 컨설팅'에서
+    동일 연령대 수익률 상위 고객의 운용현황을 조회해 대조한다.
+    "잘하는 고객은 혼합형·해외주식형 등으로 분산투자하고 있다" → 이 대조를 근거로 분산투자를 제안.
+    지적이 아니라 개선방안 제시로 접근한다.
+  numbers: []
+  screens: ["[06-12-631]"]
+  cautions:
+    - "비교그룹 조회 화면의 현행 여부 확인 필요 (2021~22년 자료)"
+  source: {doc: "연금고객 수익률 KPI 고객관리 시나리오", section: "관리 포인트별 상담 전략 D", org: "-", date: "2021 추정"}
+  origin_ref: "방법론 4번 / 화법 28번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-S-008, KU-G-001]
+
+- id: KU-M-003
+  type: method
+  title: "성향 설문만 믿지 않는다 — 펀드 이력을 교차 확인해 두 갈래로 나눈다"
+  segments: [SEG-02, SEG-06]
+  trigger: "제안 상품을 정하기 직전"
+  body: |
+    퇴직연금([04-12-642] 전체기간)과 일반 공모펀드([04-50-007] 폐기계좌 포함) 이력을 교차 조회해 가른다.
+    ① 안전자산 선호(투자 이력 없음) → 상품군은 그대로 두고 금리만 올린다 (저축은행 정기예금·GIC)
+    ② 분산투자 가능(투자 이력 있음) → 일부 금액을 포트폴리오로 이동 제안 (추천펀드·TDF)
+    이 분기가 곧 고객에게 물을 질문이 된다: "실적배당 희망하세요, 원리금보장 희망하세요?"
+  numbers: []
+  screens: ["[04-12-642]", "[04-50-007]"]
+  cautions: []
+  source: {doc: "연금고객 수익률 KPI 고객관리 시나리오 / Series1", section: "-", org: "연금컨설팅부", date: "2021~2026"}
+  origin_ref: "방법론 7·9·9-1·9-2번 / 절차 4번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-036, KU-S-037]
+
+- id: KU-M-004
+  type: method
+  title: "현금성자산은 접촉 전에 '사용계획 자금'인지 '방치 자금'인지 먼저 가른다"
+  segments: [SEG-02, SEG-03, SEG-06]
+  trigger: "현금성자산 보유 계좌를 발견했을 때 — 접촉 직전"
+  body: |
+    두 조건을 모두 만족할 때만 "미운용 자산"으로 안내한다.
+    ① 1개월 이상 금액 변동 없이 유지
+    ② [04-12-644] 거래내역조회에서 입금 사유가 "교체매매"·"연금지급"이 아님
+    오탐 접촉 한 번이 고객 신뢰를 깎는다.
+  numbers: []
+  screens: ["[04-12-644]"]
+  cautions:
+    - "상담 용어는 '고유계정대'가 아니라 '현금성자산' / '운용지시가 되지 않은 자산'"
+  source: {doc: "연금고객 수익률 KPI 고객관리 시나리오", section: "-", org: "-", date: "2021 추정"}
+  origin_ref: "방법론 6번 / SEG 26번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-G-004]
+
+- id: KU-M-005
+  type: method
+  title: "거부하는 고객에게는 규모를 줄여 '일부만 + 되돌릴 수 있음'으로 재제안한다"
+  segments: [SEG-02, SEG-03, SEG-06]
+  trigger: "상품 변경·전환을 거부당했을 때"
+  body: |
+    처음부터 전액이 아니라 일부씩(500만~1천만원) 제안하고,
+    6개월~1년 뒤 재점검을 함께 약속한다.
+    "언제든 되돌릴 수 있다"는 가역성이 심리 문턱을 낮춘다.
+    이 스몰스텝 자체가 다음 접촉의 명분이 된다.
+  numbers:
+    - {label: "권장 1회 전환 규모", value: "500만~1,000만원", as_of: "2026", verify: false}
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론", section: "-", org: "-", date: "-"}
+  origin_ref: "방법론 20·79번 / 화법 46번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-016, KU-M-011]
+
+- id: KU-M-006
+  type: method
+  title: "만기 전 교체는 계산기로 중도해지 유불리를 먼저 판정한다"
+  segments: [SEG-02, SEG-06]
+  trigger: "지금 바꿀지 만기까지 둘지 고민되는 상품이 있을 때"
+  body: |
+    [04-12-642] 연계메뉴 「퇴직연금 정기예금 중도해지 예상조회 및 리밸런싱 계산기」로
+    만기가치 vs 중도해지평가액 vs 리밸런싱 예상가치를 비교한다.
+    중도해지 손실이 개선 이익보다 크면 후순위로 미룬다.
+    정기예금이라도 중도해지이율이 수수료율보다 낮으면 원금이 깨질 수 있다.
+  numbers: []
+  screens: ["[04-12-642]"]
+  cautions:
+    - "디폴트옵션 안정형으로 보유한 타행 3년제 상품(기업·하나·신한)은 특히 확인 대상"
+  source: {doc: "Hot Tip 207088", section: "2. 평가대상고객 확인", org: "강동구청역지점", date: "2026.07"}
+  origin_ref: "방법론 19·58번 / SEG 42번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-007]
+
+- id: KU-M-007
+  type: method
+  title: "정기예금 매도 순서 4단 우선순위"
+  segments: [SEG-02, SEG-06]
+  trigger: "여러 정기예금 중 무엇부터 매도할지 정할 때"
+  body: |
+    ① 분할인출 횟수가 적은 정기예금 계좌
+    ② 최근 신규일이 빠른 정기예금 계좌
+    ③ 금액이 적은 정기예금 계좌
+    ④ 계좌번호가 빠른 정기예금 계좌
+    [04-12-642] 연계 계산기가 이 우선순위를 제시한다.
+  numbers: []
+  screens: ["[04-12-642]"]
+  cautions:
+    - "시스템 계산기 순위를 직원이 정리한 것 — 본부 공식 규칙인지 확인 필요"
+  source: {doc: "Hot Tip 207088 / 207754", section: "-", org: "강동구청역지점 / 영등포하이테크", date: "2026.07~08"}
+  origin_ref: "방법론 77번 / SEG 42번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-M-006]
+
+- id: KU-M-008
+  type: method
+  title: "상담 들어가기 전 유형별 준비 자료를 손에 들고 시작한다"
+  segments: [SEG-01, SEG-02, SEG-03, SEG-04, SEG-05, SEG-06]
+  trigger: "모든 접촉의 0단계"
+  body: |
+    준비물 표준 세트:
+    ① 계좌 스냅샷 (적립금·3층 구성·수익률·만기 임박 상품)
+    ② 비교 근거 ([06-12-631] 비교그룹 운용현황, WiseNet 추천 포트폴리오)
+    ③ 당월 수치 (원리금보장 특별제공상품 금리, 추천펀드)
+    ④ 계좌 상태 플래그 (KU-M-028 대체: 연금개시·진행 중 거래·AI일임)
+    ⑤ 오탐 제거 확인 결과 (KU-M-004)
+    "파는 게 아니라 알려준다는 마음으로" 시작한다.
+  numbers: []
+  screens: ["[06-12-631]", "[04-12-642]", "[04-12-17A]"]
+  cautions: []
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론", section: "-", org: "-", date: "-"}
+  origin_ref: "방법론 8·15·59번 / 화법 49번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-001, KU-M-004]
+
+- id: KU-M-009
+  type: method
+  title: "전액 원리금보장 운용 고객 — 저수익의 원인이 '구성'에 있음을 짚고 일부 실적배당 전환"
+  segments: [SEG-01, SEG-02]
+  trigger: "수익률 불만 + 전액 원리금보장상품 운용"
+  body: |
+    화법을 보유 상품 유형에 따라 나누는 것이 핵심이다.
+    이 유형은 개별 상품이 잘못된 것이 아니라 구성이 원인이므로,
+    "예금 금리와 물가상승률을 감안하면 일부 자금은 성향에 맞는 펀드로" 라는 논리로
+    일부 실적배당 전환을 제안한다. 전액 전환이 아니다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "스타런 교육영상 수익률불만·자산관리미흡 이탈대응", section: "-", org: "연금사업부", date: "2024 추정"}
+  origin_ref: "SEG 36-1번 / 화법 63번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-006, KU-M-010]
+
+- id: KU-M-010
+  type: method
+  title: "성과저조·환매추천 펀드 보유 고객 — 사과 후 매도·재추천이라는 구체 액션"
+  segments: [SEG-01]
+  trigger: "수익률 불만 + 부진한 실적배당상품 보유"
+  body: |
+    대상 판별: WM투자상품부가 매분기 제공하는 '환매추천펀드' 보유 계좌 (PB센터 관리고객 제외).
+    대응 순서: 감정 인정("속상하시겠지만") → 판매중단 사유(성과부진) 설명 →
+    "운용사의 관심도가 떨어져 향후에도 개선이 어려울 수 있다" → 매도 후 재추천.
+    2021년 자료는 전략펀드·ETF로, 2023~24 TM 스크립트는 디폴트옵션으로 갈아타게 유도한다.
+  numbers: []
+  screens: []
+  cautions:
+    - "현행 기준은 매분기 갱신되는 환매추천펀드 — 2021년의 '판매중단 21종' 목록은 실효로 보임"
+  source: {doc: "오늘의할일 스크립트 시트31 / KPI시나리오 2021", section: "-", org: "연금사업부(상품)", date: "2021~2024"}
+  origin_ref: "SEG 8번 / 방법론 23번 / 화법 27번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-S-007]
+
+- id: KU-M-011
+  type: method
+  title: "관리 사이클 — 현황 스캔 → 만기 → 수익률 → 수수료 4수칙과 6개월~1년 점검 주기"
+  segments: [SEG-01, SEG-03, SEG-06]
+  trigger: "기존 고객 상시 관리 체계를 돌릴 때"
+  body: |
+    기존 고객 관리 4수칙 순서:
+    ① 현황 스캔 (조회 → 파악 → 대화를 만날 때마다 반복)
+    ② 만기 1개월 전 반드시 만기 안내
+    ③ 수익률이 낮으면 포트폴리오 리밸런싱 제안
+    ④ 대면 계좌면 비대면 전환 시 수수료 인하 안내
+    점검 주기는 6개월~1년. "6개월이나 1년에 한 번씩 점검해드리니 고객이 찾아와서 추가 변경을 요청한다."
+    재접촉을 그 자리에서 심는 것이 사이클을 돌게 만든다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1 / Hot Tip 205805", section: "기존 고객 관리", org: "연금컨설팅부 / 인천삼산지점", date: "2026.03~04"}
+  origin_ref: "방법론 36·37번 / SEG 53번 / 화법 38번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-005, KU-S-017]
+
+- id: KU-M-012
+  type: method
+  title: "2026 하반기 고객관리활동 인정 요건 — 리밸런싱의 표준 단위"
+  segments: [SEG-02, SEG-06]
+  trigger: "리밸런싱 실행 규모·상품을 정할 때 (내부 실적 관점)"
+  body: |
+    인정 요건: 수탁고 1천만원 이상 고객 대상, 고유대 또는 시중은행 정기예금 1천만원 이상 매도 + 상품변경
+    (최초 1회 한), 저축은행·TDF로 변경해야 인정 (시중은행 정기예금 매수 미인정).
+    실적점: 창구는 등록 직원 소속, 비대면은 고객이 입력한 관리희망부점. 타지점 계좌 변경도 인정.
+    함의 ① 리밸런싱 최소 단위가 표준화됨 ② 고객당 1회 → 한 번에 제대로 ③ 타지점 계좌 인정 → 관리 사각을 다른 지점이 메울 수 있음.
+  numbers:
+    - {label: "최소 매도 금액", value: "1,000만원", as_of: "2026 하반기", verify: true}
+  screens: []
+  cautions:
+    - "평가 최적해 ≠ 고객 최적해. 시중은행 정기예금이 고객에게 최선인 경우와 충돌할 수 있다"
+    - "고객에게는 실적 요건이 아니라 금리 개선폭으로 설명한다"
+  source: {doc: "Hot Tip 207754", section: "-", org: "영등포하이테크종합금융센터", date: "2026.08"}
+  origin_ref: "방법론 111번 / SEG 40번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-M-023]
+
+- id: KU-M-013
+  type: method
+  title: "퇴직금이 입금된 계좌 — 입금은 끝이 아니다, 직후 운용지시 여부를 점검한다"
+  segments: [SEG-03]
+  trigger: "개인형IRP로 퇴직금이 입금된 직후"
+  body: |
+    퇴직금은 금액이 커서 미운용 방치 시 곧바로 현금성자산 편중 계좌(SEG-02)가 된다.
+    입금 확인 → 운용지시 여/부 확인 → 전체 적립금 중 운용지시 금액 확인 → 미운용분 상담.
+    입금 대상은 [경영정보시스템]·[04-12-646]으로 조회하되 일자구분은 최근 2개월 이내로 잡는다.
+  numbers: []
+  screens: ["[04-12-646]", "[04-12-644]"]
+  cautions: []
+  source: {doc: "맞춤형 타깃 요청 신청서 / 보물지도", section: "-", org: "충청·호남영업추진그룹", date: "2026"}
+  origin_ref: "SEG 18번 / 방법론 28번 / 절차 45번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-M-004]
+
+- id: KU-M-014
+  type: method
+  title: "디폴트옵션 등록은 기존 고유대 자금 교체매매와 반드시 세트로 묶는다"
+  segments: [SEG-02, SEG-03, SEG-06]
+  trigger: "디폴트옵션 미등록 + 현금성자산 보유 계좌"
+  body: |
+    디폴트옵션을 등록해도 이미 고유계정대에 있는 자금은 그대로 남는다.
+    따라서 두 거래를 세트로 처리한다.
+    ① 이미 만기가 되어 고유계정대에 있는 자금 → 교체매매로 고금리 상품 이동
+    ② 앞으로 만기가 될 자금 → 디폴트옵션 등록으로 자동화
+    디폴트옵션 초저위험 → 저위험 이상 상향은 ⓐ 사전지정운용제도 등록/변경 → ⓑ 보유상품 변경의
+    2단계 거래이며, 하나만 하면 절반 처리다.
+  numbers: []
+  screens: []
+  cautions:
+    - "⚠ ⓐ에서 멈추면 절반 처리 — 반드시 ⓑ까지 안내"
+    - "사내 스크립트(2단계·매도 필요)와 KBthink(매도 불필요) 서술이 상충 — 절차 18번 최우선 상충 항목"
+  source: {doc: "Hot Tip 9737 / 오늘의할일 시트32", section: "-", org: "부동산사업부(P) / 연금사업부(상품)", date: "2023"}
+  origin_ref: "방법론 83·22번 / SEG 41번 / 화법 71번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: high
+  related: [KU-S-013, KU-F-004]
+
+- id: KU-M-015
+  type: method
+  title: "이탈 사유가 특정되면 5개 유형별로 대안을 분기한다"
+  segments: [SEG-04]
+  trigger: "경청으로 이탈 사유를 파악한 직후"
+  body: |
+    본부 5분류:
+    ① ETF 투자 목적 증권사 이전 → ETF의 허와 실 진단 + 90/10 원칙, 대표지수 장기투자 프레임
+    ② 당행 ETF 상품 수 불만 → 라이선스 구조·상품위원회 선별 = '큐레이션' 프레임
+    ③ 증권사 IRP 수수료 무료 → 면제 조건 3분기 + 장기할인 승계 비대칭
+    ④ 대출 금리로 인한 동반 이전 → 두 상품의 판단 기준을 분리
+    ⑤ 수익률 부진·자산관리 미흡 → 사과 → 원인 규명 → 즉시 리밸런싱
+    현장판 4분류(ETF 라인업 / 낮은 수익률 / 수수료 / 관리 소홀)와 같은 계보다.
+    등급(VIP)은 사유가 아닌 별도 축으로, 실제로는 '사유 × 등급' 2차원으로 작동한다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "스타런 이탈방지상담 교육영상 5편", section: "-", org: "연금사업부", date: "2024 추정"}
+  origin_ref: "SEG 33·50번 / 방법론 40·102번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-020, KU-S-021, KU-S-022, KU-S-028, KU-S-024]
+
+- id: KU-M-016
+  type: method
+  title: "실물이전 불가·거절 계좌 상태 5분류 — 계약이전 대상의 실행 가능성 필터"
+  segments: [SEG-04]
+  trigger: "계약이전(전입·전출)을 다루기 직전 상태 확인"
+  body: |
+    ① 상품변경 진행 중(보유상품변경·만기상환·디폴트매수·ETF 체결 중) → 완료 후 재신청
+    ② 현금성자산만 보유 → 실물이전 불가, '현금이전'으로 재신청
+    ③ 실물이전 불가 ETF 보유 → 고객 직접 매도 필요
+    ④ 환매불가상품(러시아펀드) 보유 → 이전 불가 계좌
+    ⑤ 퇴직금 일부 미입금 → 전액 입금 후 재신청
+    확인: [04-12-646] 개인형IRP 이체목록에서 전문 확인.
+    ②는 SEG-02(현금성자산 편중)와 정확히 겹친다 — 편중 고객은 실물이전 자체가 불가하다.
+  numbers: []
+  screens: ["[04-12-646]", "[04-12-333]", "[06-AD-020]"]
+  cautions: []
+  source: {doc: "Hot Tip 203523 / 203917", section: "-", org: "옥포지점", date: "2025.10~11"}
+  origin_ref: "SEG 56번 / 절차 32·35번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-F-012]
+
+- id: KU-M-017
+  type: method
+  title: "전출 알림을 받으면 곧바로 전화하지 말고 4단계 사전 진단으로 손실을 계산해 둔다"
+  segments: [SEG-04]
+  trigger: "계약이전(전출) 알림 수신 직후"
+  body: |
+    통화 전 확인 순서:
+    ① 거래현황 ([72-01-801] 개인싱글뷰)
+    ② 이전 유형 — 현금이전인지 실물이전인지 ([06-AD-080])
+    ③ 보유상품 ([04-12-642] 적립금 및 수익률조회)
+    ④ 상품별 리스크 — 중도해지 이자손실, 환매 소요기간, 실물이전 불가 상품 손실
+       ([06-AD-020], [04-12-333], 중도해지&리밸런싱 계산기)
+    준비 없이 걸면 "지금 옮기면 얼마를 잃는지"를 숫자로 말할 수 없다.
+  numbers: []
+  screens: ["[72-01-801]", "[06-AD-080]", "[04-12-642]", "[06-AD-020]", "[04-12-333]"]
+  cautions:
+    - "'전액현금대체' = 실물이전 신청했으나 전 보유상품이 이전 불가로 확인되어 전액 현금이전되는 경우"
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "이탈방어 사전체크사항", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "방법론 41번 / 화법 34번 / 절차 29번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-026, KU-M-016]
+
+- id: KU-M-018
+  type: method
+  title: "방어가 불가능하면 KB증권 소개로 계열사 내 유지"
+  segments: [SEG-04]
+  trigger: "증권사 이탈이 확정적이고 방어 카드가 소진됐을 때"
+  body: |
+    완전 이탈 대신 계열사(KB증권)로 전환시키는 차선책.
+    고객 편익: 비대면 제도수수료 평생 무료, ETF 매매수수료 혜택.
+    지점 편익: WM고객 이탈 방어 + 계열사 이전 실적으로 KPI 보전.
+    시너지성과관리시스템 소개등록 [06-10-800]은 필수.
+  numbers:
+    - {label: "KPI 보전율", value: "70% 또는 80%", as_of: "2025~2026", verify: true}
+  screens: ["[06-10-800]"]
+  cautions:
+    - "보전율이 자료별로 70%(2025 상반기 평가기준)와 80%(보물지도)로 상충 — 현행 확인 필요"
+    - "당행 IRP 유지라는 사후관리 목표와 방향이 다르다 — 마지막 단계에만 배치"
+  source: {doc: "Hot Tip 200539 / 보물지도", section: "-", org: "강동구청역지점 / 연금컨설팅부", date: "2025.05~2026.03"}
+  origin_ref: "SEG 39번 / 방법론 118번 / 화법 99번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: []
+
+- id: KU-M-019
+  type: method
+  title: "이탈 상담은 설득보다 경청이 먼저다 — 사유 특정 전에 대안 금지"
+  segments: [SEG-04]
+  trigger: "이탈 상담의 시작"
+  body: |
+    "이탈 방어는 고객 의견 경청에서 시작합니다. 경청을 통해 이탈 사유를 명확히 파악하세요."
+    스크립트 설계상 Step03(통화 목적) 다음에 'Key Point — 고객 의견 경청'이 놓이고,
+    리스크 안내(Step04)보다 경청이 앞선다.
+    사유를 모른 채 꺼낸 대안은 고객에게 "역시 설득하려는 전화"로 읽힌다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1", section: "이탈방어 스크립트", org: "연금컨설팅부", date: "2026.03"}
+  origin_ref: "방법론 39번 / 화법 47번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-025]
+
+- id: KU-M-020
+  type: method
+  title: "0원 계좌는 방치가 아니라 자금 유입 대기 — 잔액 기준 세그먼트의 사각지대"
+  segments: [SEG-03, SEG-05]
+  trigger: "잔액 0원 IRP 계좌를 발견했을 때"
+  body: |
+    두 성격이 있다.
+    ① 연금개시 계좌는 추가입금이 불가하므로, 계약이전을 받기 위한 새 그릇으로 미리 열어둔 계좌
+    ② 퇴직금 수령에 대비해 미리 열어둔 계좌
+    잔액 기준 세그먼트(1천만원 이상 등)에서는 항상 탈락하지만 자금 유입 가능성은 가장 높다.
+    본부 세그먼트 기준표에서 '추가납입' 대상으로, PB 직무에서는 '퇴직금 수령 예상 고객'으로 명시된다.
+  numbers: []
+  screens: []
+  cautions:
+    - "0원 계좌 명세의 직접 추출 경로가 자료에 없음 — 맞춤형 타깃 요청 필요"
+  source: {doc: "Hot Tip 206004 / 개인형IRP 마케팅 사례공유", section: "-", org: "부산종합금융센터 / 연금컨설팅부", date: "2025.12~2026.05"}
+  origin_ref: "SEG 47번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: medium
+  related: [KU-G-011]
+
+- id: KU-M-021
+  type: method
+  title: "전년 납입 있고 당해 미납이면 '한도 미달'이 아니라 납입 중단 신호로 읽는다"
+  segments: [SEG-05]
+  trigger: "납입 이력을 스캔할 때"
+  body: |
+    2025년 납입 이력이 있는데 2026년 납입이 없는 계좌는
+    단순 한도 미달보다 강한 신호 — 납입 습관이 끊긴 조기 경보로 본다.
+    방치 시 자연 이탈로 이어질 수 있다.
+    변형 조건: '25년 납입 300만원 이상 & '26년 납입 없음(또는 100만원 미만) 등 금액 임계값 추가 가능.
+  numbers: []
+  screens: ["[04-12-644]", "[06-12-151]"]
+  cautions:
+    - "'납입 중단 신호'라는 프레이밍은 정리자의 해석"
+  source: {doc: "맞춤형 타깃 요청 신청서", section: "-", org: "산본사거리·상계역·명동역지점", date: "2026"}
+  origin_ref: "SEG 14번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: medium
+  related: [KU-S-029]
+
+- id: KU-M-022
+  type: method
+  title: "추가납 마케팅 시점 — 세액공제는 '납입 시점' 기준, 11월이 실질 마감"
+  segments: [SEG-05]
+  trigger: "추가납 캠페인 시점을 설계할 때"
+  body: |
+    세액공제는 납입 시점 기준이므로 12월 말이 아니라 11월이 실질 마감이다.
+    자금이 움직이는 시기를 미리 특정하는 연간 캘린더 로직과 결합해
+    ① ISA 만기 도래 시점 ② 퇴직금 지급 시즌(1분기·희망퇴직) ③ 연말 절세(11~12월) 순으로 배치한다.
+    "퇴직연금 시즌은 11·12월이 아니다"라는 시점 인식(연수교안)과 함께 읽는다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론", section: "-", org: "-", date: "-"}
+  origin_ref: "방법론 90·53·125번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-S-029]
+
+- id: KU-M-023
+  type: method
+  title: "추가납 접촉 우선순위 3단 — 개선 여력 최대 우선"
+  segments: [SEG-05]
+  trigger: "추가납 대상 명세를 받아 접촉 순서를 정할 때"
+  body: |
+    ① 자기부담금 30만원 미만 계좌 — 현재 0점, 30만원만 입금하면 상태가 바뀐다
+    ② 올해 입금액이 없거나 1,800만원 미만인 계좌
+    ③ 그 외 모든 계좌
+    접촉 전 필수 확인: [04-12-644] 입금내역, [06-12-151] 연합회 한도,
+    [02-12-223] 연금개시 여부(개시 시 추가입금 불가).
+  numbers:
+    - {label: "1순위 기준", value: "자기부담금 30만원 미만", as_of: "2026 하반기", verify: true}
+  screens: ["[04-12-644]", "[06-12-151]", "[02-12-223]"]
+  cautions:
+    - "이 서열은 고객 편익 순이 아니라 직원 득점 효율 순 — 정렬에만 쓰고 대고객 언급 금지"
+    - "2026 하반기 KPI 기준. 평가체계 변경 시 실효"
+  source: {doc: "Hot Tip 207754", section: "-", org: "영등포하이테크종합금융센터", date: "2026.08"}
+  origin_ref: "SEG 44·44-1·44-2번 / 방법론 57번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 검증필요
+  confidence: medium
+  related: [KU-M-012, KU-G-011]
+
+- id: KU-M-024
+  type: method
+  title: "ISA 만기자금은 60일 이내 전환 + 3년 주기 재순환으로 설계한다"
+  segments: [SEG-05]
+  trigger: "ISA 만기가 도래했거나 2~1개월 앞둔 고객"
+  body: |
+    ① 만기일로부터 60일 이내 IRP 입금 (전부 또는 일부 선택 가능)
+    ② 전환금액의 10%(최대 300만원)만큼 세액공제 한도 추가
+    ③ 연 1,800만원 납입한도와 무관하게 전액 전환 가능
+    ④ 횟수 무제한 — ISA 만기 → IRP 전환 → ISA 재가입의 3년 주기 사이클로 반복
+    ⑤ 타행 ISA도 대상 (마이데이터로 확인)
+    ⑥ 사전관리: 만기 2~1개월 전 접촉이 만기 후 60일 타이머보다 앞선 관리 지점
+    ⑦ 만기가 먼 ISA라도 가입 3년 경과면 해지 후 IRP 이전 판단이 가능
+  numbers:
+    - {label: "전환 기한", value: "만기일로부터 60일", as_of: "2026.03", verify: false}
+    - {label: "추가 세액공제", value: "전환금액의 10%, 최대 300만원", as_of: "2026.03", verify: false}
+  screens: ["[01-12-213]", "[04-10-099]"]
+  cautions:
+    - "세액공제 이월은 전환 신청을 별도로 해야 한다"
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1 / Hot Tip 204287", section: "3. 추가납 CASE ①", org: "연금컨설팅부 / 동부산종합금융센터", date: "2026.01~03"}
+  origin_ref: "방법론 26·85·86번 / SEG 17·45번"
+  trust: 본부공식
+  disclosure: 대고객가능
+  status: 확정
+  confidence: high
+  related: [KU-F-014, KU-S-032, KU-S-034]
+
+- id: KU-M-025
+  type: method
+  title: "만기를 '재설계 창구'로 쓴다 — 방치하면 현금성자산이 된다"
+  segments: [SEG-06]
+  trigger: "원리금보장상품 만기가 1개월 앞으로 다가왔을 때"
+  body: |
+    "둘. 만기 1개월 전, 반드시 만기 안내를 해주세요." (본부 기존 고객 관리 4원칙 중 두 번째)
+    "퇴직연금 정기예금 만기 = 펀드상품으로 리밸런싱할 수 있는 최적의 시점"
+    만기는 고객이 이상하게 여기지 않는 유일한 접촉 명분이고, 기한이 붙어 우선순위가 자동으로 정해진다.
+    운용지시가 없으면 만기자금은 대기 중인 현금성자산으로 상환된다.
+  numbers: []
+  screens: []
+  cautions: []
+  source: {doc: "개인형IRP 마케팅 보물지도 Vol.1 / 퇴직연금 리밸런싱 마케팅", section: "기존 고객 관리", org: "연금컨설팅부 / 연금사업본부", date: "2021.02, 2026.03"}
+  origin_ref: "SEG 9번 / 방법론 18번 / 화법 38번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-F-006, KU-M-026]
+
+- id: KU-M-026
+  type: method
+  title: "실행 방식 — 보유상품은 교체매매, 만기 전 상품은 예약변경"
+  segments: [SEG-06]
+  trigger: "만기 자금의 실행 방식을 정할 때"
+  body: |
+    ① 이미 고유계정대에 있는 자금 → 교체매매
+    ② 만기가 아직 오지 않은 상품 → 만기 예약변경 (만기 1개월 전부터 가능)
+    만기 자금 관리는 매월 첫째 주 만기명세로 돌린다.
+    실행 채널 3경로(스타뱅킹·영업점 창구·전용상담센터 전화)의 상품 제약을 먼저 확인한다 —
+    전화 센터(1599-0099·1833-3700)는 원리금보장상품만 처리 가능.
+  numbers: []
+  screens: ["[04-12-660]"]
+  cautions:
+    - "컨설팅센터 연계는 '예금 → 예금'만 가능"
+  source: {doc: "06_주제별_추출지식/02_IRP관리방법론 / 05_업무처리절차", section: "-", org: "-", date: "-"}
+  origin_ref: "방법론 21·80번 / 절차 21·60번"
+  trust: 본부공식
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-P-011]
+
+- id: KU-M-027
+  type: method
+  title: "원리금보장상품 매수 시점 — 금리는 월 단위 확정, 월말 매수를 조심한다"
+  segments: [SEG-06]
+  trigger: "재예치·매수 실행 타이밍을 정할 때"
+  body: |
+    원리금보장상품 금리는 월 단위로 확정·변동된다.
+    7/31에 매수하면 8월 금리가 적용되는 식이므로, 월말 매수 시 다음 달 금리를 먼저 확인한다.
+    매월 마지막 영업일에 다음 달 「퇴직연금 원리금보장 특별제공상품 안내」가 게시되며,
+    이것이 만기 상담의 기반 자료다 (연금사업본부 홈페이지).
+  numbers: []
+  screens: ["[04-12-17A]"]
+  cautions:
+    - "상담 전 당월 특별제공상품 금리를 반드시 조회. 화법에 금리를 하드코딩하지 않는다"
+  source: {doc: "Hot Tip 207754 / 203753", section: "-", org: "영등포하이테크 / 서전주지점", date: "2025.10~2026.08"}
+  origin_ref: "방법론 78번 / 절차 15번"
+  trust: 현장팁
+  disclosure: 사내전용
+  status: 확정
+  confidence: high
+  related: [KU-F-018, KU-F-019]
