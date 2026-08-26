@@ -75,12 +75,18 @@ def build() -> dict[str, Any]:
 
     wb = openpyxl.load_workbook(SOURCE_XLSX, data_only=True)
 
-    # 00_시연케이스가 고객 목록·순서·시연 포인트의 원장이다.
+    # 00_시연케이스가 고객 목록·순서의 원장이다.
+    #
+    # 같은 시트의 «시연 포인트» 열은 담지 않는다. 기획자가 "이 케이스로 무엇을 보여줄지"를
+    # 적어둔 **연출 메모**이지 고객에 관한 사실이 아니다. 원장에 섞이면 에이전트가 읽는
+    # 재료가 되고("현금성자산 장기 방치 + 디폴트옵션 미설정 고객"), 판정이 데이터에서
+    # 나온 것인지 메모를 옮긴 것인지 구분되지 않는다 — 요건은 계좌 값에서 코드가 정한다
+    # (CLAUDE.md 규칙 2). 시연 의도는 원본 xlsx 에 그대로 남아 있다.
     cases = _rows(wb["00_시연케이스"])
     records: dict[str, dict[str, Any]] = {}
     for c in cases:
         pin = c["KB-PIN"]
-        records[pin] = {"id": pin, "case_note": c.get("시연 포인트"), "badge": c.get("Badge")}
+        records[pin] = {"id": pin, "badge": c.get("Badge")}
 
     for sheet, key in _ONE_ROW_SHEETS.items():
         for row in _rows(wb[sheet]):

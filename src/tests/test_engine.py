@@ -228,7 +228,8 @@ for _p in PERSONAS:
         check((_cond in _c) == _want, f"배지 골든셋: {_p.nm} {_badge}",
               f"요건 {_cond}={_cond in _c} vs 배지={_want}")
 
-# 요건 판정 스냅샷 (00_시연케이스의 시연 포인트와 정합해야 한다)
+# 요건 판정 스냅샷 (원본 xlsx 00_시연케이스의 시연 포인트와 정합해야 한다 — 그 메모
+# 자체는 원장에 담지 않는다, scripts/import_customers.py 참고)
 _EXPECTED_CONDS = {
     "김현수": ["dep", "idl", "nod", "nch"],            # 현금성 방치(고유대 75%, 1개월 무변동)
     "박지민": ["lim", "tax", "add"],                   # 실적배당 75% > 한도 70% + 세액공제 잔여
