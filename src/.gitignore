@@ -1,0 +1,18 @@
+# 비밀 설정 — 절대 커밋 금지 (사내 게이트웨이 URL·API 키 포함)
+.env
+*/.env
+
+# 파이썬
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# strategy_agent 평가 대시보드 로그
+**/feedback_log.csv
+
+# 상담 세션/대화이력 (가변 운영 데이터 · 개인정보 포함 가능 — 저장소에 커밋 금지)
+session_data/
+
+# 원본 PDF·스캔본은 대외비 — 추출 결과(knowledge/data/*.json)만 버전관리
+sources/
