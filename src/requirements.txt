@@ -1,0 +1,7 @@
+# 런타임 — 에이전트 본체
+langgraph>=0.2.0          # consult_agent 대화 그래프
+anthropic>=0.40.0         # 외부 테스트용 LLM 프로바이더 (사내 genai 는 표준 라이브러리만 씀)
+
+# 개발·데모 화면 (app.py)
+streamlit>=1.35.0
+pandas>=2.0.0

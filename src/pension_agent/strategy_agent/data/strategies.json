@@ -1,0 +1,452 @@
+{
+  "meta": {
+    "title": "전략 정의",
+    "as_of": "2026-08-11",
+    "note": "각 항목은 완결 문장이 아니라 절(clause)을 산출한다. 절은 명사형 동작으로 종결하며, 이 규약에 따라 접속 규칙만으로 안전한 결합이 가능하다. 이 플레이북은 원천 소스(가이드·화법)나 규정에 근거한 전략만 담는다. 근거가 없는 요건(low·nch·add)은 전략으로 정의하지 않고, 게이트 결과에 대한 추론으로만 발동하는 조건부 안전망(투자성향 재진단)은 근거 등급이 '추정' 이므로 이 플레이북과 분리해 engine.SYSTEM_STRATEGIES(코드)로 따로 관리한다. 추가입금(add)은 briefing 의 납입여력 정보를 근거로 LLM 이 재량으로 제안한다.",
+    "conventions": {
+      "actor": "행위 주체. '직원' 은 직원이 직접 수행하는 행동(접촉·발송·조회·안내)이며 절이 그대로 사용된다. '고객' 은 고객의 운용지시 사항이므로 렌더링 시 '하도록 제안' 또는 '하도록 안내' 가 자동 부착된다. 산출 문장은 직원이 읽고 실행하는 문서이므로, 고객만 실행할 수 있는 동작을 직원에 대한 지시로 쓰지 않는다.",
+      "verb": "상품 확정 결과에 부착되는 동작 명사. 실적배당 상품에는 '매수', 만기 도래 원리금보장 상품에는 '재예치', 신규 원리금보장 상품에는 '예치' 를 사용한다. 실적배당 상품에 '재예치' 를 쓰지 않는다.",
+      "topic_keys": "sources 교차검증용 주제어. engine.validate() 가 인용 문서의 제목·주제·핵심포인트와 대조해, 근거로 인용한 문서가 실제로 그 주제를 다루는지 검증한다.",
+      "confidence": "행내가이드(지식베이스 근거 있음) / 규정(법령·내규 근거) / 추정(근거 미확보). 행내가이드는 sources 가, 규정은 regulation 이 필수이다.",
+      "briefing": "절은 판단·행동만 담는다. 시스템이 이미 입력값(Profile)으로 보유한 데이터의 조회·확인(예: 가이드 p02 'MyStar 에서 보유상품·수익률 확인')은 전략이 아니라 engine._briefing() 이 산출하는 사실이다. 'MyStar'·'단말' 등 조회 지시어가 절에 있으면 engine.validate() 가 [로직화대상] 으로 차단한다.",
+      "slots": "{product_action} 은 상품과 동작이 결합된 구(예: 'KB GIC 확정금리(연 3.65%)로 재예치')이며, 분기가 둘이면 '실적배당 희망 시 …, 원리금보장 희망 시 …' 형태로 결합된다. {asset} 은 조사가 부착된 발송 자료명, {trim_target} 은 축소 대상 표기이다.",
+      "benefit": "카드 렌더링용 한 줄 혜택 문구. 절(clause)이 '무엇을 얼마나' 를 담는다면 benefit 은 '왜 고객에게 이로운가' 를 한 문장으로 담는다. 판단근거(evidence)의 수치 나열과 달리 슬롯 없는 완결 문장으로 쓴다. 누락 시 engine 이 evidence 로 폴백한다.",
+      "talk": "직원(actor='직원') 접촉 전략에만 정의하는 상담 추천 화법. 콜스크립트(sources) 절차를 요약한 대화 순서이며, 'MyStar'·'단말' 등 내부 조회 지시어는 담지 않는다(engine.validate() 가 [로직화대상] 으로 차단). pitch_refs 로 화법 카드를 참조하는 전략에는 두지 않는다 — 둘 다 없으면 그 전략은 ⑥ 화법 후보에서 빠진다.",
+      "time_pressure": "절(clause)에는 '금주 내'·'당장' 처럼 데이터로 확정되지 않은 시한 표현을 넣지 않는다. 시급성은 urgency 필드와 실행 순서로 표현하며, 'D-{matDD}' 처럼 Profile 값으로 산출되는 기한만 절에 담는다. 위반 시 engine.validate() 가 [시급성문구] 로 차단한다.",
+      "resolves": "겹치는 전략을 하나로 정리하는 선언. 리스트이며 원소마다 policy 가 다르다 — 'always'(target 을 무조건 흡수) · 'conditional'(target 을 condition 이 참일 때만 흡수, condition 은 {field,op,value|value_of,mul} 비교식이며 리스트면 AND) · 'max_amount'(같은 group 태그를 가진 전략들 중 계산된 금액이 가장 큰 것만 남김). 새 조건부 흡수 규칙은 이 필드에 조건식만 추가하면 되고 engine.py 를 수정할 필요가 없다."
+    },
+    "kind": "strategy"
+  },
+  "records": [
+    {
+      "id": "st.chn_retain",
+      "kind": "strategy",
+      "fields": {
+        "title": "이탈 방어 선제 접촉",
+        "when": "chn",
+        "kind": "접촉",
+        "actor": "직원",
+        "resolves": [
+          {
+            "target": "st.dor_contact",
+            "policy": "always"
+          }
+        ],
+        "requires": [
+          "cap.lms_send"
+        ],
+        "urgency": 10,
+        "impact": null,
+        "clause": "유선 접촉",
+        "clause_if_asset": "{asset} LMS로 선발송하고 유선 접촉",
+        "benefit": "이탈 신호가 여럿 겹친 고객으로, 선제적으로 접촉하면 경쟁사 이동을 막고 관계를 유지할 수 있습니다.",
+        "talk": "① 인사와 통화 목적을 안내하고, ② 현재 예금·현금성 금리가 대안 상품보다 낮다는 점을 설명한 뒤, ③ 실적배당 희망 고객에게는 ETF·TDF·추천펀드를, 원리금보장 희망 고객에게는 특별제공상품을 제시합니다.",
+        "evidence": "이탈 위험 {churn}점 — {dorm}일 미접촉 · 운용변경 {nchM}개월 · 수익률 하위 {retPct}% 가 겹친 구간. 가이드 기준 고위험군 이탈률은 일반 고객의 1.3배",
+        "confidence": "행내가이드",
+        "topic_keys": [
+          "이탈위험",
+          "리밸런싱",
+          "콜스크립트"
+        ],
+        "sources": [
+          "seg.01",
+          "pitch.k03.040"
+        ]
+      }
+    },
+    {
+      "id": "st.dor_contact",
+      "kind": "strategy",
+      "fields": {
+        "title": "장기 미접촉 재접촉",
+        "when": "dor",
+        "kind": "접촉",
+        "actor": "직원",
+        "requires": [
+          "cap.lms_send"
+        ],
+        "urgency": 8,
+        "impact": null,
+        "clause": "유선 접촉",
+        "clause_if_asset": "{asset} 공유하고 유선 접촉",
+        "benefit": "장기간 접촉이 끊겨 타사 비교에 노출됐을 수 있어, 재접촉으로 관계를 회복합니다.",
+        "talk": "① 안부와 통화 목적을 안내하고, ② 현재 예금 금리가 대안 상품보다 낮다는 점을 설명한 뒤, ③ 희망 성향에 맞는 대안 상품을 제시합니다.",
+        "evidence": "{dorm}일간 접촉 이력 없음 — 타사 비교 견적에 노출됐을 가능성",
+        "confidence": "행내가이드",
+        "topic_keys": [
+          "리밸런싱",
+          "콜스크립트"
+        ],
+        "sources": [
+          "pitch.k03.040"
+        ]
+      }
+    },
+    {
+      "id": "st.limit_fix",
+      "kind": "strategy",
+      "fields": {
+        "title": "위험자산 한도 초과 정리",
+        "when": "lim",
+        "kind": "운용",
+        "actor": "고객",
+        "mandatory": true,
+        "reduces_risk": true,
+        "resolves": [
+          {
+            "group": "위험자산비중",
+            "policy": "max_amount"
+          }
+        ],
+        "pool": "위험자산",
+        "pool_priority": 2,
+        "amount": {
+          "kind": "risk_over_limit"
+        },
+        "urgency": 9,
+        "impact": null,
+        "product": {
+          "where": {
+            "payout": "원리금보장"
+          },
+          "order": "-rate",
+          "verb": "예치"
+        },
+        "clause": "{trim_target} {amount}을 {product_action}",
+        "benefit": "규정 한도를 넘는 위험자산은 성향과 무관하게 한도 안으로 낮춰야 하는 필수 조정입니다.",
+        "evidence": "위험자산 {risk_asset}% — DC·개인형IRP 투자한도 70% 초과. 성향과 무관하게 한도 내로 조정해야 하는 규정 사항이므로 다른 위험자산 조정 전략에 흡수시키지 않는다",
+        "confidence": "규정",
+        "regulation": "근로자퇴직급여보장법 시행규칙 — DC·개인형IRP 가입자의 위험자산 총 투자한도 적립금의 70%",
+        "topic_keys": [],
+        "sources": []
+      }
+    },
+    {
+      "id": "st.mis_fix",
+      "kind": "strategy",
+      "fields": {
+        "title": "투자성향 불일치 정리",
+        "when": "mis",
+        "kind": "운용",
+        "actor": "고객",
+        "mandatory": true,
+        "reduces_risk": true,
+        "resolves": [
+          {
+            "group": "위험자산비중",
+            "policy": "max_amount"
+          },
+          {
+            "target": "st.sec_trim",
+            "policy": "always"
+          }
+        ],
+        "pool": "위험자산",
+        "amount": {
+          "kind": "risk_excess",
+          "targets": {
+            "안정형": 20,
+            "안정추구형": 30,
+            "위험중립형": 45,
+            "적극투자형": 65,
+            "공격투자형": 80
+          }
+        },
+        "urgency": 8,
+        "impact": null,
+        "product_branch": {
+          "실적배당": {
+            "where": {
+              "category": [
+                "채권형",
+                "MP"
+              ]
+            },
+            "order": "-exp_return",
+            "verb": "매수"
+          },
+          "원리금보장": {
+            "where": {
+              "payout": "원리금보장"
+            },
+            "order": "-rate",
+            "verb": "예치"
+          }
+        },
+        "clause": "{trim_target} {amount}을 {product_action}",
+        "benefit": "투자성향에 맞지 않는 위험자산을 적합성 원칙에 맞게 정리해, 성향에 부합하는 구성으로 되돌립니다.",
+        "evidence": "투자성향 {rk} 대비 위험자산 {risk_asset}% — 적합성 원칙(금융소비자보호법)상 필수 정리 대상이며 제안 순위와 무관하게 포함한다",
+        "confidence": "행내가이드",
+        "regulation": "금융소비자보호법상 적합성 원칙 — 투자성향에 부합하지 않는 상품의 권유·유지를 제한한다",
+        "topic_keys": [
+          "추천펀드",
+          "포트폴리오",
+          "TDF"
+        ],
+        "sources": [
+          "pitch.k03.015"
+        ]
+      }
+    },
+    {
+      "id": "st.sec_trim",
+      "kind": "strategy",
+      "fields": {
+        "title": "특정 섹터 집중 완화",
+        "when": "sec",
+        "kind": "운용",
+        "actor": "고객",
+        "reduces_risk": true,
+        "pool": "위험자산",
+        "amount": {
+          "kind": "sector_excess",
+          "target": 30
+        },
+        "urgency": 6,
+        "impact": null,
+        "product": {
+          "where": {
+            "category": [
+              "채권형",
+              "MP"
+            ]
+          },
+          "order": "-exp_return",
+          "verb": "매수"
+        },
+        "clause": "섹터 ETF {port3}% 중 분산 기준 30% 초과분 {amount}을 {product_action}",
+        "benefit": "한 섹터에 몰린 자금을 분산해 집중 위험을 낮춥니다.",
+        "evidence": "특정 섹터 ETF {port3}% 단일 집중 — 분산 기준 30% 대비 {sec_excess}%p 초과",
+        "confidence": "행내가이드",
+        "topic_keys": [
+          "추천펀드",
+          "포트폴리오",
+          "ETF"
+        ],
+        "sources": [
+          "pitch.k03.015"
+        ]
+      }
+    },
+    {
+      "id": "st.dep_shift",
+      "kind": "strategy",
+      "fields": {
+        "title": "예금 편중 해소",
+        "when": "dep",
+        "kind": "운용",
+        "actor": "고객",
+        "pool": "예금",
+        "amount": {
+          "kind": "dep_shift",
+          "cap_pct": 20,
+          "floor_pct": 30
+        },
+        "urgency": 5,
+        "impact": {
+          "kind": "spread",
+          "base_ref": "BL.bank_deposit"
+        },
+        "apply_preference": false,
+        "require_return_over_base": true,
+        "product_branch": {
+          "실적배당": {
+            "where": {
+              "category": [
+                "채권형",
+                "TDF"
+              ]
+            },
+            "order": "-exp_return",
+            "verb": "매수"
+          },
+          "원리금보장": {
+            "where": {
+              "payout": "원리금보장"
+            },
+            "order": "-rate",
+            "verb": "예치"
+          }
+        },
+        "clause": "예금 {port0}% 중 {move_pct}%p({amount})을 {product_action}",
+        "benefit": "예금에 묶인 자금 일부를 옮겨 편중을 줄이고 기대수익을 높입니다.",
+        "evidence": "예금 비중 {port0}% 편중 — 예금·현금성 편중 고객은 이탈률이 1.3배 높다",
+        "confidence": "행내가이드",
+        "topic_keys": [
+          "고유계정대",
+          "이탈위험",
+          "추천펀드",
+          "TDF"
+        ],
+        "sources": [
+          "seg.01",
+          "pitch.k03.015"
+        ]
+      }
+    },
+    {
+      "id": "st.mat_reprice",
+      "kind": "strategy",
+      "fields": {
+        "title": "만기 예금 재예치",
+        "when": "mat",
+        "kind": "운용",
+        "actor": "고객",
+        "pool": "예금",
+        "pool_priority": 1,
+        "resolves": [
+          {
+            "target": "st.dep_shift",
+            "policy": "conditional",
+            "condition": [
+              {
+                "field": "dep_amt",
+                "op": ">",
+                "value": 0
+              },
+              {
+                "field": "matAmt",
+                "op": ">=",
+                "value_of": "dep_amt",
+                "mul": 0.9
+              }
+            ]
+          }
+        ],
+        "amount": {
+          "kind": "mat"
+        },
+        "urgency": {
+          "kind": "deadline",
+          "field": "matDD",
+          "div": 10,
+          "lo": 3,
+          "hi": 10
+        },
+        "impact": {
+          "kind": "spread",
+          "base_ref": "BL.cash"
+        },
+        "apply_preference": false,
+        "product_branch": {
+          "실적배당": {
+            "where": {
+              "category": [
+                "채권형",
+                "TDF"
+              ]
+            },
+            "order": "-exp_return",
+            "verb": "매수"
+          },
+          "원리금보장": {
+            "where": {
+              "payout": "원리금보장"
+            },
+            "order": "-rate",
+            "verb": "예치",
+            "verb_by_category": {
+              "예금": "재예치"
+            }
+          }
+        },
+        "clause": "만기 D-{matDD} 예금 {amount}을 {product_action}",
+        "clause_if_merged": "예금 {port0}% 전액이 만기 D-{matDD} 도래하므로 {amount}을 {product_action}",
+        "benefit": "만기 자금을 방치하면 저금리 현금성으로 대기하므로, 만기 시점에 운용 방향을 정해 수익을 지킵니다.",
+        "evidence": "만기 D-{matDD} 도래 — 재예치 지시가 없으면 현금성자산(연 2.52%)으로 대기하므로 만기 전 운용 방향 확정이 필요",
+        "evidence_if_merged": "만기 D-{matDD} 도래 · 예금 {port0}% 구성 — 정기예금 100% 보유 고객의 리밸런싱 대상(가이드 Mission 2)이며, 만기 시점이 편중 해소의 유일한 실행 창구",
+        "confidence": "행내가이드",
+        "topic_keys": [
+          "원리금보장상품",
+          "GIC",
+          "특별제공상품",
+          "정기예금100%"
+        ],
+        "sources": [
+          "m.016",
+          "pitch.k03.021"
+        ]
+      }
+    },
+    {
+      "id": "st.nod_set",
+      "kind": "strategy",
+      "fields": {
+        "title": "디폴트옵션 설정",
+        "when": "nod",
+        "kind": "설정",
+        "actor": "고객",
+        "urgency": 4,
+        "impact": null,
+        "product": {
+          "where": {
+            "default_option": true
+          },
+          "order": "-exp_return",
+          "verb": "설정"
+        },
+        "clause": "디폴트옵션을 {product_action}",
+        "benefit": "디폴트옵션을 지정해 운용 지시가 없는 자금이 방치되는 것을 막습니다.",
+        "evidence": "사전지정운용방법(디폴트옵션) 미설정 — 만기 후 운용 지시가 없는 자금이 현금성자산으로 대기하게 되는 상태",
+        "confidence": "규정",
+        "regulation": "근로자퇴직급여보장법상 사전지정운용제도(디폴트옵션) — 가입자가 운용방법을 스스로 지정하지 않은 적립금은 사전지정운용방법으로 운용되며, 미설정 시 만기 후 운용지시 없는 자금이 현금성자산으로 대기하게 된다",
+        "topic_keys": [],
+        "sources": []
+      }
+    },
+    {
+      "id": "st.tax_fill",
+      "kind": "strategy",
+      "fields": {
+        "title": "세액공제 한도 납입",
+        "when": "tax",
+        "kind": "납입",
+        "actor": "고객",
+        "pool": "추가납입",
+        "amount": {
+          "kind": "room",
+          "credit_limit": 9000000,
+          "contribution_limit": 18000000
+        },
+        "urgency": {
+          "kind": "year_end",
+          "div": 30,
+          "lo": 2,
+          "hi": 10
+        },
+        "impact": {
+          "kind": "tax_credit"
+        },
+        "product": {
+          "where": {
+            "category": [
+              "MP",
+              "채권형",
+              "TDF"
+            ]
+          },
+          "order": "-exp_return",
+          "verb": "납입"
+        },
+        "clause": "세액공제 미사용 한도 {amount}을 {product_action}",
+        "benefit": "미사용 세액공제 한도는 연말이 지나면 소멸하므로, 한도까지 채우면 납입액의 일부를 세금에서 돌려받습니다.",
+        "evidence": "세액공제 한도(연 900만원) 중 {amount} 미사용 — 총급여 {income_bracket} 기준 공제율 {tax_rate}, 연말({year_end_dd}일 남음) 경과 시 소멸",
+        "confidence": "행내가이드",
+        "topic_keys": [
+          "세액공제"
+        ],
+        "sources": [
+          "fact.k04.f2",
+          "fact.k04.f3",
+          "pitch.k03.029"
+        ],
+        "pitch_refs": [
+          {
+            "id": "pitch.k03.029",
+            "customer_type": "공통"
+          }
+        ]
+      }
+    }
+  ]
+}

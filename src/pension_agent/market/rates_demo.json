@@ -1,0 +1,42 @@
+{
+  "meta": {
+    "kind": "market_rates",
+    "title": "데모 금리표 — 실데이터 아님",
+    "dummy": true,
+    "as_of": "2026-08",
+    "note": "발표 데모용 자리표시자. 실제 금리 피드(상품 마스터·시황 API)가 붙으면 이 파일을 지우고 market.current() 본문을 교체한다. dummy 플래그가 남아 있는 한 이 값으로 만든 문장은 DEMO_STATUS 리포트에 더미로 집계된다."
+  },
+  "rates": {
+    "cash_idle": {
+      "label": "고유계정대(현금성자산) 적용금리",
+      "value": 2.42,
+      "unit": "%",
+      "basis": "한국은행 1일물 콜금리 수준 · 매일 변동"
+    },
+    "deposit_1y": {
+      "label": "시중은행 정기예금 1년 평균",
+      "value": 3.18,
+      "unit": "%"
+    },
+    "deposit_3y_fixed": {
+      "label": "디폴트옵션 편입 정기예금 3년(고정)",
+      "value": 3.05,
+      "unit": "%"
+    },
+    "gic_3_5y": {
+      "label": "IRP 내 GIC 3~5년제",
+      "value": 4.20,
+      "unit": "%"
+    },
+    "irp_avg_1y": {
+      "label": "IRP 고객 1년 평균 수익률",
+      "value": 7.41,
+      "unit": "%"
+    },
+    "savings_bank_1y": {
+      "label": "저축은행 정기예금 1년",
+      "value": 3.46,
+      "unit": "%"
+    }
+  }
+}

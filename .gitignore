@@ -1,5 +1,5 @@
 # 로컬 개인 설정
-.claude/settings.local.json
+**/.claude/settings.local.json
 .Rhistory
 .env
 .env.*
@@ -14,3 +14,5 @@ __pycache__/
 *.pyc
 venv/
 .venv/
+.claudian/
+.obsidian/

@@ -1,0 +1,168 @@
+{
+ "meta": {
+  "kind": "resource",
+  "title": "상담 참고 자료 — 자료·조회 화면 경로",
+  "as_of": "2026-05",
+  "confidential": true,
+  "doc_id": "resources",
+  "note": "손저작 파일이다(kb_build 산출물이 아니다). 화법·팩트가 kb_* 로 대체되면서 구 화법 파일에 함께 실려 있던 resource 레코드만 여기로 옮겼다 — 자료 경로는 06_주제별_추출지식 추출 대상이 아니어서 신 세트에 같은 종류가 없다. 원천 문서는 레코드마다 source.doc 로 밝힌다."
+ },
+ "records": [
+  {
+   "id": "res.product_guide",
+   "kind": "resource",
+   "fields": {
+    "name": "개인형IRP 상품안내장",
+    "path": "KB-WiseNet > Info Zone > 연금(퇴직연금) > 제안서·홍보자료 > 개인형IRP",
+    "purpose": "IRP에서 투자 가능한 예금·펀드·ETF·TDF 및 부가서비스 안내. 운용상품과 부가서비스로 수수료 부담 인식을 낮출 때 활용.",
+    "customer_facing": true
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_1주차_신규마케팅화법"
+   }
+  },
+  {
+   "id": "res.system_guide",
+   "kind": "resource",
+   "fields": {
+    "name": "개인형IRP 제도안내장",
+    "path": "KB-WiseNet > Info Zone > 연금(퇴직연금) > 제안서·홍보자료 > 개인형IRP",
+    "purpose": "세액공제 및 입금한도 등 제도 기초 상담용.",
+    "customer_facing": true
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_1주차_신규마케팅화법"
+   }
+  },
+  {
+   "id": "res.special_deposit",
+   "kind": "resource",
+   "fields": {
+    "name": "원리금보장상품(특별제공상품)",
+    "path": "KB-WiseNet > Info Zone > 연금(퇴직연금) > [상품]원리금보장상품",
+    "purpose": "정기예금보다 높은 금리를 원하는 고객 제안용.",
+    "customer_facing": true
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_1주차_신규마케팅화법"
+   }
+  },
+  {
+   "id": "res.onepick",
+   "kind": "resource",
+   "fields": {
+    "name": "원픽(One-Pick) 가이드",
+    "path": "매주 마스터북에서 제공 (Lv1 1주차: 「세액공제 / 과세이연」)",
+    "purpose": "세액공제와 과세이연 혜택을 시각화한 창구 상담용 가이드.",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_1주차_신규마케팅화법"
+   }
+  },
+  {
+   "id": "res.treasure_map",
+   "kind": "resource",
+   "fields": {
+    "name": "개인형IRP 마케팅 보물지도",
+    "path": "KB-WiseNet > Info Zone > 연금(퇴직연금) > 마케팅 컨텐츠 > 마케팅 Tip",
+    "purpose": "이론편(A to Z) + 실전편(신규·계약이전·추가납·퇴직금 사례, 고객관리 및 이탈방어).",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_1주차_신규마케팅화법"
+   }
+  },
+  {
+   "id": "res.starclub_flyer",
+   "kind": "resource",
+   "fields": {
+    "name": "스타클럽 제도 안내장",
+    "path": "KB-WiseNet > Smart Zone > 안내장 > 영업지원 > 마케팅",
+    "purpose": "대출·예금 등 거래실적 우수고객에게 스타클럽 등급 혜택을 안내하며 IRP 계약이전을 유도할 때 활용",
+    "customer_facing": true
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_계약이전화법_은행"
+   }
+  },
+  {
+   "id": "res.market_outlook_guide",
+   "kind": "resource",
+   "fields": {
+    "name": "온국민 투자가이드",
+    "path": "KB-WiseNet > Info-zone > WM Sales Café > 시장전망 > 시장동향",
+    "purpose": "시장전망·자산별 운용전략·위험성향별 최적 자산배분안을 안내해 관리능력을 어필할 때 활용",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_계약이전화법_은행"
+   }
+  },
+  {
+   "id": "res.recommended_fund",
+   "kind": "resource",
+   "fields": {
+    "name": "퇴직연금 추천펀드",
+    "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > [상품]실적배당상품 > 추천펀드",
+    "purpose": "이번달 추천펀드·디폴트옵션 확인",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.연금왕찐천재_마스터북_계약이전화법_은행"
+   }
+  },
+  {
+   "id": "res.guide.info_zone_target_list",
+   "kind": "resource",
+   "fields": {
+    "name": "이탈위험 고객 타겟리스트",
+    "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > KPI 전담자표 > 타겟리스트",
+    "purpose": "고유계정대 50% 이상 또는 시중은행 정기예금 100% 보유한 이탈위험 고객 조회",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.개인형IRP_고객관리_가이드_Series1"
+   }
+  },
+  {
+   "id": "res.guide.mystar_terminal",
+   "kind": "resource",
+   "fields": {
+    "name": "MyStar 적립금·수익률 조회",
+    "path": "MyStar 단말 [04-12-642] 적립금 및 수익률 조회",
+    "purpose": "고객별 보유상품·만기·운용수익률 확인",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.개인형IRP_고객관리_가이드_Series1"
+   }
+  },
+  {
+   "id": "res.guide.info_zone_hotmenu",
+   "kind": "resource",
+   "fields": {
+    "name": "퇴직연금 ETF/TDF/추천펀드 조회",
+    "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > HOT MENU > 퇴직연금 ETF · TDF",
+    "purpose": "ETF·TDF 상품 정보 및 이달의 추천펀드·포트폴리오 조회",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.개인형IRP_고객관리_가이드_Series1"
+   }
+  },
+  {
+   "id": "res.guide.info_zone_dc_irp_rate",
+   "kind": "resource",
+   "fields": {
+    "name": "DC/개인형IRP 특별제공 원리금보장상품 금리",
+    "path": "KB-WiseNet > Info-zone > 연금(퇴직연금) > 원리금보장상품 > 특별제공상품",
+    "purpose": "월별로 갱신되는 고금리 원리금보장 특별제공상품 금리 확인",
+    "customer_facing": false
+   },
+   "source": {
+    "doc": "doc.개인형IRP_고객관리_가이드_Series1"
+   }
+  }
+ ]
+}

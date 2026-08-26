@@ -1,0 +1,157 @@
+"""화면 연계 — 후처리 노드 `offer`(제안)와 확인 응답 노드 `confirm_action`(확인·연계).
+
+답변이 직원이 단말에서 이어서 할 일을 가리키면(업무 절차의 화면번호, 고객에게 보낼 문구의
+LMS 발송 화면), 그 화면으로 바로 갈 수 있게 **연계를 제안**한다. 실제 작업은 직원이 그
+화면에서 한다 — 에이전트는 화면을 열어줄 뿐 작업을 대신 수행하지 않는다(CLAUDE.md §10).
+
+예전에는 여기서 LMS 를 **발송까지 수행**했다(스텁). 그러면 되돌릴 수 없는 대외 행위를
+에이전트가 하는 셈이라 확인 절차 하나에 전부를 걸어야 했다. 지금은 수행하는 것이 없으므로
+확인은 "이 화면을 열까요"에 대한 것이고, 보낼지 말지는 직원이 그 화면에서 정한다.
+
+━━ 제안 → 확인 → 연계 ━━
+제안 여부는 **규칙이 정한다**(LLM 판단 아님) — 답변이 실제로 화면을 가리키고, 그 화면을
+열 정보가 갖춰졌을 때만. 매 턴 "연계해드릴까요?"가 붙으면 직원이 그 문장을 읽지 않게
+되고, 그러면 확인 절차 자체가 의미를 잃는다.
+
+━━ 제안은 그 자리에서만 유효하다 ━━
+확인 응답은 **직전 턴**의 제안만 실행한다. 예전에는 대화 이력을 거슬러 올라가 '가장 최근의
+제안'을 찾았고, 그래서 사이에 다른 질문이 오간 뒤의 "네"도 몇 턴 전 제안을 실행할 수
+있었다(§12 gap 14). 직원이 잊은 제안이 뒤늦게 실행되는 것은 승낙이 아니다.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from pension_agent.consult_agent import screens
+from pension_agent.consult_agent.state import AgentState
+from pension_agent.tools import TOOL_REGISTRY
+
+#: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
+_SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
+
+_YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "ok", "yes")
+_NO = ("아니", "괜찮", "나중", "취소", "안 열", "안열", "하지마", "no")
+
+
+def _answer_screens(state: AgentState) -> list[str]:
+    """답변이 실제로 인용한 화면번호 — **근거 카드에 있는 것만**(§10).
+
+    답변 텍스트에서 화면번호 꼴을 찾은 뒤 원장의 값과 대조한다. 답변에서만 찾으면 LLM 이
+    지어낸 번호로 링크를 만들게 되고, 원장에서만 찾으면 답변이 언급하지도 않은 다른
+    절차의 화면을 열자고 제안하게 된다.
+    """
+    answer = state.get("answer") or ""
+    known = {screens.normalize(s)
+             for e in (state.get("evidence") or []) for s in e["atomic"]
+             if _SCREEN_IN_ANSWER.fullmatch(s.strip())}
+    seen: list[str] = []
+    for m in _SCREEN_IN_ANSWER.finditer(answer):
+        number = screens.normalize(m.group())
+        if number in known and number not in seen:
+            seen.append(number)
+    return seen
+
+
+def _propose(state: AgentState) -> dict[str, Any] | None:
+    """이번 답변에 붙일 화면 연계 제안 하나. 조건이 아니면 None.
+
+    **답변이 화면번호를 인용했을 때만이다.** 그것이 §10 의 "답변이 실제로 화면을 가리킨다"에
+    해당하는 유일하게 확인 가능한 신호다 — 직원이 그 번호를 읽고 있다는 뜻이고, 열 화면도
+    파라미터도 근거에서 나온다.
+
+    한때 여기에 두 번째 갈래가 있었다: 답변 안에 따옴표로 감싼 15자 이상의 문장이 있으면
+    LMS 발송 화면을 제안했다. 그 조건은 **화법 코칭 답변이면 거의 항상 참**이다 — 고객에게
+    할 말을 큰따옴표로 쓰라고 작성 프롬프트가 지시하기 때문이다. 그래서 사후관리 방법을
+    물었을 뿐인 턴에도 "발송 화면 열까요?"가 붙었고, 그러면 §10 이 경계한 바로 그 상태가
+    된다 — 매 턴 붙는 제안은 직원이 읽지 않게 되고 확인 절차가 의미를 잃는다.
+
+    문구를 보내려는 직원은 그렇게 말한다("이 문구로 LMS 보내줘"). 그 요청은 `lms_send` 가
+    받아 같은 화면 연계를 제안한다 — 기능이 사라진 것이 아니라, **추측이 아니라 요청으로**
+    시작하게 바뀐 것이다.
+    """
+    for number in _answer_screens(state):
+        return {"kind": "screen", "label": f"{number} 화면 열기", "screen": number,
+                "params": {"customer_id": state.get("customer_id") or ""}}
+    return None
+
+
+def offer(state: AgentState) -> dict[str, Any]:
+    """답변 뒤에 붙는 화면 연계 제안. 조건이 아니면 아무것도 바꾸지 않고 통과한다."""
+    if state.get("pending_action"):
+        return {}
+    action = _propose(state)
+    if not action:
+        return {}
+    return {
+        "answer": state["answer"] + f"\n\n— {action['label']}, 연계해드릴까요? (네 / 아니오)",
+        "pending_action": action,
+    }
+
+
+def _pending(history: list[dict] | None) -> dict | None:
+    """직전 턴이 걸어둔 제안. **그 한 턴만** 본다(§10 "제안은 그 자리에서만 유효하다").
+
+    걸어둔 제안을 몇 턴 뒤의 "네"로 실행하지 않는다. 직원이 확인 대신 다른 질문을 하면
+    그 턴은 제안 없이 끝나므로, 여기서 자동으로 무효가 된다.
+    """
+    if not history:
+        return None
+    return (history[-1] or {}).get("pending_action") or None
+
+
+def confirm_action(state: AgentState) -> dict[str, Any]:
+    """직전 턴이 제안한 화면을 열거나, 물리거나, 애매하면 다시 묻는다.
+
+    무엇을 연계하기로 한 것인지(어느 화면·어느 고객)는 **제안한 턴이 남긴 것**으로 정하고
+    이번 턴의 말에서 다시 추측하지 않는다(§10) — 이번 질문에는 "네" 한 글자밖에 없다.
+    """
+    pending = _pending(state.get("history"))
+    if not pending:
+        return {"answer": "직전에 제안드린 작업이 없어요. 무엇을 도와드릴까요?",
+                "sources": [], "pending_action": None}
+
+    text = (state.get("question") or "").strip().lower()
+    said_no = any(k in text for k in _NO) and not any(text.startswith(k) for k in _YES)
+    if said_no:
+        return {"answer": f"{pending['label']}을 취소했어요.", "sources": [], "pending_action": None}
+    if not any(k in text for k in _YES):
+        # 애매한 답을 승낙으로 해석하지 않는다 — 제안을 유지한 채 다시 묻는다(§10).
+        return {"answer": f"{pending['label']}을 진행할까요? '네' 또는 '아니오'로 답해 주세요.",
+                "sources": [], "pending_action": pending}
+
+    return _link(pending)
+
+
+def _link(pending: dict) -> dict[str, Any]:
+    """연계 결과를 알린다 — 어느 화면을 열었는지, 못 열었으면 왜인지(§10).
+
+    **링크는 화면만 연다.** 딥링크가 받는 파라미터는 `scnNo`·`mode` 뿐이라(screens.py) 고객
+    식별자도 문구도 URL 로 넘어가지 않는다 — 직원이 열린 화면에서 입력한다. 그러니 여기서
+    "무엇을 채웠다"고 말하지 않는다. 채우지 않은 값을 채웠다고 말하는 답변이 링크가 없는
+    것보다 나쁘다.
+    """
+    message = pending.get("message") or ""
+    if pending.get("kind") == "lms":
+        # 발송 화면으로 넘기는 문구는 코드가 한 가지를 거부한다 — 아직 실제 콘텐츠로
+        # 확정되지 않은 더미 문구다. 화면을 열어 그 문구를 건네면 직원이 그대로 보낼 수
+        # 있기 때문이고, 이 판정은 답변에 붙인 경고 문구가 아니라 코드가 한다(§10).
+        gate = TOOL_REGISTRY["open_lms_screen"](
+            (pending.get("params") or {}).get("customer_id") or "", message)
+        if gate["status"] == "blocked":
+            return {"answer": f"연계하지 않았어요. {gate['detail']}",
+                    "sources": [], "pending_action": None}
+
+    url = screens.link(pending.get("screen") or "")
+    if not url:
+        # 화면번호가 규격에 맞지 않으면 연계 대신 화면번호만 안내한다(§10).
+        return {"answer": f"화면 연계를 만들지 못했어요. 화면번호 {pending.get('screen') or '미상'} "
+                          "로 직접 이동해 주세요.",
+                "sources": [], "pending_action": None}
+
+    answer = f"{pending['label']} — {url}"
+    if pending.get("kind") == "lms" and message:
+        # 문구는 링크로 넘어가지 않으므로 직원이 화면에서 붙여넣도록 여기서 다시 준다.
+        answer += f'\n화면이 열리면 이 문구를 넣어 주세요 — "{message}"'
+    return {"answer": answer, "sources": [], "pending_action": None}
