@@ -649,7 +649,11 @@ TOOLS: dict[str, Tool] = {
         Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment),
         Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method),
         Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip),
-        Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·요건)를 돌려준다", _customer),
+        # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
+        # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
+        # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.
+        Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·성립 요건, 그리고 이 고객이 "
+             "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
              _history),
     )
@@ -659,12 +663,18 @@ TOOLS: dict[str, Tool] = {
 _NEEDS_CUSTOMER = frozenset({"customer", "history"})
 
 
+def usable(state: AgentState | None = None) -> list[str]:
+    """이 턴에 실제로 부를 수 있는 도구 이름. 고객 화면이 닫혀 있으면 고객 전제 도구는
+    빠진다(§3). 카탈로그와 재계획의 '아직 안 써 본 도구'가 같은 목록을 봐야 한다 —
+    갈리면 카탈로그에 없는 도구를 다시 시도하라고 말하게 된다."""
+    opened = bool((state or {}).get("customer_id"))
+    return [t.name for t in TOOLS.values() if opened or t.name not in _NEEDS_CUSTOMER]
+
+
 def catalog(state: AgentState | None = None) -> str:
     """계획 프롬프트에 실리는 도구 목록. 쓸 수 없는 도구는 애초에 보여주지 않는다 —
     고객 화면이 닫혀 있는데 customer 를 제안하게 두면 한 스텝을 낭비한다."""
-    opened = bool((state or {}).get("customer_id"))
-    usable = [t for t in TOOLS.values() if opened or t.name not in _NEEDS_CUSTOMER]
-    return "\n".join(f"- {t.name}: {t.desc}" for t in usable)
+    return "\n".join(f"- {TOOLS[n].name}: {TOOLS[n].desc}" for n in usable(state))
 
 
 def run(name: str, state: AgentState, query: str) -> Evidence | None:

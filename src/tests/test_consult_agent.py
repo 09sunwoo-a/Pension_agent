@@ -1140,6 +1140,29 @@ def check_relations() -> int:
     print(f"{'✓' if hit else '✗'} 행원들이 적어둔 알려진 오답을 그대로 말하면 잡는다")
     ok += hit
 
+    # 인용은 주장이 아니다 — 그 문구를 «틀렸다»고 짚는 답변까지 잡던 자리다. 카드의
+    # verify_points 가 직원에게 그렇게 짚어주라고 적어둔 바로 그 문구라, 데이터가 시킨 일을
+    # 했다고 벌하는 꼴이었다(폐기 뒤 나가는 카드 원문에는 같은 문구가 그대로 실려 있다).
+    pf = f2.get("pitfalls") or []
+    hit = (not R.known_wrong('"5,500만원 이상 13.2%"는 오기예요. "초과"가 맞습니다.', pf)
+           and not R.known_wrong("「5,500만원 이상 13.2%」는 틀린 표기니 주의하세요.", pf))
+    print(f"{'✓' if hit else '✗'} 오답 문구를 «틀렸다»고 짚는 정정은 막지 않는다")
+    ok += hit
+
+    # 정정으로 보는 조건은 둘 다다 — 하나만으로는 헐겁다.
+    hit = R.known_wrong("오기 주의하시고, 5,500만원 이상 13.2% 로 안내하세요.", pf) != []
+    print(f"{'✓' if hit else '✗'} 정정 표지만 곁에 있고 문구는 주장했으면 잡는다")
+    ok += hit
+
+    hit = R.known_wrong('고객님께 "5,500만원 이상 13.2%" 라고 안내드릴게요.', pf) != []
+    print(f"{'✓' if hit else '✗'} 따옴표만 있고 정정 표지가 없으면 잡는다(고객 대사도 따옴표에 담긴다)")
+    ok += hit
+
+    hit = R.known_wrong('"5,500만원 이상 13.2%"는 오기예요. '
+                        "그래도 5,500만원 이상 13.2% 로 하세요.", pf) != []
+    print(f"{'✓' if hit else '✗'} 한쪽에서 정정하고 다른 쪽에서 그대로 말하면 잡는다")
+    ok += hit
+
     # 오답 문자열은 **구절**이어야 한다 — 값 하나짜리는 다른 팩트의 맞는 문장에도 들어간다.
     bare = [w for f in KB.facts.values() for x in f.get("pitfalls") or []
             for w in x.get("wrong") or [] if " " not in w and len(w) < 8]
@@ -1386,6 +1409,94 @@ def check_miss_recovery() -> int:
 
     hit = P._no_evidence({}) == P.NO_EVIDENCE
     print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴에는 빈 '찾아본 곳'을 붙이지 않는다")
+    ok += hit
+    return ok
+
+
+def check_replan_on_empty() -> int:
+    """근거 0건인 채 계획이 끝나려 하면 **한 번은 다시 계획하는가**(§5).
+
+    회귀 대상: "이 고객은 왜 타겟이 됐지?"(고객 화면 열림). 계획이 segment 를 골랐고
+    (타겟 = 관리 대상 고객군이라는 말은 알아들었다) segment 가 0건을 냈는데, 원장에는
+    성공한 재료만 실려서 계획은 자기가 뭘 불러봤는지 몰랐다 — 같은 호출을 반복하다
+    반복 차단에 걸려, customer(왜 이 고객인가·판단근거를 들고 있는 도구)를 써 볼 기회
+    없이 턴이 '근거 없음'으로 끝났다. 재료가 없는 것이 아니라 고르기를 실패한 것이다.
+
+    고친 것 셋: ① 빗나간 호출이 계획 프롬프트에 실린다 ② 근거 0건인 채 끝내려 하면
+    코드가 안 써 본 도구 목록과 함께 한 번 되돌려 보낸다(두 번째 끝내기는 존중 — 정직한
+    '없음' 경로를 막지 않는다) ③ customer 도구 설명이 "왜 관리 대상(타겟)인가"를 말한다.
+    """
+    from pension_agent.consult_agent.nodes import plan as P
+
+    ok = 0
+    ev_customer = {"tool": "customer", "query": "왜 타겟", "text": "· 왜 이 고객인가: 미운용 방치",
+                   "atomic": [], "notices": [], "notice_scopes": [], "marks": [], "related": [],
+                   "allow": ["· 왜 이 고객인가: 미운용 방치"],
+                   "sources": [{"id": "customer.CX", "title": "고객 계좌 현황"}], "meta": {}}
+
+    # ① 회귀 시나리오 그대로: segment 빗나감 → done → (재계획) → customer 로 답 재료 확보.
+    prompts: list[str] = []
+    script = ['{"tool": "segment", "query": "타겟 고객군 선정 조건"}',
+              '{"done": true}',
+              '{"tool": "customer", "query": "왜 타겟이 됐는지", "last": true}']
+    orig_gen, orig_run = P.generate, P.tools.run
+    P.generate = lambda prompt, **kw: prompts.append(prompt) or script.pop(0)
+    P.tools.run = lambda name, state, query: ev_customer if name == "customer" else None
+    try:
+        state = {"question": "이 고객은 왜 타겟이 됐지?", "customer_id": "188406-7352194"}
+        for _ in range(plan.MAX_STEPS + 2):
+            state.update(P.plan_step(state))
+            if state.get("plan_done"):
+                break
+    finally:
+        P.generate, P.tools.run = orig_gen, orig_run
+    used = [e["tool"] for e in state.get("evidence") or []]
+    hit = used == ["customer"] and state.get("plan_done") is True
+    print(f"{'✓' if hit else '✗'} 첫 도구가 빗나가도 재계획으로 customer 에 닿는다 → 원장 {used}")
+    ok += hit
+
+    # 빗나간 호출이 다음 계획 프롬프트에 보인다 — 원장에는 성공한 재료만 실리므로,
+    # 이게 없으면 계획은 같은 호출을 반복한다.
+    hit = len(prompts) == 3 and "segment:타겟 고객군 선정 조건" in prompts[1] \
+        and "반복해도 소용없다" in prompts[1]
+    print(f"{'✓' if hit else '✗'} 빗나간 호출이 계획 프롬프트에 실린다")
+    ok += hit
+
+    # 재계획 턴의 프롬프트는 아직 안 써 본 도구를 이름으로 보여준다.
+    hit = len(prompts) == 3 and "아직 근거가 0건이다" in prompts[2] and "customer" in prompts[2]
+    print(f"{'✓' if hit else '✗'} 재계획 지시가 안 써 본 도구(customer 포함)를 보여준다")
+    ok += hit
+
+    # ② 두 번째 done 은 존중한다 — 재계획이 정직한 '없음' 경로를 막지 않는다.
+    P.generate = lambda prompt, **kw: '{"done": true}'
+    try:
+        st = {"question": "질문"}
+        st.update(P.plan_step(st))
+        retried = st.get("plan_retry") is True and not st.get("plan_done")
+        st.update(P.plan_step(st))
+    finally:
+        P.generate = orig_gen
+    hit = retried and st.get("plan_done") is True \
+        and P.compose(st)["answer"] == P.NO_EVIDENCE
+    print(f"{'✓' if hit else '✗'} 두 번째 done 은 존중 → 여전히 정직한 '근거 없음'")
+    ok += hit
+
+    # 근거를 모았으면 done 을 바로 존중한다 — 재계획은 0건일 때만이다.
+    P.generate = lambda prompt, **kw: '{"done": true}'
+    try:
+        st2 = {"question": "질문", "evidence": [ev_customer], "plan_calls": ["customer:q"]}
+        st2.update(P.plan_step(st2))
+    finally:
+        P.generate = orig_gen
+    hit = st2.get("plan_done") is True and not st2.get("plan_retry")
+    print(f"{'✓' if hit else '✗'} 근거가 있으면 done 즉시 존중(재계획 없음)")
+    ok += hit
+
+    # ③ customer 도구 설명이 "왜 관리 대상(타겟)인가"를 말한다 — 도구 설명이 곧 계획의
+    #    판단 재료라, 잔액·수익률만 말하면 이 질문이 segment 로 흘러간다.
+    desc = tools.TOOLS["customer"].desc
+    hit = "타겟" in desc and "왜" in desc
+    print(f"{'✓' if hit else '✗'} customer 도구 설명이 선정 이유(타겟)를 말한다")
     ok += hit
     return ok
 
@@ -1962,17 +2073,33 @@ def check_tool_loop() -> int:
         print(f"{'✓' if hit else '✗'} MAX_STEPS 상한 준수(호출 {len(st.get('plan_calls') or [])}회 ≤ {plan.MAX_STEPS})")
         ok += hit
 
-        # ⑤ 같은 도구를 같은 질의로 다시 부르면 진전이 없으므로 끊는다.
+        # ⑤ 같은 도구를 같은 질의로 다시 부르면 진전이 없으므로 도구를 다시 돌리지 않는다.
+        #    근거가 0건이면 바로 끝내는 대신 한 번 재계획으로 되돌리고(check_replan_on_empty),
+        #    그 뒤에도 반복이면 끝낸다.
         st2 = {"question": "질문", "plan_calls": ["fact:무한"]}
         st2.update(plan.plan_step(st2))
-        hit = st2.get("plan_done") is True and len(st2["plan_calls"]) == 1
-        print(f"{'✓' if hit else '✗'} 같은 호출 반복 차단")
+        first = st2.get("plan_retry") is True and not st2.get("plan_done")
+        st2.update(plan.plan_step(st2))
+        hit = first and st2.get("plan_done") is True and len(st2["plan_calls"]) == 1
+        print(f"{'✓' if hit else '✗'} 같은 호출 반복 차단(재계획 한 번 뒤 종료)")
+        ok += hit
+
+        # 근거를 이미 모은 턴이면 반복은 재계획 없이 바로 끝낸다 — 되돌릴 이유가 없다.
+        st2e = {"question": "질문", "plan_calls": ["fact:무한"],
+                "evidence": [{"tool": "fact", "query": "q", "text": "블록", "atomic": [],
+                              "notices": [], "notice_scopes": [], "marks": [], "related": [],
+                              "allow": ["블록"], "sources": [], "meta": {}}]}
+        st2e.update(plan.plan_step(st2e))
+        hit = st2e.get("plan_done") is True
+        print(f"{'✓' if hit else '✗'} 근거가 있으면 반복 즉시 종료(재계획 없음)")
         ok += hit
 
         # ⑥ LLM 이 없는 도구 이름을 내놓으면 실행하지 않는다.
         plan.generate = lambda prompt, **kw: '{"tool": "존재하지_않는_도구", "query": "x"}'
         st3 = plan.plan_step({"question": "질문"})
-        hit = st3.get("plan_done") is True and "evidence" not in st3
+        st3_done = plan.plan_step({"question": "질문", "plan_retry": True})
+        hit = "evidence" not in st3 and not st3.get("plan_done") \
+            and st3_done.get("plan_done") is True and "evidence" not in st3_done
         print(f"{'✓' if hit else '✗'} 미등록 도구 이름 차단")
         ok += hit
 
@@ -2416,6 +2543,7 @@ def main() -> int:
     check_relations()
     check_turn_cost()
     check_miss_recovery()
+    check_replan_on_empty()
     check_screen_registry()
     check_caution_roles()
     check_history_material()
