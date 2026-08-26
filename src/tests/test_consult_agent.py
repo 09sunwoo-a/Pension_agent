@@ -2050,6 +2050,7 @@ def check_market_material() -> int:
     수치는 주·월 단위로 낡으므로, 기준시점과 원문의 시효 경고가 답변에 함께 나가야 한다.
     """
     from pension_agent.consult_agent import marks as MARKS
+    from pension_agent.consult_agent import relations as REL
     from pension_agent.consult_agent.kb import buckets
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES
     from pension_agent.consult_agent.state import KB
@@ -2152,6 +2153,81 @@ def check_market_material() -> int:
     hit = all(c["id"] in bucketed for c in cards)
     print(f"{'✓' if hit else '✗'} 버킷 카탈로그에 들어간다(LLM 후보 목록에 보인다)")
     ok += hit
+
+    # ── 표를 관계로 선언했는가 (knowledge/CLAUDE.md §1) ──────────────
+    #
+    # 05 문서의 알맹이는 산문이 아니라 표다. 표를 텍스트 덩어리로만 실으면 두 가지가 같이
+    # 막힌다 — 검색 입구가 없고(「1975년생이면 TDF 몇 년」의 답이 표에 있는데 못 찾았다),
+    # 값–조건 오짝을 잡을 재료가 없다(「알파드림 금리 3.40」은 지켜드림의 값인데 통과했다).
+    tabled = [c for c in cards if c.get("tables")]
+    hit = len(tabled) >= 8
+    print(f"{'✓' if hit else '✗'} 표가 행 단위 관계로 선언된다 ({len(tabled)}장)")
+    ok += hit
+
+    deck = next((c for c in cards if c["id"].endswith("추천펀드_2026-08.01")), None)
+    rows = (deck or {}).get("tables", [{}])[0].get("rows") or []
+    # 병합 셀(합계 행)은 위 행에서 이름을 이어받는다 — 안 이어받으면 「알파드림 포트폴리오
+    # 수익률 4.23」이라는 **맞는 답변**이 남의 값으로 몰려 막힌다.
+    hit = any(r["keys"][:2] == ["저위험", "알파드림"] and "100" in r["values"] for r in rows)
+    print(f"{'✓' if hit else '✗'} 병합 셀 합계 행이 상품 이름을 이어받는다")
+    ok += hit
+
+    # 행을 못 가리는 이름(「포트폴리오」는 모든 상품 밑에 달려 있다)은 행 이름이 아니다.
+    hit = not any("포트폴리오" in (r.get("keys") or []) for r in rows)
+    print(f"{'✓' if hit else '✗'} 행을 못 가리는 이름은 행 이름으로 쓰지 않는다")
+    ok += hit
+
+    hit = REL.declared(deck or {})
+    print(f"{'✓' if hit else '✗'} 표를 선언한 카드가 관계 검사 대상이 된다")
+    ok += hit
+
+    # 표에서 나온 검색 입구 — 열 머리말(1975년)과 행 이름(알파드림 III)이 둘 다 있어야 한다.
+    tdf = next((c for c in cards if c["title"] == "TDF 포트폴리오"), None)
+    hit = bool(tdf) and "1975년" in (tdf.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 표의 열 머리말이 검색 입구가 된다 — 1975년")
+    ok += hit
+
+    hit = bool(deck) and "알파드림 III" in (deck.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 표의 행 이름이 검색 입구가 된다 — 알파드림 III")
+    ok += hit
+
+    orig = tools.fits_question
+    tools.fits_question = lambda q, h, kind="", history=None: h
+    try:
+        q = "1975년생이면 TDF 몇 년짜리 골라야 해?"
+        found = tools.run("market", {"question": q}, q)
+    finally:
+        tools.fits_question = orig
+    hit = bool(found) and "출생연도" in found["text"]
+    print(f"{'✓' if hit else '✗'} 표 안에만 있던 질문이 근거에 닿는다 — 출생연도별 TDF")
+    ok += hit
+
+    # ── 오짝 판정: 막아야 할 것과 **막으면 안 되는 것** ─────────────
+    #
+    # 뒤쪽이 더 중요하다 — 검증기가 옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다
+    # 나쁘다(relations.py 머리말). 그래서 맞는 답변 쪽을 더 많이 건다.
+    tables = (deck or {}).get("tables") or []
+    for expect, label, answer in (
+        (True, "다른 행의 금리를 갖다 붙임",
+         "알파드림의 정기예금 금리는 3.40 이에요."),
+        (True, "형제 상품의 수익률을 갖다 붙임",
+         "모두드림 III 의 1년 수익률은 20.63 이에요."),
+        (False, "원문 그대로 옮긴 답",
+         "알파드림은 수협은행 노후보장 정기예금 디폴트옵션용(3년) 70, "
+         "키움키워드림적격TDF2030 20, 삼성글로벌EMP적격TDF2035 10 으로 구성돼요."),
+        (False, "산문 칸(상품특징)의 수치를 인용",
+         "알파드림은 시중은행 정기예금 70, TDF 30 투자하는 포트폴리오예요."),
+        (False, "합계 행의 값을 인용",
+         "알파드림 포트폴리오의 1년 수익률은 4.23 이에요."),
+        (False, "여러 행을 함께 말함",
+         "지켜드림은 3.40·3.25·3.32, 알파드림은 3.27 이에요."),
+        (False, "어느 행인지 안 밝힘 — 판정 불가는 위반이 아니다",
+         "정기예금 금리는 3.40 수준이에요."),
+    ):
+        broken = REL.table_mispaired(answer, tables)
+        hit = bool(broken) == expect
+        print(f"{'✓' if hit else '✗'} {'차단' if expect else '통과'}: {label}")
+        ok += hit
     return ok
 
 

@@ -1040,7 +1040,10 @@ def _market_emphasis(text: str) -> str:
     («인용 전 `as_of` 기준시점을 확인하고»). clean 을 그대로 쓰면 그 이름이 `asof` 로
     깨진 채 답변에 나가고, 직원은 존재하지 않는 필드를 찾게 된다.
     """
-    out = re.sub(r"[*`]+", "", text)
+    # 이스케이프를 먼저 푼다 — 원문이 각주 표시를 `\\*\\*\\*수협은행…` 처럼 적어서,
+    # `*` 만 지우면 백슬래시가 이름 앞에 남는다(행 이름이 원문과 달라진다).
+    out = re.sub(r"\\([*_`\[\]<>#|])", r"\1", text)
+    out = re.sub(r"[*`]+", "", out)
     return re.sub(r"\s{2,}", " ", out).strip()
 
 
@@ -1103,6 +1106,176 @@ _MIN_KEYWORD = 2
 def _market_keywords(keywords: list[str]) -> list[str]:
     return [kw for kw in keywords
             if len(re.sub(r"[^0-9A-Za-z가-힣]", "", kw)) >= _MIN_KEYWORD]
+
+
+# ─────────────────────────────────────────────────────────────
+# 05 의 표 → 관계 선언 (knowledge/CLAUDE.md §1 값↔성립 조건)
+#
+# 05 문서의 알맹이는 산문이 아니라 **표**다 — 디폴트옵션 9종의 편입상품·비중·금리, TDF
+# 빈티지별 위험자산 비중, 투자성향 5단계의 구성상품. 그 표를 텍스트 덩어리로만 실으면 두
+# 가지가 동시에 막힌다.
+#
+#   ① 검색 입구가 없다. 「1975년생이면 TDF 몇 년짜리」의 답이 표 안에 버젓이 있는데
+#      (출생연도 1975년 → TDF 2035) 카드의 검색 예시는 제목·문서 키워드뿐이라 n-gram 이
+#      닿지 못했다. 표의 **열 머리말과 행 이름**이 곧 직원이 부르는 말이다.
+#   ② 값–조건 오짝을 잡을 재료가 없다. `verify_texts` 는 수치의 집합 포함 검사라, 표 안에
+#      있는 숫자를 **다른 행에 갖다 붙인** 답("알파드림 금리는 3.27" — 그건 수협은행 행의
+#      값이다)이 그대로 통과한다. 표는 그 자체가 조건→값 구조인데 그걸 안 쓰고 있었다.
+#
+# 표를 행 단위로 펴서 선언하면 하나의 추출이 둘을 같이 푼다. **내용을 새로 만들지 않는다** —
+# 원문 표의 칸을 그대로 옮길 뿐이고, `content` 의 원문도 그대로 남는다(fact 가 `value` 산문과
+# `tiers` 쌍을 함께 갖는 것과 같은 구조다).
+# ─────────────────────────────────────────────────────────────
+
+#: 표 한 줄. `| a | b |` 형태.
+_TABLE_LINE = re.compile(r"^\s*\|(.+)\|\s*$")
+#: 머리말과 본문을 가르는 구분선. `|---|:--:|`
+_TABLE_SEP = re.compile(r"^\s*\|[\s:|-]+\|\s*$")
+
+#: 행 이름 열로 볼 최소 비율. 그 열의 값 중 이만큼이 '글자가 든 이름'이어야 한다.
+_KEY_COL_RATIO = 0.6
+
+#: 값 칸으로 볼 최대 길이. 이보다 길면 산문 칸(상품특징 등)이다 — 그 안의 수치는 **다른
+#: 행의 값으로 세지 않는다**. 산문에는 그 행을 설명하는 숫자가 섞여 있어서(「정기예금 70,
+#: TDF 30 투자하는 포트폴리오」), 그걸 남의 값으로 세면 맞는 답변이 막힌다.
+_VALUE_CELL_MAX = 24
+
+
+def _table_cells(line: str) -> list[str]:
+    return [_market_emphasis(c) for c in _TABLE_LINE.match(line).group(1).split("|")]
+
+
+def _is_name(cell: str) -> bool:
+    """이름 칸인가 — 글자가 들어 있고 순수 수치·날짜가 아니다."""
+    if not cell:
+        return False
+    if not re.search(r"[가-힣A-Za-z]", cell):
+        return False
+    return not re.fullmatch(r"[\d.,\-~%\s]+", cell)
+
+
+def _key_columns(rows: list[list[str]]) -> int:
+    """왼쪽부터 몇 개 열이 '행 이름' 열인가. 처음으로 값 열을 만나면 멈춘다.
+
+    열 개수를 세는 이유는 표마다 이름 열이 다르기 때문이다 — 디폴트옵션 표는 셋
+    (위험도·상품·편입상품), 추천펀드 표는 둘(구분·상품명), TDF 매트릭스는 하나(운용사).
+    """
+    n = max((len(r) for r in rows), default=0)
+    for col in range(n):
+        vals = [r[col] for r in rows if col < len(r) and r[col].strip()]
+        if not vals:
+            return col
+        if sum(_is_name(v) for v in vals) / len(vals) < _KEY_COL_RATIO:
+            return col
+    return n
+
+
+def _identifying(filled: list[list[str]], ncol: int) -> set[tuple[int, str]]:
+    """행을 **가리킬 수 있는** 이름 칸만 남긴다 — 윗 열이 다른 여러 행에 걸친 이름은 뺀다.
+
+    병합 셀을 이어받으면 합계 행의 이름이 「포트폴리오」가 되는데, 그 말은 지켜드림·알파드림·
+    모두드림 밑에 **전부** 달려 있어서 어느 상품의 합계인지 못 가린다. 그런 이름을 행 이름으로
+    두면 답변에 「포트폴리오」라는 흔한 말이 한 번 나왔다는 이유로 남의 행까지 «답변이 말한
+    행»이 되고, 그러면 다른 상품의 값을 갖다 붙인 답이 그대로 통과한다(실측으로 잡은 자리다 —
+    「알파드림 포트폴리오 1년 수익률 8.56」은 알파드림 II 의 값인데 통과했다).
+
+    판정은 «윗 열 조합이 하나뿐인가»로 한다. 「수협은행 노후보장 정기예금 디폴트옵션용(3년)」은
+    알파드림 밑에만 있어 그 행을 가리키고, 「포트폴리오」는 아니다.
+    """
+    ident: set[tuple[int, str]] = set()
+    for col in range(ncol):
+        parents: dict[str, set[tuple[str, ...]]] = {}
+        for row_keys in filled:
+            val = row_keys[col]
+            if val:
+                parents.setdefault(val, set()).add(tuple(row_keys[:col]))
+        ident |= {(col, val) for val, ups in parents.items() if len(ups) == 1}
+    return ident
+
+
+def _market_tables(text: str) -> list[dict]:
+    """마크다운 표 → `{"columns", "rows":[{"keys", "cells"}]}`.
+
+    빈 이름 칸은 **바로 위 행에서 이어받는다**. 원문이 병합 셀로 적은 자리라
+    (디폴트옵션 표의 `| | | **포트폴리오** | … | **100** |` 합계 행), 이어받지 않으면 그
+    행이 어느 상품의 것인지 잃는다 — 그러면 「알파드림 포트폴리오 수익률 4.23」이라는
+    **맞는 답변**이 남의 값으로 몰려 막힌다.
+    """
+    out: list[dict] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if not _TABLE_LINE.match(lines[i]) or _TABLE_SEP.match(lines[i]):
+            i += 1
+            continue
+        if i + 1 >= len(lines) or not _TABLE_SEP.match(lines[i + 1]):
+            i += 1
+            continue
+        columns = _table_cells(lines[i])
+        body: list[list[str]] = []
+        j = i + 2
+        while j < len(lines) and _TABLE_LINE.match(lines[j]) and not _TABLE_SEP.match(lines[j]):
+            body.append(_table_cells(lines[j]))
+            j += 1
+        i = j
+
+        ncol = _key_columns(body)
+        # 이름 열과 값 열이 둘 다 있어야 «어느 행의 값인가»를 말할 수 있다. 한쪽뿐인 표
+        # (달력·일정표)는 선언하지 않는다 — 판정할 수 없는 것을 선언해두면 검사가 그것을
+        # 근거로 삼는다.
+        if ncol == 0 or ncol >= max((len(r) for r in body), default=0):
+            continue
+
+        filled: list[list[str]] = []
+        carry: list[str] = [""] * ncol
+        for cells in body:
+            row_keys: list[str] = []
+            for col in range(ncol):
+                val = cells[col].strip() if col < len(cells) else ""
+                if val:
+                    carry[col] = val
+                elif carry[col]:
+                    val = carry[col]
+                row_keys.append(val)
+            filled.append(row_keys)
+
+        ident = _identifying(filled, ncol)
+        rows: list[dict] = []
+        for cells, row_keys in zip(body, filled):
+            keys: list[str] = []
+            for col, val in enumerate(row_keys):
+                # 한 글자 이름(「상」 같은 표 머리말 값)과 «행을 못 가리는 이름»은 뺀다.
+                if (val and val not in keys and (col, val) in ident
+                        and len(re.sub(r"[^0-9A-Za-z가-힣]", "", val)) >= _MIN_KEYWORD):
+                    keys.append(val)
+            rest = [c.strip() for c in cells[ncol:] if c.strip()]
+            if not keys or not rest:
+                continue
+            rows.append({"keys": keys, "cells": rest,
+                         "values": [c for c in rest if len(c) <= _VALUE_CELL_MAX]})
+        if rows:
+            out.append({"columns": [c.strip() for c in columns], "rows": rows})
+    return out
+
+
+def _table_triggers(tables: list[dict], limit: int = 30) -> list[str]:
+    """표에서 나오는 검색 입구 — 열 머리말과 행 이름. 직원이 부르는 말이 여기 있다.
+
+    「1975년생이면 TDF 몇 년짜리」의 `1975년` 은 **열 머리말**이고, 「알파드림 구성상품」의
+    `알파드림` 은 **행 이름**이다. 둘 다 원문 표에 그대로 적혀 있는 말이라 지어내는 것이
+    아니다.
+    """
+    out: list[str] = []
+    for table in tables:
+        for text in list(table.get("columns") or []) + [
+                k for row in table.get("rows") or [] for k in row.get("keys") or []]:
+            text = text.strip()
+            if len(re.sub(r"[^0-9A-Za-z가-힣]", "", text)) < _MIN_KEYWORD:
+                continue
+            if len(text) > 40 or text in out:
+                continue
+            out.append(text)
+    return out[:limit]
 
 
 def _market_triggers(title: str, text: str, keywords: list[str], limit: int = 8) -> list[str]:
@@ -1173,16 +1346,19 @@ def build_market() -> tuple[list[dict], list[dict]]:
             "volatile": warn, "customer_facing": customer_facing,
         }
         overview_id = f"mkt.{slug}.00"
+        ov_tables = _market_tables(preamble)
         cards.append(record(overview_id, "market", {
             "title": title,
             "topic": clean(fm.get("topic") or "") or None,
             "key_points": fm.get("key_points") or None,
             "content": preamble or None,
             "parent": None,
+            "tables": ov_tables or None,
             "tags": {"topics": sorted({*topics_of(title, fm.get("topic") or "",
                                                    " ".join(fm.get("key_points") or [])),
                                        category})},
-            "trigger_examples": ([title] + _market_keywords(fm.get("trigger_keywords") or []))[:24],
+            "trigger_examples": ([title] + _market_keywords(fm.get("trigger_keywords") or [])
+                                 )[:24] + _table_triggers(ov_tables),
             **common,
         }, source={"doc": doc_id, "locator": f"{rel} § 개요"}))
 
@@ -1194,13 +1370,16 @@ def build_market() -> tuple[list[dict], list[dict]]:
                 note(f"[05 빈절] {path.name} § {sec_title} — 본문 없음, 건너뜀")
                 continue
             nn += 1
+            sec_tables = _market_tables(sec_body)
             cards.append(record(f"mkt.{slug}.{nn:02d}", "market", {
                 "title": sec_title,
                 "content": sec_body,
                 "parent": overview_id,
+                "tables": sec_tables or None,
                 "tags": {"topics": sorted({*topics_of(sec_title, sec_body), category})},
                 "trigger_examples": _market_triggers(sec_title, sec_body,
-                                                     fm.get("trigger_keywords") or []),
+                                                     fm.get("trigger_keywords") or [])
+                                    + _table_triggers(sec_tables),
                 **common,
             }, source={"doc": doc_id, "locator": f"{rel} § {sec_title}"}))
         if nn == 0:

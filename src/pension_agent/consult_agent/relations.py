@@ -10,6 +10,8 @@
   tiers      조건–값 쌍. 답변이 어떤 조건을 말하면서 **다른 조건의 값**을 붙였는지 본다.
   pitfalls   행원들이 적어둔 "자주 틀리는 지점" 중 틀린 표현을 인용한 것. 답변에 그 표현이
              그대로 있으면 알려진 오답을 말한 것이다.
+  tables     원문 표를 행 단위로 편 것(05 시황·상품). 답변이 어느 행을 말하면서 **다른 행의
+             값**을 붙였는지 본다 — 표는 그 자체가 조건→값 구조라 tiers 와 같은 자리다.
 
 ━━ 커버리지는 저작된 범위와 같다 ━━
 선언이 없는 카드의 오짝은 못 잡는다. 그래서 이 검사는 원문 강제를 **선언이 있는 카드에
@@ -88,6 +90,89 @@ def mispaired(answer: str, tiers: list[dict]) -> list[str]:
     return bad
 
 
+# ─────────────────────────────────────────────────────────────
+# 표의 행 ↔ 값 — 「다른 행의 값을 갖다 붙였는가」
+#
+# 05 시황·상품 카드는 알맹이가 **표**다(디폴트옵션 9종의 편입상품·비중·금리, TDF 빈티지별
+# 위험자산 비중). 표는 그 자체가 조건→값 구조인데, 텍스트로만 실으면 `verify_texts` 의 집합
+# 포함 검사로는 「알파드림 금리는 3.27」 같은 답이 그대로 통과한다 — 3.27 은 표 안에 실제로
+# 있는 숫자이기 때문이다(수협은행 행의 값이다). tiers 가 fact 에서 하는 일을 표에서 한다.
+#
+# ━━ 판정을 비대칭으로 한다 ━━
+# 이 검사가 옳은 답을 막지 않도록, 양쪽에 다른 잣대를 쓴다.
+#
+#   답변이 **말한 행**  → `cells` 전부를 인용 허용으로 본다. 산문 칸까지 포함한다 —
+#                        상품특징에 「정기예금 70, TDF 30 투자하는 포트폴리오」처럼 그 행을
+#                        설명하는 숫자가 들어 있어서, 그것을 빼면 원문을 그대로 옮긴 답변이
+#                        막힌다.
+#   답변이 **말하지 않은 행** → `values`(짧은 값 칸)만 남의 값으로 센다. 남의 산문에 우연히
+#                        든 숫자까지 세면 오탐이 난다.
+#
+# 그리고 **어느 행도 못 알아보면 아무 말도 하지 않는다.** 그건 통과가 아니라 판정 불가이고,
+# 판정 불가를 위반으로 바꾸면 맞는 답이 막힌다(이 파일 머리말).
+# ─────────────────────────────────────────────────────────────
+
+#: 남의 값으로 셀 수치의 최소 자릿수. 한 자리 숫자는 표 곳곳에 흔해서(「정기예금(3년)」의 3,
+#: 설정일의 일자) 그것으로 행을 가리면 오탐이 난다.
+MIN_VALUE_CHARS = 2
+
+
+def _nums(cells: list) -> set[str]:
+    return numbers(" ".join(str(c) for c in cells or []))
+
+
+def _spans(answer: str, needle: str) -> list[tuple[int, int]]:
+    out, at = [], answer.find(needle)
+    while at >= 0:
+        out.append((at, at + len(needle)))
+        at = answer.find(needle, at + 1)
+    return out
+
+
+def _called_by_name(answer: str, key: str, siblings: list[str]) -> bool:
+    """답변이 이 이름을 **제 이름으로** 불렀는가.
+
+    형제 이름이 서로를 품는다 — 「모두드림」은 「모두드림 II」·「모두드림 III」의 부분문자열이다.
+    부분문자열 일치만 보면 「모두드림 III 의 1년 수익률」이라는 답변에서 «모두드림» 행까지
+    «답변이 말한 행»이 되고, 그러면 모두드림의 값을 III 의 값처럼 말한 답이 통과한다.
+    그래서 더 긴 형제 이름에 **덮이지 않은** 자리가 한 번이라도 있어야 부른 것으로 본다.
+    """
+    covers = [sp for longer in siblings for sp in _spans(answer, longer)]
+    return any(not any(a <= start and end <= b for a, b in covers)
+               for start, end in _spans(answer, key))
+
+
+def _said_rows(answer: str, rows: list[dict]) -> list[dict]:
+    """답변이 말하고 있는 행들. 어느 행도 못 알아보면 빈 목록(판정 불가)."""
+    all_keys = {k for r in rows for k in r.get("keys") or [] if k}
+    return [r for r in rows
+            if any(_called_by_name(answer, k, [x for x in all_keys if x != k and k in x])
+                   for k in r.get("keys") or [] if k)]
+
+
+def table_mispaired(answer: str, tables: list[dict]) -> list[str]:
+    """답변이 다른 행의 값을 갖다 붙인 자리. 판정할 수 없으면 빈 목록."""
+    bad: list[str] = []
+    for table in tables or []:
+        rows = table.get("rows") or []
+        said = _said_rows(answer, rows)
+        if not said or len(said) == len(rows):
+            continue                      # 어느 행인지 못 가린다 → 판정 불가
+        allowed: set[str] = set()
+        for row in said:
+            allowed |= _nums(row.get("cells"))
+        others: set[str] = set()
+        for row in rows:
+            if row not in said:
+                others |= _nums(row.get("values"))
+        foreign = {n for n in others - allowed
+                   if len(n.rstrip("%").lstrip("-")) >= MIN_VALUE_CHARS}
+        for n in sorted(numbers(answer) & foreign):
+            label = " / ".join(said[0].get("keys") or [])
+            bad.append(f"{label} 의 값이 아닌 {n} — 같은 표의 다른 행 값이다")
+    return bad
+
+
 def known_wrong(answer: str, pitfalls: list[dict]) -> list[str]:
     """답변이 그대로 말한 '알려진 오답'. 행원들이 틀렸다고 적어둔 표현만 본다."""
     hit: list[str] = []
@@ -100,7 +185,7 @@ def known_wrong(answer: str, pitfalls: list[dict]) -> list[str]:
 
 def declared(card: dict) -> bool:
     """이 카드가 관계를 선언했는가 — 선언이 있어야 관계 검사가 원문 강제를 대신한다."""
-    return bool(card.get("tiers")) or bool(
+    return bool(card.get("tiers")) or bool(card.get("tables")) or bool(
         any(p.get("wrong") for p in card.get("pitfalls") or []))
 
 
@@ -109,8 +194,10 @@ def check(answer: str, cards: list[dict]) -> list[str]:
     out: list[str] = []
     for card in cards:
         out += mispaired(answer, card.get("tiers") or [])
+        out += table_mispaired(answer, card.get("tables") or [])
         out += known_wrong(answer, card.get("pitfalls") or [])
     return out
 
 
-__all__ = ["NEAR", "check", "declared", "known_wrong", "mispaired", "numbers"]
+__all__ = ["MIN_VALUE_CHARS", "NEAR", "check", "declared", "known_wrong", "mispaired",
+           "numbers", "table_mispaired"]
