@@ -207,10 +207,16 @@ def _briefing(p: Profile) -> dict:
     if three_way:
         snap["운용현황(3분류)"] = " · ".join(f"{k} {v}%" for k, v in three_way.items())
     if p.matDD is not None:
-        # 날짜를 함께 싣는다. "만기 언제야?"는 잔여일수가 아니라 날짜를 묻는 질문이고,
-        # 재료에 날짜가 없으면 대화형이 TODAY 에서 계산해 답하게 된다(근거 밖 산출).
-        when = f"{p.matDate} (D-{p.matDD})" if p.matDate else f"D-{p.matDD}"
-        snap["만기도래"] = f"{when} · {won(p.matAmt)}"
+        # **보유한 만기를 전부 싣는다.** 예금과 GIC 의 만기가 서로 다른 고객이 있어서,
+        # 가장 가까운 한 건만 실으면 "만기 언제야?" 에 나머지가 없는 것처럼 답하게 된다.
+        # 날짜를 함께 싣는 이유도 같다 — 재료에 없으면 대화형이 기준일에서 계산해 말한다.
+        if p.maturities:
+            snap["만기도래"] = " · ".join(
+                f"{m['date']} (D-{m['dd']}) {m['type']} {won(m['amount'])}"
+                for m in p.maturities)
+        else:  # 만기 목록 없이 조립된 프로파일(합성 케이스) — 가장 가까운 건만 표기한다
+            when = f"{p.matDate} (D-{p.matDD})" if p.matDate else f"D-{p.matDD}"
+            snap["만기도래"] = f"{when} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
     # 근거 수치는 여기서 확정하고, 실제 제안 여부는 LLM 이 맥락상 판단한다(prompts.py).
     # 단 연금수령 개시 계좌는 추가입금 자체가 불가하므로(방법론 59) 납입여력을 제시하지 않고,

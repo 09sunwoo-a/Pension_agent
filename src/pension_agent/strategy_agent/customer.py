@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 # 데모 고정 기준일. date.today() 를 쓰지 않는 이유는 산출 재현성이다 — 만기 잔여일수(matDD)·
@@ -79,10 +79,20 @@ class Profile:
     room: int  # 추가납입 여력(만원)
     dorm: int | None  # 최종 접촉 이후 경과 일수. None 은 "접촉 이력 소스 없음"(CRM 조인 전).
     nchM: float  # 최종 운용변경 이후 경과 개월수
-    matDD: int | None = None  # 만기 잔여일수
-    matDate: str | None = None  # 만기일(ISO). 잔여일수만으로는 "만기 언제야?"에 날짜로 답할 수
-    # 없다 — 재료에 없는 값은 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
-    matAmt: int = 0  # 만기 도래 예금액(원)
+    # ── 만기 ─────────────────────────────────────────────────
+    # 아래 셋은 **가장 가까운 만기 한 건**이다(요건 판정·재예치 전략의 입력). `mat` 요건은
+    # "만기 1개월 전 안내"라 가장 가까운 것만 보면 되고, st.mat_reprice 의 배분액도 그 건이다.
+    #
+    # 하지만 **고객이 들고 있는 만기가 그 하나라는 뜻은 아니다.** 예금과 GIC 를 함께 들고
+    # 만기가 서로 다른 고객이 있다(목업 9케이스 중 3명). "만기 언제야?" 에 가장 가까운 것
+    # 하나만 답하면 나머지는 없는 것이 되므로, 전체 목록은 `maturities` 가 따로 들고 있다.
+    matDD: int | None = None  # 가장 가까운 만기까지의 잔여일수
+    matDate: str | None = None  # 가장 가까운 만기일(ISO). 잔여일수만으로는 "언제야?"에 날짜로
+    # 답할 수 없다 — 재료에 없으면 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
+    matAmt: int = 0  # 그 만기일에 도래하는 금액(원)
+    maturities: list[dict] = field(default_factory=list)  # 만기 보유 전체.
+    # [{"date": ISO, "dd": 잔여일수, "type": 상품유형, "name": 상품명, "amount": 평가금액}] 을
+    # 만기일 오름차순으로. 대화형이 "만기 뭐뭐 있어?"에 빠짐없이 답하기 위한 재료다.
     nonface: bool = False  # 비대면 거래 채널 고객 여부
     income_bracket: str | None = None  # 총급여 구간 ("5500이하" / "5500초과"). 세액공제율 판정에 사용한다.
     customer_type: str | None = None  # "직장인" / "사업자" / "공통". strategy.pitch_refs 에서 화법을
@@ -273,20 +283,24 @@ def _port(rec: dict) -> tuple[list[int], int]:
     return port, round(sm["고유계정대평가금액"] * 100 / bal)
 
 
-def _nearest_maturity(rec: dict) -> tuple[int | None, str | None, int]:
-    """만기일 있는 보유상품 중 최근접 만기의 (잔여일수, 만기일, 그 날짜 평가금액 합)."""
-    dated = [(date.fromisoformat(p["약정만기년월일"]), p["평가금액"])
-             for p in rec["products"] if p.get("약정만기년월일")]
-    if not dated:
-        return None, None, 0
-    nearest = min(d for d, _ in dated)
-    return (nearest - TODAY).days, nearest.isoformat(), sum(a for d, a in dated if d == nearest)
+def _maturities(rec: dict) -> list[dict]:
+    """만기일이 있는 보유상품 전체를 만기일 오름차순으로. 예금만이 아니다 — GIC 처럼
+    만기가 있는 다른 상품도 함께 담는다(상품 유형을 같이 실어야 어느 만기인지 분간된다)."""
+    rows = [{"date": p["약정만기년월일"],
+             "dd": (date.fromisoformat(p["약정만기년월일"]) - TODAY).days,
+             "type": p["상품유형"], "name": p["상품명"], "amount": p["평가금액"]}
+            for p in rec["products"] if p.get("약정만기년월일")]
+    return sorted(rows, key=lambda r: (r["date"], r["name"]))
 
 
 def _to_profile(rec: dict) -> Profile:
     basic, sm, act = rec["basic"], rec["summary"], rec["activity"]
     port, cash_pct = _port(rec)
-    mat_dd, mat_date, mat_amt = _nearest_maturity(rec)
+    mats = _maturities(rec)
+    # 가장 가까운 만기 = 요건 판정·재예치 전략의 입력. 같은 날짜에 여러 건이면 합산한다.
+    nearest = mats[0]["date"] if mats else None
+    mat_dd = mats[0]["dd"] if mats else None
+    mat_amt = sum(m["amount"] for m in mats if m["date"] == nearest)
     rk = basic["투자성향"]
     return Profile(
         id=rec["id"], nm=basic["고객명"], ag=basic["만나이"],
@@ -299,7 +313,7 @@ def _to_profile(rec: dict) -> Profile:
         room=rec["tax_isa"]["세액공제잔여한도"] // 10_000,
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
-        matDD=mat_dd, matDate=mat_date, matAmt=mat_amt,
+        matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats,
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),

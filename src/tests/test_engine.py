@@ -300,6 +300,31 @@ check(any("투자성향 불일치 정리 — 대상 금액 0원" in d for d in F
 check(any(i["id"] == "st.dep_shift" for i in FACTS["정민석"]["items"]),
       "정민석: 편중 해소 전략이 대신 선다")
 
+# 만기는 여러 건일 수 있다 — 예금·GIC 의 만기가 서로 다른 고객이 있다.
+# 가장 가까운 한 건(matDD·matAmt)은 요건 판정·재예치 배분액의 입력이고, 재료에는 **전부**
+# 실려야 한다. 하나만 실으면 "만기 언제야?"에 나머지가 없는 것처럼 답하게 된다.
+_MULTI = {"정민석": 2, "한지우": 2, "오세훈": 2}
+for nm, cnt in _MULTI.items():
+    p_ = BY_NAME[nm]
+    check(len(p_.maturities) == cnt, f"{nm}: 만기 보유 {cnt}건", str(len(p_.maturities)))
+    bf = FACTS[nm]["briefing"]["만기도래"]
+    check(all(m["date"] in bf for m in p_.maturities),
+          f"{nm}: 만기 전건이 브리핑 재료에 실림", bf)
+    check(all(m["type"] in bf for m in p_.maturities),
+          f"{nm}: 만기마다 상품 유형 표기(예금/GIC 분간)", bf)
+for p_ in PERSONAS:
+    if not p_.maturities:
+        continue
+    check(p_.matDate == p_.maturities[0]["date"] and p_.matDD == p_.maturities[0]["dd"],
+          f"{p_.nm}: matDate·matDD 는 가장 가까운 만기", f"{p_.matDate} vs {p_.maturities[0]['date']}")
+    check(p_.matAmt == sum(m["amount"] for m in p_.maturities if m["date"] == p_.matDate),
+          f"{p_.nm}: matAmt 는 그 날짜 도래분 합", str(p_.matAmt))
+# 재예치 전략은 가장 가까운 만기분만 대상으로 한다(먼 만기를 지금 끌어오지 않는다).
+_ose = next((i for i in FACTS["오세훈"]["items"] if i["id"] == "st.mat_reprice"), None)
+check(_ose is not None and _ose["amount"] == engine.won(BY_NAME["오세훈"].matAmt),
+      "오세훈: 재예치 대상액은 가까운 예금 만기분만(먼 GIC 제외)",
+      str(_ose and _ose["amount"]))
+
 # 만기 요건 — D-17(이준호)·D-25(오세훈)는 성립, 창 밖은 위 합성 케이스가 고정.
 check("mat" in conditions(BY_NAME["이준호"]) and "mat" in conditions(BY_NAME["오세훈"]),
       "이준호 D-17 · 오세훈 D-25 만기 요건 성립")
