@@ -26,10 +26,29 @@ _NUM = re.compile(r"\d(?:[\d,]*\d)?(?:\.\d+)?%?")
 _PROD = re.compile(r"KB\s[^\s,·)]+(?:\s[^\s,·)]+)*")
 
 
+def _canon(tok: str) -> str:
+    """수치 토큰의 값 보존 정규형 — **같은 값은 같은 토큰**이 되게 한다.
+
+    원장은 원본 xlsx 의 소수(0.15)를 백분율로 펴며 "15.0%" 로 적고, LLM 은 자연스럽게
+    "15%" 라 쓴다. 이 둘을 문자열로 비교하던 동안 **맞는 답변이 '원장 밖 수치'로
+    버려졌고**, compose 는 답변 대신 근거 원문을 통째로 덤프했다 — 직원이 "예금 비중
+    몇 프로야?" 라고 물었는데 화면에 브리핑 재료 표가 떨어진 실제 사고다. 뒤따르는 쉼표
+    버그(아래 _NUM 주석)와 같은 부류로, 표기가 판정을 뒤집으면 안 된다.
+
+    값이 바뀌는 변형은 하지 않는다: 천단위 쉼표 제거(4,050→4050)와 소수 끝자리 0 제거
+    (15.0→15 · 10.20→10.2)뿐이고, %-유무는 다른 주장이므로 보존한다(15% ≠ 15).
+    """
+    pct = tok.endswith("%")
+    t = tok.rstrip("%").replace(",", "")
+    if "." in t:
+        t = t.rstrip("0").rstrip(".")
+    return t + ("%" if pct else "")
+
+
 def numbers(text: str) -> set[str]:
-    """텍스트에 등장하는 수치. 스팬 안에 값이 있는지 판정할 때 호출부가 쓴다
+    """텍스트에 등장하는 수치(정규형). 스팬 안에 값이 있는지 판정할 때 호출부가 쓴다
     (compose 가 '값을 말했는데 원문 스팬을 안 실었다'를 잡는 데 필요하다)."""
-    return set(_NUM.findall(text))
+    return {_canon(n) for n in _NUM.findall(text)}
 
 
 def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
@@ -41,7 +60,7 @@ def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
     """
     nums: set[str] = set()
     for t in texts:
-        nums.update(_NUM.findall(t))
+        nums.update(_canon(n) for n in _NUM.findall(t))
     return nums, set()
 
 
@@ -89,7 +108,9 @@ def verify_texts(
 def _judge(
     sentence: str, nums: set[str], prods: set[str], known_products: set[str]
 ) -> tuple[bool, list[str]]:
-    bad = [f"수치 '{n}'" for n in _NUM.findall(sentence) if n not in nums]
+    # 거부 사유에는 답변의 원표기를 남긴다 — 정규형으로 바꿔 적으면 답변 어디를 말하는지
+    # 사람이 못 찾는다. 대조만 정규형으로 한다.
+    bad = [f"수치 '{n}'" for n in _NUM.findall(sentence) if _canon(n) not in nums]
     for m in (x.strip() for x in _PROD.findall(sentence)):
         if any(m.startswith(x) or x.startswith(m) for x in prods):
             continue
