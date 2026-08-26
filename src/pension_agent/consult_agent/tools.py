@@ -372,6 +372,69 @@ def _fieldtip(state: AgentState, query: str) -> Evidence | None:
                KBMOD.sources_of(KB, hits), cards=[c for _s, c in hits])
 
 
+# ── 시황·상품 기반지식 — 05_시황_상품_기반지식 ──
+#
+# 「이 자료는 상담 시 근거로 인용할 시장·상품 데이터」라고 폴더가 스스로 규정하고 문서마다
+# 검색용 front-matter(trigger_keywords·key_points·as_of)까지 갖춰 저작돼 있었는데, 적재
+# 경로가 없어 에이전트에게는 통째로 없는 재료였다(knowledge/CLAUDE.md 적재 감사).
+#
+# 다른 도구와 갈리는 지점은 **시효**다. 화면번호·제도값과 달리 시황 수치는 주·월 단위로
+# 낡는다. 그래서 카드마다 기준시점(as_of)과 원문의 시효 경고(volatile)를 싣고, 그 표시를
+# notices 로 강제한다 — 답변에서 빠지면 코드가 채워 넣는다(§9). 붙일지도 문구도 데이터가
+# 정한다는 규약은 screen·channel 과 같다(stale_mark).
+
+#: 시황·상품 카드 후보 수. 카드 하나가 표 통째(디폴트옵션 9종 = 약 4천 자)인 경우가 있어
+#: 좁게 둔다 — 세 장이면 재료가 1만 자를 넘고, 답이 그 안에서 길을 잃는다.
+MARKET_TOP_K = 2
+
+
+def _render_market(card: dict) -> str:
+    # 개요 카드는 제목과 group(문서명)이 같다 — 같은 말을 두 번 세우지 않는다.
+    doc_name = card.get("group") if card.get("group") != card.get("title") else None
+    scope = " · ".join(x for x in (card.get("category"), doc_name) if x)
+    lines = [f"■ {card['title']}" + (f"  ({scope})" if scope else "")]
+    if card.get("topic"):
+        lines.append(f"· 무엇을 다루나: {card['topic']}")
+    lines.append(f"· 기준시점: {card['as_of']}")
+    for k in card.get("key_points") or []:
+        lines.append(f"· 요점: {k}")
+    if card.get("content"):
+        lines += ["", card["content"].strip()]
+    mark = stale_mark(card)
+    if mark:
+        lines.append(mark)
+    lines.append(f"· 출처 {KBMOD.origin_of(KB, card)}")
+    return "\n".join(lines)
+
+
+def _market(state: AgentState, query: str) -> Evidence | None:
+    """시황·상품 기반지식 — "요즘 시장 어때", "8월 추천펀드 뭐야", "디폴트옵션 알파드림 구성".
+
+    `fact`(제도 확정값)와 나누는 기준은 **시효**다. 세액공제 한도는 제도가 바뀌기 전까지
+    참이고, 이 재료는 다음 회차 자료가 나오면 낡는다 — 그래서 기준시점 표시가 답에 반드시
+    따라붙어야 하고(ANSWER_SHAPES), 그 표시는 카드의 선언에서 온다.
+
+    본문은 원문 표·산문이라 atomic 으로 요구하지 않는다. 표를 통째로 원문 강제하면 답변이
+    표 덤프가 되고(tools 머리말), 그건 이 재료를 못 쓰게 만드는 것과 같다. 지금 걸리는
+    것은 수치 집합 검사뿐이다 — 값–조건 오짝은 못 잡는다(consult §12 gap 6).
+    """
+    hits = _adopt(state, query, pick(("market",), query, top_k=MARKET_TOP_K), "시황·상품 기반지식")
+    if not hits:
+        return None
+    notices: list[str] = []
+    scopes: list[dict] = []
+    for _s, c in hits:
+        mark = stale_mark(c)
+        if not mark:
+            continue
+        if mark not in notices:
+            notices.append(mark)
+        scopes.append(_scope(c["title"], [], [mark]))
+    return _ev("market", query, "\n\n".join(_render_market(c) for _, c in hits),
+               KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
+               cards=[c for _s, c in hits])
+
+
 def _customer(state: AgentState, query: str) -> Evidence | None:
     """지금 열려 있는 고객의 브리핑 재료. 계산은 strategy_agent 가 이미 한 것을 그대로 쓴다
     (같은 판정을 두 번 구현하지 않는다). 화면에 보이는 것과 다른 값을 말하면 안 되기 때문이다.
@@ -649,6 +712,8 @@ TOOLS: dict[str, Tool] = {
         Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment),
         Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method),
         Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip),
+        Tool("market", "시황·상품 기반지식 — 시장 동향·추천펀드·디폴트옵션 포트폴리오·TDF 를 "
+                       "기준시점과 함께 돌려준다", _market),
         Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·요건)를 돌려준다", _customer),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
              _history),

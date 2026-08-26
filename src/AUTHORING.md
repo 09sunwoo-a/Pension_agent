@@ -44,7 +44,10 @@
 | `segment` | 검색(고객군 정의 = 문제상황) | `knowledge/data/kb_segments.json` |
 | `method` | 검색(관리 방법론 — 상황→액션 판단 규칙) | `knowledge/data/kb_methods.json` |
 | `procedure` | 검색(업무 처리 절차·화면번호) | `knowledge/data/kb_procedures.json` |
+| `screen` | 검색(단말 화면 레지스트리 — 어느 화면인가) | `knowledge/data/kb_screens.json` |
+| `channel` | 검색(비대면 채널 경로 — 고객이 앱·웹에서 어디로 가나) | `knowledge/data/kb_channels.json` |
 | `fieldtip` | 검색(현장의 목소리 — 영업점 관찰) | `knowledge/data/kb_fieldtips.json` |
+| `market` | 검색(시황·상품 기반지식 — 시장 상황·운용 상품) | `knowledge/data/kb_market.json` |
 
 `python -m pension_agent.knowledge.schema kinds` 로 최신 목록을 본다.
 

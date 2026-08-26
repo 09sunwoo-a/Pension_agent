@@ -1994,18 +1994,19 @@ def check_tool_loop() -> int:
 
 
 def check_all_kinds_reachable() -> int:
-    """다섯 종류 카드가 전부 도구로 닿는지 — method 131장·fieldtip 10장이 답변 근거로
+    """카드 종류가 전부 도구로 닿는지 — method 131장·fieldtip 10장이 답변 근거로
     쓰이는 경로가 없던 것이 이 변경의 동기 중 하나였다(guard 가 caution 8건만 썼다).
+    market 23장은 적재 경로 자체가 없어 통째로 닿지 않던 자리다(check_market_material).
 
-    두 경로를 다 본다. method·fieldtip 은 trigger_examples 가 제목과 거의 같아서 n-gram
-    폴백이 화법보다 약하다 — 이 종류에서는 LLM 선택이 사실상 주 경로다.
+    두 경로를 다 본다. 이 종류들은 trigger_examples 가 제목과 거의 같아서 n-gram 폴백이
+    화법보다 약하다 — 사실상 LLM 선택이 주 경로다.
     """
     ok = 0
-    hit = {"fact", "procedure", "segment", "method", "fieldtip"} <= set(tools.TOOLS)
-    print(f"{'✓' if hit else '✗'} 다섯 종류 모두 도구로 등록됨")
+    hit = {"fact", "procedure", "segment", "method", "fieldtip", "market"} <= set(tools.TOOLS)
+    print(f"{'✓' if hit else '✗'} 여섯 종류 모두 도구로 등록됨")
     ok += hit
 
-    for kind in ("method", "fieldtip"):
+    for kind in ("method", "fieldtip", "market"):
         card = next(c for c in tools.KB.cards if c["_kind"] == kind)
 
         # ① LLM 선택 경로 — 주 경로다. 이 도구들은 select.pick() 을 거치므로 시임이 거기다.
@@ -2031,6 +2032,125 @@ def check_all_kinds_reachable() -> int:
     tip = next(c for c in tools.KB.cards if c["_kind"] == "fieldtip")
     hit = "본부 공식 지침이 아닙니다" in tools._render_fieldtip(tip)
     print(f"{'✓' if hit else '✗'} fieldtip 근거에 '본부 지침 아님' 표시")
+    ok += hit
+    return ok
+
+
+def check_market_material() -> int:
+    """시황·상품 기반지식(05 폴더)이 답변 재료로 닿는가.
+
+    회귀 대상: 05_시황_상품_기반지식 5개 문서는 「상담 시 근거로 인용할 시장·상품 데이터」
+    라고 폴더가 스스로 규정하고 문서마다 검색용 front-matter(trigger_keywords·key_points·
+    as_of)까지 갖춰 저작돼 있었는데, **변환기에 경로가 없어** 에이전트에게는 통째로 없는
+    재료였다(knowledge/CLAUDE.md 적재 감사 — 원문 폴더 중 유일하게 ❌ 였던 자리).
+    "8월 추천펀드 뭐야"·"디폴트옵션 알파드림 구성"에 답할 재료가 저장소에 있는데도
+    "찾지 못했습니다"로 끝났다 — screen 표A 88행이 빠져 있던 것과 같은 유형이다.
+
+    이 재료가 다른 것과 갈리는 지점은 **시효**다(CLAUDE.md §9). 제도 확정값과 달리 시황
+    수치는 주·월 단위로 낡으므로, 기준시점과 원문의 시효 경고가 답변에 함께 나가야 한다.
+    """
+    from pension_agent.consult_agent import marks as MARKS
+    from pension_agent.consult_agent.kb import buckets
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES
+    from pension_agent.consult_agent.state import KB
+
+    ok = 0
+    cards = [c for c in KB.cards if c["_kind"] == "market"]
+
+    hit = len(cards) >= 20
+    print(f"{'✓' if hit else '✗'} 시황·상품 기반지식이 적재된다 ({len(cards)}장)")
+    ok += hit
+
+    # 두 갈래가 다 들어와야 한다 — 시황만 적재되면 상품 질문이 통째로 빈다(그 반대도).
+    kinds = {c["category"] for c in cards}
+    hit = kinds == {"시황", "상품"}
+    print(f"{'✓' if hit else '✗'} 시황·상품 두 갈래가 모두 적재된다 ({sorted(kinds)})")
+    ok += hit
+
+    # 기준시점 없는 시황·상품 수치는 인용 불가다(폴더 README 수록 규칙) — 필수로 잡는다.
+    missing = [c["id"] for c in cards if not c.get("as_of")]
+    hit = not missing
+    print(f"{'✓' if hit else '✗'} 모든 카드가 기준시점을 갖는다"
+          + ("" if hit else f" — {missing[:3]}"))
+    ok += hit
+
+    orig = tools.fits_question
+    tools.fits_question = lambda q, h, kind="", history=None: h
+    try:
+        q = "디폴트옵션 알파드림 구성상품이 뭐야"
+        found = tools.run("market", {"question": q}, q)
+    finally:
+        tools.fits_question = orig
+
+    hit = bool(found) and "수협은행 노후보장 정기예금" in found["text"]
+    print(f"{'✓' if hit else '✗'} market 도구가 디폴트옵션 편입상품을 근거로 돌려준다")
+    ok += hit
+
+    # 시효 표시는 **데이터가 정한다** — 폴더 README 의 ※ 안내(volatile)와 카드의 as_of 다.
+    # 코드 상수로 붙이면 원문이 바뀔 때 두 곳이 갈린다(§12 지워진 gap 16·18 과 같은 자리).
+    hit = bool(found) and any("빠르게 달라집니다" in n for n in (found.get("notices") or []))
+    print(f"{'✓' if hit else '✗'} 시장·상품이 달라질 수 있다는 원문 경고가 함께 나간다")
+    ok += hit
+
+    sample = next((c for c in cards if c.get("volatile")), None)
+    hit = bool(sample) and sample["volatile"] in tools.stale_mark(sample) \
+        and sample["as_of"] in tools.stale_mark(sample)
+    print(f"{'✓' if hit else '✗'} 경고 문구와 기준시점을 원문에서 읽어 온다")
+    ok += hit
+
+    # 필드 이름을 코드표기로 인용한 원문(`as_of`)이 밑줄 제거로 깨지지 않는가 —
+    # 깨지면 직원이 존재하지 않는 필드를 찾게 된다.
+    hit = bool(sample) and "asof" not in sample["volatile"]
+    print(f"{'✓' if hit else '✗'} 원문의 필드 이름 표기가 깨지지 않는다")
+    ok += hit
+
+    # 행내한 자료는 고객에게 그대로 못 준다 — 원문 confidentiality 선언에서 온다.
+    internal = [c for c in cards if c.get("customer_facing") is False]
+    facing = [c for c in cards if c.get("customer_facing") is True]
+    hit = bool(internal) and bool(facing)
+    print(f"{'✓' if hit else '✗'} 고객용·행내한이 원문 표기대로 갈린다 "
+          f"(행내한 {len(internal)} · 고객용 {len(facing)})")
+    ok += hit
+
+    marks = MARKS.notes_for(KB, internal[:1]) if internal else []
+    hit = any("고객에게 그대로 안내하지는 마세요" in m for m in marks)
+    print(f"{'✓' if hit else '✗'} 행내한 자료를 쓰면 고객 안내 주의가 붙는다")
+    ok += hit
+
+    # 원문(content)은 고치지 않는다 — 표의 값이 그대로 실려 있어야 인용이 성립한다.
+    tdf = next((c for c in cards if "TDF" in c["title"]), None)
+    hit = bool(tdf) and "Glide-Path" in (tdf.get("content") or "")
+    print(f"{'✓' if hit else '✗'} 절 본문이 원문 그대로 실린다")
+    ok += hit
+
+    # 절 카드는 자기 문서의 개요 카드를 부모로 갖는다 — 어느 회차 자료인지가 카드에 남는다.
+    sections = [c for c in cards if c.get("parent")]
+    ids = {c["id"] for c in cards}
+    hit = bool(sections) and all(c["parent"] in ids for c in sections)
+    print(f"{'✓' if hit else '✗'} 절 카드가 개요 카드를 부모로 가리킨다 ({len(sections)}장)")
+    ok += hit
+
+    # 저작·검수 기록(추출 노트)은 카드가 아니다 — 직원 답변 재료가 아니라 저작 메모다.
+    hit = not any("추출 노트" in c["title"] for c in cards)
+    print(f"{'✓' if hit else '✗'} 추출 노트·목차는 카드로 만들지 않는다")
+    ok += hit
+
+    # 한 글자 키워드는 검색 예시에서 빠진다 — 「금」은 거의 모든 절에 걸려 갈래를 못 가른다.
+    one_char = [(c["id"], t) for c in cards for t in (c.get("trigger_examples") or [])
+                if len(t.strip()) < 2]
+    hit = not one_char
+    print(f"{'✓' if hit else '✗'} 한 글자 검색 키워드를 달지 않는다"
+          + ("" if hit else f" — {one_char[:3]}"))
+    ok += hit
+
+    # 새 종류를 적재하면 함께 손대야 하는 자리들 — 빠지면 "적재는 됐는데 검색되지 않는다".
+    hit = "market" in tools.TOOLS and "market" in ANSWER_SHAPES
+    print(f"{'✓' if hit else '✗'} 도구·답변 형태 요구에 등록됨")
+    ok += hit
+
+    bucketed = {c["id"] for b in buckets(KB).values() for c in b["cards"]}
+    hit = all(c["id"] in bucketed for c in cards)
+    print(f"{'✓' if hit else '✗'} 버킷 카탈로그에 들어간다(LLM 후보 목록에 보인다)")
     ok += hit
     return ok
 
@@ -2417,6 +2537,7 @@ def main() -> int:
     check_turn_cost()
     check_miss_recovery()
     check_screen_registry()
+    check_market_material()
     check_caution_roles()
     check_history_material()
     check_hier_index()
