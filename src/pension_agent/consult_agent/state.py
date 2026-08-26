@@ -63,6 +63,13 @@ class AgentState(TypedDict, total=False):
     # (예전의 hits·broaden_count·verified 를 대신한다 — 화법 체인이 도구 하나로 접혔다.)
     evidence: list                   # [tools.Evidence, ...] 도구별 근거 블록
     plan_calls: list[str]            # 이번 턴에 부른 "도구:질의" 목록 (반복 호출 차단·상한 계산)
+    # 부른 것 중 근거를 내놓지 못한 호출. 원장에는 성공한 재료만 실려서, 이게 없으면
+    # 계획이 자기가 뭘 불러봤는지 모른 채 같은 호출을 반복한다(반복은 코드가 끊고, 그러면
+    # 턴이 '근거 없음'으로 끝난다) — 계획 프롬프트에 실려 질의·도구를 바꾸게 한다.
+    plan_misses: list[str]
+    # 근거 0건인 채 계획이 끝나려 해서 코드가 한 번 되돌려 보냈다는 표시(§5). 이 표시가
+    # 있는데 또 끝내려 하면 그때는 존중한다 — 정직한 '없음' 경로를 막지 않는다.
+    plan_retry: bool
     plan_done: bool                  # 계획 루프 종료 신호 (LLM 의 done, 또는 코드가 상한에서 끊음)
     # LLM 단계가 **깨져서** 끝났을 때의 이유(호출 실패·규격 밖 응답). 정상이면 비어 있다.
     # 슬롯 분해(situation_slots)·계획(plan_step)·문장 작성(compose) 어디서 실패해도 같은

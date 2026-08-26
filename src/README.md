@@ -22,7 +22,7 @@ src/
 │  │  └─ engine/           결정적 처리 계층 9개 모듈 (catalog·products·scoring·pipeline…)
 │  ├─ consult_agent/       직원 상담 대화 (LangGraph) — state·routing·graph + nodes/
 │  └─ market/              시황·금리 소스 (자리표시자)
-├─ tests/                  회귀 테스트 5종
+├─ tests/                  회귀 테스트 5종 + debug/(실행 트레이스 — 운영 코드 무수정)
 ├─ scripts/                개발 스크립트 — kb_build(지식 변환) · demo_status(리포트)
 ├─ app.py                  Streamlit 평가 대시보드 (개발·테스트용 화면)
 ├─ requirements.txt
@@ -57,7 +57,20 @@ python -m tests.test_support                    # ⑥~⑨ 문제상황·후보�
 python -m tests.test_strategy_agent             # LLM 산출 검증·폴백 경로
 python -m tests.test_consult_agent              # 검색·라우팅·즉답 의도·도구 루프
 python -m tests.test_infra                      # 공용 인프라(세션·도구·임포트 경계)
+python -m tests.debug.test_trace                # 실행 트레이스 — 노드·게이트·폐기 사유
 python -m scripts.kb_build.test_paths           # 경로·locator 실재 (폴더 재번호 회귀)
+
+# ── 진단: 이 답이 어느 노드에서 어떻게 나왔나 (tests/debug — 운영 코드를 고치지 않는다)
+# 인자 규약이 위 REPL 과 같다. 평소 쓰던 줄의 모듈 이름만 바꾸고 --debug 를 붙이면 된다.
+CAD="python -m tests.debug"
+$CAD --debug "세액공제 한도가 얼마야?"                  # 단발 + 트레이스
+$CAD --debug -c 198734-1205842                          # REPL + 턴마다 트레이스
+$CAD --debug -c 198734-1205842 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"  # 멀티턴
+$CAD --script tax_credit_asserts_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
+$CAD --list                                              # 시나리오 목록
+# -c 값은 손대지 않고 그대로 넘어간다. 다만 이 체크아웃에 없는 id 면 시작할 때 끊고 있는
+# id 를 알려준다 — 없는 id 는 에러 없이 '재료 0건' 이 돼서 오타와 구분되지 않기 때문이다.
+# 그대로 넘기려면 --any-customer (트레이스 맨 위에 경고가 남는다).
 
 # ── 무결성 점검
 python -m pension_agent.strategy_agent.engine   # 전략 정의 검증 — 근거 교차검증 포함

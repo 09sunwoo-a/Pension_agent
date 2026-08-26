@@ -8,8 +8,8 @@
 여기서는 **데이터가 선언한 관계**로 본다(`knowledge/CLAUDE.md` §1·§2).
 
   tiers      조건–값 쌍. 답변이 어떤 조건을 말하면서 **다른 조건의 값**을 붙였는지 본다.
-  pitfalls   행원들이 적어둔 "자주 틀리는 지점" 중 틀린 표현을 인용한 것. 답변에 그 표현이
-             그대로 있으면 알려진 오답을 말한 것이다.
+  pitfalls   행원들이 적어둔 "자주 틀리는 지점" 중 틀린 표현. 답변이 그것을 **주장하면**
+             알려진 오답을 말한 것이다. 주장과 정정을 갈라 보는 이유는 아래에 적는다.
   tables     원문 표를 행 단위로 편 것(05 시황·상품). 답변이 어느 행을 말하면서 **다른 행의
              값**을 붙였는지 본다 — 표는 그 자체가 조건→값 구조라 tiers 와 같은 자리다.
 
@@ -17,6 +17,25 @@
 선언이 없는 카드의 오짝은 못 잡는다. 그래서 이 검사는 원문 강제를 **선언이 있는 카드에
 한해** 대신한다 — 선언이 없으면 `atomic` 이 그대로 남는다(tools.py). 저작이 넓어지는 만큼
 원문 강제가 물러난다.
+
+━━ 인용은 주장이 아니다 ━━
+같은 문구가 정반대 뜻으로 쓰인다. "5,500만원 이상 13.2% 로 안내하세요"는 오답을 **주장**한
+것이고, «"5,500만원 이상 13.2%"는 오기예요»는 그것을 **정정**한 것이다. 문자열 포함만 보던
+동안 뒤엣것도 위반으로 잡혔고, 답변은 통째로 버려져 근거 원문이 대신 나갔다.
+
+그냥 오탐이 아니라 **데이터가 시킨 일을 했다고 벌하는 것**이었다. 세액공제 카드의
+`verify_points` 첫 줄이 «"5,500만원 이상 13.2%" = 오기» 이고, 그 줄은 직원에게 그렇게
+짚어주라고 적혀 있으며 작성 프롬프트에도 그대로 실린다. 게다가 폐기 뒤 폴백으로 나가는
+카드 원문에는 같은 문구가 그 줄에 들어 있다 — 위험한 문구를 막은 것이 아니라 **그 문구를
+위험하다고 설명해주는 코칭만 잃은** 것이다.
+
+그래서 정정으로 보는 조건을 **둘 다** 요구한다(하나만으로는 헐겁다):
+  · 그 문구가 인용부호 안에 있을 것 — 틀렸다고 짚을 때는 문구를 따온다. 따옴표 없이
+    문장에 녹여 쓴 것은 주장이다("고객님께 5,500만원 이상 13.2% 라고 안내드릴게요").
+  · 곁에 정정 표지가 있을 것 — 오기·오타·틀린·잘못·아닙니다… 따옴표만으로는 부족하다.
+    고객에게 읽어줄 대사도 따옴표에 담기기 때문이다(작성 지시 §6).
+
+둘 다 요구하므로 "오기 주의하시고, 5,500만원 이상 13.2% 로 안내하세요"는 여전히 잡힌다.
 
 ━━ 못 잡는 것을 잡은 척하지 않는다 ━━
 판정은 문자열 대조다. 답변이 조건을 다른 말로 풀어 쓰면(“5,500만원을 넘으면”) 이 검사는
@@ -26,6 +45,8 @@
 """
 
 from __future__ import annotations
+
+import re
 
 from pension_agent.verify import numbers
 
@@ -173,12 +194,42 @@ def table_mispaired(answer: str, tables: list[dict]) -> list[str]:
     return bad
 
 
+#: 인용부호. 틀렸다고 짚을 때는 그 문구를 따온다.
+_OPEN, _CLOSE = "\"'「『“‘", "\"'」』”’"
+
+#: 정정 표지 — 곁에 있으면 그 인용은 주장이 아니라 정정이다.
+CORRECTIONS = ("오기", "오타", "표기 오류", "틀린", "틀립", "틀려", "잘못",
+               "아닙니다", "아니에요", "아니라", "아니고", "정정", "주의")
+
+#: 정정 표지를 찾는 거리. 한 문장 안에서 인용과 표지가 만나는 것을 보려는 것이라,
+#: 넓히면 다른 문장의 "주의"가 엉뚱한 인용을 정정으로 만든다.
+CORRECTION_NEAR = 40
+
+
+def _corrects(answer: str, at: int, wrong: str) -> bool:
+    """이 자리의 오답 문구가 **정정으로** 쓰였는가 (모듈 주석 「인용은 주장이 아니다」)."""
+    end = at + len(wrong)
+    quoted = (at > 0 and answer[at - 1] in _OPEN
+              and end < len(answer) and answer[end] in _CLOSE)
+    if not quoted:
+        return False
+    window = answer[max(0, at - CORRECTION_NEAR):end + CORRECTION_NEAR]
+    return any(mark in window for mark in CORRECTIONS)
+
+
 def known_wrong(answer: str, pitfalls: list[dict]) -> list[str]:
-    """답변이 그대로 말한 '알려진 오답'. 행원들이 틀렸다고 적어둔 표현만 본다."""
+    """답변이 **주장한** '알려진 오답'. 행원들이 틀렸다고 적어둔 표현만 본다.
+
+    그 문구를 정정하려고 따온 자리는 세지 않는다. 단, 한 번이라도 주장한 자리가 있으면
+    잡는다 — 한쪽에서 정정하고 다른 쪽에서 그대로 말한 답변은 오답을 말한 것이다.
+    """
     hit: list[str] = []
     for item in pitfalls or []:
         for wrong in item.get("wrong") or []:
-            if wrong and wrong in answer and wrong not in hit:
+            if not wrong or wrong in hit:
+                continue
+            spots = [m.start() for m in re.finditer(re.escape(wrong), answer)]
+            if spots and not all(_corrects(answer, at, wrong) for at in spots):
                 hit.append(wrong)
     return hit
 
@@ -199,5 +250,5 @@ def check(answer: str, cards: list[dict]) -> list[str]:
     return out
 
 
-__all__ = ["MIN_VALUE_CHARS", "NEAR", "check", "declared", "known_wrong", "mispaired",
-           "numbers", "table_mispaired"]
+__all__ = ["CORRECTIONS", "CORRECTION_NEAR", "MIN_VALUE_CHARS", "NEAR",
+           "check", "declared", "known_wrong", "mispaired", "numbers", "table_mispaired"]
