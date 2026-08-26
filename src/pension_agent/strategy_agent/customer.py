@@ -90,6 +90,11 @@ class Profile:
     matDate: str | None = None  # 가장 가까운 만기일(ISO). 잔여일수만으로는 "언제야?"에 날짜로
     # 답할 수 없다 — 재료에 없으면 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
     matAmt: int = 0  # 그 만기일에 도래하는 금액(원)
+    isa: dict | None = None  # ISA 만기자금 — {"amount", "date", "dd", "org", "within_1m"}.
+    # **IRP 계좌 밖의 돈**이다(추가납입 재원 후보). 보유 현황과 섞어 읽으면 IRP 잔액이
+    # 부풀어 보이므로 표기에서 갈라 둔다. 만기금액이 0 이면 None.
+    paid_by_year: dict[str, int] = field(default_factory=dict)  # 연도별 IRP 납입액(원).
+    # pension_paid_ytd(당해 세액공제 인정액)만으로는 "작년엔 얼마 넣었어" 에 답할 수 없다.
     assets: list[dict] = field(default_factory=list)  # 자산군별 보유 — 원장 그대로.
     # [{"type": 자산군, "amount": 평가금액(원), "pct": 비중(%)}]. `port` 4분류는 전략 로직이
     # 쓰는 **요약**이라 정수 비중이고 여러 자산군을 한 칸에 접는다(port[0] 은 예금·GIC·
@@ -304,6 +309,25 @@ def _assets(rec: dict) -> list[dict]:
     return sorted(out, key=lambda r: -r["amount"])
 
 
+def _isa(rec: dict) -> dict | None:
+    """ISA 만기자금. 만기금액이 없으면 None — 없는 것을 0원으로 실으면 화면에 줄이 생긴다."""
+    t = rec["tax_isa"]
+    amt = t.get("ISA만기금액") or 0
+    if not amt:
+        return None
+    when = t.get("ISA만기일")
+    return {"amount": amt, "date": when,
+            "dd": (date.fromisoformat(when) - TODAY).days if when else None,
+            "org": t.get("ISA기관구분"), "within_1m": t.get("ISA만기1개월이내보유여부") == "Y"}
+
+
+def _paid_by_year(rec: dict) -> dict[str, int]:
+    """연도별 IRP 납입액. 원장 컬럼명(`2023년IRP납입액`)에서 연도만 뽑는다."""
+    return {k.replace("IRP납입액", ""): v
+            for k, v in rec["tax_isa"].items()
+            if k.endswith("IRP납입액") and not k.startswith("당해") and v}
+
+
 def _maturities(rec: dict) -> list[dict]:
     """만기일이 있는 보유상품 전체를 만기일 오름차순으로. 예금만이 아니다 — GIC 처럼
     만기가 있는 다른 상품도 함께 담는다(상품 유형을 같이 실어야 어느 만기인지 분간된다)."""
@@ -319,6 +343,7 @@ def _to_profile(rec: dict) -> Profile:
     port, cash_pct = _port(rec)
     mats = _maturities(rec)
     assets = _assets(rec)
+    isa = _isa(rec)
     # 가장 가까운 만기 = 요건 판정·재예치 전략의 입력. 같은 날짜에 여러 건이면 합산한다.
     nearest = mats[0]["date"] if mats else None
     mat_dd = mats[0]["dd"] if mats else None
@@ -335,7 +360,7 @@ def _to_profile(rec: dict) -> Profile:
         room=rec["tax_isa"]["세액공제잔여한도"] // 10_000,
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
-        matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats, assets=assets,
+        matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats, assets=assets, isa=isa, paid_by_year=_paid_by_year(rec),
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),

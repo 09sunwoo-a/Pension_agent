@@ -244,6 +244,16 @@ def _briefing(p: Profile) -> dict:
     elif p.room > 0:
         snap["납입여력"] = f"{won(p.room * 10000)} (연 납입한도 1,800만원 이내)"
 
+    # ISA 만기자금 — **IRP 계좌 밖의 돈**이라 보유 현황과 갈라 적는다. 추가납입 상담의
+    # 재원 후보이고, 만기가 임박하면 그 시점이 상담 창구가 된다(시연 케이스 2건).
+    if p.isa:
+        dd = f" (D-{p.isa['dd']})" if p.isa.get("dd") is not None else ""
+        snap["ISA만기자금(IRP 외부)"] = (
+            f"{won(p.isa['amount'])} · 만기 {p.isa['date']}{dd} · {p.isa['org']}")
+    # 연도별 납입 이력 — "작년엔 얼마 넣었어" 는 당해 납입액만으로 답할 수 없다.
+    if p.paid_by_year:
+        snap["납입이력"] = " · ".join(f"{y} {won(v)}" for y, v in p.paid_by_year.items())
+
     # 「고객이 모르는 자기 현황」 — 07_에이전트_기능정의/01 ① 필수 구성 요소 3.
     # 브리핑 화면에 따로 칸을 만들지 않고 재료로만 싣는다: 이 항목은 화면(왼쪽)이 아니라
     # 대화형(오른쪽)에서 직원이 물었을 때 답하는 몫이기 때문이다.

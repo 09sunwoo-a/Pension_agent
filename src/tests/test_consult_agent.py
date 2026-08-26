@@ -635,6 +635,16 @@ def check_customer_material() -> int:
         ("② 문제상황", "· 문제상황 1:"),
         ("② 성립 요건", "· 성립 요건:"),
     ]
+    # ISA 만기자금·납입이력 — 원장에 컬럼이 있어도 Profile 이 안 접으면 대화형은 못 본다.
+    _isa_mat = tools.run("customer", {"customer_id": "188406-7352194"}, "ISA")["text"]
+    hit = "ISA만기자금" in _isa_mat and "1억 2,000만원" in _isa_mat
+    print(f"{'✓' if hit else '✗'} 고객 재료: ISA 만기자금이 원장에서 대화형까지 온다")
+    ok += hit
+    _pay_mat = tools.run("customer", {"customer_id": "176903-5528417"}, "납입")["text"]
+    hit = "납입이력" in _pay_mat and "2025년" in _pay_mat
+    print(f"{'✓' if hit else '✗'} 고객 재료: 연도별 납입 이력이 실린다(당해분만이 아니다)")
+    ok += hit
+
     for _label, _needle in _NEED:
         _h = _needle in _mat
         print(f"{'✓' if _h else '✗'} 고객 재료: {_label}" + ("" if _h else f" — '{_needle}' 없음"))
