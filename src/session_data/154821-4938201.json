@@ -1,0 +1,35 @@
+{
+  "customer_id": "154821-4938201",
+  "sessions": [
+    {
+      "session_id": "past-2025-12-20",
+      "started_at": "2025-12-20T09:00:00+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "ts": "2025-12-20T09:00:00+00:00",
+          "role": "record",
+          "text": "연말 세액공제 한도 안내. 추가 납입 후에도 기존 실적배당상품 운용을 유지하고 싶다는 의사 확인.",
+          "intent": null,
+          "tool_calls": []
+        }
+      ],
+      "outcome": null
+    },
+    {
+      "session_id": "past-2026-07-02",
+      "started_at": "2026-07-02T09:00:00+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "ts": "2026-07-02T09:00:00+00:00",
+          "role": "record",
+          "text": "미국주식형 자산의 최근 성과를 점검함. 단기 변동성은 감수 가능하며 현재 운용방향 유지 희망.",
+          "intent": null,
+          "tool_calls": []
+        }
+      ],
+      "outcome": null
+    }
+  ]
+}

@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -23,9 +22,20 @@ def check(cond: bool, label: str, detail: str = "") -> None:
     _results.append((bool(cond), label, detail))
 
 
+#: 이 파일이 만드는 세션 고객 id. 정리는 **이것만** 지운다.
+_TEST_CUSTOMERS = ("TEST01", "TEST02", "NO_SUCH_CUSTOMER")
+
+
 def _clean_session_data() -> None:
-    if session_store.SESSION_DATA_DIR.exists():
-        shutil.rmtree(session_store.SESSION_DATA_DIR)
+    """이 테스트가 만든 세션 파일만 지운다.
+
+    예전에는 디렉터리를 통째로 rmtree 했다. session_data 가 실행 중에만 생기는 임시
+    데이터일 때는 맞았지만, 지금은 시연 픽스처(과거 상담 기록 — scripts/seed_sessions.py)가
+    거기 함께 산다 — 테스트 한 번 돌리면 그 픽스처가 통째로 날아갔고, 다음 시연에서
+    "지난 상담 없음"이 되는데 아무도 그 인과를 짚지 못한다.
+    """
+    for customer_id in _TEST_CUSTOMERS:
+        (session_store.SESSION_DATA_DIR / f"{customer_id}.json").unlink(missing_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -131,6 +141,21 @@ check(not _verify_texts("만기 금액은 7,777만원이에요.", _ledger)[0],
 
 
 # ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# 시연 픽스처는 테스트가 지우지 않는다
+#
+# session_data 에는 과거 상담 기록(scripts/seed_sessions.py 가 심는 목업)이 함께 산다.
+# 테스트 정리가 «이번 실행이 만든 것»을 넘어서면 그 픽스처가 사라지고, 다음 시연에서
+# 상담 이력이 통째로 비는데 원인을 짚기 어렵다.
+# ─────────────────────────────────────────────────────────────
+
+_seeded = ([fp for fp in session_store.SESSION_DATA_DIR.glob("*.json")
+            if fp.stem not in _TEST_CUSTOMERS]
+           if session_store.SESSION_DATA_DIR.exists() else [])
+check(bool(_seeded), "시연 픽스처(과거 상담 세션)가 테스트 후에도 남아 있다 "
+                     "— 없으면 python -m scripts.seed_sessions", str(len(_seeded)))
+
 
 failed = [(label, detail) for ok, label, detail in _results if not ok]
 for ok, label, detail in _results:

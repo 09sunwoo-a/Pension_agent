@@ -500,9 +500,9 @@ def check_screen_link() -> int:
     print(f"{'✓' if hit else '✗'} scnNo·mode 밖의 파라미터는 링크에 싣지 않는다")
     ok += hit
 
-    import shutil
-    if session_store.SESSION_DATA_DIR.exists():
-        shutil.rmtree(session_store.SESSION_DATA_DIR)
+    # 정리는 main() 이 «이번 실행이 만든 파일만» 지운다. 예전에는 여기서 디렉터리를
+    # 통째로 rmtree 했는데, session_data 가 시연 픽스처를 담게 되면서(과거 상담 기록 —
+    # scripts/seed_sessions.py) 테스트 한 번에 그 픽스처가 날아갔다.
     return ok
 
 
@@ -645,16 +645,19 @@ def check_customer_material() -> int:
         print(f"{'✓' if _h else '✗'} 고객 재료: {_label}" + ("" if _h else f" — '{_needle}' 없음"))
         ok += _h
 
-    # 상담 이력은 소스가 둘(원장·세션)이고, 화면과 대화형이 같은 것을 봐야 한다.
+    # 과거 상담 기록은 세션 저장소에 심겨 있고(scripts/seed_sessions.py), 읽는 경로는
+    # 하나다 — 화면 §14 와 대화형 history 도구가 같은 것을 본다. 원장에서 따로 읽는 두
+    # 번째 경로를 만들면 같은 상담이 두 번 실린다.
+    _PAST = "재투자하고 싶다"          # 송도윤 2025-10-06 상담 기록의 한 조각
     _hist = tools.run("history", {"customer_id": "188406-7352194"}, "지난번에 무슨 얘기 했어")
-    hit = bool(_hist) and "원장 기록" in _hist["text"] and "재투자하고 싶다" in _hist["text"]
-    print(f"{'✓' if hit else '✗'} history 도구: 원장의 과거 상담 기록을 싣는다")
+    hit = bool(_hist) and _PAST in _hist["text"] and "상담기록" in _hist["text"]
+    print(f"{'✓' if hit else '✗'} history 도구: 과거 상담 기록을 싣는다(role=record)")
     ok += hit
     from pension_agent.strategy_agent import engine as _eng
     from pension_agent.strategy_agent.customer import get_profile as _gp
     _screen = _eng.prepare(_gp("188406-7352194"))["consult_history"]
-    hit = any("원장" in line and "재투자하고 싶다" in line for line in _screen)
-    print(f"{'✓' if hit else '✗'} 화면 §14 상담이력도 같은 원장 기록을 본다(대화형과 답이 갈리지 않는다)")
+    hit = sum(_PAST in line for line in _screen) == 1
+    print(f"{'✓' if hit else '✗'} 화면 §14 도 같은 기록을 «한 번만» 본다(대화형과 답이 갈리지 않는다)")
     ok += hit
 
     # ISA 만기자금·납입이력 — 원장에 컬럼이 있어도 Profile 이 안 접으면 대화형은 못 본다.

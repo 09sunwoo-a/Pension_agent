@@ -94,10 +94,9 @@ class Profile:
     # [{"name","type","amount","principal","ret_1y","ret_own","pct","grade","rate",
     #   "discontinued","opened","matures"}] 을 평가금액 내림차순으로. `assets`(자산군별 합계)
     # 로는 "무슨 상품 들고 있어" · "판매중단된 거 있어" 에 답할 수 없다.
-    consult_log: list[dict] = field(default_factory=list)  # 과거 상담 기록(원장) —
-    # [{"date","text"}]. 직원-고객 상담 기록이지, 이 에이전트와 나눈 대화(session_store)가
-    # 아니다. 둘은 소스가 다르지만 직원이 "지난번에 무슨 얘기 했지" 로 묻는 것은 같은
-    # 사건이라, consult_agent 의 history 도구가 둘을 함께 답한다.
+    # 과거 상담 기록은 여기 두지 않는다 — 읽는 곳을 세션 저장소 하나로 모았다.
+    # 원장의 상담 기록은 scripts/seed_sessions.py 가 session_data 로 심는다(실서비스에서는
+    # CRM 이 같은 자리를 채운다). 여기에도 두면 같은 상담이 화면에 두 번 실린다.
     peer: dict | None = None  # 동연령대 비교(원장) — 평균·상위1% 수익률, 상위1% 원리금보장
     # 비중, 상위1%가 많이 담은 펀드·ETF. 모수가 저장소 밖이라 엔진이 계산할 수 없는 값이다.
     activity: dict = field(default_factory=dict)  # 거래 활동(원장) — 최근 매매·입금일,
@@ -333,12 +332,6 @@ def _holdings(rec: dict) -> list[dict]:
     return sorted(rows, key=lambda r: -r["amount"])
 
 
-def _consult_log(rec: dict) -> list[dict]:
-    """과거 상담 기록(원장). 최신순 — 지난 상담은 가까운 것부터 본다."""
-    rows = [{"date": h["상담년월일"], "text": h["상담이력내용"]} for h in rec["history"]]
-    return sorted(rows, key=lambda r: r["date"], reverse=True)
-
-
 def _peer(rec: dict) -> dict | None:
     """동연령대 비교. 모수(유사고객 집단)가 저장소 밖이라 엔진이 산출할 수 없는 조인값이다."""
     q = rec.get("peer") or {}
@@ -420,7 +413,7 @@ def _to_profile(rec: dict) -> Profile:
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
         matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats, assets=assets, isa=isa, paid_by_year=_paid_by_year(rec),
-        holdings=_holdings(rec), consult_log=_consult_log(rec),
+        holdings=_holdings(rec),
         peer=_peer(rec), activity=_activity(rec),
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],

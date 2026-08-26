@@ -475,7 +475,10 @@ HISTORY_MARK = "※ 지난 상담 기록입니다 — 그때 나눈 이야기이
 #: 아무도 안 읽고 원장만 무거워진다.
 HISTORY_SESSIONS, HISTORY_TURNS, HISTORY_EXCERPT = 3, 8, 120
 
-_HISTORY_ROLE = {"user": "직원", "agent": "에이전트", "correction": "수정요청", "tool": "도구실행"}
+#: 세션 턴의 역할 → 사람이 읽는 이름. `record` 는 발화가 아니라 «과거 상담 결과 요약»이다
+#: (실서비스의 CRM 상담 기록 자리 — scripts/seed_sessions.py 가 목업으로 심는다).
+_HISTORY_ROLE = {"user": "직원", "agent": "에이전트", "correction": "수정요청",
+                 "tool": "도구실행", "record": "상담기록"}
 
 
 def _history(state: AgentState, query: str) -> Evidence | None:
@@ -496,17 +499,12 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     try:
         sessions = session_store.list_sessions(customer_id)
     except Exception:
-        sessions = []
+        return None
 
+    # 읽는 곳은 **여기 하나**다. 과거 상담 기록(직원이 고객과 나눈 것)도 세션 저장소에
+    # 들어와 있다 — 원장에서 따로 읽는 두 번째 경로를 두면 같은 상담이 두 번 실린다
+    # (scripts/seed_sessions.py 가 목업을 심고, 실서비스에서는 CRM 이 같은 자리를 채운다).
     lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
-    # 원장의 **과거 상담 기록**(직원이 고객과 나눈 상담)을 먼저 싣는다. 아래 세션 기록은
-    # 이 에이전트와 나눈 대화라 소스가 다르지만, 직원이 "지난번에 무슨 얘기 했지" 로 묻는
-    # 것은 같은 사건이다 — 도구를 둘로 나누면 어느 쪽을 부를지 LLM 이 정하게 되고, 한쪽만
-    # 불린 턴은 나머지가 없는 것이 된다. 어느 기록인지는 줄마다 밝힌다.
-    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
-    profile = strategy_customer.get_profile(customer_id)
-    for entry in (profile.consult_log if profile else [])[:HISTORY_SESSIONS]:
-        lines.append(f"· {entry['date']} 상담(원장 기록): {entry['text']}")
     recent = sorted(sessions, key=lambda s: s.get("started_at") or "", reverse=True)
     for session in recent[:HISTORY_SESSIONS]:
         turns = [t for t in (session.get("turns") or []) if (t.get("text") or "").strip()]
@@ -524,7 +522,7 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     return _ev("history", query, "\n".join(lines),
                [{"id": f"session.{customer_id}", "title": f"고객 {customer_id} 상담 이력",
-                 "doc": "상담 이력 — 원장의 과거 상담 기록 + 에이전트가 턴마다 남긴 대화",
+                 "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],
                notices=[HISTORY_MARK])
 

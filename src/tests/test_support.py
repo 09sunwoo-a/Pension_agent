@@ -209,6 +209,10 @@ if _dummy_msg:
 check(_tools.open_lms_screen("TEST", "행내 자산과 무관한 직접 작성 문구입니다",
                              session_id="test-gate")["status"] != "blocked",
       "⑨ 더미 자산에서 온 문구가 아니면 막지 않음")
+# 게이트 검사가 세션이력을 남긴다(도구 호출 기록). 이 테스트가 만든 것만 지운다 —
+# session_data 에는 시연 픽스처(과거 상담 기록)가 함께 살고 있어 통째로 비우면 안 된다.
+from pension_agent import config as _config
+(_config.SESSION_DATA_DIR / "TEST.json").unlink(missing_ok=True)
 
 # 기준일 인자 — 과거 시점으로 물어보면 그때 열려 있던 콘텐츠가 나온다(선별 로직 자체의 검증).
 from datetime import date as _date

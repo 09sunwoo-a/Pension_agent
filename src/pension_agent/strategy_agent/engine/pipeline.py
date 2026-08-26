@@ -71,13 +71,6 @@ from pension_agent.strategy_agent.support import (
 
 # ─────────────────────────────────────────────────────────────
 
-def _consult_history(p: Profile) -> list[str]:
-    """상담 이력 한 줄 요약 — 원장 기록 + 세션 요약을 날짜 내림차순으로 합친다."""
-    rows = [f"{e['date']} 상담(원장) — {e['text']}" for e in p.consult_log]
-    rows += [f"{line} (에이전트 대화)" for line in summarize_for_briefing(p.id)]
-    return sorted(rows, key=lambda r: r[:10], reverse=True)
-
-
 def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     """고객 프로파일로부터 확정 사실을 산출한다. 반환값이 LLM 단계의 유일한 입력이다."""
     conds = conditions(p)
@@ -336,7 +329,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         # AI 산출로 오인"하지 않도록, 빈 이유를 사람이 읽을 수 있게 남긴다.
         "llm_skipped": {},
         # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(REQUIREMENTS.md ④).
-        "top_holdings": top_reference_products(),
+        "top_holdings": top_reference_products(p),
         # 고객님께 안내해보세요 — 문제상황에 맞는 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨).
         "outreach": next_event_and_seminar(situations),
         "items": [{
@@ -369,14 +362,11 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             "consult_resources": consult_resource_candidates(p, situations),
             "outreach": outreach_candidates(situations),
         },
-        # 상담 이력(REQUIREMENTS.md §14) — 소스가 둘이다.
-        #   · 원장(`Profile.consult_log`) — 직원이 고객과 나눈 과거 상담. 실서비스의 CRM 자리다.
-        #   · 세션(`session_store`) — 이 에이전트와 나눈 대화. consult_agent 가 턴마다 쓰고
-        #     strategy_agent 는 읽기만 한다("코드=사실" 경계를 대화이력에도 유지).
-        # 둘을 합쳐 한 줄기로 낸다. 화면이 한쪽만 보여주면 대화형(history 도구)과 답이
-        # 갈리는데, 같은 질문에 화면과 대화형이 다른 말을 하는 것이 이 저장소가 가장
-        # 경계하는 실패다. 어느 기록인지는 줄마다 밝힌다.
-        "consult_history": _consult_history(p),
+        # 상담 이력(REQUIREMENTS.md §14) — 세션 저장소가 유일한 읽기 경로다. 과거 상담
+        # 기록(직원이 고객과 나눈 것)도 거기 들어와 있다: 목업은 scripts/seed_sessions.py
+        # 가 심고, 실서비스에서는 CRM 이 같은 자리를 채운다. strategy_agent 는 읽기만
+        # 한다("코드=사실" 경계를 대화이력에도 유지).
+        "consult_history": summarize_for_briefing(p.id),
         # 근거 규정 — 규정 근거가 붙은 선정 항목. 적합성 원칙 등 판단의 출처를 추적 가능하게 한다.
         "regulations": [{"title": b["spec"]["title"], "regulation": b["spec"]["regulation"]}
                         for b in selected if b["spec"].get("regulation")],
