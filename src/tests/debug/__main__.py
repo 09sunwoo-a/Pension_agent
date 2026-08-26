@@ -1,7 +1,7 @@
 """디버그 CLI — 운영 CLI 와 같은 출력에 트레이스를 얹는다.
 
     cd src
-    python -m tests.debug --script tax_credit_known_wrong --debug --show-llm
+    python -m tests.debug --script tax_credit_asserts_wrong --debug --show-llm
     python -m tests.debug --debug "세액공제 한도가 얼마야?"          # 실제 LLM
     python -m tests.debug -c 198734-1205842 --debug "질문1" "질문2"  # 멀티턴 한 줄 재현
     python -m tests.debug -c 198734-1205842 --debug                  # REPL

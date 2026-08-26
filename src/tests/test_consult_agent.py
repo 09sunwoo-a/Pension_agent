@@ -1140,6 +1140,29 @@ def check_relations() -> int:
     print(f"{'✓' if hit else '✗'} 행원들이 적어둔 알려진 오답을 그대로 말하면 잡는다")
     ok += hit
 
+    # 인용은 주장이 아니다 — 그 문구를 «틀렸다»고 짚는 답변까지 잡던 자리다. 카드의
+    # verify_points 가 직원에게 그렇게 짚어주라고 적어둔 바로 그 문구라, 데이터가 시킨 일을
+    # 했다고 벌하는 꼴이었다(폐기 뒤 나가는 카드 원문에는 같은 문구가 그대로 실려 있다).
+    pf = f2.get("pitfalls") or []
+    hit = (not R.known_wrong('"5,500만원 이상 13.2%"는 오기예요. "초과"가 맞습니다.', pf)
+           and not R.known_wrong("「5,500만원 이상 13.2%」는 틀린 표기니 주의하세요.", pf))
+    print(f"{'✓' if hit else '✗'} 오답 문구를 «틀렸다»고 짚는 정정은 막지 않는다")
+    ok += hit
+
+    # 정정으로 보는 조건은 둘 다다 — 하나만으로는 헐겁다.
+    hit = R.known_wrong("오기 주의하시고, 5,500만원 이상 13.2% 로 안내하세요.", pf) != []
+    print(f"{'✓' if hit else '✗'} 정정 표지만 곁에 있고 문구는 주장했으면 잡는다")
+    ok += hit
+
+    hit = R.known_wrong('고객님께 "5,500만원 이상 13.2%" 라고 안내드릴게요.', pf) != []
+    print(f"{'✓' if hit else '✗'} 따옴표만 있고 정정 표지가 없으면 잡는다(고객 대사도 따옴표에 담긴다)")
+    ok += hit
+
+    hit = R.known_wrong('"5,500만원 이상 13.2%"는 오기예요. '
+                        "그래도 5,500만원 이상 13.2% 로 하세요.", pf) != []
+    print(f"{'✓' if hit else '✗'} 한쪽에서 정정하고 다른 쪽에서 그대로 말하면 잡는다")
+    ok += hit
+
     # 오답 문자열은 **구절**이어야 한다 — 값 하나짜리는 다른 팩트의 맞는 문장에도 들어간다.
     bare = [w for f in KB.facts.values() for x in f.get("pitfalls") or []
             for w in x.get("wrong") or [] if " " not in w and len(w) < 8]

@@ -5,10 +5,16 @@
     cd src
     python -m tests.debug.test_trace
 
-이 스위트가 고정하는 것은 **지금 이 진단**이다. "세액공제 한도가 얼마야?" 가 카드 원문으로
-답해진 것은 `relations` 가 오기를 오기라고 짚은 문장까지 '알려진 오답'으로 보고 생성문을
-버렸기 때문이고, 그 사실이 여기 박제된다. 나중에 `relations.known_wrong()` 에 극성 판정이
-들어가면 검사 2·3 이 빨개진다 — 그때 빨개지는 것이 맞다(고쳐진 것이다).
+이 스위트가 고정하는 것은 **어느 게이트가 무엇을 걸고 무엇을 통과시키는가**다. "세액공제
+한도가 얼마야?" 가 카드 원문(문어체)으로 답해지던 사고 둘이 여기서 시작했고, 고친 뒤에는
+같은 시나리오가 반대 방향을 고정한다:
+
+  · 표기 — "148만 5천원" 이 원장 밖 수치로 걸리던 것 → `verify._measures` (korean_units)
+  · 극성 — 오기를 «틀렸다»고 짚는 문장까지 걸리던 것 → `relations._corrects`
+           (tax_credit_correction ↔ tax_credit_asserts_wrong)
+
+둘 다 **넓히기만 하고 좁히지 않았다**는 것을 짝 시나리오가 함께 잰다 — 값이 틀리면
+(korean_units_wrong), 문구를 주장하면(asserts_wrong) 여전히 폐기된다.
 """
 
 from __future__ import annotations
@@ -62,7 +68,7 @@ def _evidence_texts(name: str) -> list[str]:
 # clarify 가 사이에 있는 것이 정상이다. 계획 루프가 끝나면 되물을지 한 번 판정하고
 # (routing.route_plan → clarify), 되묻지 않기로 하면 compose 로 간다(route_clarify).
 
-r, tr = _run("tax_credit_known_wrong")
+r, tr = _run("tax_credit_asserts_wrong")
 check(tr.node_names() == ["understand", "plan_step", "clarify", "compose", "offer"],
       "노드 순서: understand → plan → clarify → compose → offer", str(tr.node_names()))
 check((tr.node("plan_step") or types.SimpleNamespace(note="")).note.startswith(
@@ -72,24 +78,34 @@ check((tr.node("plan_step") or types.SimpleNamespace(note="")).note.startswith(
 
 
 # ─────────────────────────────────────────────────────────────
-# 2·3. 알려진 오답 — 어느 게이트가 걸었고, 그래서 무엇이 화면에 나갔나
+# 2·3. 알려진 오답 — 주장은 잡고 정정은 통과시킨다
 # ─────────────────────────────────────────────────────────────
+# 같은 문구가 정반대 뜻으로 쓰인다. 문자열 포함만 보던 동안 «"…이상 13.2%"는 오기예요»
+# 까지 잡혀 답변이 통째로 버려졌다 — 카드의 verify_points 가 직원에게 그렇게 짚어주라고
+# 적어둔 문구인데도. 이제 인용부호 + 정정 표지를 보고 가른다.
 
 gates = tr.gates()
 check(gates.get("verify_texts") is not None and gates["verify_texts"].passed,
-      "known_wrong: 수치 집합 검사는 통과한다(원장 안의 숫자만 썼다)")
+      "asserts_wrong: 수치 집합 검사는 통과한다(원장 안의 숫자만 썼다)")
 check(tr.blocked_by() == "relations" and "5,500만원 이상 13.2%" in gates["relations"].detail,
-      "known_wrong: relations 가 '알려진 오답' 으로 생성문을 버린다",
+      "asserts_wrong: 오답을 주장하면 relations 가 생성문을 버린다",
       str(gates.get("relations")))
 check("span" not in gates,
-      "known_wrong: 앞에서 끊겨 원문 스팬 검사는 실행조차 되지 않는다", str(sorted(gates)))
+      "asserts_wrong: 앞에서 끊겨 원문 스팬 검사는 실행조차 되지 않는다", str(sorted(gates)))
 
 draft = tr.draft()
 check(r["answer"].startswith("■") and draft and draft not in r["answer"],
-      "known_wrong: 화면에 나간 것은 생성문이 아니라 근거 원문이다(말투가 달라지는 자리)",
+      "asserts_wrong: 화면에 나간 것은 생성문이 아니라 근거 원문이다(말투가 달라지는 자리)",
       r["answer"][:40])
 check((tr.node("compose") or types.SimpleNamespace(note="")).note.startswith("폴백"),
-      "known_wrong: 처분이 '폴백' 으로 기록된다")
+      "asserts_wrong: 처분이 '폴백' 으로 기록된다")
+
+rc, trc = _run("tax_credit_correction")
+check(trc.blocked_by() is None and not rc["answer"].startswith("■"),
+      "correction: 오기를 «틀렸다»고 짚는 문장은 더는 폐기되지 않는다",
+      str(trc.gates().get("relations")))
+check("오기니까" in rc["answer"] and '"초과"' in rc["answer"],
+      "correction: 그 코칭이 화면까지 간다", rc["answer"][-40:])
 
 
 # ─────────────────────────────────────────────────────────────

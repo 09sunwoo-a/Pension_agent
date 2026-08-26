@@ -10,7 +10,7 @@
 `src/pension_agent/**` 는 한 줄도 바뀌지 않는다.
 
     cd src
-    python -m tests.debug --script tax_credit_known_wrong --debug --show-llm
+    python -m tests.debug --script tax_credit_asserts_wrong --debug --show-llm
     python -m tests.debug --debug "세액공제 한도가 얼마야?"    # 실제 LLM
     python -m tests.debug.test_trace                          # 회귀 검사
 

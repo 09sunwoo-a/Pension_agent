@@ -66,7 +66,7 @@ CAD="python -m tests.debug"
 $CAD --debug "세액공제 한도가 얼마야?"                  # 단발 + 트레이스
 $CAD --debug -c 198734-1205842                          # REPL + 턴마다 트레이스
 $CAD --debug -c 198734-1205842 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"  # 멀티턴
-$CAD --script tax_credit_known_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
+$CAD --script tax_credit_asserts_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
 $CAD --list                                              # 시나리오 목록
 # -c 값은 손대지 않고 그대로 넘어간다. 다만 이 체크아웃에 없는 id 면 시작할 때 끊고 있는
 # id 를 알려준다 — 없는 id 는 에러 없이 '재료 0건' 이 돼서 오타와 구분되지 않기 때문이다.

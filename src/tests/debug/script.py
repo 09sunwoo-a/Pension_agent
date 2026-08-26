@@ -40,8 +40,15 @@ _CLEAN = (
     "그 단서를 꼭 함께 말씀해 주세요."
 )
 #: 위 문장에 **오기를 오기라고 짚는 한 문장**을 더한 것. 카드의 `verify_points` 가 직원에게
-#: 바로 그렇게 안내하라고 적어둔 내용인데, 이 문장 때문에 답변이 통째로 폐기된다.
-_KNOWN_WRONG = _CLEAN + ' 안내하실 때 "5,500만원 이상 13.2%"는 오기니까 "초과"로 말씀해 주세요.'
+#: 바로 그렇게 안내하라고 적어둔 내용인데, 예전에는 이 문장 때문에 답변이 통째로 폐기됐다
+#: (문자열이 들어 있기만 하면 '알려진 오답'으로 봤다). 지금은 인용부호 + 정정 표지를 보고
+#: 정정으로 판정해 통과한다.
+_CORRECTION = _CLEAN + ' 안내하실 때 "5,500만원 이상 13.2%"는 오기니까 "초과"로 말씀해 주세요.'
+
+#: 같은 문구를 **주장한** 답변. 정정과 주장을 갈라 보는지 확인하는 반대짝이다.
+_ASSERTS_WRONG = (
+    "세액공제 한도는 연 900만원이에요. 총급여 5,500만원 이상 13.2% 로 안내하시면 돼요."
+)
 #: 위와 **같은 표기인데 값이 하나 틀린** 답변(148만 6천원 = 1,486,000원). 단위를 접어
 #: 준다고 아무 금액이나 통과하는 것이 아님을 고정한다.
 _KOREAN_UNITS_WRONG = (
@@ -82,10 +89,16 @@ _FACT_STEP = ({"tool": "fact", "query": "세액공제 한도", "last": True},)
 SCENARIOS: dict[str, Scenario] = {
     s.name: s for s in (
         Scenario(
-            name="tax_credit_known_wrong",
+            name="tax_credit_correction",
             question="세액공제 한도가 얼마야?",
-            plan=_FACT_STEP, compose=_KNOWN_WRONG, keep=("fact.k04.f2",),
-            expect="relations 가 '알려진 오답' 으로 폐기 → 근거 원문 폴백(말투가 달라진다)",
+            plan=_FACT_STEP, compose=_CORRECTION, keep=("fact.k04.f2",),
+            expect="오기를 «틀렸다»고 짚는 정정은 통과한다(예전엔 이것까지 폐기됐다)",
+        ),
+        Scenario(
+            name="tax_credit_asserts_wrong",
+            question="세액공제 한도가 얼마야?",
+            plan=_FACT_STEP, compose=_ASSERTS_WRONG, keep=("fact.k04.f2",),
+            expect="같은 문구라도 주장하면 relations 가 폐기 → 근거 원문 폴백",
         ),
         Scenario(
             name="tax_credit_clean",
