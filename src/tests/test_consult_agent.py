@@ -551,7 +551,7 @@ def check_guard() -> int:
     cases.append((any(a["card"] == "pitch.k03.028" for a in alt),
                   "low: 민감 응대 대안 화법을 함께 제시"))
 
-    dep = GD.cautions_for(gkb, ["dep:예금 비중 높음"])
+    dep = GD.cautions_for(gkb, ["dep:원리금보장상품 편중(80% 이상)"])
     cases.append((any("현금성자산" in g["text"] for g in dep),
                   "dep: 용어 주의(고유계정대→현금성자산)도 지식베이스에서"))
 

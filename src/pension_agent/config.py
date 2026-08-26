@@ -44,6 +44,11 @@ STRATEGY_DATA_DIR = PACKAGE_ROOT / "strategy_agent" / "data"  # 상품·전략 �
 # 훑어버린다. 고객 레코드는 카드가 아니므로 스캔 경로 밖, 소유자(customer.py) 옆에 둔다.
 CUSTOMERS_JSON = PACKAGE_ROOT / "strategy_agent" / "customers.json"
 
+# 사후관리 타겟 룰베이스 (scripts/import_targets.py 산출물 — 원본은 저장소 루트의 xlsx).
+# 기획자가 행내 원문을 정규화해 확인해준 타겟 14종·조건·액션표다. 요건 임계값의 상위
+# 기준이며, customers.json 과 같은 이유로 DATA_ROOTS 밖에 둔다.
+TARGETS_JSON = PACKAGE_ROOT / "strategy_agent" / "targets.json"
+
 #: Store 가 훑는 루트. 앞의 것이 먼저 적재된다.
 DATA_ROOTS: list[Path] = [STRATEGY_DATA_DIR, KB_DATA_DIR]
 

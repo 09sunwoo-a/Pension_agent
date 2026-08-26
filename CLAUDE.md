@@ -9,7 +9,8 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 
 - 고객은 시연용 목업 9케이스다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`,
   `scripts/import_customers.py` 가 `customers.json` 으로 내리고 `customer.py` 가 Profile 로
-  매핑한다(고칠 값은 xlsx 에 넣고 재생성). 기준일은 `customer.TODAY`(=원장 기준일 2026-08-24)
+  매핑한다(고칠 값은 xlsx 에 넣고 재생성). 타겟 선정 룰베이스는 더미가 아니다 — 기획자가
+  행내 원문을 정규화해 확인해준 표다(`targets.json`). 기준일은 `customer.TODAY`(=원장 기준일 2026-08-24)
   고정, 안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.
 - **화면에는 더미 표시를 붙이지 않는다**(발송문 포함). 발표 산출물에 딱지를 남기지 않기로
   했다. 대신 무엇이 더미인지는 `docs/DEMO_STATUS.md` 가 전담한다.
@@ -26,6 +27,17 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 - 지식베이스에 없는 기준은 **만들지 않는다.** 재료가 없는 요건에는 아무것도 띄우지 않는다
   (집행: `consult_agent/CLAUDE.md` §8 금지·주의 안내).
 - 값을 특정하지 못하면 지어내지 않고 `source_text` 로 원문 표기를 남기고 리포트에 올린다.
+
+**«누구를 타겟으로 볼 것인가»는 타겟 룰베이스가 정한다.** 기획자가 행내 원문(IRP 텐션
+UP-②③④⑤)을 읽고 타겟 14종으로 정규화해 확인해준 표다 — 원본은 저장소 루트
+`IRP_타겟고객_룰베이스_v1.xlsx`, `scripts/import_targets.py` 가 `targets.json` 으로 내린다.
+요건 임계값이 이 표와 어긋나면 **코드가 틀린 것**이고, `customer.py` 의 각 임계값 상수는
+근거 TARGET_ID 를 주석에 단다.
+
+표는 스스로 근거등급을 밝힌다 — **A**(원문에 임계값이 그대로 있음) · **B**(A 의 상위 통합) ·
+**C**(이탈고객 조사 «비중»이며 개인 임계값이 아님) · **D**(원문에 없는 기획자 설계 제안,
+Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로 오해된다. 지금 코드가 D 에
+기대는 자리는 `docs/DEMO_STATUS.md` §7 이 집계한다.
 
 ## 절대 규칙
 
@@ -84,6 +96,7 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 | | |
 |---|---|
 | 요건 기준 | `docs/REQUIREMENTS.md` — 전체 서비스 요건 앵커. 상위 기준은 `07_에이전트_기능정의/` |
+| 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/strategy_agent/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것 |
 | 데모 상태 | `docs/DEMO_STATUS.md` (생성물) |
 | 지식 저작 | `src/AUTHORING.md` |
 | 실행·테스트 | `src/README.md` |
@@ -112,6 +125,13 @@ python -m pension_agent.knowledge.schema validate pension_agent
 python -m scripts.kb_build.build_kb             # _draft_ 생성 + 변환 리포트
 python -m scripts.kb_build.build_kb --activate  # 검토 후 활성화
 python -m scripts.demo_status                   # 리포트 갱신
+```
+
+타겟 룰베이스 xlsx 를 기획자가 갱신해 왔으면:
+
+```bash
+python -m scripts.import_targets                # xlsx → targets.json (멱등)
+python -m scripts.demo_status                   # §7 근거등급 표 갱신
 ```
 
 테스트는 LLM 키 없이 돈다. `langgraph` 는 설치가 필요하다(`src/requirements.txt`).
