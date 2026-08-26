@@ -120,16 +120,21 @@ check(r3["answer"].startswith("■"), "out_of_ledger: 역시 근거 원문 폴�
 # 5-2. 실제 실행에서 걸린 자리 — 값은 맞는데 표기가 달라서 버려진다
 # ─────────────────────────────────────────────────────────────
 # 실제 LLM 이 쓴 문장은 "148만 5천원"·"2026년 6월" 이었고, 원장은 "1,485,000원"·
-# "148.5만원"·"2026.06" 이다. 같은 값인데 숫자 토큰 집합이 달라 폐기됐다.
-# **이건 지어낸 수치를 막은 것이 아니라 맞는 답변을 표기 때문에 버린 것이다.**
+# "148.5만원"·"2026.06" 이다. 같은 값인데 숫자 토큰 집합이 달라 폐기됐다 — 지어낸 수치를
+# 막은 것이 아니라 맞는 답변을 표기 때문에 버린 것이다. verify._measures() 가 덩이로
+# 읽게 되면서 통과한다. **표기는 통과시키되 값은 여전히 따진다**는 것까지 함께 고정한다.
 
 r5, tr5 = _run("korean_units")
-_blocked = set((tr5.gates().get("verify_texts") or TR.Gate("", True)).detail)
-check(tr5.blocked_by() == "verify_texts"
-      and {"수치 '148'", "수치 '5'", "수치 '118'", "수치 '8'", "수치 '6'"} <= _blocked,
-      "korean_units: 만·천으로 끊어 쓴 금액과 풀어 쓴 연월이 '원장 밖 수치' 로 걸린다",
-      str(sorted(_blocked)))
-check(r5["answer"].startswith("■"), "korean_units: 그래서 근거 원문 폴백", r5["answer"][:30])
+check(tr5.blocked_by() is None and not r5["answer"].startswith("■"),
+      "korean_units: 만·천으로 끊어 쓴 금액이 더는 '원장 밖 수치' 로 걸리지 않는다",
+      str(tr5.gates().get("verify_texts")))
+check("148만 5천원" in r5["answer"] and "2026년 6월" in r5["answer"],
+      "korean_units: 직원이 말하는 표기 그대로 화면에 나간다", r5["answer"][:40])
+
+r6, tr6 = _run("korean_units_wrong")
+check(tr6.blocked_by() == "verify_texts" and r6["answer"].startswith("■"),
+      "korean_units_wrong: 같은 표기라도 값이 틀리면 여전히 폐기된다",
+      str(tr6.gates().get("verify_texts")))
 
 # 버려진 값이 실제로는 원장 안에 있다 — 표기만 달랐다는 것을 못박는다.
 _ledger = " ".join(_evidence_texts("korean_units"))
