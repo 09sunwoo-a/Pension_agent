@@ -203,17 +203,42 @@ from pension_agent.strategy_agent.customer import PERSONAS
 BY_NAME = {p.nm: p for p in PERSONAS}
 check(len(PERSONAS) == 9, "목업 9케이스 적재", str(len(PERSONAS)))
 
+# ── 배지 골든셋 ──────────────────────────────────────────────
+# 첫 화면 배지(원본 08_BADGES)는 기획자가 지식베이스 세그먼트를 읽고 9케이스에 부여한
+# 값이다. 그 Y/N 을 골든셋으로 두고, customer.conditions() 의 요건 5종이 **정확히** 재현하는지
+# 본다 — 데이터가 바뀌든 판정이 바뀌든 어긋나면 여기서 드러난다. 판정 기준은 전부 세그먼트의
+# condition_text 원문이고 임계값도 원문 값이다(customer.py 주석에 세그먼트 번호 기재).
+import json as _json
+
+from pension_agent import config as _cfg
+
+_BADGE_COND = {
+    "미운용현금자산": "idl",                    # 세그 1(고유대 50%↑) + 26(1개월 변동 없음)
+    "판매중단펀드보유": "hlt",                   # 세그 8
+    "연금개시 요건충족 후 미개시": "pen",          # 세그 19-1
+    "ISA만기자금 보유 고객": "isa",              # 세그 17
+    "이탈위험관찰": "out",                      # 세그 1+26+34 (유입 임계값 미정 — >0)
+}
+_LEDGER = {r["id"]: r for r in
+           _json.loads(_cfg.CUSTOMERS_JSON.read_text(encoding="utf-8"))["records"]}
+for _p in PERSONAS:
+    _c = set(conditions(_p))
+    for _badge, _cond in _BADGE_COND.items():
+        _want = _LEDGER[_p.id]["badges"].get(_badge) == "Y"
+        check((_cond in _c) == _want, f"배지 골든셋: {_p.nm} {_badge}",
+              f"요건 {_cond}={_cond in _c} vs 배지={_want}")
+
 # 요건 판정 스냅샷 (00_시연케이스의 시연 포인트와 정합해야 한다)
 _EXPECTED_CONDS = {
-    "김현수": ["dep", "nod", "nch"],           # 현금성 방치 + 디폴트옵션 미설정
-    "박지민": ["lim", "tax", "add"],           # 실적배당 75% > 한도 70% + 세액공제 잔여
-    "이준호": ["mat"],                          # 예금 만기 D-17
-    "최서윤": ["dor", "nch"],                   # 8개월 미접촉 (판매중단펀드는 후속 요건화 대상)
-    "정민석": ["dor", "mis", "dep", "nch"],    # 공격투자형 + 예금 100%
-    "한지우": ["tax", "add"],                   # 세액공제 잔여 300만원
-    "오세훈": ["dep", "mat"],                   # 예금 만기 D-25
-    "윤가영": ["nod"],                          # 디폴트옵션 미등록 (이탈관찰은 후속 요건화 대상)
-    "송도윤": ["dor", "nod", "nch"],           # 11개월 미접촉 + 미등록
+    "김현수": ["dep", "idl", "nod", "nch"],            # 현금성 방치(고유대 75%, 1개월 무변동)
+    "박지민": ["lim", "tax", "add"],                   # 실적배당 75% > 한도 70% + 세액공제 잔여
+    "이준호": ["mat"],                                  # 예금 만기 D-17
+    "최서윤": ["dor", "hlt", "nch"],                   # 8개월 미접촉 + 판매중단 펀드 보유
+    "정민석": ["dor", "mis", "dep", "nch"],            # 공격투자형 + 예금 100%
+    "한지우": ["isa", "tax", "add"],                   # ISA 만기 D-12 + 세액공제 잔여 300만원
+    "오세훈": ["dep", "mat", "pen"],                   # 만기 D-25 + 연금개시 요건충족·미개시
+    "윤가영": ["out", "nod"],                          # 고유대 52% + 최근 1개월 1.7억 유입
+    "송도윤": ["dor", "hlt", "idl", "nod", "isa", "nch"],  # 3개 복합 케이스
 }
 for nm, want in _EXPECTED_CONDS.items():
     got = conditions(BY_NAME[nm])
@@ -222,6 +247,16 @@ for nm, want in _EXPECTED_CONDS.items():
 # 전원 산출 스모크 — 로직 검사는 노출 개수를 넓게 열어 만든다(TOP_N 좁힘과 무관해야 한다).
 _WIDE = 99
 FACTS = {p.nm: engine.prepare(p, top_n=_WIDE) for p in PERSONAS}
+
+# 배지 요건에는 대응 세그먼트가 선언돼 있어야 «왜 관리 대상인가»가 문제상황으로 뜬다.
+_BADGE_SEG = {"idl": "3", "hlt": "8", "isa": "17", "pen": "19-1", "out": "34"}
+for _cond, _no in _BADGE_SEG.items():
+    _who = [p_ for p_ in PERSONAS if _cond in conditions(p_)]
+    check(bool(_who), f"배지 요건 {_cond}: 성립 고객 존재")
+    for p_ in _who:
+        _nos = {s["no"] for s in FACTS[p_.nm]["problem_situations"]}
+        check(_no in _nos, f"배지 요건 {_cond}: {p_.nm} 에 세그먼트 {_no} 문제상황",
+              str(sorted(_nos)))
 
 for nm, f in FACTS.items():
     p_ = BY_NAME[nm]
@@ -347,7 +382,9 @@ from dataclasses import replace as _replace
 
 check(agent.propose(BY_NAME["이준호"], use_llm=False)["tier"] == "행내전략",
       "매칭 전략 있으면 tier=행내전략")
-_calm = _replace(BY_NAME["한지우"], room=0)  # 요건 전부 제거 → 미매칭
+# 요건이 하나도 없는 고객을 합성한다 — 9케이스에는 그런 고객이 없어서(전원 관리 사유 보유)
+# 실존 고객에서 요건 원인을 걷어내 만든다. 새 요건이 늘면 여기도 함께 비워야 한다.
+_calm = _replace(BY_NAME["한지우"], room=0, isa=None)
 check(not conditions(_calm), "합성 무요건 고객: 요건 0건", str(conditions(_calm)))
 _r = agent.propose(_calm, use_llm=False)
 check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 실행 항목이 없습니다"),
