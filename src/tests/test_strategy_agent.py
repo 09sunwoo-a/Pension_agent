@@ -2,11 +2,13 @@
 
 engine.verify() 는 이미 test_engine.py 가 대조 함수 단위로 검증하지만, agent.py 가 실제로
 그 결과에 따라 규칙 폴백으로 전환하는지, 그리고 ⑤(_recommend)·⑥(_write_talking_scripts) 의
-LLM 접점이 목록 밖 id·재료 이탈을 실제로 거부하는지는 agent.py 를 직접 통해서만 검증된다
-(기존에는 이 파일이 없어 이 경로가 결정론적 스텁 테스트로 커버되지 않았다 —
-consult_agent/test_agent.py 의 스텁 패턴을 그대로 옮겼다).
+LLM 접점이 목록 밖 id·재료 이탈을 실제로 거부하는지는 agent.py 를 직접 통해서만 검증된다.
 
-실행: python test_agent.py
+픽스처는 시연용 목업 9케이스(customers.json)다 — 이준호(만기 전략·화법 보유)와
+박지민(추천 후보 상품·포트폴리오 보유)을 쓴다. 원본 xlsx 교체로 이 전제가 깨지면
+각 검사의 전제조건 체크가 명시적으로 실패한다.
+
+실행: python -m tests.test_strategy_agent
 """
 
 from __future__ import annotations
@@ -48,13 +50,14 @@ def _restore_llm() -> None:
 # ─────────────────────────────────────────────────────────────
 
 def check_order_mismatch_fallback() -> None:
-    p = _BY_NAME["김민수"]
+    p = _BY_NAME["이준호"]
     facts = engine.prepare(p)
     ids = [it["id"] for it in facts["items"]]
 
     llm.available = lambda: True
     llm.generate = lambda *a, **k: json.dumps(
-        {"order": ids[:-1], "insight": "테스트", "sentence": "테스트 문장입니다."}, ensure_ascii=False
+        {"order": ids + ["st.없는전략"], "insight": "테스트", "sentence": "테스트 문장입니다."},
+        ensure_ascii=False,
     )
     A.llm = llm
 
@@ -72,7 +75,7 @@ def check_order_mismatch_fallback() -> None:
 # ─────────────────────────────────────────────────────────────
 
 def check_sentence_verify_rejects_fabrication() -> None:
-    p = _BY_NAME["김민수"]
+    p = _BY_NAME["이준호"]
     facts = engine.prepare(p)
     ids = [it["id"] for it in facts["items"]]
 
@@ -98,9 +101,10 @@ def check_sentence_verify_rejects_fabrication() -> None:
 # ─────────────────────────────────────────────────────────────
 
 def check_why_customer_accepts_grounded() -> None:
-    p = _BY_NAME["김민수"]  # balPct 값이 있는 페르소나
+    p = _BY_NAME["이준호"]
     facts = engine.prepare(p)
-    stub_lines = [f"평가금액이 유사 고객 상위 {p.balPct}% 수준이라 관리 대상으로 떴어요."]
+    # 재료 안 수치(수익률)만 쓰는 문장 — balPct 는 새 데이터에 모수가 없어 None 이다.
+    stub_lines = [f"최근 1년 수익률이 {p.ret}%로 양호해 관리 대상으로 떴어요."]
 
     llm.available = lambda: True
     llm.generate = lambda *a, **k: json.dumps({"lines": stub_lines}, ensure_ascii=False)
@@ -116,13 +120,13 @@ def check_why_customer_accepts_grounded() -> None:
 
 
 def check_why_customer_rejects_fabrication() -> None:
-    p = _BY_NAME["김민수"]
+    p = _BY_NAME["이준호"]
     facts = engine.prepare(p)
     rule_lines = list(facts["why_this_customer"])
 
     llm.available = lambda: True
     llm.generate = lambda *a, **k: json.dumps(
-        {"lines": ["평가금액이 유사 고객 상위 1% 수준이에요."]}, ensure_ascii=False,
+        {"lines": ["평가금액이 유사 고객 상위 999% 수준이에요."]}, ensure_ascii=False,
     )
     A.llm = llm
 
@@ -140,15 +144,16 @@ def check_why_customer_rejects_fabrication() -> None:
 # ─────────────────────────────────────────────────────────────
 
 def check_talking_script_accepts_grounded() -> None:
-    p = _BY_NAME["이현우"]  # talking_points 1개 이상 있는 페르소나
+    p = _BY_NAME["이준호"]  # talking_points 1개 이상 있는 페르소나
     facts = engine.prepare(p)
     if not facts["talking_points"]:
         check(False, "⑥ 화법 스크립트: 전제조건(talking_points 존재) 불충족 — 페르소나 데이터 확인 필요")
         return
 
     llm.available = lambda: True
+    # 제목에 수치("100%")가 든 화법이 있어 제목 인용 스텁은 verify 에 걸린다 — 수치 없는 문장.
     llm.generate = lambda *a, **k: json.dumps(
-        {tp["title"]: f"고객님, {tp['title']} 관련 안내드릴게요." for tp in facts["talking_points"]},
+        {tp["title"]: "고객님, 상담 때 이 내용을 안내드릴게요." for tp in facts["talking_points"]},
         ensure_ascii=False,
     )
     A.llm = llm
@@ -163,7 +168,7 @@ def check_talking_script_accepts_grounded() -> None:
 
 
 def check_talking_script_rejects_fabrication() -> None:
-    p = _BY_NAME["이현우"]
+    p = _BY_NAME["이준호"]
     facts = engine.prepare(p)
     if not facts["talking_points"]:
         check(False, "⑥ 화법 스크립트(거부 케이스): 전제조건 불충족")
@@ -189,7 +194,7 @@ def check_talking_script_rejects_fabrication() -> None:
 # ─────────────────────────────────────────────────────────────
 
 def check_recommend_accepts_valid_pick() -> None:
-    p = _BY_NAME["박지영"]  # 후보 상품·포트폴리오 모두 있는 페르소나
+    p = _BY_NAME["박지민"]  # 후보 상품·포트폴리오 모두 있는 페르소나
     pool = engine.candidate_pool_for_recommendation(p)
     if not pool["products"] or not pool["portfolios"]:
         check(False, "⑤ 추천: 전제조건(후보 상품·포트폴리오 존재) 불충족")
@@ -212,7 +217,7 @@ def check_recommend_accepts_valid_pick() -> None:
 
 
 def check_recommend_rejects_out_of_pool_id() -> None:
-    p = _BY_NAME["박지영"]
+    p = _BY_NAME["박지민"]
     llm.available = lambda: True
     llm.generate = lambda *a, **k: json.dumps({
         "product_id": "P99-NOT-EXIST", "product_reason": "테스트",
@@ -226,7 +231,7 @@ def check_recommend_rejects_out_of_pool_id() -> None:
 
 
 def check_recommend_rejects_fabricated_number() -> None:
-    p = _BY_NAME["박지영"]
+    p = _BY_NAME["박지민"]
     pool = engine.candidate_pool_for_recommendation(p)
     if not pool["products"]:
         check(False, "⑤ 추천(재료이탈 케이스): 전제조건 불충족")

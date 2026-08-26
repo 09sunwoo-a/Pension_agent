@@ -15,10 +15,12 @@
   4. 소스 미확정 필드 (데이터딕셔너리에 없는 `Profile` 필드)
   5. 하드코딩된 데모 상수 (기준일·페르소나·자리표시자 데이터)
   6. 시효 미기재 사실 (`fact.as_of` 없음)
+  7. 요건 임계값의 근거등급 (타겟 룰베이스 대조)
 """
 
 from __future__ import annotations
 
+import json
 import sys
 
 from pension_agent import config, market
@@ -43,6 +45,23 @@ UNSOURCED_FIELDS = [
      "② 왜 이 고객인가 · low 요건"),
     ("pension_started", "연금수령 개시 여부", "'연금개시가능잔여일'은 만55-연령이라 개시 여부가 아님",
      "§7 추가납 권유 금지 (민원 방지 규칙)"),
+    ("grade", "고객 위험등급(가입 상한)", "딕셔너리·목업 v3 모두 컬럼 없음 — 현재 PREF[투자성향] 파생값",
+     "적합성 게이트 (상품 위험등급 하드 상한)"),
+]
+
+
+# 요건 판정 임계값 → 근거로 삼은 타겟 룰베이스 TARGET_ID.
+#
+# 근거등급은 여기 적지 않고 targets.json 에서 읽는다. 등급은 기획자가 매기는 값이라
+# 여기 복사해두면 표가 갱신돼도 리포트만 옛 등급을 말하게 된다 — 그러면 "D(검증 전
+# 제안값)를 A(행내 기준)로 읽는" 정확히 그 사고가 리포트를 통해 일어난다.
+COND_THRESHOLDS = [
+    ("dep", "customer.PRINCIPAL_HEAVY_PCT", lambda: f"{customer.PRINCIPAL_HEAVY_PCT}%",
+     "TG-202", "고유계정대+예금+GIC 합산 비중. TG-003(합산 100%, 등급 A)을 함께 덮으려 상한은 두지 않는다"),
+    ("nch", "customer.NO_CHANGE_MONTHS", lambda: f"{customer.NO_CHANGE_MONTHS}개월",
+     "TG-201", "최종 운용지시 이후 경과 개월수"),
+    ("idl / out", "customer.CASH_IDLE_PCT", lambda: f"{customer.CASH_IDLE_PCT}%",
+     "TG-001", "고유계정대 비중. 방치(idl)·현금화 신호(out)의 갈림은 세그먼트 26 이 정한다"),
 ]
 
 
@@ -118,8 +137,9 @@ def build() -> tuple[str, dict[str, int]]:
     # 4. 소스 미확정 필드
     n["fields"] = len(UNSOURCED_FIELDS)
     L += [f"## 4. 소스 미확정 필드 — {len(UNSOURCED_FIELDS)}건", "",
-          "데이터딕셔너리에서 대응 컬럼을 찾지 못한 `Profile` 필드. 데모에서는 페르소나에",
-          "더미 값을 채워 화면이 매끄럽게 보이지만, 실데이터 전환 때는 **여기부터** 확인한다.",
+          "데이터딕셔너리에서 대응 컬럼을 찾지 못한 `Profile` 필드. 데모에서는 목업 원장",
+          "(customers.json)의 값·파생값으로 채워 화면이 매끄럽게 보이지만, 실데이터 전환 때는",
+          "**여기부터** 확인한다.",
           "딕셔너리가 아직 정리 중이므로 '없다'가 아니라 '소스 확인 필요'로 읽는다.", ""]
     _rows(L, ["필드", "무엇", "딕셔너리 상태", "무엇이 걸려 있나"],
           [list(r) for r in UNSOURCED_FIELDS])
@@ -128,8 +148,10 @@ def build() -> tuple[str, dict[str, int]]:
     consts = [
         ("customer.TODAY", str(customer.TODAY),
          "데모 고정 기준일. 실배포 시 date.today() 로 바꾸고 assets.json 날짜도 함께 교체"),
-        ("customer.PERSONAS", f"{len(customer.PERSONAS)}명 (C1~C{len(customer.PERSONAS)})",
-         "하드코딩 페르소나. 실데이터 조인으로 교체"),
+        ("customer.PERSONAS",
+         f"{len(customer.PERSONAS)}명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)"
+         if customer.PERSONAS else "0명 (비어 있음 — customers.json 미생성)",
+         "시연용 목업 9케이스. scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체"),
         ("data/portfolios.json", f"{len(engine.PORTFOLIOS)}건",
          "채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체"),
         ("engine.TOP_N / ALT_N", f"{engine.TOP_N} / {engine.ALT_N}",
@@ -155,6 +177,26 @@ def build() -> tuple[str, dict[str, int]]:
           "", "<details><summary>목록</summary>", ""]
     L += [f"- `{i}`" for i in stale]
     L += ["", "</details>", ""]
+
+    # 7. 요건 임계값의 근거등급
+    tdoc = (json.loads(config.TARGETS_JSON.read_text(encoding="utf-8"))
+            if config.TARGETS_JSON.is_file() else {"targets": []})
+    by_id = {t.get("TARGET_ID"): t for t in tdoc.get("targets", [])}
+    trows, pilot = [], 0
+    for cond, const, value, tid, note in COND_THRESHOLDS:
+        t = by_id.get(tid) or {}
+        grade = t.get("근거등급") or "— (룰베이스 미적재)"
+        if str(grade).startswith("D"):
+            pilot += 1
+        trows.append([f"`{cond}`", f"`{const}`", value(), tid,
+                      str(t.get("타겟명") or "—"), str(grade), note])
+    n["pilot_thresholds"] = pilot
+    L += [f"## 7. 요건 임계값의 근거등급 — 검증 전 제안값 {pilot} / {len(trows)}건", "",
+          "판정 임계값이 타겟 룰베이스(`targets.json` ← 기획자 확인표)의 어느 타겟에서 왔는지와, "
+          "그 타겟이 스스로 밝힌 근거등급이다. **D 는 행내 문서에 없는 기획자 설계 제안값**이라 "
+          "Pilot 로 운영하고 실데이터에서 보정해야 한다 — 실전환 때 가장 먼저 흔들릴 자리다. "
+          "A 는 원문에 임계값이 그대로 적힌 것이다.", ""]
+    _rows(L, ["요건", "상수", "현재값", "TARGET_ID", "타겟명", "근거등급", "비고"], trows)
 
     return "\n".join(L).rstrip() + "\n", n
 

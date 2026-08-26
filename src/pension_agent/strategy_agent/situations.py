@@ -106,6 +106,8 @@ if __name__ == "__main__":
     from pension_agent.strategy_agent.customer import PERSONAS  # noqa: PLC0415
 
     print(f"세그먼트 레코드 {len(SEGMENTS)}건")
+    if not PERSONAS:
+        print("등록된 고객이 없어 문제상황 덤프를 건너뜁니다 (customer.PERSONAS 가 비어 있음).")
     for p in PERSONAS:
         rows = problem_situations(p)
         print(f"[{p.id} {p.nm}] {len(rows)}건 — " + ", ".join(f"{r['no']} {r['title']}" for r in rows))

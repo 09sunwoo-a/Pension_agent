@@ -1,0 +1,20 @@
+{
+  "customer_id": "162754-9483106",
+  "sessions": [
+    {
+      "session_id": "past-2026-08-05",
+      "started_at": "2026-08-05T09:00:00+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "ts": "2026-08-05T09:00:00+00:00",
+          "role": "record",
+          "text": "증권사의 ETF 거래 편의성과 상품 선택 폭을 문의. 최근 현금성자산이 크게 늘어난 상태로 향후 운용방향을 검토 중.",
+          "intent": null,
+          "tool_calls": []
+        }
+      ],
+      "outcome": null
+    }
+  ]
+}

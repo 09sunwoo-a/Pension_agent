@@ -29,6 +29,7 @@ from pension_agent.consult_agent.nodes import clarify as CL
 from pension_agent.consult_agent.nodes import plan as P
 from pension_agent.consult_agent.nodes import understand as U
 from pension_agent.llm import LLMError
+from tests.debug import trace as TR
 
 #: 세액공제 카드(fact.k04.f2)를 근거로 받은 답변들. 게이트가 무엇을 어떻게 가르는지
 #: 눈으로 대조하려고 **한 글자 차이**로 갈리게 만들어 뒀다.
@@ -100,7 +101,7 @@ def installed(scn: Scenario):
     steps = list(scn.plan)
 
     def plan_generate(prompt, **kw):
-        if "<지식베이스>" in prompt:                     # 답변 작성
+        if TR.is_compose_prompt(prompt):                # 답변 작성
             if scn.compose is None:
                 raise LLMError("스크립트: compose 단계에서 LLM 이 죽은 상황")
             return scn.compose

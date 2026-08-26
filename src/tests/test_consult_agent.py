@@ -230,7 +230,7 @@ def check_intent_routing() -> bool:
         question = f"{intent}-라우팅-테스트"
         _OVERRIDES[question] = {"intent": intent}
         agent = G.build_agent()
-        out = agent.invoke({"question": question, "customer_id": "C1"})
+        out = agent.invoke({"question": question, "customer_id": "CX"})
         this_ok = out.get("answer") == f"({intent} 응답)"
         ok = ok and this_ok
         print(f"{'✓' if this_ok else '✗'} intent={intent} → {intent} 노드로 라우팅")
@@ -281,12 +281,12 @@ def check_lms_send_parsing() -> bool:
     """
     from pension_agent.consult_agent.nodes import lms
 
-    out = lms.lms_send({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "C1"})
+    out = lms.lms_send({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "CX"})
     pending = out.get("pending_action")
     ok1 = (bool(pending) and pending["kind"] == "lms" and pending["screen"]
            and pending["message"] == "안내 문구입니다"
            and "보낼지는 그 화면에서" in out["answer"])
-    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "C1"})["answer"]
+    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "CX"})["answer"]
     ok3 = "찾을 수 없어요" in lms.lms_send({"question": '"문구" 보내줘', "customer_id": None})["answer"]
     ok = ok1 and ok2 and ok3
     print(f"{'✓' if ok else '✗'} lms_send: 발송이 아니라 화면 연계를 제안한다")
@@ -500,9 +500,9 @@ def check_screen_link() -> int:
     print(f"{'✓' if hit else '✗'} scnNo·mode 밖의 파라미터는 링크에 싣지 않는다")
     ok += hit
 
-    import shutil
-    if session_store.SESSION_DATA_DIR.exists():
-        shutil.rmtree(session_store.SESSION_DATA_DIR)
+    # 정리는 main() 이 «이번 실행이 만든 파일만» 지운다. 예전에는 여기서 디렉터리를
+    # 통째로 rmtree 했는데, session_data 가 시연 픽스처를 담게 되면서(과거 상담 기록 —
+    # scripts/seed_sessions.py) 테스트 한 번에 그 픽스처가 날아갔다.
     return ok
 
 
@@ -551,7 +551,7 @@ def check_guard() -> int:
     cases.append((any(a["card"] == "pitch.k03.028" for a in alt),
                   "low: 민감 응대 대안 화법을 함께 제시"))
 
-    dep = GD.cautions_for(gkb, ["dep:예금 비중 높음"])
+    dep = GD.cautions_for(gkb, ["dep:원리금보장상품 편중(80% 이상)"])
     cases.append((any("현금성자산" in g["text"] for g in dep),
                   "dep: 용어 주의(고유계정대→현금성자산)도 지식베이스에서"))
 
@@ -586,6 +586,9 @@ def check_customer_material() -> int:
     ② 「하지 말 것」이 원장에 고객 요건이 실렸을 때만 — 즉 LLM 이 customer 도구를 부른
        턴에만 — 붙었다. 고객 상태는 코드가 이미 아는 값인데 LLM 의 도구 선택에 의존한
        것이고, 그래서 화법만 물은 턴에는 조용히 빠졌다(§8 · gap 10).
+
+    실존 고객이 필요한 검사는 시연용 목업 9케이스의 이준호(KB-PIN 198734-1205842)를
+    쓴다. "CX" 는 존재하지 않는 id 로 남겨 "고객 없음" 경로를 함께 검증한다.
     """
     from pension_agent.consult_agent import guard as GD
     from pension_agent.consult_agent.nodes import plan as P
@@ -598,7 +601,7 @@ def check_customer_material() -> int:
     print(f"{'✓' if gone else '✗'} 고객 재료를 답하던 두 번째 경로(briefing_qa)가 없다")
     ok += gone
 
-    found = tools.run("customer", {"customer_id": "C3"}, "이 고객 평가금액 얼마야?")
+    found = tools.run("customer", {"customer_id": "198734-1205842"}, "이 고객 평가금액 얼마야?")
     hit = bool(found) and "평가금액" in found["text"] and "성립 요건" in found["text"]
     print(f"{'✓' if hit else '✗'} customer 도구가 브리핑 재료(값·요건)를 싣는다")
     ok += hit
@@ -610,21 +613,93 @@ def check_customer_material() -> int:
     orig_propose = SA.propose
     SA.propose = lambda profile: {**orig_propose(profile),
                                   "sentence": "만기 예금을 이렇게 제안해 보세요.",
-                                  "insight": "예금 100% 라 수익률이 낮습니다."}
+                                  "insight": "만기 자금이 대기 중이라 수익 기회를 놓칩니다."}
     try:
-        found = tools.run("customer", {"customer_id": "C3"}, "브리핑 요약해줘")
+        found = tools.run("customer", {"customer_id": "198734-1205842"}, "브리핑 요약해줘")
         hit = bool(found) and "AI브리핑 문장" in found["text"] and "AI브리핑 근거해설" in found["text"]
     finally:
         SA.propose = orig_propose
     print(f"{'✓' if hit else '✗'} customer 도구가 화면에 뜬 AI브리핑 산문까지 재료로 싣는다")
     ok += hit
 
+    # ── CLAUDE.md §3 「고객 정보 질의응답 — 되어야 하는 것」 재료 요건 ──────────────
+    # 문서에 적어둔 것이 실제로 재료에 실리는지 본다. 아래가 하나라도 빠지면 그 질문은
+    # 답이 나올 수 없고, LLM 은 없는 재료에 대해 말을 만든다.
+    _mat = tools.run("customer", {"customer_id": "181245-3097614"}, "이 고객 현황")["text"]
+    _NEED = [
+        ("① 값 — 자산군별 금액", "고유계정대 2,000만원"),   # 비중만 있으면 금액을 못 답한다
+        ("① 값 — 자산군별 비중(원장값)", "(7.7%)"),          # 4분류 반올림(8%)이 아니라 원장값
+        ("① 값 — 만기 전건", "2027-02-01"),                 # 가장 가까운 한 건만이 아니다
+        ("② 왜 이 고객인가", "· 왜 이 고객인가:"),
+        ("② 판단근거", "· 판단근거:"),
+        ("② 문제상황", "· 문제상황 1:"),
+        ("② 성립 요건", "· 성립 요건:"),
+    ]
+    # 원장 → Profile → 재료 경로가 뚫려 있는지. 하나만 하면 값은 있는데 답은 못 한다.
+    _big = tools.run("customer", {"customer_id": "188406-7352194"}, "현황")["text"]
+    for _label, _needle in (("보유상품 개별 종목", "KB 퇴직연금 배당"),
+                            ("판매중단 표시", "⚠판매중단"),
+                            ("동연령대 비교", "동연령 평균 수익률"),
+                            ("거래 활동", "1년 매매")):
+        _h = _needle in _big
+        print(f"{'✓' if _h else '✗'} 고객 재료: {_label}" + ("" if _h else f" — '{_needle}' 없음"))
+        ok += _h
+
+    # 과거 상담 기록은 세션 저장소에 심겨 있고(scripts/seed_sessions.py), 읽는 경로는
+    # 하나다 — 화면 §14 와 대화형 history 도구가 같은 것을 본다. 원장에서 따로 읽는 두
+    # 번째 경로를 만들면 같은 상담이 두 번 실린다.
+    _PAST = "재투자하고 싶다"          # 송도윤 2025-10-06 상담 기록의 한 조각
+    _hist = tools.run("history", {"customer_id": "188406-7352194"}, "지난번에 무슨 얘기 했어")
+    hit = bool(_hist) and _PAST in _hist["text"] and "상담기록" in _hist["text"]
+    print(f"{'✓' if hit else '✗'} history 도구: 과거 상담 기록을 싣는다(role=record)")
+    ok += hit
+    from pension_agent.strategy_agent import engine as _eng
+    from pension_agent.strategy_agent.customer import get_profile as _gp
+    _screen = _eng.prepare(_gp("188406-7352194"))["consult_history"]
+    hit = sum(_PAST in line for line in _screen) == 1
+    print(f"{'✓' if hit else '✗'} 화면 §14 도 같은 기록을 «한 번만» 본다(대화형과 답이 갈리지 않는다)")
+    ok += hit
+
+    # ISA 만기자금·납입이력 — 원장에 컬럼이 있어도 Profile 이 안 접으면 대화형은 못 본다.
+    _isa_mat = tools.run("customer", {"customer_id": "188406-7352194"}, "ISA")["text"]
+    hit = "ISA만기자금" in _isa_mat and "1억 2,000만원" in _isa_mat
+    print(f"{'✓' if hit else '✗'} 고객 재료: ISA 만기자금이 원장에서 대화형까지 온다")
+    ok += hit
+    _pay_mat = tools.run("customer", {"customer_id": "176903-5528417"}, "납입")["text"]
+    hit = "납입이력" in _pay_mat and "2025년" in _pay_mat
+    print(f"{'✓' if hit else '✗'} 고객 재료: 연도별 납입 이력이 실린다(당해분만이 아니다)")
+    ok += hit
+
+    for _label, _needle in _NEED:
+        _h = _needle in _mat
+        print(f"{'✓' if _h else '✗'} 고객 재료: {_label}" + ("" if _h else f" — '{_needle}' 없음"))
+        ok += _h
+
+    # 같은 항목이 재료 안에서 두 값이 되면 안 된다 — 3분류와 자산군별의 고유계정대가
+    # 각각 8% · 7.7% 로 실리던 자리(4분류 반올림 대 원장값).
+    import re as _re
+    _three = _re.search(r"운용현황\(3분류\)[^\n]*고유계정대 ([\d.]+)%", _mat)
+    _asset = _re.search(r"자산군별[^\n]*고유계정대[^(]*\(([\d.]+)%\)", _mat)
+    hit = bool(_three and _asset) and _three.group(1) == _asset.group(1)
+    print(f"{'✓' if hit else '✗'} 고객 재료: 같은 항목(고유계정대 비중)이 한 값으로만 실린다"
+          + ("" if hit else f" — 3분류 {_three and _three.group(1)} vs 자산군별 {_asset and _asset.group(1)}"))
+    ok += hit
+
+    # 인용 허용 집합에 후보 더미(pools)를 싣지 않는다 — 답변이 쓰지도 않을 카드의 숫자가
+    # 아무 주장에나 근거를 대주면 검증이 무력해진다("만기일 2026년 9월 11일" 이 통과하던 자리).
+    from pension_agent.verify import verify_texts as _vt
+    _ev = tools.run("customer", {"customer_id": "198734-1205842"}, "만기")
+    hit = (_vt("만기일은 2026-09-10, 금액 4,050만원이에요.", _ev["allow"])[0]
+           and not _vt("만기일은 2026년 9월 11일입니다.", _ev["allow"])[0])
+    print(f"{'✓' if hit else '✗'} 고객 재료: 화면 값은 인용 통과, 후보 더미가 licensing 하던 오답은 거부")
+    ok += hit
+
     hit = tools.run("customer", {"customer_id": None}, "평가금액") is None
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 고객 재료를 만들지 않는다")
     ok += hit
 
-    # ② 고객 상태 주의를 코드가 판단하는가.
-    hit = "low" in [c.split(":")[0] for c in GD.conditions_of("C3")]
+    # ② 고객 상태 주의를 코드가 판단하는가. (이준호는 만기 요건이 성립한다)
+    hit = "mat" in [c.split(":")[0] for c in GD.conditions_of("198734-1205842")]
     print(f"{'✓' if hit else '✗'} conditions_of: customer_id 만으로 고객 요건을 읽는다")
     ok += hit
 
@@ -639,7 +714,9 @@ def check_customer_material() -> int:
     orig_gen = P.generate
     P.generate = lambda prompt, **kw: "(스텁 답변)"
     try:
-        out = P.compose({"question": "뭐라고 말하지?", "customer_id": "C3",
+        # 김현수(dep·nod) — 이 요건에는 지식베이스에 대응 주의 카드가 실재한다.
+        # 이준호(mat)로 재면 안 된다: 만기 요건의 주의 카드는 없어서 가드가 정당하게 빈다.
+        out = P.compose({"question": "뭐라고 말하지?", "customer_id": "173544-2074623",
                          "evidence": pitch_only})
         hit = bool(out.get("guards"))
         closed = P.compose({"question": "뭐라고 말하지?", "evidence": pitch_only})
@@ -1145,7 +1222,7 @@ def check_turn_cost() -> int:
     ev_customer = {"tool": "customer", "query": "q", "text": "· 평가금액 2억 3,000만원",
                    "atomic": [], "notices": [], "notice_scopes": [], "marks": [],
                    "related": [], "allow": ["· 평가금액 2억 3,000만원"],
-                   "sources": [{"id": "briefing.C3"}], "meta": {}}
+                   "sources": [{"id": "briefing.CX"}], "meta": {}}
 
     # ① 화법 슬롯 분해가 화법을 안 부르는 턴에서는 아예 안 돈다.
     called: list[str] = []
@@ -1154,7 +1231,7 @@ def check_turn_cost() -> int:
     orig_plan_gen = P.generate
     P.generate = lambda prompt, **kw: '{"tool": "customer", "query": "예금 잔액", "last": true}'
     try:
-        state = {"question": "이 고객 예금 잔액 얼마지", "customer_id": "C3"}
+        state = {"question": "이 고객 예금 잔액 얼마지", "customer_id": "198734-1205842"}
         state.update(P.plan_step(state))
     finally:
         pitch.extract_slots, P.generate = orig_extract, orig_plan_gen
@@ -1162,7 +1239,7 @@ def check_turn_cost() -> int:
     print(f"{'✓' if hit else '✗'} 화법을 안 부르는 턴은 슬롯 분해 호출이 없다")
     ok += hit
 
-    # ② 계획이 한 호출로 끝난다("last": true).
+    # ② 계획이 한 호출로 끝난다("last": true) — 그 도구가 실제로 재료를 내놨을 때만.
     hit = state.get("plan_done") is True and len(state.get("plan_calls") or []) == 1
     print(f"{'✓' if hit else '✗'} 재료 하나로 끝나는 질문은 계획 호출 1번으로 끝난다")
     ok += hit
@@ -1309,6 +1386,94 @@ def check_miss_recovery() -> int:
 
     hit = P._no_evidence({}) == P.NO_EVIDENCE
     print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴에는 빈 '찾아본 곳'을 붙이지 않는다")
+    ok += hit
+    return ok
+
+
+def check_replan_on_empty() -> int:
+    """근거 0건인 채 계획이 끝나려 하면 **한 번은 다시 계획하는가**(§5).
+
+    회귀 대상: "이 고객은 왜 타겟이 됐지?"(고객 화면 열림). 계획이 segment 를 골랐고
+    (타겟 = 관리 대상 고객군이라는 말은 알아들었다) segment 가 0건을 냈는데, 원장에는
+    성공한 재료만 실려서 계획은 자기가 뭘 불러봤는지 몰랐다 — 같은 호출을 반복하다
+    반복 차단에 걸려, customer(왜 이 고객인가·판단근거를 들고 있는 도구)를 써 볼 기회
+    없이 턴이 '근거 없음'으로 끝났다. 재료가 없는 것이 아니라 고르기를 실패한 것이다.
+
+    고친 것 셋: ① 빗나간 호출이 계획 프롬프트에 실린다 ② 근거 0건인 채 끝내려 하면
+    코드가 안 써 본 도구 목록과 함께 한 번 되돌려 보낸다(두 번째 끝내기는 존중 — 정직한
+    '없음' 경로를 막지 않는다) ③ customer 도구 설명이 "왜 관리 대상(타겟)인가"를 말한다.
+    """
+    from pension_agent.consult_agent.nodes import plan as P
+
+    ok = 0
+    ev_customer = {"tool": "customer", "query": "왜 타겟", "text": "· 왜 이 고객인가: 미운용 방치",
+                   "atomic": [], "notices": [], "notice_scopes": [], "marks": [], "related": [],
+                   "allow": ["· 왜 이 고객인가: 미운용 방치"],
+                   "sources": [{"id": "customer.CX", "title": "고객 계좌 현황"}], "meta": {}}
+
+    # ① 회귀 시나리오 그대로: segment 빗나감 → done → (재계획) → customer 로 답 재료 확보.
+    prompts: list[str] = []
+    script = ['{"tool": "segment", "query": "타겟 고객군 선정 조건"}',
+              '{"done": true}',
+              '{"tool": "customer", "query": "왜 타겟이 됐는지", "last": true}']
+    orig_gen, orig_run = P.generate, P.tools.run
+    P.generate = lambda prompt, **kw: prompts.append(prompt) or script.pop(0)
+    P.tools.run = lambda name, state, query: ev_customer if name == "customer" else None
+    try:
+        state = {"question": "이 고객은 왜 타겟이 됐지?", "customer_id": "188406-7352194"}
+        for _ in range(plan.MAX_STEPS + 2):
+            state.update(P.plan_step(state))
+            if state.get("plan_done"):
+                break
+    finally:
+        P.generate, P.tools.run = orig_gen, orig_run
+    used = [e["tool"] for e in state.get("evidence") or []]
+    hit = used == ["customer"] and state.get("plan_done") is True
+    print(f"{'✓' if hit else '✗'} 첫 도구가 빗나가도 재계획으로 customer 에 닿는다 → 원장 {used}")
+    ok += hit
+
+    # 빗나간 호출이 다음 계획 프롬프트에 보인다 — 원장에는 성공한 재료만 실리므로,
+    # 이게 없으면 계획은 같은 호출을 반복한다.
+    hit = len(prompts) == 3 and "segment:타겟 고객군 선정 조건" in prompts[1] \
+        and "반복해도 소용없다" in prompts[1]
+    print(f"{'✓' if hit else '✗'} 빗나간 호출이 계획 프롬프트에 실린다")
+    ok += hit
+
+    # 재계획 턴의 프롬프트는 아직 안 써 본 도구를 이름으로 보여준다.
+    hit = len(prompts) == 3 and "아직 근거가 0건이다" in prompts[2] and "customer" in prompts[2]
+    print(f"{'✓' if hit else '✗'} 재계획 지시가 안 써 본 도구(customer 포함)를 보여준다")
+    ok += hit
+
+    # ② 두 번째 done 은 존중한다 — 재계획이 정직한 '없음' 경로를 막지 않는다.
+    P.generate = lambda prompt, **kw: '{"done": true}'
+    try:
+        st = {"question": "질문"}
+        st.update(P.plan_step(st))
+        retried = st.get("plan_retry") is True and not st.get("plan_done")
+        st.update(P.plan_step(st))
+    finally:
+        P.generate = orig_gen
+    hit = retried and st.get("plan_done") is True \
+        and P.compose(st)["answer"] == P.NO_EVIDENCE
+    print(f"{'✓' if hit else '✗'} 두 번째 done 은 존중 → 여전히 정직한 '근거 없음'")
+    ok += hit
+
+    # 근거를 모았으면 done 을 바로 존중한다 — 재계획은 0건일 때만이다.
+    P.generate = lambda prompt, **kw: '{"done": true}'
+    try:
+        st2 = {"question": "질문", "evidence": [ev_customer], "plan_calls": ["customer:q"]}
+        st2.update(P.plan_step(st2))
+    finally:
+        P.generate = orig_gen
+    hit = st2.get("plan_done") is True and not st2.get("plan_retry")
+    print(f"{'✓' if hit else '✗'} 근거가 있으면 done 즉시 존중(재계획 없음)")
+    ok += hit
+
+    # ③ customer 도구 설명이 "왜 관리 대상(타겟)인가"를 말한다 — 도구 설명이 곧 계획의
+    #    판단 재료라, 잔액·수익률만 말하면 이 질문이 segment 로 흘러간다.
+    desc = tools.TOOLS["customer"].desc
+    hit = "타겟" in desc and "왜" in desc
+    print(f"{'✓' if hit else '✗'} customer 도구 설명이 선정 이유(타겟)를 말한다")
     ok += hit
     return ok
 
@@ -1580,11 +1745,11 @@ def check_history_material() -> int:
         orig_dir = session_store.SESSION_DATA_DIR
         session_store.SESSION_DATA_DIR = Path(tmp)
         try:
-            session_store.append_turn("C3", "s1", {
+            session_store.append_turn("CX", "s1", {
                 "role": "user", "text": "수수료 부담된다고 하시네요", "ts": "2026-08-01T09:00:00Z"})
-            session_store.append_turn("C3", "s1", {
+            session_store.append_turn("CX", "s1", {
                 "role": "agent", "text": "수수료는 " + "가" * 400, "ts": "2026-08-01T09:00:05Z"})
-            state = {"question": "지난번에 고객 상담에서 무슨 얘기 했지?", "customer_id": "C3"}
+            state = {"question": "지난번에 고객 상담에서 무슨 얘기 했지?", "customer_id": "CX"}
             found = tools.run("history", state, "지난 상담 내용")
             closed = tools.run("history", {"question": "지난번에 무슨 얘기 했지?"}, "지난 상담")
             unseen = tools.run("history", {"question": "q", "customer_id": "C_없음"}, "지난 상담")
@@ -1592,7 +1757,7 @@ def check_history_material() -> int:
             session_store.SESSION_DATA_DIR = orig_dir
 
     hit = bool(found) and "수수료 부담된다고 하시네요" in found["text"] \
-        and found["sources"][0]["id"] == "session.C3"
+        and found["sources"][0]["id"] == "session.CX"
     print(f"{'✓' if hit else '✗'} 지난 상담 기록이 재료로 올라온다")
     ok += hit
 
@@ -1611,7 +1776,7 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫혔거나 기록이 없으면 지어내지 않는다")
     ok += hit
 
-    hit = "history" not in tools.catalog({}) and "history" in tools.catalog({"customer_id": "C3"})
+    hit = "history" not in tools.catalog({}) and "history" in tools.catalog({"customer_id": "CX"})
     print(f"{'✓' if hit else '✗'} 못 쓰는 도구는 계획에 보여주지 않는다")
     ok += hit
 
@@ -1628,7 +1793,7 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 앞 턴의 미답을 이번 답변에서 사과하지 않는다")
     ok += hit
 
-    opened = meta.agent_help({"question": "뭘 도와줄 수 있어?", "customer_id": "C3"})["answer"]
+    opened = meta.agent_help({"question": "뭘 도와줄 수 있어?", "customer_id": "CX"})["answer"]
     shut = meta.agent_help({"question": "뭘 도와줄 수 있어?"})["answer"]
     hit = "지난 상담 기록" in opened and "지난 상담 기록" not in shut \
         and "단말 화면번호" in opened
@@ -1885,17 +2050,33 @@ def check_tool_loop() -> int:
         print(f"{'✓' if hit else '✗'} MAX_STEPS 상한 준수(호출 {len(st.get('plan_calls') or [])}회 ≤ {plan.MAX_STEPS})")
         ok += hit
 
-        # ⑤ 같은 도구를 같은 질의로 다시 부르면 진전이 없으므로 끊는다.
+        # ⑤ 같은 도구를 같은 질의로 다시 부르면 진전이 없으므로 도구를 다시 돌리지 않는다.
+        #    근거가 0건이면 바로 끝내는 대신 한 번 재계획으로 되돌리고(check_replan_on_empty),
+        #    그 뒤에도 반복이면 끝낸다.
         st2 = {"question": "질문", "plan_calls": ["fact:무한"]}
         st2.update(plan.plan_step(st2))
-        hit = st2.get("plan_done") is True and len(st2["plan_calls"]) == 1
-        print(f"{'✓' if hit else '✗'} 같은 호출 반복 차단")
+        first = st2.get("plan_retry") is True and not st2.get("plan_done")
+        st2.update(plan.plan_step(st2))
+        hit = first and st2.get("plan_done") is True and len(st2["plan_calls"]) == 1
+        print(f"{'✓' if hit else '✗'} 같은 호출 반복 차단(재계획 한 번 뒤 종료)")
+        ok += hit
+
+        # 근거를 이미 모은 턴이면 반복은 재계획 없이 바로 끝낸다 — 되돌릴 이유가 없다.
+        st2e = {"question": "질문", "plan_calls": ["fact:무한"],
+                "evidence": [{"tool": "fact", "query": "q", "text": "블록", "atomic": [],
+                              "notices": [], "notice_scopes": [], "marks": [], "related": [],
+                              "allow": ["블록"], "sources": [], "meta": {}}]}
+        st2e.update(plan.plan_step(st2e))
+        hit = st2e.get("plan_done") is True
+        print(f"{'✓' if hit else '✗'} 근거가 있으면 반복 즉시 종료(재계획 없음)")
         ok += hit
 
         # ⑥ LLM 이 없는 도구 이름을 내놓으면 실행하지 않는다.
         plan.generate = lambda prompt, **kw: '{"tool": "존재하지_않는_도구", "query": "x"}'
         st3 = plan.plan_step({"question": "질문"})
-        hit = st3.get("plan_done") is True and "evidence" not in st3
+        st3_done = plan.plan_step({"question": "질문", "plan_retry": True})
+        hit = "evidence" not in st3 and not st3.get("plan_done") \
+            and st3_done.get("plan_done") is True and "evidence" not in st3_done
         print(f"{'✓' if hit else '✗'} 미등록 도구 이름 차단")
         ok += hit
 
@@ -1906,7 +2087,7 @@ def check_tool_loop() -> int:
 
         # ⑧ 고객 화면이 닫혀 있으면 customer 도구를 아예 보여주지 않는다(스텝 낭비 방지).
         hit = ("customer" not in tools.catalog({})
-               and "customer" in tools.catalog({"customer_id": "C1"}))
+               and "customer" in tools.catalog({"customer_id": "CX"}))
         print(f"{'✓' if hit else '✗'} 쓸 수 없는 도구는 카탈로그에서 제외")
         ok += hit
     finally:
@@ -2339,6 +2520,7 @@ def main() -> int:
     check_relations()
     check_turn_cost()
     check_miss_recovery()
+    check_replan_on_empty()
     check_screen_registry()
     check_caution_roles()
     check_history_material()

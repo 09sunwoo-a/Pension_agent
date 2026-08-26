@@ -1,0 +1,20 @@
+{
+  "customer_id": "198734-1205842",
+  "sessions": [
+    {
+      "session_id": "past-2026-05-28",
+      "started_at": "2026-05-28T09:00:00+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "ts": "2026-05-28T09:00:00+00:00",
+          "role": "record",
+          "text": "정기예금 만기 시점에 일부 금액을 실적배당상품으로 전환하는 방안에 관심을 보임.",
+          "intent": null,
+          "tool_calls": []
+        }
+      ],
+      "outcome": null
+    }
+  ]
+}

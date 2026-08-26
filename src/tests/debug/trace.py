@@ -31,6 +31,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from pension_agent.consult_agent import graph as G
+from pension_agent.consult_agent import prompts as PROMPTS
 from pension_agent.consult_agent import select as S
 from pension_agent.consult_agent import tools as T
 from pension_agent.consult_agent.nodes import clarify as CL
@@ -45,22 +46,42 @@ NODE_NAMES = ("understand", "plan_step", "compose", "clarify", "agent_help",
 #: 말하기 위해서다 — 앞에서 끊기면 뒤는 아예 안 불리고, 그 사실이 진단의 핵심이다.
 GATES = ("verify_texts", "relations", "span")
 
-#: 프롬프트로 LLM 호출의 정체를 가른다. 호출부마다 다른 함수를 감싸지만, 한 함수(plan.generate)가
-#: 계획과 작성 둘 다 쓰므로 프롬프트를 봐야 갈린다.
-_PROMPT_MARKS = (
-    ("<지식베이스>", "compose"),
-    ("쓸 수 있는 도구:", "plan"),
-    ("어떤 기능으로 보낼지", "route"),
-    ("직접 답이 되는 것만", "adequacy"),
-    ("되물어야 하는지만", "clarify"),
+#: 프롬프트로 LLM 호출의 정체를 가른다. 한 함수(plan.generate)가 계획과 작성 둘 다 쓰므로
+#: 프롬프트를 봐야 갈린다.
+#:
+#: **표식을 손으로 적지 않고 프롬프트 상수에서 뽑는다.** 예전에는 `"<지식베이스>"` 처럼
+#: 본문 한 조각을 적어 뒀는데, 운영 쪽에서 그 머리글이 `<재료>` 로 바뀌자 계측이 조용히
+#: 어긋났다 — 작성 호출을 계획 호출로 분류했고, 그러면 트레이스가 다른 실행을 그린다.
+#: 상수에서 뽑으면 프롬프트 문구가 바뀌어도 따라간다(없어지면 아래에서 크게 실패한다).
+def _head(template: str) -> str:
+    """포맷 자리표시자 앞의 **첫 줄**. 다섯 프롬프트가 이것만으로 서로 갈린다."""
+    return template.split("{")[0].strip().splitlines()[0].strip()
+
+
+_PROMPT_MARKS: tuple[tuple[str, str], ...] = (
+    (_head(PROMPTS.COMPOSE_PROMPT), "compose"),
+    (_head(PROMPTS.PLAN_PROMPT), "plan"),
+    (_head(PROMPTS.ROUTE_PROMPT), "route"),
+    (_head(PROMPTS.ADEQUACY_PROMPT), "adequacy"),
+    (_head(PROMPTS.CLARIFY_PROMPT), "clarify"),
 )
+
+if len({mark for mark, _ in _PROMPT_MARKS}) != len(_PROMPT_MARKS):
+    raise AssertionError(
+        "프롬프트 첫 줄이 서로 겹칩니다 — LLM 호출을 갈라 볼 수 없습니다: "
+        + str([m for m, _ in _PROMPT_MARKS]))
 
 
 def _stage(prompt: str) -> str:
     for mark, name in _PROMPT_MARKS:
-        if mark in prompt:
+        if mark and mark in prompt:
             return name
     return "기타"
+
+
+def is_compose_prompt(prompt: str) -> bool:
+    """답변 작성 호출인가 — 캔드 시나리오(script.py)도 같은 판정을 쓴다."""
+    return _stage(prompt) == "compose"
 
 
 @dataclass

@@ -162,7 +162,15 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     kept = []
     for b in built:
         pool = b["spec"].get("pool")
-        if pool and b["req"] > 0:
+        if pool and b["req"] <= 0:
+            # 재원 풀을 선언한 전략(정리·이동·납입)은 전부 금액 산식을 갖는다 — 대상 금액이
+            # 0원이면 요건은 성립해도 이 전략이 움직일 것이 없다. 예: 공격투자형 + 예금 100%
+            # 는 'mis' 요건이지만 위험자산 초과분이 0원이라 축소 전략(mis_fix)이 아니라 편중
+            # 해소(dep_shift)가 답이다. 0원을 그대로 흘리면 "초과분 0원을 매수" 같은 절이
+            # 렌더링된다(9케이스 목업 적재 때 실제로 그랬다).
+            dropped.append(f"{b['spec']['title']} — 대상 금액 0원 (요건은 성립하나 실행 대상 없음)")
+            continue
+        if pool:
             alloc = min(b["req"], pools.get(pool, 0))
             if alloc < MIN_ALLOC:
                 dropped.append(f"{b['spec']['title']} — 동일 재원({pool}) 이 선행 전략에 배분 완료")
@@ -321,7 +329,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         # AI 산출로 오인"하지 않도록, 빈 이유를 사람이 읽을 수 있게 남긴다.
         "llm_skipped": {},
         # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(REQUIREMENTS.md ④).
-        "top_holdings": top_reference_products(),
+        "top_holdings": top_reference_products(p),
         # 고객님께 안내해보세요 — 문제상황에 맞는 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨).
         "outreach": next_event_and_seminar(situations),
         "items": [{
@@ -354,8 +362,10 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             "consult_resources": consult_resource_candidates(p, situations),
             "outreach": outreach_candidates(situations),
         },
-        # 상담 이력 — consult_agent 가 기록한 대화이력 요약(REQUIREMENTS.md §14). 읽기만 한다 —
-        # strategy_agent 는 세션 저장소에 쓰지 않는다("코드=사실" 경계를 대화이력에도 유지).
+        # 상담 이력(REQUIREMENTS.md §14) — 세션 저장소가 유일한 읽기 경로다. 과거 상담
+        # 기록(직원이 고객과 나눈 것)도 거기 들어와 있다: 목업은 scripts/seed_sessions.py
+        # 가 심고, 실서비스에서는 CRM 이 같은 자리를 채운다. strategy_agent 는 읽기만
+        # 한다("코드=사실" 경계를 대화이력에도 유지).
         "consult_history": summarize_for_briefing(p.id),
         # 근거 규정 — 규정 근거가 붙은 선정 항목. 적합성 원칙 등 판단의 출처를 추적 가능하게 한다.
         "regulations": [{"title": b["spec"]["title"], "regulation": b["spec"]["regulation"]}

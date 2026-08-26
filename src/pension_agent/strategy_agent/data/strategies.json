@@ -270,7 +270,7 @@
         },
         "clause": "예금 {port0}% 중 {move_pct}%p({amount})을 {product_action}",
         "benefit": "예금에 묶인 자금 일부를 옮겨 편중을 줄이고 기대수익을 높입니다.",
-        "evidence": "예금 비중 {port0}% 편중 — 예금·현금성 편중 고객은 이탈률이 1.3배 높다",
+        "evidence": "원리금보장·현금성 비중 {port0}% 편중 — 편중 고객은 이탈률이 1.3배 높다",
         "confidence": "행내가이드",
         "topic_keys": [
           "고유계정대",

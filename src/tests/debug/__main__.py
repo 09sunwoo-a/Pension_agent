@@ -3,8 +3,8 @@
     cd src
     python -m tests.debug --script tax_credit_known_wrong --debug --show-llm
     python -m tests.debug --debug "세액공제 한도가 얼마야?"          # 실제 LLM
-    python -m tests.debug -c C3 --debug "질문1" "질문2"              # 멀티턴 한 줄 재현
-    python -m tests.debug -c C3 --debug                              # REPL
+    python -m tests.debug -c 198734-1205842 --debug "질문1" "질문2"  # 멀티턴 한 줄 재현
+    python -m tests.debug -c 198734-1205842 --debug                  # REPL
     python -m tests.debug --list                                     # 시나리오 목록
 
 **인자 규약은 운영 CLI(`pension_agent.consult_agent.__main__`)와 같다** — 그래야 평소 쓰던

@@ -100,7 +100,7 @@ def _eval_condition(cond: dict | list, p: Profile) -> bool:
 _BRACKET_LABEL = {"5500이하": "5,500만원 이하", "5500초과": "5,500만원 초과"}
 
 
-def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
+def _three_way_breakdown(p: Profile) -> dict[str, float] | None:
     """3분류 운용현황 — 고유계정대/실적배당형/원리금보장형(REQUIREMENTS.md ③).
 
     cash_idle_pct(고유계정대 비중)가 없으면 None — 화면은 이 경우 3분류 표시를 생략한다
@@ -108,9 +108,20 @@ def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
     다룬다 — port[0] 자체는 위험자산 한도 등 기존 게이팅 로직이 그대로 참조하므로 건드리지
     않는다(port 4분류는 불변, 이 3분류는 순수 표시용 추가 뷰다).
     """
+    if p.assets:
+        # 원장(assets)이 있으면 거기서 뽑는다. port 4분류는 정수 반올림이라 원장의 7.7% 가
+        # 8% 로 나가고, 그러면 같은 재료 안에 고유계정대가 8%(3분류)·7.7%(자산군별) 두 값으로
+        # 실린다 — 어느 쪽을 인용해도 다른 줄과 어긋나는 답이 된다.
+        by = {a["type"]: a["pct"] for a in p.assets}
+        grouped = {
+            "고유계정대": by.get("고유계정대", 0.0),
+            "실적배당형": round(by.get("수익증권", 0.0) + by.get("ETF", 0.0), 1),
+            "원리금보장형": round(by.get("예금", 0.0) + by.get("GIC", 0.0) + by.get("기타", 0.0), 1),
+        }
+        return {k: v for k, v in grouped.items()}
     if p.cash_idle_pct is None:
         return None
-    return {
+    return {   # 원장 없이 조립된 프로파일(합성 케이스) — 4분류 요약에서 되짚는다
         "고유계정대": p.cash_idle_pct,
         "실적배당형": p.port[1] + p.port[2] + p.port[3],
         "원리금보장형": p.port[0] - p.cash_idle_pct,
@@ -206,8 +217,23 @@ def _briefing(p: Profile) -> dict:
     three_way = _three_way_breakdown(p)
     if three_way:
         snap["운용현황(3분류)"] = " · ".join(f"{k} {v}%" for k, v in three_way.items())
+    # 자산군별 **금액**. 위의 보유구성·3분류는 비중뿐이라 "고유계정대 얼마야?" 처럼 금액을
+    # 묻는 질문에 답할 재료가 없었다(대화형이 "금액은 재료에 없어요" 로 답하던 자리).
+    # 비중도 여기 것이 원장값이다 — 4분류 요약은 정수 반올림이라 7.7% 가 8% 로 보인다.
+    if p.assets:
+        snap["자산군별"] = " · ".join(
+            f"{a['type']} {won(a['amount'])}({a['pct']}%)" for a in p.assets)
     if p.matDD is not None:
-        snap["만기도래"] = f"D-{p.matDD} · {won(p.matAmt)}"
+        # **보유한 만기를 전부 싣는다.** 예금과 GIC 의 만기가 서로 다른 고객이 있어서,
+        # 가장 가까운 한 건만 실으면 "만기 언제야?" 에 나머지가 없는 것처럼 답하게 된다.
+        # 날짜를 함께 싣는 이유도 같다 — 재료에 없으면 대화형이 기준일에서 계산해 말한다.
+        if p.maturities:
+            snap["만기도래"] = " · ".join(
+                f"{m['date']} (D-{m['dd']}) {m['type']} {won(m['amount'])}"
+                for m in p.maturities)
+        else:  # 만기 목록 없이 조립된 프로파일(합성 케이스) — 가장 가까운 건만 표기한다
+            when = f"{p.matDate} (D-{p.matDD})" if p.matDate else f"D-{p.matDD}"
+            snap["만기도래"] = f"{when} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
     # 근거 수치는 여기서 확정하고, 실제 제안 여부는 LLM 이 맥락상 판단한다(prompts.py).
     # 단 연금수령 개시 계좌는 추가입금 자체가 불가하므로(방법론 59) 납입여력을 제시하지 않고,
@@ -217,6 +243,54 @@ def _briefing(p: Profile) -> dict:
         snap["연금수령"] = "수령 중 · 추가납입 불가(연금지급설계 등록 계좌)"
     elif p.room > 0:
         snap["납입여력"] = f"{won(p.room * 10000)} (연 납입한도 1,800만원 이내)"
+
+    # 보유상품 개별 종목. 자산군별 합계로는 "무슨 상품 들고 있어"·"판매중단된 거 있어"에
+    # 답할 수 없다. 수익률은 **고객 보유수익률**(그 고객이 실제로 얻은 것)을 쓴다 —
+    # 상품의 최근 1년 수익률과 다르고, 직원이 묻는 것은 이 고객의 손익이다.
+    if p.holdings:
+        snap["보유상품"] = " · ".join(
+            f"{h['name']} {won(h['amount'])}"
+            + (f" 수익률 {h['ret_own'] * 100:.1f}%" if h.get("ret_own") is not None else "")
+            + (f" 금리 {h['rate'] * 100:.2f}%" if h.get("rate") else "")
+            + (" ⚠판매중단" if h["discontinued"] else "")
+            for h in p.holdings)
+    # 동연령대 비교 — 모수가 저장소 밖이라 엔진이 산출할 수 없는 조인값이다.
+    if p.peer:
+        q, bits = p.peer, []
+        if q.get("avg_ret") is not None:
+            bits.append(f"동연령 평균 수익률 {q['avg_ret']}%")
+        if q.get("top1_ret") is not None:
+            bits.append(f"상위1% 평균 수익률 {q['top1_ret']}%")
+        if q.get("top1_guaranteed_pct") is not None:
+            bits.append(f"상위1% 원리금보장 비중 {q['top1_guaranteed_pct']}%")
+        if q.get("top1_funds"):
+            bits.append("상위1% 인기 펀드 " + ", ".join(q["top1_funds"]))
+        if q.get("top1_etfs"):
+            bits.append("상위1% 인기 ETF " + ", ".join(q["top1_etfs"]))
+        snap["동연령대비교"] = " · ".join(bits)
+    # 거래 활동 — "최근에 거래한 적 있어" 는 운용변경 경과월(nchM)만으로 답할 수 없다.
+    if p.activity:
+        a, bits = p.activity, []
+        for label, key in (("최근 매매", "last_trade"), ("최근 운용지시", "last_order"),
+                           ("최근 입금", "last_deposit")):
+            if a.get(key):
+                bits.append(f"{label} {a[key]}")
+        if a.get("trades_1y") is not None:
+            bits.append(f"1년 매매 {a['trades_1y']}회")
+        if a.get("cash_delta_1m"):
+            bits.append(f"최근 1개월 고유계정대 증감 {won(a['cash_delta_1m'])}")
+        if bits:
+            snap["거래활동"] = " · ".join(bits)
+
+    # ISA 만기자금 — **IRP 계좌 밖의 돈**이라 보유 현황과 갈라 적는다. 추가납입 상담의
+    # 재원 후보이고, 만기가 임박하면 그 시점이 상담 창구가 된다(시연 케이스 2건).
+    if p.isa:
+        dd = f" (D-{p.isa['dd']})" if p.isa.get("dd") is not None else ""
+        snap["ISA만기자금(IRP 외부)"] = (
+            f"{won(p.isa['amount'])} · 만기 {p.isa['date']}{dd} · {p.isa['org']}")
+    # 연도별 납입 이력 — "작년엔 얼마 넣었어" 는 당해 납입액만으로 답할 수 없다.
+    if p.paid_by_year:
+        snap["납입이력"] = " · ".join(f"{y} {won(v)}" for y, v in p.paid_by_year.items())
 
     # 「고객이 모르는 자기 현황」 — 07_에이전트_기능정의/01 ① 필수 구성 요소 3.
     # 브리핑 화면에 따로 칸을 만들지 않고 재료로만 싣는다: 이 항목은 화면(왼쪽)이 아니라

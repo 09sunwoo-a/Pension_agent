@@ -1,0 +1,20 @@
+{
+  "customer_id": "165932-8741205",
+  "sessions": [
+    {
+      "session_id": "past-2025-12-15",
+      "started_at": "2025-12-15T09:00:00+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "ts": "2025-12-15T09:00:00+00:00",
+          "role": "record",
+          "text": "보유 펀드 손실에 대한 불만을 표명. 추가 손실 우려로 즉시 매도보다는 상품 상태와 대안을 먼저 비교해달라고 요청.",
+          "intent": null,
+          "tool_calls": []
+        }
+      ],
+      "outcome": null
+    }
+  ]
+}

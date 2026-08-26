@@ -649,7 +649,16 @@ def _print(r: dict) -> None:
         th_sec = sections.BY_KEY["top_holdings"]
         print(f"\n  [{th_sec.full_title}]  ※ {th_sec.note}")
         for th in f["top_holdings"]:
-            print(f"    · {th['product_name']} — {th['description']} (최근 1년 {th['return_1y']}%)")
+            # 값이 있는 칸만 그린다. 원장의 동연령 비교는 상품명만 주고 설명·수익률이
+            # 없는데, 빈 값을 그대로 끼우면 "— (최근 1년 None%)" 이 화면에 나간다.
+            bits = [f"    · {th['product_name']}"]
+            if th.get("description"):
+                bits.append(f"— {th['description']}")
+            if th.get("return_1y") is not None:
+                bits.append(f"(최근 1년 {th['return_1y']}%)")
+            elif th.get("peer_top1_return") is not None:
+                bits.append(f"(동연령 상위 1% 평균 수익률 {th['peer_top1_return']}%)")
+            print(" ".join(bits))
     outreach = f.get("outreach") or {}
     if outreach.get("event") or outreach.get("seminar"):
         print(f"\n  [{sections.title('outreach')}]")
@@ -695,6 +704,10 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
 
     name = " ".join(sys.argv[1:]).strip()
+    if not PERSONAS:
+        print("등록된 고객이 없습니다. 시연용 고객 데이터가 정해지면 "
+              "pension_agent/strategy_agent/customer.py 의 PERSONAS 에 채웁니다.")
+        raise SystemExit(1)
     targets = [p for p in PERSONAS if not name or p.nm == name]
     if not targets:
         print(f"'{name}' 에 해당하는 고객이 없습니다. 대상: {', '.join(p.nm for p in PERSONAS)}")

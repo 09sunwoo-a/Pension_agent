@@ -87,6 +87,13 @@ def summarize_for_briefing(customer_id: str, n: int = 3) -> list[str]:
     lines = []
     for s in sessions[:n]:
         date = s["started_at"][:10]
-        n_turns = len(s["turns"])
-        lines.append(f"{date} 상담 — {n_turns}턴 진행")
+        turns = s["turns"]
+        # 과거 상담 기록(role=record)은 «무슨 얘기를 했는지» 자체가 내용이므로 그대로 싣는다.
+        # 에이전트와 나눈 대화는 발화가 길고 여러 턴이라 건수로만 요약한다 — 화면 §14 는
+        # 한 줄짜리 목록이고, 원문이 필요하면 대화형 history 도구가 발췌를 싣는다.
+        record = next((t for t in turns if t.get("role") == "record"), None)
+        if record:
+            lines.append(f"{date} 상담 — {' '.join((record.get('text') or '').split())}")
+        else:
+            lines.append(f"{date} 상담 — {len(turns)}턴 진행")
     return lines

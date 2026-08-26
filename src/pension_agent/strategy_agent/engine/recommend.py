@@ -92,13 +92,27 @@ def render_recommendation(
     return out
 
 
-def top_reference_products(n: int = 2) -> list[dict]:
+def top_reference_products(p: Profile | None = None, n: int = 2) -> list[dict]:
     """수익률 상위 1% 고객 상품 사례 n개(기본 2개) — REQUIREMENTS.md ④.
 
-    고객별 필터가 없다 — 이 섹션 자체가 "이 고객에 대한 추천"이 아니라 고성과 고객의 실제
-    운용 사례를 비교·참고 정보로 보여주는 것이기 때문이다(REQUIREMENTS.md §7). 수익률 내림차순
-    상위만 뽑는 순수 데이터 조회이며 LLM 이 개입하지 않는다.
+    "이 고객에 대한 추천"이 아니라 고성과 고객의 실제 운용 사례를 비교·참고 정보로 보여주는
+    섹션이다(REQUIREMENTS.md §7). 순수 데이터 조회이며 LLM 이 개입하지 않는다.
+
+    **비교 대상은 동연령대다.** 원장이 고객별로 "동연령대 상위 1% 가 많이 담은 펀드·ETF" 를
+    주므로 그것을 쓴다 — 예전에는 `data/top_holdings.json` 의 자리표시자 2건을 고객 구분
+    없이 전원에게 똑같이 보여줬다(그 파일 note 가 "실제 집계로 교체해야 한다" 고 적어둔
+    자리다). 66세 고객과 29세 고객에게 같은 상품을 "상위 1% 가 담은 것" 이라고 보여주면
+    비교 정보로서 뜻이 없다.
+
+    원장에는 상품명만 있고 설명·수익률이 없다. 지어내지 않고 **비운다** — 화면은 값이 있는
+    칸만 그린다. 대신 그 연령대의 상위 1% 평균 수익률을 함께 실어, 무엇과 비교하는
+    수치인지가 드러나게 한다.
     """
+    if p is not None and p.peer and (p.peer.get("top1_funds") or p.peer.get("top1_etfs")):
+        names = [*(p.peer.get("top1_funds") or []), *(p.peer.get("top1_etfs") or [])]
+        return [{"product_name": nm, "description": "", "return_1y": None,
+                 "peer_top1_return": p.peer.get("top1_ret")} for nm in names[:n]]
+    # 원장에 동연령 비교가 없는 프로파일(합성 케이스) — 자리표시자 카탈로그로 물러선다.
     ranked = sorted(TOP_HOLDINGS, key=lambda r: r["return_1y"], reverse=True)
     return [
         {"product_name": r["product_name"], "description": r["description"],

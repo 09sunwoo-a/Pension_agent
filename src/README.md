@@ -47,8 +47,8 @@ cp .env.example .env      # 사내 GenAI 게이트웨이 URL·키 입력 (pensio
 
 ```bash
 # ── 실행
-python -m pension_agent.strategy_agent.agent 이현우    # 단일 고객 AI 브리핑 (CLI)
-python -m pension_agent.consult_agent -c C3            # 대화형 에이전트 REPL — 고객 화면이 열린 상태
+python -m pension_agent.strategy_agent.agent 이준호            # 단일 고객 AI 브리핑 (CLI)
+python -m pension_agent.consult_agent -c 198734-1205842        # 대화형 REPL — 고객 화면이 열린 상태
 streamlit run app.py                                   # 평가·피드백 대시보드 (+대화형 에이전트 테스트 탭)
 
 # ── 테스트 (LLM 키 없이 동작)
@@ -64,8 +64,8 @@ python -m scripts.kb_build.test_paths           # 경로·locator 실재 (폴더
 # 인자 규약이 위 REPL 과 같다. 평소 쓰던 줄의 모듈 이름만 바꾸고 --debug 를 붙이면 된다.
 CAD="python -m tests.debug"
 $CAD --debug "세액공제 한도가 얼마야?"                  # 단발 + 트레이스
-$CAD --debug -c C3                                      # REPL + 턴마다 트레이스
-$CAD --debug -c C3 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"   # 멀티턴 한 줄 재현
+$CAD --debug -c 198734-1205842                          # REPL + 턴마다 트레이스
+$CAD --debug -c 198734-1205842 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"  # 멀티턴
 $CAD --script tax_credit_known_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
 $CAD --list                                              # 시나리오 목록
 # -c 값은 손대지 않고 그대로 넘어간다. 다만 이 체크아웃에 없는 id 면 시작할 때 끊고 있는
@@ -89,8 +89,9 @@ python -m scripts.demo_status                   # docs/DEMO_STATUS.md 갱신
 패키지를 찾는다. 설치(`pip install -e .`)는 필요 없다.
 
 대화형 에이전트는 `-c/--customer` 로 "지금 열려 있는 고객"을 지정한다. 넘기지 않으면
-브리핑질의·LMS발송·수정 세 의도가 "고객 화면을 먼저 열어주세요"로 답한다. 고객 id 목록은
-`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 참고(예: 이현우=`C3`). 자세한 실행
+브리핑질의·LMS발송·수정 세 의도가 "고객 화면을 먼저 열어주세요"로 답한다. 고객 id(KB-PIN)
+목록은 `pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 참고(예: 이준호=
+`198734-1205842`) — 원장은 `customers.json`(scripts/import_customers.py 산출물)이다. 자세한 실행
 조합은 [pension_agent/consult_agent/README.md](pension_agent/consult_agent/README.md).
 
 LLM 은 `.env` 의 `LLM_BASE_URL` 유무로 사내(genai)/외부테스트(anthropic)를 자동 전환한다 →

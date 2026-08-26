@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import shutil
 import sys
 from pathlib import Path
 
@@ -23,9 +22,20 @@ def check(cond: bool, label: str, detail: str = "") -> None:
     _results.append((bool(cond), label, detail))
 
 
+#: 이 파일이 만드는 세션 고객 id. 정리는 **이것만** 지운다.
+_TEST_CUSTOMERS = ("TEST01", "TEST02", "NO_SUCH_CUSTOMER")
+
+
 def _clean_session_data() -> None:
-    if session_store.SESSION_DATA_DIR.exists():
-        shutil.rmtree(session_store.SESSION_DATA_DIR)
+    """이 테스트가 만든 세션 파일만 지운다.
+
+    예전에는 디렉터리를 통째로 rmtree 했다. session_data 가 실행 중에만 생기는 임시
+    데이터일 때는 맞았지만, 지금은 시연 픽스처(과거 상담 기록 — scripts/seed_sessions.py)가
+    거기 함께 산다 — 테스트 한 번 돌리면 그 픽스처가 통째로 날아갔고, 다음 시연에서
+    "지난 상담 없음"이 되는데 아무도 그 인과를 짚지 못한다.
+    """
+    for customer_id in _TEST_CUSTOMERS:
+        (session_store.SESSION_DATA_DIR / f"{customer_id}.json").unlink(missing_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -101,6 +111,68 @@ check(not any("sys.path" in (f.read_text(encoding="utf-8"))
 
 
 # ─────────────────────────────────────────────────────────────
+# 수치 토큰화 — 뒤따르는 쉼표를 숫자에 붙이지 않는다
+#
+# `_NUM` 이 `\d[\d,]*` 이던 시절, "만기 D-17, 4,050만원"에서 `17,` 을 통째로 집었다.
+# 원장에는 "D-17 ·" 라 `17` 로 들어가 있어서 **맞는 답변이 '원장 밖 수치'로 거부**됐고,
+# compose 는 근거 원문을 통째로 덤프했다 — 직원 화면에 답변 대신 재료 표가 떴다.
+# 천단위 쉼표(4,050)는 숫자의 일부이므로 함께 고정한다.
+# ─────────────────────────────────────────────────────────────
+
+from pension_agent.verify import numbers as _numbers, verify_texts as _verify_texts
+
+# numbers() 는 **값 보존 정규형**을 돌려준다(verify._canon) — 천단위 쉼표 제거·소수
+# 끝자리 0 제거. 같은 값이 표기 차이로 다른 토큰이 되면 맞는 답변이 «원장 밖 수치»로
+# 버려진다(아래 15.0%/15% 케이스가 그 사고의 회귀 고정이다).
+_TOKENS = [
+    ("만기 D-17, 4,050만원", {"17", "4050"}),
+    ("D-17 · 4,050만원", {"17", "4050"}),
+    ("연 3.65%", {"3.65%"}),
+    ("5,500만원 초과 13.2%", {"5500", "13.2%"}),
+    ("1,234.5원", {"1234.5"}),
+    ("예금 120만원(15.0%)", {"120", "15%"}),
+    ("금리 3.00%", {"3%"}),
+]
+for _text, _want in _TOKENS:
+    check(_numbers(_text) == _want, f"수치 토큰화: {_text}", str(sorted(_numbers(_text))))
+
+# 쉼표 하나로 판정이 뒤집히지 않는다 — 같은 값을 말하는 두 문장은 같은 결과여야 한다.
+_ledger = ["· 만기도래 2026-09-10 (D-17) · 4,050만원"]
+check(_verify_texts("만기 D-17, 4,050만원이에요.", _ledger)[0]
+      and _verify_texts("만기 D-17 · 4,050만원이에요.", _ledger)[0],
+      "구분자(쉼표/가운뎃점)가 원장 대조 결과를 바꾸지 않는다")
+check(not _verify_texts("만기 금액은 7,777만원이에요.", _ledger)[0],
+      "원장 밖 수치는 여전히 거부된다")
+
+# 소수점 표기 차이로 판정이 뒤집히지 않는다 — 원장 "15.0%" 를 답변이 "15%" 라 말한 것은
+# 같은 값이다. 이게 다르게 취급되던 동안, "예금 비중 몇 프로야?" 의 **맞는 답**이 버려지고
+# compose 가 브리핑 재료 표를 통째로 덤프했다(실사고).
+_pct_ledger = ["· 자산군별 예금 120만원(15.0%) · 고유계정대 600만원(75.0%)"]
+check(_verify_texts("예금 비중은 15%예요.", _pct_ledger)[0],
+      "소수 끝자리 0(15.0%↔15%)이 원장 대조 결과를 바꾸지 않는다")
+check(not _verify_texts("예금 비중은 15.5%예요.", _pct_ledger)[0],
+      "값이 실제로 다른 수치(15.5%)는 여전히 거부된다")
+check(not _verify_texts("예금 비중은 15예요.", _pct_ledger)[0],
+      "%-유무는 보존된다 — 원장의 15% 로 답변의 맨 15 를 허용하지 않는다")
+
+
+# ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# 시연 픽스처는 테스트가 지우지 않는다
+#
+# session_data 에는 과거 상담 기록(scripts/seed_sessions.py 가 심는 목업)이 함께 산다.
+# 테스트 정리가 «이번 실행이 만든 것»을 넘어서면 그 픽스처가 사라지고, 다음 시연에서
+# 상담 이력이 통째로 비는데 원인을 짚기 어렵다.
+# ─────────────────────────────────────────────────────────────
+
+_seeded = ([fp for fp in session_store.SESSION_DATA_DIR.glob("*.json")
+            if fp.stem not in _TEST_CUSTOMERS]
+           if session_store.SESSION_DATA_DIR.exists() else [])
+check(bool(_seeded), "시연 픽스처(과거 상담 세션)가 테스트 후에도 남아 있다 "
+                     "— 없으면 python -m scripts.seed_sessions", str(len(_seeded)))
+
+
 # 저작 검증 — 작성자가 누구인지로 자료가 무엇인지를 추론한 문장을 잡는다
 #
 # 회귀 대상: "작성자가 인재개발부 소속이라 교육 목적으로 정리된 자료로 보이나 본부 공식

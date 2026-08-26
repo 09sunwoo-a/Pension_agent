@@ -153,7 +153,12 @@ def _capture(argv: list[str]) -> tuple[int, str]:
 
 code, out = _capture(["-c", _UNKNOWN, "세액공제 한도가 얼마야?"])
 check(code == 2 and "없습니다" in out, "없는 고객 id 면 실행 전에 끊는다", f"code={code}")
-check("C3 이현우" in out and "--any-customer" in out,
+# 특정 페르소나를 이름으로 박지 않는다 — 고객 데이터는 이미 한 번 통째로 갈렸다
+# (C1~C6 → PIN 9케이스). 안내가 **지금 적재된 것**을 말하는지만 본다.
+from pension_agent.strategy_agent import customer as SC  # noqa: E402, PLC0415
+
+_first = SC.PERSONAS[0]
+check(f"{_first.id} {_first.nm}" in out and "--any-customer" in out,
       "안내에 이 체크아웃의 실제 고객 id 와 우회 방법이 들어 있다", out.strip()[:80])
 
 code, out = _capture(["--script", "tax_credit_clean", "-c", _UNKNOWN, "--any-customer", "--debug"])

@@ -401,6 +401,17 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
     if facts.get("conditions"):
         lines.append(f"· 성립 요건: {', '.join(facts['conditions'])}")
+    # 「왜 이 고객이 관리 대상인가」 — 직원이 실제로 가장 많이 묻는 것인데 통째로 빠져
+    # 있었다. 요건 코드(dor·mis…)만 있고 그 요건이 왜 문제인지, 어느 세그먼트에 걸렸는지,
+    # 무엇을 근거로 뽑혔는지가 재료에 없어서 LLM 이 요건 이름만 풀어 쓰거나 지어냈다.
+    for label, values in (("왜 이 고객인가", facts.get("why_this_customer")),
+                          ("판단근거", facts.get("rationale")),
+                          ("고지 필요", facts.get("cautions")),
+                          ("확인 필요", facts.get("needs_confirm"))):
+        for v in values or []:
+            lines.append(f"· {label}: {v}")
+    for sit in facts.get("problem_situations") or []:
+        lines.append(f"· 문제상황 {sit['no']}: {sit['title']} [{sit['group']}]")
     # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
     # 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 산문이므로 원문 스팬은 아니다.
     for label, text in (("AI브리핑 문장", result.get("sentence")),
@@ -414,10 +425,33 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 출처를 낸다. 지식 카드가 아니라 **전략제안이 계산한 브리핑 재료**라 카드 id 가 없지만,
     # "이 값이 어디서 왔나"는 답해야 한다(§3 모든 답에 출처를 밝힌다). 출처가 안 실리면
     # 화면에 "근거: 없음"이 뜨고, 직원은 값을 어디서 확인할지 모른 채 답만 받는다.
+    # 출처는 **고객 원장**이지 지식 카드가 아니다. 예전 표기("AI브리핑 재료 /
+    # briefing.<id>")는 화면에서 카드 id 처럼 읽혀, 계좌에 그냥 들어 있는 값이 어딘가에서
+    # 검색해 온 자료처럼 보였다. 검색으로 온 재료가 아니므로 관련도(score)도 없다.
     return _ev("customer", query, "\n".join(lines),
-               [{"id": f"briefing.{customer_id}", "title": f"고객 {customer_id} AI브리핑 재료",
-                 "doc": "전략제안 산출(브리핑 화면과 같은 값)", "score": None, "page": None}],
-               allow=["\n".join(lines), json.dumps(facts, ensure_ascii=False, default=str)])
+               [{"id": f"customer.{customer_id}",
+                 "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
+                 "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
+                 "score": None, "page": None}],
+               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)])
+
+
+#: 인용 허용 집합에서 빼는 facts 가지. 값이 아니라 **선별 전 후보 더미**다.
+#:
+#: allow 는 "이 답변이 인용해도 되는 값"의 집합이고, verify 는 답변의 수치가 그 안에 있는지만
+#: 본다. 그래서 답변이 쓰지도 않을 카드 더미를 넣으면 그 안의 온갖 숫자가 **아무 주장에나
+#: 근거를 대주는 꼴**이 된다. pools(⑦⑧ 후보군)는 카드 id·발췌가 통째로 들어와 이준호
+#: 케이스에서만 허용 수치를 22개 → 110개로 5배 불렸고, 그 결과 "만기일은 2026년 9월
+#: 11일"(오답)이 통과했다 — 9 와 11 이 무관한 카드 어딘가에 있었기 때문이다.
+#:
+#: 반대로 items·blocked_products·dropped·outreach 는 뺄 수 없다. 직원이 실제로 묻는
+#: 것들이다("왜 ELB 는 빠졌어?" → blocked_products 의 최소가입금액).
+_POOL_KEYS = ("pools",)
+
+
+def _citable(facts: dict) -> dict:
+    """인용 허용 집합에 실을 facts. 후보 더미만 걷어낸다."""
+    return {k: v for k, v in facts.items() if k not in _POOL_KEYS}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -441,7 +475,10 @@ HISTORY_MARK = "※ 지난 상담 기록입니다 — 그때 나눈 이야기이
 #: 아무도 안 읽고 원장만 무거워진다.
 HISTORY_SESSIONS, HISTORY_TURNS, HISTORY_EXCERPT = 3, 8, 120
 
-_HISTORY_ROLE = {"user": "직원", "agent": "에이전트", "correction": "수정요청", "tool": "도구실행"}
+#: 세션 턴의 역할 → 사람이 읽는 이름. `record` 는 발화가 아니라 «과거 상담 결과 요약»이다
+#: (실서비스의 CRM 상담 기록 자리 — scripts/seed_sessions.py 가 목업으로 심는다).
+_HISTORY_ROLE = {"user": "직원", "agent": "에이전트", "correction": "수정요청",
+                 "tool": "도구실행", "record": "상담기록"}
 
 
 def _history(state: AgentState, query: str) -> Evidence | None:
@@ -464,6 +501,9 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     except Exception:
         return None
 
+    # 읽는 곳은 **여기 하나**다. 과거 상담 기록(직원이 고객과 나눈 것)도 세션 저장소에
+    # 들어와 있다 — 원장에서 따로 읽는 두 번째 경로를 두면 같은 상담이 두 번 실린다
+    # (scripts/seed_sessions.py 가 목업을 심고, 실서비스에서는 CRM 이 같은 자리를 채운다).
     lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
     recent = sorted(sessions, key=lambda s: s.get("started_at") or "", reverse=True)
     for session in recent[:HISTORY_SESSIONS]:
@@ -482,7 +522,8 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     return _ev("history", query, "\n".join(lines),
                [{"id": f"session.{customer_id}", "title": f"고객 {customer_id} 상담 이력",
-                 "doc": "상담 이력 기록(에이전트가 턴마다 남긴 것)", "score": None, "page": None}],
+                 "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
+                 "score": None, "page": None}],
                notices=[HISTORY_MARK])
 
 
@@ -608,7 +649,11 @@ TOOLS: dict[str, Tool] = {
         Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment),
         Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method),
         Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip),
-        Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·요건)를 돌려준다", _customer),
+        # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
+        # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
+        # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.
+        Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·성립 요건, 그리고 이 고객이 "
+             "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
              _history),
     )
@@ -618,12 +663,18 @@ TOOLS: dict[str, Tool] = {
 _NEEDS_CUSTOMER = frozenset({"customer", "history"})
 
 
+def usable(state: AgentState | None = None) -> list[str]:
+    """이 턴에 실제로 부를 수 있는 도구 이름. 고객 화면이 닫혀 있으면 고객 전제 도구는
+    빠진다(§3). 카탈로그와 재계획의 '아직 안 써 본 도구'가 같은 목록을 봐야 한다 —
+    갈리면 카탈로그에 없는 도구를 다시 시도하라고 말하게 된다."""
+    opened = bool((state or {}).get("customer_id"))
+    return [t.name for t in TOOLS.values() if opened or t.name not in _NEEDS_CUSTOMER]
+
+
 def catalog(state: AgentState | None = None) -> str:
     """계획 프롬프트에 실리는 도구 목록. 쓸 수 없는 도구는 애초에 보여주지 않는다 —
     고객 화면이 닫혀 있는데 customer 를 제안하게 두면 한 스텝을 낭비한다."""
-    opened = bool((state or {}).get("customer_id"))
-    usable = [t for t in TOOLS.values() if opened or t.name not in _NEEDS_CUSTOMER]
-    return "\n".join(f"- {t.name}: {t.desc}" for t in usable)
+    return "\n".join(f"- {TOOLS[n].name}: {TOOLS[n].desc}" for n in usable(state))
 
 
 def run(name: str, state: AgentState, query: str) -> Evidence | None:

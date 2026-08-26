@@ -1,0 +1,20 @@
+{
+  "customer_id": "181245-3097614",
+  "sessions": [
+    {
+      "session_id": "past-2026-02-20",
+      "started_at": "2026-02-20T09:00:00+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "ts": "2026-02-20T09:00:00+00:00",
+          "role": "record",
+          "text": "원금손실 우려가 커 IRP는 예금 중심으로 유지 중. 다만 타 계좌에서 ETF 투자경험이 있다고 언급.",
+          "intent": null,
+          "tool_calls": []
+        }
+      ],
+      "outcome": null
+    }
+  ]
+}

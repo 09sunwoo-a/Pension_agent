@@ -26,7 +26,8 @@ from typing import Any
 from pension_agent.consult_agent import guard, relations, tools
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
-    ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_SYSTEM, MUST_BLOCK, PLAN_PROMPT, SHAPE_BLOCK,
+    ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_SYSTEM, MUST_BLOCK, PLAN_MISSES_BLOCK,
+    PLAN_PROMPT, PLAN_RETRY_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -96,9 +97,44 @@ def _json_obj(text: str) -> dict:
 # Node. plan_step — 다음 도구 하나를 고르고 실행해 원장에 쌓는다
 # ─────────────────────────────────────────────────────────────
 
+def _untried(state: AgentState, calls: list[str]) -> list[str]:
+    """이 턴에 아직 안 불러본 도구 이름. 재계획 관문(_wrap_up)과 재계획 지시가 함께 쓴다."""
+    used = {c.split(":", 1)[0] for c in calls}
+    return [name for name in tools.usable(state) if name not in used]
+
+
+def _wrap_up(state: AgentState, evidence: list, calls: list[str]) -> dict[str, Any]:
+    """계획을 끝내기 전 마지막 관문 — **근거 0건이면 한 번은 다시 계획한다**(§5).
+
+    LLM 이 done 을 말했든, 같은 호출을 반복했든, 없는 도구를 골랐든 끝내려는 사건은
+    같다. 그런데 근거가 0건인 채 여기서 끝나면, 재료가 없는 것이 아니라 **도구·질의
+    고르기를 실패한 것**이 '근거 없음'으로 답해진다 — 다른 도구를 써 볼 기회를 코드가
+    한 번 만든다(재계획 프롬프트에는 빗나간 호출과 안 써 본 도구가 실린다). 두 번째
+    끝내기는 존중한다: 정직한 '없음' 경로를 막지 않는다.
+    """
+    if evidence or state.get("plan_retry") or not _untried(state, calls):
+        return {"plan_done": True}
+    return {"plan_retry": True}
+
+
+def _misses_block(state: AgentState, misses: list[str], calls: list[str]) -> str:
+    """계획 프롬프트에 끼우는 '빗나간 호출' + (재계획 턴이면) '아직 안 써 본 도구' 블록.
+
+    원장에는 성공한 재료만 실리므로, 이 블록이 없으면 계획은 자기가 뭘 불러봤는지 모르고
+    같은 호출을 반복한다 — 반복은 코드가 끊고, 그러면 턴이 '근거 없음'으로 끝난다.
+    """
+    parts: list[str] = []
+    if misses:
+        parts.append(PLAN_MISSES_BLOCK.format(misses="\n".join(f"- {m}" for m in misses)))
+    if state.get("plan_retry"):
+        parts.append(PLAN_RETRY_BLOCK.format(untried=", ".join(_untried(state, calls))))
+    return "".join(parts)
+
+
 def plan_step(state: AgentState) -> dict[str, Any]:
     evidence = list(state.get("evidence") or [])
     calls = list(state.get("plan_calls") or [])
+    misses = list(state.get("plan_misses") or [])
 
     if len(calls) >= MAX_STEPS:
         return {"plan_done": True}
@@ -109,6 +145,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
             PLAN_PROMPT.format(
                 catalog=tools.catalog(state),
                 ledger=tools.summarize(evidence),
+                misses_block=_misses_block(state, misses, calls),
                 # 후속 질문("그럼 안 된다고 하면요?")은 이전 턴을 이어받아야 무엇을 묻는지
                 # 정해진다. 이 줄이 없으면 계획이 이번 질문 한 줄만 보고 재료를 고른다(§2-1).
                 history_block=format_history(state.get("history")),
@@ -136,7 +173,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
 
     name = action.get("tool")
     if action.get("done") or not isinstance(name, str) or name not in tools.TOOLS:
-        return {**alive, "plan_done": True}
+        return {**alive, **_wrap_up(state, evidence, calls)}
 
     # 이 도구가 마지막이라고 말했으면 한 바퀴를 아낀다 — 재료 하나로 끝나는 질문
     # ("이 고객 예금 잔액 얼마지")도 계획에만 LLM 을 두 번 쓰던 자리다. 상한은 그대로
@@ -148,7 +185,9 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         query = question
     signature = f"{name}:{query}"
     if signature in calls:
-        return {**alive, "plan_done": True}  # 같은 호출을 반복하면 진전이 없다
+        # 같은 호출을 반복하면 진전이 없다 — 도구를 다시 돌리지는 않되, 근거 0건이면
+        # _wrap_up 이 한 번 되돌려 보낸다(빗나간 호출 목록을 보여주며).
+        return {**alive, **_wrap_up(state, evidence, calls)}
 
     try:
         found = tools.run(name, state, query)
@@ -159,6 +198,11 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     update: dict[str, Any] = {**alive, "plan_calls": calls + [signature]}
     if found is not None:
         update["evidence"] = evidence + [found]
+    else:
+        # 빗나간 호출로 기록한다 — 다음 계획 프롬프트가 이걸 보고 같은 호출을 반복하는
+        # 대신 질의를 바꾸거나 다른 도구를 고른다(원장에는 성공한 재료만 실리므로,
+        # 이 기록이 없으면 계획은 자기가 뭘 불러봤는지 모른다).
+        update["plan_misses"] = misses + [signature]
 
     # `last` 는 **재료를 얻었을 때만** 존중한다. 근거를 못 찾았는데 루프를 끝내면 다른 도구를 써
     # 볼 기회가 없이 그 턴이 '근거 없음'으로 끝난다 — 계획이 고른 도구·질의가 빗나갔을
