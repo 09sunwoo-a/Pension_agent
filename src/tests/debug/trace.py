@@ -100,10 +100,17 @@ class Trace:
 
     def __init__(self) -> None:
         self.turns: list[Turn] = []
+        # 실행 자체에 대한 경고(예: 이 체크아웃에 없는 고객 id). 턴에 속하지 않으므로
+        # 따로 들고 있다가 트레이스 맨 위에 찍는다 — 트레이스만 붙여 보내도 원인이 보이게.
+        self.notes: list[str] = []
         self._calls: list[Call] = []   # 다음 노드가 가져갈 LLM 호출
         self._gates: list[Gate] = []   # 다음 노드가 가져갈 게이트 판정
 
     # ── 기록 ──────────────────────────────────────────────
+    def note(self, text: str) -> None:
+        if text and text not in self.notes:
+            self.notes.append(text)
+
     def begin_turn(self, question: str) -> None:
         self.turns.append(Turn(question=question))
 
@@ -351,6 +358,7 @@ def render(trace: Trace, show_llm: bool = False, last_only: bool = False) -> str
     if last_only:
         turns = turns[-1:]
     out: list[str] = ["━━ 트레이스 ━━"]
+    out += [f"  ⚠ {n}" for n in trace.notes]
     for index, turn in turns:
         if len(turns) > 1:
             out.append(f"\n> {turn.question}")

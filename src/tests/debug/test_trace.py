@@ -13,18 +13,21 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 import types
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from pension_agent import verify as V
+from pension_agent import session_store, verify as V
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import relations as REL
 from pension_agent.consult_agent import tools as T
 from pension_agent.consult_agent.nodes import plan as P
 from tests.debug import script, trace as TR
+from tests.debug.__main__ import main
 from tests.debug.runner import run
 
 #: 계측 전 원본. 검사 8(복원)이 이것과 대조한다 — import 시점에 잡아둬야 의미가 있다.
@@ -132,7 +135,40 @@ check(G._AGENT is None,
 
 
 # ─────────────────────────────────────────────────────────────
-# 8. 계측 대상이 사라지면 조용히 덜 보지 않고 크게 실패한다
+# 8. 없는 고객 id 를 조용히 넘기지 않는다
+# ─────────────────────────────────────────────────────────────
+# `-c` 값은 손대지 않고 graph.ask 로 그대로 간다. 그래서 없는 id 를 넣으면 에러 없이
+# 재료만 0건이 되고, **id 를 잘못 넣은 것과 그 고객에게 재료가 없는 것이 구분되지 않는다.**
+# 진단 도구에서 그 둘이 같아 보이면 안 된다.
+
+_UNKNOWN = "999999-9999999"
+
+
+def _capture(argv: list[str]) -> tuple[int, str]:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = main(argv)
+    return code, buf.getvalue()
+
+
+code, out = _capture(["-c", _UNKNOWN, "세액공제 한도가 얼마야?"])
+check(code == 2 and "없습니다" in out, "없는 고객 id 면 실행 전에 끊는다", f"code={code}")
+check("C3 이현우" in out and "--any-customer" in out,
+      "안내에 이 체크아웃의 실제 고객 id 와 우회 방법이 들어 있다", out.strip()[:80])
+
+code, out = _capture(["--script", "tax_credit_clean", "-c", _UNKNOWN, "--any-customer", "--debug"])
+check(code == 0 and f"⚠ {_UNKNOWN}" in out,
+      "--any-customer 면 진행하되 트레이스 맨 위에 경고가 남는다", f"code={code}")
+
+# 고객 id 를 준 실행은 상담이력을 남긴다(.gitignore 대상). 이번 실행이 만든 것만 지운다.
+_leftover = session_store.SESSION_DATA_DIR / f"{_UNKNOWN}.json"
+if _leftover.exists():
+    _leftover.unlink()
+check(not _leftover.exists(), "검사가 남긴 상담이력 파일을 치운다")
+
+
+# ─────────────────────────────────────────────────────────────
+# 9. 계측 대상이 사라지면 조용히 덜 보지 않고 크게 실패한다
 # ─────────────────────────────────────────────────────────────
 # 이 검사가 없으면, 운영 쪽에서 `_span_verdict` 를 인라인한 날 트레이스는 "게이트 통과"를
 # 찍는다 — 실은 게이트를 못 본 것인데. 진단 도구가 조용히 틀리는 것이 가장 나쁘다.

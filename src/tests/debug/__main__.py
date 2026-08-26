@@ -3,17 +3,25 @@
     cd src
     python -m tests.debug --script tax_credit_known_wrong --debug --show-llm
     python -m tests.debug --debug "세액공제 한도가 얼마야?"          # 실제 LLM
-    python -m tests.debug -c 198734-1205842 --debug "질문1" "질문2"  # 멀티턴 한 줄 재현
-    python -m tests.debug -c 181245-3097614 --debug                  # REPL
+    python -m tests.debug -c C3 --debug "질문1" "질문2"              # 멀티턴 한 줄 재현
+    python -m tests.debug -c C3 --debug                              # REPL
     python -m tests.debug --list                                     # 시나리오 목록
 
 **인자 규약은 운영 CLI(`pension_agent.consult_agent.__main__`)와 같다** — 그래야 평소 쓰던
 줄에 `--debug` 만 붙여 쓸 수 있다. `-c/--customer` 는 앞뒤 어디에 와도 되고, 질문이 여러
 개면 순서대로 한 턴씩(맥락 이어서), 질문이 없으면 REPL 이다. 여기에 셋이 더 있다:
 
-    --debug      답변 아래에 실행 트레이스를 붙인다
-    --show-llm   compose 가 LLM 에게 받은 문장(폐기됐어도)을 그대로 보여준다
-    --script N   캔드 LLM 시나리오로 실행한다(키 없이 돈다)
+    --debug          답변 아래에 실행 트레이스를 붙인다
+    --show-llm       compose 가 LLM 에게 받은 문장(폐기됐어도)을 그대로 보여준다
+    --script N       캔드 LLM 시나리오로 실행한다(키 없이 돈다)
+    --any-customer   이 체크아웃에 없는 고객 id 로도 그냥 진행한다(경고만)
+
+`-c` 로 넘긴 값은 **손대지 않고 그대로** `graph.ask(customer_id=...)` 로 간다 — 운영 CLI 와
+같다. 다만 없는 id 를 넘기면 아무 일도 일어나지 않은 것처럼 보인다(`get_profile` 이 None →
+고객 도구가 재료를 못 내놓음 → 재료 0건). **id 를 잘못 넣은 것과 그 고객에게 재료가 없는
+것이 화면에서 구분되지 않는다**는 뜻이라, 시작할 때 한 번 확인하고 이 체크아웃에 실제로
+있는 id 를 알려준다. 실제 고객 저장소로 바뀌면 이 조회가 의미를 잃으므로 `--any-customer`
+로 지나갈 수 있다.
 
 **운영 `__main__.py` 를 import 하지 않는다.** 그 파일은 import 즉시 `sys.argv` 를 파싱하고
 REPL 로 들어가는 스크립트라, 불러오는 순간 이 CLI 가 아니라 그쪽이 돈다. 그래서 답변·근거
@@ -52,6 +60,29 @@ def _print_answer(r: dict) -> None:
             _print_source(s)
 
 
+def _check_customer(customer_id: str | None, allow_any: bool) -> tuple[bool, str]:
+    """`-c` 로 받은 id 가 이 체크아웃에 있는가. 반환: (진행해도 되는가, 트레이스에 남길 경고).
+
+    조회는 운영 코드 것을 그대로 쓴다(`customer.get_profile`) — 같은 판정을 두 번 구현하지
+    않는다. 임포트를 함수 안에 두는 이유는 strategy_agent 가 무겁기 때문이다.
+    """
+    if not customer_id:
+        return True, ""
+    from pension_agent.strategy_agent import customer as SC  # noqa: PLC0415
+    if SC.get_profile(customer_id):
+        return True, ""
+
+    known = " · ".join(f"{p.id} {p.nm}" for p in SC.PERSONAS)
+    if allow_any:
+        return True, (f"{customer_id} 는 이 체크아웃에 없는 고객입니다(--any-customer) — "
+                      "고객 재료는 전부 0건이 됩니다.")
+    print(f"-c {customer_id} : 그런 고객이 이 체크아웃에 없습니다.")
+    print(f"   있는 고객: {known}")
+    print("   (id 체계가 다르면 페르소나 정의가 이 브랜치에 아직 안 들어온 것입니다)")
+    print("   그대로 넘기려면 --any-customer 를 붙이세요.")
+    return False, ""
+
+
 def _usage() -> None:
     print(__doc__)
     print("시나리오:")
@@ -88,7 +119,8 @@ def main(argv: list[str]) -> int:
 
     debug = "--debug" in argv
     show_llm = "--show-llm" in argv
-    argv = [a for a in argv if a not in ("--debug", "--show-llm")]
+    allow_any = "--any-customer" in argv
+    argv = [a for a in argv if a not in ("--debug", "--show-llm", "--any-customer")]
 
     scenario = None
     customer_id = None
@@ -110,9 +142,14 @@ def main(argv: list[str]) -> int:
         else:
             customer_id = value
 
+    ok, warning = _check_customer(customer_id, allow_any)
+    if not ok:
+        return 2
+
     questions = argv or ([scenario.question] if scenario else [])
 
     with session(customer_id=customer_id, scenario=scenario) as (ask, tr):
+        tr.note(warning)
         if questions:
             for question in questions:
                 if len(questions) > 1:

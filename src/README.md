@@ -68,6 +68,9 @@ $CAD --debug -c C3                                      # REPL + 턴마다 트�
 $CAD --debug -c C3 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"   # 멀티턴 한 줄 재현
 $CAD --script tax_credit_known_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
 $CAD --list                                              # 시나리오 목록
+# -c 값은 손대지 않고 그대로 넘어간다. 다만 이 체크아웃에 없는 id 면 시작할 때 끊고 있는
+# id 를 알려준다 — 없는 id 는 에러 없이 '재료 0건' 이 돼서 오타와 구분되지 않기 때문이다.
+# 그대로 넘기려면 --any-customer (트레이스 맨 위에 경고가 남는다).
 
 # ── 무결성 점검
 python -m pension_agent.strategy_agent.engine   # 전략 정의 검증 — 근거 교차검증 포함
