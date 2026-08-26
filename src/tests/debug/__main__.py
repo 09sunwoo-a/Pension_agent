@@ -3,11 +3,13 @@
     cd src
     python -m tests.debug --script tax_credit_known_wrong --debug --show-llm
     python -m tests.debug --debug "세액공제 한도가 얼마야?"          # 실제 LLM
-    python -m tests.debug -c C3 --debug "질문1" "질문2"              # 멀티턴
+    python -m tests.debug -c 198734-1205842 --debug "질문1" "질문2"  # 멀티턴 한 줄 재현
+    python -m tests.debug -c 181245-3097614 --debug                  # REPL
     python -m tests.debug --list                                     # 시나리오 목록
 
-인자 규약은 운영 CLI(`pension_agent.consult_agent.__main__`)와 같게 맞췄다 — `-c/--customer`,
-질문 여러 개면 멀티턴. 여기에 셋이 더 있다:
+**인자 규약은 운영 CLI(`pension_agent.consult_agent.__main__`)와 같다** — 그래야 평소 쓰던
+줄에 `--debug` 만 붙여 쓸 수 있다. `-c/--customer` 는 앞뒤 어디에 와도 되고, 질문이 여러
+개면 순서대로 한 턴씩(맥락 이어서), 질문이 없으면 REPL 이다. 여기에 셋이 더 있다:
 
     --debug      답변 아래에 실행 트레이스를 붙인다
     --show-llm   compose 가 LLM 에게 받은 문장(폐기됐어도)을 그대로 보여준다
@@ -24,7 +26,7 @@ from __future__ import annotations
 import sys
 
 from tests.debug import script, trace as TR
-from tests.debug.runner import run
+from tests.debug.runner import session
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -57,6 +59,28 @@ def _usage() -> None:
         print(f"  {name:<24} {scn.expect}")
 
 
+def _repl(ask, tr, customer_id: str | None, debug: bool, show_llm: bool) -> int:
+    """대화형. 답변 보고 다음 질문을 그때그때 입력하는 실제 사용 형태 그대로 —
+    계측은 세션 내내 걸려 있고 트레이스는 **방금 턴만** 찍는다."""
+    print("질문을 입력하세요 (빈 줄 입력 시 종료). 후속 질문은 이전 맥락을 이어서 물어보면 됩니다.")
+    if customer_id:
+        print(f"(고객 화면 열림: {customer_id})")
+    if debug:
+        print("(--debug: 답변 아래에 이번 턴의 트레이스를 붙입니다)")
+    while True:
+        try:
+            question = input("\n> ").strip()
+        except EOFError:
+            break
+        if not question:
+            break
+        _print_answer(ask(question))
+        if debug:
+            print()
+            print(TR.render(tr, show_llm=show_llm, last_only=True))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if "--list" in argv or "-h" in argv or "--help" in argv:
         _usage()
@@ -87,21 +111,18 @@ def main(argv: list[str]) -> int:
             customer_id = value
 
     questions = argv or ([scenario.question] if scenario else [])
-    if not questions:
-        print("질문을 지정하세요 (또는 --script <이름>).")
-        _usage()
-        return 1
 
-    results, tr = run(questions, customer_id=customer_id, scenario=scenario)
-
-    for question, r in zip(questions, results):
-        if len(questions) > 1:
-            print(f"\n> {question}")
-        _print_answer(r)
-    if debug:
-        print()
-        print(TR.render(tr, show_llm=show_llm))
-    return 0
+    with session(customer_id=customer_id, scenario=scenario) as (ask, tr):
+        if questions:
+            for question in questions:
+                if len(questions) > 1:
+                    print(f"\n> {question}")
+                _print_answer(ask(question))
+            if debug:
+                print()
+                print(TR.render(tr, show_llm=show_llm))
+            return 0
+        return _repl(ask, tr, customer_id, debug, show_llm)
 
 
 if __name__ == "__main__":

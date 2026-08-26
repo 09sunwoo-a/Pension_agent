@@ -344,10 +344,15 @@ def _gate_lines(node: Node) -> list[str]:
             for i, (name, text) in enumerate(rows)]
 
 
-def render(trace: Trace, show_llm: bool = False) -> str:
+def render(trace: Trace, show_llm: bool = False, last_only: bool = False) -> str:
+    """`last_only` 는 REPL 용이다 — 매 턴 전체 기록을 다시 찍으면 화면이 밀려서
+    방금 물은 턴이 어디 있는지 못 찾는다."""
+    turns = list(enumerate(trace.turns))
+    if last_only:
+        turns = turns[-1:]
     out: list[str] = ["━━ 트레이스 ━━"]
-    for index, turn in enumerate(trace.turns):
-        if len(trace.turns) > 1:
+    for index, turn in turns:
+        if len(turns) > 1:
             out.append(f"\n> {turn.question}")
         step = 0
         plan_step = 0

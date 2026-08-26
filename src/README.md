@@ -61,9 +61,13 @@ python -m tests.debug.test_trace                # 실행 트레이스 — 노드
 python -m scripts.kb_build.test_paths           # 경로·locator 실재 (폴더 재번호 회귀)
 
 # ── 진단: 이 답이 어느 노드에서 어떻게 나왔나 (tests/debug — 운영 코드를 고치지 않는다)
-python -m tests.debug --debug "세액공제 한도가 얼마야?"          # 실제 LLM
-python -m tests.debug --script tax_credit_known_wrong --debug --show-llm   # 키 없이 재현
-python -m tests.debug --list                                     # 시나리오 목록
+# 인자 규약이 위 REPL 과 같다. 평소 쓰던 줄의 모듈 이름만 바꾸고 --debug 를 붙이면 된다.
+CAD="python -m tests.debug"
+$CAD --debug "세액공제 한도가 얼마야?"                  # 단발 + 트레이스
+$CAD --debug -c C3                                      # REPL + 턴마다 트레이스
+$CAD --debug -c C3 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"   # 멀티턴 한 줄 재현
+$CAD --script tax_credit_known_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
+$CAD --list                                              # 시나리오 목록
 
 # ── 무결성 점검
 python -m pension_agent.strategy_agent.engine   # 전략 정의 검증 — 근거 교차검증 포함
