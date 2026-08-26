@@ -100,7 +100,7 @@ def _eval_condition(cond: dict | list, p: Profile) -> bool:
 _BRACKET_LABEL = {"5500이하": "5,500만원 이하", "5500초과": "5,500만원 초과"}
 
 
-def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
+def _three_way_breakdown(p: Profile) -> dict[str, float] | None:
     """3분류 운용현황 — 고유계정대/실적배당형/원리금보장형(REQUIREMENTS.md ③).
 
     cash_idle_pct(고유계정대 비중)가 없으면 None — 화면은 이 경우 3분류 표시를 생략한다
@@ -108,9 +108,20 @@ def _three_way_breakdown(p: Profile) -> dict[str, int] | None:
     다룬다 — port[0] 자체는 위험자산 한도 등 기존 게이팅 로직이 그대로 참조하므로 건드리지
     않는다(port 4분류는 불변, 이 3분류는 순수 표시용 추가 뷰다).
     """
+    if p.assets:
+        # 원장(assets)이 있으면 거기서 뽑는다. port 4분류는 정수 반올림이라 원장의 7.7% 가
+        # 8% 로 나가고, 그러면 같은 재료 안에 고유계정대가 8%(3분류)·7.7%(자산군별) 두 값으로
+        # 실린다 — 어느 쪽을 인용해도 다른 줄과 어긋나는 답이 된다.
+        by = {a["type"]: a["pct"] for a in p.assets}
+        grouped = {
+            "고유계정대": by.get("고유계정대", 0.0),
+            "실적배당형": round(by.get("수익증권", 0.0) + by.get("ETF", 0.0), 1),
+            "원리금보장형": round(by.get("예금", 0.0) + by.get("GIC", 0.0) + by.get("기타", 0.0), 1),
+        }
+        return {k: v for k, v in grouped.items()}
     if p.cash_idle_pct is None:
         return None
-    return {
+    return {   # 원장 없이 조립된 프로파일(합성 케이스) — 4분류 요약에서 되짚는다
         "고유계정대": p.cash_idle_pct,
         "실적배당형": p.port[1] + p.port[2] + p.port[3],
         "원리금보장형": p.port[0] - p.cash_idle_pct,
@@ -206,6 +217,12 @@ def _briefing(p: Profile) -> dict:
     three_way = _three_way_breakdown(p)
     if three_way:
         snap["운용현황(3분류)"] = " · ".join(f"{k} {v}%" for k, v in three_way.items())
+    # 자산군별 **금액**. 위의 보유구성·3분류는 비중뿐이라 "고유계정대 얼마야?" 처럼 금액을
+    # 묻는 질문에 답할 재료가 없었다(대화형이 "금액은 재료에 없어요" 로 답하던 자리).
+    # 비중도 여기 것이 원장값이다 — 4분류 요약은 정수 반올림이라 7.7% 가 8% 로 보인다.
+    if p.assets:
+        snap["자산군별"] = " · ".join(
+            f"{a['type']} {won(a['amount'])}({a['pct']}%)" for a in p.assets)
     if p.matDD is not None:
         # **보유한 만기를 전부 싣는다.** 예금과 GIC 의 만기가 서로 다른 고객이 있어서,
         # 가장 가까운 한 건만 실으면 "만기 언제야?" 에 나머지가 없는 것처럼 답하게 된다.

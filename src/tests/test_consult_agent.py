@@ -622,6 +622,34 @@ def check_customer_material() -> int:
     print(f"{'✓' if hit else '✗'} customer 도구가 화면에 뜬 AI브리핑 산문까지 재료로 싣는다")
     ok += hit
 
+    # ── CLAUDE.md §3 「고객 정보 질의응답 — 되어야 하는 것」 재료 요건 ──────────────
+    # 문서에 적어둔 것이 실제로 재료에 실리는지 본다. 아래가 하나라도 빠지면 그 질문은
+    # 답이 나올 수 없고, LLM 은 없는 재료에 대해 말을 만든다.
+    _mat = tools.run("customer", {"customer_id": "181245-3097614"}, "이 고객 현황")["text"]
+    _NEED = [
+        ("① 값 — 자산군별 금액", "고유계정대 2,000만원"),   # 비중만 있으면 금액을 못 답한다
+        ("① 값 — 자산군별 비중(원장값)", "(7.7%)"),          # 4분류 반올림(8%)이 아니라 원장값
+        ("① 값 — 만기 전건", "2027-02-01"),                 # 가장 가까운 한 건만이 아니다
+        ("② 왜 이 고객인가", "· 왜 이 고객인가:"),
+        ("② 판단근거", "· 판단근거:"),
+        ("② 문제상황", "· 문제상황 1:"),
+        ("② 성립 요건", "· 성립 요건:"),
+    ]
+    for _label, _needle in _NEED:
+        _h = _needle in _mat
+        print(f"{'✓' if _h else '✗'} 고객 재료: {_label}" + ("" if _h else f" — '{_needle}' 없음"))
+        ok += _h
+
+    # 같은 항목이 재료 안에서 두 값이 되면 안 된다 — 3분류와 자산군별의 고유계정대가
+    # 각각 8% · 7.7% 로 실리던 자리(4분류 반올림 대 원장값).
+    import re as _re
+    _three = _re.search(r"운용현황\(3분류\)[^\n]*고유계정대 ([\d.]+)%", _mat)
+    _asset = _re.search(r"자산군별[^\n]*고유계정대[^(]*\(([\d.]+)%\)", _mat)
+    hit = bool(_three and _asset) and _three.group(1) == _asset.group(1)
+    print(f"{'✓' if hit else '✗'} 고객 재료: 같은 항목(고유계정대 비중)이 한 값으로만 실린다"
+          + ("" if hit else f" — 3분류 {_three and _three.group(1)} vs 자산군별 {_asset and _asset.group(1)}"))
+    ok += hit
+
     # 인용 허용 집합에 후보 더미(pools)를 싣지 않는다 — 답변이 쓰지도 않을 카드의 숫자가
     # 아무 주장에나 근거를 대주면 검증이 무력해진다("만기일 2026년 9월 11일" 이 통과하던 자리).
     from pension_agent.verify import verify_texts as _vt

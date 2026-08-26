@@ -401,6 +401,17 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
     if facts.get("conditions"):
         lines.append(f"· 성립 요건: {', '.join(facts['conditions'])}")
+    # 「왜 이 고객이 관리 대상인가」 — 직원이 실제로 가장 많이 묻는 것인데 통째로 빠져
+    # 있었다. 요건 코드(dor·mis…)만 있고 그 요건이 왜 문제인지, 어느 세그먼트에 걸렸는지,
+    # 무엇을 근거로 뽑혔는지가 재료에 없어서 LLM 이 요건 이름만 풀어 쓰거나 지어냈다.
+    for label, values in (("왜 이 고객인가", facts.get("why_this_customer")),
+                          ("판단근거", facts.get("rationale")),
+                          ("고지 필요", facts.get("cautions")),
+                          ("확인 필요", facts.get("needs_confirm"))):
+        for v in values or []:
+            lines.append(f"· {label}: {v}")
+    for sit in facts.get("problem_situations") or []:
+        lines.append(f"· 문제상황 {sit['no']}: {sit['title']} [{sit['group']}]")
     # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
     # 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 산문이므로 원문 스팬은 아니다.
     for label, text in (("AI브리핑 문장", result.get("sentence")),

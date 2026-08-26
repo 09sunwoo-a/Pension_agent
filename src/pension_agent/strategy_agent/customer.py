@@ -90,6 +90,11 @@ class Profile:
     matDate: str | None = None  # 가장 가까운 만기일(ISO). 잔여일수만으로는 "언제야?"에 날짜로
     # 답할 수 없다 — 재료에 없으면 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
     matAmt: int = 0  # 그 만기일에 도래하는 금액(원)
+    assets: list[dict] = field(default_factory=list)  # 자산군별 보유 — 원장 그대로.
+    # [{"type": 자산군, "amount": 평가금액(원), "pct": 비중(%)}]. `port` 4분류는 전략 로직이
+    # 쓰는 **요약**이라 정수 비중이고 여러 자산군을 한 칸에 접는다(port[0] 은 예금·GIC·
+    # 고유계정대·기타의 합). 그 요약만으로는 "고유계정대 얼마야?" 에 답할 수 없고 — 금액이
+    # 아예 없고, 비중도 반올림된 값이라 원장의 7.7% 가 8% 로 나간다. 원장 값은 여기 둔다.
     maturities: list[dict] = field(default_factory=list)  # 만기 보유 전체.
     # [{"date": ISO, "dd": 잔여일수, "type": 상품유형, "name": 상품명, "amount": 평가금액}] 을
     # 만기일 오름차순으로. 대화형이 "만기 뭐뭐 있어?"에 빠짐없이 답하기 위한 재료다.
@@ -283,6 +288,22 @@ def _port(rec: dict) -> tuple[list[int], int]:
     return port, round(sm["고유계정대평가금액"] * 100 / bal)
 
 
+#: 원장 요약(02_IRP_SUMMARY)의 자산군. 값이 0 인 자산군은 싣지 않는다.
+_ASSET_TYPES = ("고유계정대", "예금", "GIC", "수익증권", "ETF", "기타")
+
+
+def _assets(rec: dict) -> list[dict]:
+    """자산군별 평가금액·비중을 원장 그대로. 비중은 원장의 소수값을 소수점 한 자리로만
+    옮긴다 — 반올림해 정수로 만들면 7.7% 가 8% 로 나가 원장과 어긋난 값이 답변에 실린다."""
+    sm = rec["summary"]
+    out = []
+    for t in _ASSET_TYPES:
+        amt = sm.get(f"{t}평가금액") or 0
+        if amt:
+            out.append({"type": t, "amount": amt, "pct": round((sm.get(f"{t}비중") or 0) * 100, 1)})
+    return sorted(out, key=lambda r: -r["amount"])
+
+
 def _maturities(rec: dict) -> list[dict]:
     """만기일이 있는 보유상품 전체를 만기일 오름차순으로. 예금만이 아니다 — GIC 처럼
     만기가 있는 다른 상품도 함께 담는다(상품 유형을 같이 실어야 어느 만기인지 분간된다)."""
@@ -297,6 +318,7 @@ def _to_profile(rec: dict) -> Profile:
     basic, sm, act = rec["basic"], rec["summary"], rec["activity"]
     port, cash_pct = _port(rec)
     mats = _maturities(rec)
+    assets = _assets(rec)
     # 가장 가까운 만기 = 요건 판정·재예치 전략의 입력. 같은 날짜에 여러 건이면 합산한다.
     nearest = mats[0]["date"] if mats else None
     mat_dd = mats[0]["dd"] if mats else None
@@ -313,7 +335,7 @@ def _to_profile(rec: dict) -> Profile:
         room=rec["tax_isa"]["세액공제잔여한도"] // 10_000,
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
-        matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats,
+        matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats, assets=assets,
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
