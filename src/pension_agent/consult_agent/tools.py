@@ -496,9 +496,17 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     try:
         sessions = session_store.list_sessions(customer_id)
     except Exception:
-        return None
+        sessions = []
 
     lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
+    # 원장의 **과거 상담 기록**(직원이 고객과 나눈 상담)을 먼저 싣는다. 아래 세션 기록은
+    # 이 에이전트와 나눈 대화라 소스가 다르지만, 직원이 "지난번에 무슨 얘기 했지" 로 묻는
+    # 것은 같은 사건이다 — 도구를 둘로 나누면 어느 쪽을 부를지 LLM 이 정하게 되고, 한쪽만
+    # 불린 턴은 나머지가 없는 것이 된다. 어느 기록인지는 줄마다 밝힌다.
+    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    profile = strategy_customer.get_profile(customer_id)
+    for entry in (profile.consult_log if profile else [])[:HISTORY_SESSIONS]:
+        lines.append(f"· {entry['date']} 상담(원장 기록): {entry['text']}")
     recent = sorted(sessions, key=lambda s: s.get("started_at") or "", reverse=True)
     for session in recent[:HISTORY_SESSIONS]:
         turns = [t for t in (session.get("turns") or []) if (t.get("text") or "").strip()]
@@ -516,7 +524,8 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     return _ev("history", query, "\n".join(lines),
                [{"id": f"session.{customer_id}", "title": f"고객 {customer_id} 상담 이력",
-                 "doc": "상담 이력 기록(에이전트가 턴마다 남긴 것)", "score": None, "page": None}],
+                 "doc": "상담 이력 — 원장의 과거 상담 기록 + 에이전트가 턴마다 남긴 대화",
+                 "score": None, "page": None}],
                notices=[HISTORY_MARK])
 
 

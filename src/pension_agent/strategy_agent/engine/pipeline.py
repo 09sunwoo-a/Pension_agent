@@ -71,6 +71,13 @@ from pension_agent.strategy_agent.support import (
 
 # ─────────────────────────────────────────────────────────────
 
+def _consult_history(p: Profile) -> list[str]:
+    """상담 이력 한 줄 요약 — 원장 기록 + 세션 요약을 날짜 내림차순으로 합친다."""
+    rows = [f"{e['date']} 상담(원장) — {e['text']}" for e in p.consult_log]
+    rows += [f"{line} (에이전트 대화)" for line in summarize_for_briefing(p.id)]
+    return sorted(rows, key=lambda r: r[:10], reverse=True)
+
+
 def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     """고객 프로파일로부터 확정 사실을 산출한다. 반환값이 LLM 단계의 유일한 입력이다."""
     conds = conditions(p)
@@ -362,9 +369,14 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             "consult_resources": consult_resource_candidates(p, situations),
             "outreach": outreach_candidates(situations),
         },
-        # 상담 이력 — consult_agent 가 기록한 대화이력 요약(REQUIREMENTS.md §14). 읽기만 한다 —
-        # strategy_agent 는 세션 저장소에 쓰지 않는다("코드=사실" 경계를 대화이력에도 유지).
-        "consult_history": summarize_for_briefing(p.id),
+        # 상담 이력(REQUIREMENTS.md §14) — 소스가 둘이다.
+        #   · 원장(`Profile.consult_log`) — 직원이 고객과 나눈 과거 상담. 실서비스의 CRM 자리다.
+        #   · 세션(`session_store`) — 이 에이전트와 나눈 대화. consult_agent 가 턴마다 쓰고
+        #     strategy_agent 는 읽기만 한다("코드=사실" 경계를 대화이력에도 유지).
+        # 둘을 합쳐 한 줄기로 낸다. 화면이 한쪽만 보여주면 대화형(history 도구)과 답이
+        # 갈리는데, 같은 질문에 화면과 대화형이 다른 말을 하는 것이 이 저장소가 가장
+        # 경계하는 실패다. 어느 기록인지는 줄마다 밝힌다.
+        "consult_history": _consult_history(p),
         # 근거 규정 — 규정 근거가 붙은 선정 항목. 적합성 원칙 등 판단의 출처를 추적 가능하게 한다.
         "regulations": [{"title": b["spec"]["title"], "regulation": b["spec"]["regulation"]}
                         for b in selected if b["spec"].get("regulation")],

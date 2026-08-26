@@ -635,6 +635,28 @@ def check_customer_material() -> int:
         ("② 문제상황", "· 문제상황 1:"),
         ("② 성립 요건", "· 성립 요건:"),
     ]
+    # 원장 → Profile → 재료 경로가 뚫려 있는지. 하나만 하면 값은 있는데 답은 못 한다.
+    _big = tools.run("customer", {"customer_id": "188406-7352194"}, "현황")["text"]
+    for _label, _needle in (("보유상품 개별 종목", "KB 퇴직연금 배당"),
+                            ("판매중단 표시", "⚠판매중단"),
+                            ("동연령대 비교", "동연령 평균 수익률"),
+                            ("거래 활동", "1년 매매")):
+        _h = _needle in _big
+        print(f"{'✓' if _h else '✗'} 고객 재료: {_label}" + ("" if _h else f" — '{_needle}' 없음"))
+        ok += _h
+
+    # 상담 이력은 소스가 둘(원장·세션)이고, 화면과 대화형이 같은 것을 봐야 한다.
+    _hist = tools.run("history", {"customer_id": "188406-7352194"}, "지난번에 무슨 얘기 했어")
+    hit = bool(_hist) and "원장 기록" in _hist["text"] and "재투자하고 싶다" in _hist["text"]
+    print(f"{'✓' if hit else '✗'} history 도구: 원장의 과거 상담 기록을 싣는다")
+    ok += hit
+    from pension_agent.strategy_agent import engine as _eng
+    from pension_agent.strategy_agent.customer import get_profile as _gp
+    _screen = _eng.prepare(_gp("188406-7352194"))["consult_history"]
+    hit = any("원장" in line and "재투자하고 싶다" in line for line in _screen)
+    print(f"{'✓' if hit else '✗'} 화면 §14 상담이력도 같은 원장 기록을 본다(대화형과 답이 갈리지 않는다)")
+    ok += hit
+
     # ISA 만기자금·납입이력 — 원장에 컬럼이 있어도 Profile 이 안 접으면 대화형은 못 본다.
     _isa_mat = tools.run("customer", {"customer_id": "188406-7352194"}, "ISA")["text"]
     hit = "ISA만기자금" in _isa_mat and "1억 2,000만원" in _isa_mat

@@ -90,6 +90,18 @@ class Profile:
     matDate: str | None = None  # 가장 가까운 만기일(ISO). 잔여일수만으로는 "언제야?"에 날짜로
     # 답할 수 없다 — 재료에 없으면 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
     matAmt: int = 0  # 그 만기일에 도래하는 금액(원)
+    holdings: list[dict] = field(default_factory=list)  # 보유상품 개별 종목 — 원장 그대로.
+    # [{"name","type","amount","principal","ret_1y","ret_own","pct","grade","rate",
+    #   "discontinued","opened","matures"}] 을 평가금액 내림차순으로. `assets`(자산군별 합계)
+    # 로는 "무슨 상품 들고 있어" · "판매중단된 거 있어" 에 답할 수 없다.
+    consult_log: list[dict] = field(default_factory=list)  # 과거 상담 기록(원장) —
+    # [{"date","text"}]. 직원-고객 상담 기록이지, 이 에이전트와 나눈 대화(session_store)가
+    # 아니다. 둘은 소스가 다르지만 직원이 "지난번에 무슨 얘기 했지" 로 묻는 것은 같은
+    # 사건이라, consult_agent 의 history 도구가 둘을 함께 답한다.
+    peer: dict | None = None  # 동연령대 비교(원장) — 평균·상위1% 수익률, 상위1% 원리금보장
+    # 비중, 상위1%가 많이 담은 펀드·ETF. 모수가 저장소 밖이라 엔진이 계산할 수 없는 값이다.
+    activity: dict = field(default_factory=dict)  # 거래 활동(원장) — 최근 매매·입금일,
+    # 1년 매매 횟수, 상품군별 보유·매매 이력, 최근 1개월 고유계정대 증감.
     isa: dict | None = None  # ISA 만기자금 — {"amount", "date", "dd", "org", "within_1m"}.
     # **IRP 계좌 밖의 돈**이다(추가납입 재원 후보). 보유 현황과 섞어 읽으면 IRP 잔액이
     # 부풀어 보이므로 표기에서 갈라 둔다. 만기금액이 0 이면 None.
@@ -309,6 +321,53 @@ def _assets(rec: dict) -> list[dict]:
     return sorted(out, key=lambda r: -r["amount"])
 
 
+def _holdings(rec: dict) -> list[dict]:
+    """보유상품 개별 종목. 평가금액 내림차순 — 직원이 큰 것부터 본다."""
+    rows = [{"name": h["상품명"], "type": h["상품유형"], "amount": h["평가금액"],
+             "principal": h["매입원금잔액"], "ret_1y": h.get("최근1년수익률"),
+             "ret_own": h.get("고객보유수익률"), "pct": round((h.get("PF비중") or 0) * 100, 1),
+             "grade": h.get("퇴직연금상품위험등급구분코드"), "rate": h.get("적용금리"),
+             "discontinued": h.get("판매중단여부") == "Y",
+             "opened": h.get("약정신규년월일"), "matures": h.get("약정만기년월일")}
+            for h in rec["products"]]
+    return sorted(rows, key=lambda r: -r["amount"])
+
+
+def _consult_log(rec: dict) -> list[dict]:
+    """과거 상담 기록(원장). 최신순 — 지난 상담은 가까운 것부터 본다."""
+    rows = [{"date": h["상담년월일"], "text": h["상담이력내용"]} for h in rec["history"]]
+    return sorted(rows, key=lambda r: r["date"], reverse=True)
+
+
+def _peer(rec: dict) -> dict | None:
+    """동연령대 비교. 모수(유사고객 집단)가 저장소 밖이라 엔진이 산출할 수 없는 조인값이다."""
+    q = rec.get("peer") or {}
+    if not q:
+        return None
+    def _pct(key: str) -> float | None:
+        v = q.get(key)
+        return round(v * 100, 1) if v is not None else None
+    funds = [q.get(f"상위1%펀드TOP{i}") for i in (1, 2, 3)]
+    etfs = [q.get(f"상위1%ETF_TOP{i}") for i in (1, 2, 3)]
+    return {"avg_ret": _pct("동연령대평균수익률"),
+            "top1_ret": _pct("동연령대상위1%평균수익률"),
+            "top1_guaranteed_pct": _pct("동연령대상위1%평균원리금보장비중"),
+            "top1_funds": [f for f in funds if f], "top1_etfs": [e for e in etfs if e]}
+
+
+def _activity(rec: dict) -> dict:
+    """거래 활동. 원장 컬럼을 그대로 옮긴다 — 판정하지 않는다."""
+    a = rec.get("activity") or {}
+    return {"last_trade": a.get("최근상품매매일"), "last_order": a.get("최근운용지시일"),
+            "last_deposit": a.get("최근입금일"), "trades_1y": a.get("최근1년상품매매횟수"),
+            "holds_etf": a.get("ETF현재보유여부") == "Y",
+            "traded_etf": a.get("ETF과거매매이력여부") == "Y",
+            "holds_fund": a.get("수익증권현재보유여부") == "Y",
+            "traded_fund": a.get("수익증권과거매매이력여부") == "Y",
+            "cash_delta_1m": a.get("최근1개월고유계정대증감액"),
+            "autopay": a.get("입금예정상품등록여부") == "Y"}
+
+
 def _isa(rec: dict) -> dict | None:
     """ISA 만기자금. 만기금액이 없으면 None — 없는 것을 0원으로 실으면 화면에 줄이 생긴다."""
     t = rec["tax_isa"]
@@ -361,6 +420,8 @@ def _to_profile(rec: dict) -> Profile:
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
         matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats, assets=assets, isa=isa, paid_by_year=_paid_by_year(rec),
+        holdings=_holdings(rec), consult_log=_consult_log(rec),
+        peer=_peer(rec), activity=_activity(rec),
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),

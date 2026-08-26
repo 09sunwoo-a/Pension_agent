@@ -244,6 +244,44 @@ def _briefing(p: Profile) -> dict:
     elif p.room > 0:
         snap["납입여력"] = f"{won(p.room * 10000)} (연 납입한도 1,800만원 이내)"
 
+    # 보유상품 개별 종목. 자산군별 합계로는 "무슨 상품 들고 있어"·"판매중단된 거 있어"에
+    # 답할 수 없다. 수익률은 **고객 보유수익률**(그 고객이 실제로 얻은 것)을 쓴다 —
+    # 상품의 최근 1년 수익률과 다르고, 직원이 묻는 것은 이 고객의 손익이다.
+    if p.holdings:
+        snap["보유상품"] = " · ".join(
+            f"{h['name']} {won(h['amount'])}"
+            + (f" 수익률 {h['ret_own'] * 100:.1f}%" if h.get("ret_own") is not None else "")
+            + (f" 금리 {h['rate'] * 100:.2f}%" if h.get("rate") else "")
+            + (" ⚠판매중단" if h["discontinued"] else "")
+            for h in p.holdings)
+    # 동연령대 비교 — 모수가 저장소 밖이라 엔진이 산출할 수 없는 조인값이다.
+    if p.peer:
+        q, bits = p.peer, []
+        if q.get("avg_ret") is not None:
+            bits.append(f"동연령 평균 수익률 {q['avg_ret']}%")
+        if q.get("top1_ret") is not None:
+            bits.append(f"상위1% 평균 수익률 {q['top1_ret']}%")
+        if q.get("top1_guaranteed_pct") is not None:
+            bits.append(f"상위1% 원리금보장 비중 {q['top1_guaranteed_pct']}%")
+        if q.get("top1_funds"):
+            bits.append("상위1% 인기 펀드 " + ", ".join(q["top1_funds"]))
+        if q.get("top1_etfs"):
+            bits.append("상위1% 인기 ETF " + ", ".join(q["top1_etfs"]))
+        snap["동연령대비교"] = " · ".join(bits)
+    # 거래 활동 — "최근에 거래한 적 있어" 는 운용변경 경과월(nchM)만으로 답할 수 없다.
+    if p.activity:
+        a, bits = p.activity, []
+        for label, key in (("최근 매매", "last_trade"), ("최근 운용지시", "last_order"),
+                           ("최근 입금", "last_deposit")):
+            if a.get(key):
+                bits.append(f"{label} {a[key]}")
+        if a.get("trades_1y") is not None:
+            bits.append(f"1년 매매 {a['trades_1y']}회")
+        if a.get("cash_delta_1m"):
+            bits.append(f"최근 1개월 고유계정대 증감 {won(a['cash_delta_1m'])}")
+        if bits:
+            snap["거래활동"] = " · ".join(bits)
+
     # ISA 만기자금 — **IRP 계좌 밖의 돈**이라 보유 현황과 갈라 적는다. 추가납입 상담의
     # 재원 후보이고, 만기가 임박하면 그 시점이 상담 창구가 된다(시연 케이스 2건).
     if p.isa:
