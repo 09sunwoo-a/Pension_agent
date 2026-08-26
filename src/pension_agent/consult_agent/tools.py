@@ -414,9 +414,14 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 출처를 낸다. 지식 카드가 아니라 **전략제안이 계산한 브리핑 재료**라 카드 id 가 없지만,
     # "이 값이 어디서 왔나"는 답해야 한다(§3 모든 답에 출처를 밝힌다). 출처가 안 실리면
     # 화면에 "근거: 없음"이 뜨고, 직원은 값을 어디서 확인할지 모른 채 답만 받는다.
+    # 출처는 **고객 원장**이지 지식 카드가 아니다. 예전 표기("AI브리핑 재료 /
+    # briefing.<id>")는 화면에서 카드 id 처럼 읽혀, 계좌에 그냥 들어 있는 값이 어딘가에서
+    # 검색해 온 자료처럼 보였다. 검색으로 온 재료가 아니므로 관련도(score)도 없다.
     return _ev("customer", query, "\n".join(lines),
-               [{"id": f"briefing.{customer_id}", "title": f"고객 {customer_id} AI브리핑 재료",
-                 "doc": "전략제안 산출(브리핑 화면과 같은 값)", "score": None, "page": None}],
+               [{"id": f"customer.{customer_id}",
+                 "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
+                 "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
+                 "score": None, "page": None}],
                allow=["\n".join(lines), json.dumps(facts, ensure_ascii=False, default=str)])
 
 

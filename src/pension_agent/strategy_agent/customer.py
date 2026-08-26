@@ -80,6 +80,8 @@ class Profile:
     dorm: int | None  # 최종 접촉 이후 경과 일수. None 은 "접촉 이력 소스 없음"(CRM 조인 전).
     nchM: float  # 최종 운용변경 이후 경과 개월수
     matDD: int | None = None  # 만기 잔여일수
+    matDate: str | None = None  # 만기일(ISO). 잔여일수만으로는 "만기 언제야?"에 날짜로 답할 수
+    # 없다 — 재료에 없는 값은 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
     matAmt: int = 0  # 만기 도래 예금액(원)
     nonface: bool = False  # 비대면 거래 채널 고객 여부
     income_bracket: str | None = None  # 총급여 구간 ("5500이하" / "5500초과"). 세액공제율 판정에 사용한다.
@@ -271,20 +273,20 @@ def _port(rec: dict) -> tuple[list[int], int]:
     return port, round(sm["고유계정대평가금액"] * 100 / bal)
 
 
-def _nearest_maturity(rec: dict) -> tuple[int | None, int]:
-    """만기일 있는 보유상품 중 최근접 만기의 (잔여일수, 그 날짜 평가금액 합)."""
+def _nearest_maturity(rec: dict) -> tuple[int | None, str | None, int]:
+    """만기일 있는 보유상품 중 최근접 만기의 (잔여일수, 만기일, 그 날짜 평가금액 합)."""
     dated = [(date.fromisoformat(p["약정만기년월일"]), p["평가금액"])
              for p in rec["products"] if p.get("약정만기년월일")]
     if not dated:
-        return None, 0
+        return None, None, 0
     nearest = min(d for d, _ in dated)
-    return (nearest - TODAY).days, sum(a for d, a in dated if d == nearest)
+    return (nearest - TODAY).days, nearest.isoformat(), sum(a for d, a in dated if d == nearest)
 
 
 def _to_profile(rec: dict) -> Profile:
     basic, sm, act = rec["basic"], rec["summary"], rec["activity"]
     port, cash_pct = _port(rec)
-    mat_dd, mat_amt = _nearest_maturity(rec)
+    mat_dd, mat_date, mat_amt = _nearest_maturity(rec)
     rk = basic["투자성향"]
     return Profile(
         id=rec["id"], nm=basic["고객명"], ag=basic["만나이"],
@@ -297,7 +299,7 @@ def _to_profile(rec: dict) -> Profile:
         room=rec["tax_isa"]["세액공제잔여한도"] // 10_000,
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
-        matDD=mat_dd, matAmt=mat_amt,
+        matDD=mat_dd, matDate=mat_date, matAmt=mat_amt,
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),

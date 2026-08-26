@@ -18,7 +18,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-_NUM = re.compile(r"\d[\d,]*(?:\.\d+)?%?")
+# 수치 토큰. 천단위 쉼표는 숫자의 일부지만(4,050) **뒤따라오는 쉼표는 아니다** — 예전
+# 패턴(`\d[\d,]*`)은 "만기 D-17, 4,050만원"에서 `17,` 을 통째로 집어 원장의 `17` 과
+# 어긋났고, 그래서 **맞는 답변이 '원장 밖 수치'로 버려졌다**(compose 가 근거 원문을 그대로
+# 덤프하던 자리). 마지막 글자는 반드시 숫자여야 한다.
+_NUM = re.compile(r"\d(?:[\d,]*\d)?(?:\.\d+)?%?")
 _PROD = re.compile(r"KB\s[^\s,·)]+(?:\s[^\s,·)]+)*")
 
 
