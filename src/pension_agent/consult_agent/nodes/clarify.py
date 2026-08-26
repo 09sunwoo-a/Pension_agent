@@ -32,6 +32,7 @@ import json
 import re
 from typing import Any
 
+from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import CLARIFY_PROMPT
 from pension_agent.consult_agent.state import AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -93,4 +94,8 @@ def clarify(state: AgentState) -> dict[str, Any]:
         return {}
 
     asked = {"question": ask.strip(), "options": options}
-    return {"clarify": asked, "answer": _render(ask.strip(), options), "sources": []}
+    # 선택지는 근거 카드에서 나온 것이므로 그 카드를 출처로 싣는다(§3 "모든 답에 출처를
+    # 밝힌다"). 비워 두면 화면이 "근거: 없음"이라고 말하는데, 직원 입장에서는 어디서 나온
+    # 갈래인지 모른 채 고르라는 말이 된다 — 되묻기도 재료에서 나온 답이다.
+    return {"clarify": asked, "answer": _render(ask.strip(), options),
+            "sources": [{**s, "role": tools.GROUND} for s in tools.ledger_sources(evidence)]}

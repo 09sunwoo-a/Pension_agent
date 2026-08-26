@@ -239,9 +239,8 @@ def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     return (APPEND, gaps) if gaps else (OK, [])
 
 
-#: 출처의 역할. 답이 **그 재료에서 나온 것**인지, 표현을 **제한만** 한 것인지는 다른
-#: 사건이고, 직원에게도 다르게 보여야 한다(§3 · §8).
-GROUND, CAUTION = "근거", "주의"
+#: 출처의 역할 어휘는 tools 가 갖는다(답을 내보내는 노드가 둘이다 — 여기와 clarify).
+GROUND, CAUTION = tools.GROUND, tools.CAUTION
 
 
 def _sources(evidence: list[tools.Evidence], guards: list, alts: list) -> list[dict]:
