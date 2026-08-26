@@ -344,13 +344,19 @@ def build_docs() -> tuple[list[dict], dict[str, str]]:
     for path in sorted(HOTTIP_DIR.glob("*.md")):
         fm = _front_matter(path.read_text(encoding="utf-8"))
         no = fm.get("글번호") or path.stem.split("_")[1]
+        # 작성자는 게시글 프론트매터의 표기를 그대로 옮긴다. 한때 여기에 "영업점(작성자 정보
+        # 미기재)" 라는 상수가 박혀 있었는데, 실명·부점·직급이 게시글에 **적혀 있는데도**
+        # 미기재라고 말하는 표시였고 부점도 틀렸다(인재개발부 게시글이 "영업점"으로 나갔다).
+        # 출처 표시가 사실과 다른 것은 근거 없는 답변과 같은 문제다.
+        author = (fm.get("작성자") or "").strip()
         add(f"doc.hottip.{no}", {
             "title": fm.get("제목") or path.stem, "short": f"핫팁 {no}",
-            "dept": "영업점(작성자 정보 미기재)", "published": fm.get("작성일"),
+            "dept": author if author and author != "(미지정)" else "영업점(작성자 미상)",
+            "published": fm.get("작성일"),
             "origin": "영업점핫팁", "tier": config.TIER_BY_ORIGIN["영업점핫팁"],
             "customer_facing": False, "post_no": no, "url": fm.get("원문 URL"),
             "path": str(path.relative_to(REPO)).replace("\\", "/"),
-            "note": "KB StarLearn 「나만의 Hot Tip」 게시글. 작성자 실명·부점·직급은 개인정보라 옮기지 않는다.",
+            "note": "KB StarLearn 「나만의 Hot Tip」 게시글. 작성자 표기는 게시글 프론트매터 그대로다.",
         }, path.stem)
 
     for path in sorted(KBTHINK_DIR.glob("*.md")):
@@ -1406,7 +1412,16 @@ def build_procedures(resolver: DocResolver) -> list[dict]:
             caution_entries = [{"role": "authoring", "text": redact(c)} for c in cautions]
 
         title = clean(item["title"])
-        screens = sorted(set(_SCREEN.findall(body_text)))
+        # 화면번호는 **이 절차가 실제로 여는 화면**이다 — ⚠ 유의 박스는 훑지 않는다.
+        #
+        # 유의 박스에 화면번호가 나오는 것은 그 절차의 화면이라서가 아니라 각주·확인 방법이라서다.
+        # 39번(비대면 실물이전)의 유의는 ⑤단계 스타뱅킹 메뉴의 단말 대응 화면을 괄호로 적어둔
+        # 것인데, 그것이 카드의 화면번호가 되는 바람에 "비대면 실물이전 화면번호는
+        # [06-12-151]" 이라는 답이 나갔다 — [06-12-151]은 개인부담금 한도 조회 화면이다.
+        # 18번의 유의도 "단말에서 실제로 걸어 확인해보라"는 검증 방법이다.
+        # 유의를 인용 목록에서 뺀 것과 같은 경계를 화면번호에도 적용한다.
+        scan = "\n".join([summary or "", *(q["text"] for q in quote_records)])
+        screens = sorted(set(_SCREEN.findall(scan)))
         marks = " ".join(meta.get("marks") or [])
         legacy = _LEGACY_NO.search(body_text)
 
