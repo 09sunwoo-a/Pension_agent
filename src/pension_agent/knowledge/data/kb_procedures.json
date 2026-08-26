@@ -920,10 +920,7 @@
             "doc": "doc.kbthink.03"
           }
         ],
-        "screens": [
-          "[06-12-610]",
-          "[06-12-611]"
-        ],
+        "screens": [],
         "cautions": [
           {
             "role": "authoring",
@@ -2012,9 +2009,7 @@
             "doc": "doc.hottip.201210"
           }
         ],
-        "screens": [
-          "[06-12-151]"
-        ],
+        "screens": [],
         "cautions": [
           {
             "role": "authoring",
