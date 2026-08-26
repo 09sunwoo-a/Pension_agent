@@ -9,7 +9,8 @@
 출력  전략 제안 문장 + 판단근거 + 근거 문서 + 다른 제안 + 고지·확인·보류 사항
 ```
 
-산출 예시 — 이현우 (성립 요건 7건):
+산출 예시 — 옛 더미 페르소나 '이현우'(성립 요건 7건) 기준. 페르소나는 걷어냈지만 산출물의
+형태를 보여주기 위해 예시는 남겨둔다:
 
 ```
 보유현황  예금 100% · 수익률 1.8%(하위 17%) · 만기 D-22 2억 3,000만원
@@ -35,10 +36,9 @@ python -m pension_agent.strategy_agent.engine       # 정의 검증 — 근거 �
 python -m pension_agent.strategy_agent.situations   # 페르소나별 문제상황 매칭 결과 확인
 python -m tests.test_engine                         # 회귀 — 엔진 결정론 로직 (전건 통과 확인)
 python -m tests.test_support                        # 회귀 — ⑥~⑨ 문제상황·후보군
-python -m tests.test_strategy_agent                 # 회귀 — LLM 단계 (스텁, API 키 불필요)
 
 # 산출
-python -m pension_agent.strategy_agent.agent 이현우  # 단일 고객 전략 제안 (CLI)
+python -m pension_agent.strategy_agent.agent <고객명> # 단일 고객 전략 제안 (CLI)
 
 # 평가/피드백 대시보드 (Streamlit)
 streamlit run app.py        # 페르소나 산출물(AI브리핑 ①~⑨) 리뷰 + consult_agent 대화형 테스트 탭 + 피드백 접수

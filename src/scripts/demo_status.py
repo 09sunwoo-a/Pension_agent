@@ -128,8 +128,11 @@ def build() -> tuple[str, dict[str, int]]:
     consts = [
         ("customer.TODAY", str(customer.TODAY),
          "데모 고정 기준일. 실배포 시 date.today() 로 바꾸고 assets.json 날짜도 함께 교체"),
-        ("customer.PERSONAS", f"{len(customer.PERSONAS)}명 (C1~C{len(customer.PERSONAS)})",
-         "하드코딩 페르소나. 실데이터 조인으로 교체"),
+        ("customer.PERSONAS",
+         f"{len(customer.PERSONAS)}명 ({', '.join(p.id for p in customer.PERSONAS)})"
+         if customer.PERSONAS else "0명 (비어 있음)",
+         "하드코딩 페르소나. 옛 더미(C1~C6)를 걷어낸 상태 — 시연용 고객 데이터로 채운 뒤 "
+         "실데이터 조인으로 교체"),
         ("data/portfolios.json", f"{len(engine.PORTFOLIOS)}건",
          "채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체"),
         ("engine.TOP_N / ALT_N", f"{engine.TOP_N} / {engine.ALT_N}",

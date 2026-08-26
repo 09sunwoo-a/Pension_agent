@@ -695,6 +695,10 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
 
     name = " ".join(sys.argv[1:]).strip()
+    if not PERSONAS:
+        print("등록된 고객이 없습니다. 시연용 고객 데이터가 정해지면 "
+              "pension_agent/strategy_agent/customer.py 의 PERSONAS 에 채웁니다.")
+        raise SystemExit(1)
     targets = [p for p in PERSONAS if not name or p.nm == name]
     if not targets:
         print(f"'{name}' 에 해당하는 고객이 없습니다. 대상: {', '.join(p.nm for p in PERSONAS)}")

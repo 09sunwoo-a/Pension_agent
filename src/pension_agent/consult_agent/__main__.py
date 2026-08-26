@@ -1,10 +1,10 @@
 """대화형 REPL — 고객 화면이 열린 상태를 흉내 낸다.
 
-    python -m pension_agent.consult_agent -c C3
-    python -m pension_agent.consult_agent -c C3 "질문1" "질문2"    # 멀티턴 시나리오
+    python -m pension_agent.consult_agent -c <고객id>
+    python -m pension_agent.consult_agent -c <고객id> "질문1" "질문2"    # 멀티턴 시나리오
 
 -c/--customer 를 넘기지 않으면 브리핑질의·LMS발송·수정 세 의도가 "고객 화면을 먼저
-열어주세요"로 답한다. 고객 id 는 strategy_agent/customer.py 의 PERSONAS 참고.
+열어주세요"로 답한다. 고객 id 는 strategy_agent/customer.py 의 PERSONAS 참고(지금은 비어 있음).
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ for flag in ("-c", "--customer"):
     if flag in argv:
         i = argv.index(flag)
         if i + 1 >= len(argv):
-            print(f"{flag} 뒤에 customer_id 를 지정하세요 (예: -c C3)")
+            print(f"{flag} 뒤에 customer_id 를 지정하세요")
             sys.exit(1)
         customer_id = argv[i + 1]
         del argv[i:i + 2]
@@ -55,7 +55,7 @@ def _print_answer(r: dict) -> None:
 
 if len(argv) > 1:
     # 인자를 여러 개 주면 순서대로 한 턴씩 실행 — 멀티턴 시나리오를 한 줄로 재현할 때 씀.
-    # 예: python -m pension_agent.consult_agent -c C3 "이현우 고객 투자성향 뭐야?" "그럼 최근 3개월 수익률은?"
+    # 예: python -m pension_agent.consult_agent -c <고객id> "이 고객 투자성향 뭐야?" "그럼 최근 3개월 수익률은?"
     history: list[dict] = []
     for q in argv:
         print(f"\n> {q}")

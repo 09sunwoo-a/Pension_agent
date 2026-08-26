@@ -221,72 +221,26 @@ def days_to_year_end() -> int:
 
 
 # ─────────────────────────────────────────────────────────────
-# 검증용 페르소나
+# 고객 로스터
 #
-# C1~C3 은 요건이 여러 건 겹치는 정밀 시나리오로, 화면 데모의 기준 케이스다.
-# C4 는 적합성 게이트·요건 충돌 검증을 위해 추가한 케이스이다.
-# C5~C6 은 '행내 전략 로직에 걸리지 않는' 경우의 산출을 확인하는 케이스이다. 매칭되는
-# 플레이북 전략이 없으면 engine.prepare() 의 items 가 비고, agent.propose() 는 LLM 단계를
-# 건너뛴 채 '제안 항목 없음' 을 반환한다(LLM 자유 답변 경로 Tier2 는 미구현).
-# income_bracket·pension_paid_ytd·balPct·cash_idle_pct·invest_period_years·club_grade 는 타겟리스트·
-# MyStar·CRM 에서 조인되는 값이며, 아래 값은 예시이다. C1~C5 에는 balPct·cash_idle_pct 를 채워
-# AI브리핑 9개 섹션이 실제로 채워지는 모습을 볼 수 있게 하고, C6 만 비워둬 "필드가 없으면
-# 해당 화면 요소를 생략한다"는 그레이스풀 폴백 경로를 데모에서도 확인할 수 있게 한다.
+# 지금은 **비어 있다.** 시연용 고객 데이터가 새로 정해지는 중이라, 옛 더미 페르소나(C1~C6)와
+# 섞이지 않도록 전부 걷어냈다. 새 데이터는 여기에 `Profile(...)` 로 채운다 — 필드 의미는
+# 위 `Profile` 정의를, 어떤 값이 어느 소스에서 조인되는지는 docs/DEMO_STATUS.md 를 본다.
+#
+# 로스터가 비어 있어도 상위 코드는 죽지 않는다: 브리핑 CLI·Streamlit 화면·문제상황 덤프는
+# 모두 "등록된 고객 없음" 으로 빠지고, `get_profile()` 은 None 을 반환한다(대화형 에이전트는
+# customer 도구 없이 지식 질의만 답한다).
 # ─────────────────────────────────────────────────────────────
 
-PERSONAS = [
-    Profile(
-        id="C1", nm="김민수", ag=48, bal=180_000_000, rk="안정형", grade="보통위험",
-        port=[82, 16, 2, 0], ret=1.9, retPct=35, dopt="미설정", room=580,
-        dorm=10, nchM=0.3, matDD=26, matAmt=50_000_000,
-        income_bracket="5500초과", pension_paid_ytd=3_200_000,
-        balPct=9, cash_idle_pct=25, invest_period_years=6.4,
-    ),
-    Profile(
-        id="C2", nm="박지영", ag=39, bal=47_000_000, rk="적극투자형", grade="높은위험",
-        port=[15, 10, 14, 61], ret=-12.3, retPct=5, dopt="설정", room=0,
-        dorm=84, nchM=1.6,
-        income_bracket="5500이하",
-        balPct=68, cash_idle_pct=8, invest_period_years=3.2,
-    ),
-    Profile(
-        id="C3", nm="이현우", ag=45, bal=230_000_000, rk="안정형", grade="매우낮은위험",
-        port=[100, 0, 0, 0], ret=1.8, retPct=17, dopt="미설정", room=0,
-        dorm=419, nchM=13.8, matDD=22, matAmt=230_000_000,
-        income_bracket="5500초과",
-        balPct=3, cash_idle_pct=40, invest_period_years=11.2,
-        club_grade="VIP",  # 스타클럽 등급 예시(CRM 조인 값) — 상단 표기 데모용. 다른 페르소나는 비워 생략 경로 확인
-    ),
-    Profile(
-        id="C4", nm="정수연", ag=52, bal=90_000_000, rk="안정추구형", grade="낮은위험",
-        port=[10, 8, 30, 52], ret=-3.2, retPct=12, dopt="미설정", room=400,
-        dorm=30, nchM=2.0, nonface=True,
-        income_bracket=None, pension_paid_ytd=0,  # 소득 구간 미확인 케이스
-        balPct=41, cash_idle_pct=6, invest_period_years=4.0,
-    ),
-    Profile(
-        # 무이슈 모범 관리 고객 — 성립 요건 0건. 어떤 전략도 소집되지 않아 items 가 빈다.
-        id="C5", nm="한서진", ag=44, bal=120_000_000, rk="위험중립형", grade="다소높은위험",
-        port=[40, 20, 30, 10], ret=6.5, retPct=55, dopt="설정", room=0,
-        dorm=30, nchM=1.0, income_bracket="5500초과",
-        balPct=22, cash_idle_pct=14, invest_period_years=8.5,
-    ),
-    Profile(
-        # 추가납입 여력만 있는 고객 — 요건은 'add' 하나뿐. add 는 원천 근거가 없어 플레이북
-        # 전략이 없으므로(LLM 재량) items 가 비고, 납입여력만 briefing 에 노출된다.
-        # balPct·cash_idle_pct 를 의도적으로 비워둔 케이스 — 상류 조인 값이 없을 때 ②·③
-        # 섹션이 해당 줄만 조용히 생략하는지 확인하는 용도.
-        id="C6", nm="오지호", ag=41, bal=95_000_000, rk="위험중립형", grade="다소높은위험",
-        port=[35, 25, 30, 10], ret=5.8, retPct=60, dopt="설정", room=200,
-        dorm=20, nchM=2.0, income_bracket="5500초과",
-    ),
-]
+PERSONAS: list[Profile] = []
 
 _BY_ID = {p.id: p for p in PERSONAS}
 
 
 def get_profile(customer_id: str) -> Profile | None:
-    """고객 id 로 Profile 을 조회한다. 지금은 PERSONAS(테스트 픽스처) 조회의 얇은 래퍼일
-    뿐이지만, 대화형 에이전트(consult_agent 의 customer 도구)가 이 함수 하나만 의존하도록 해
-    나중에 실제 고객 프로파일 저장소로 교체할 때 이 함수 본문만 바꾸면 되게 한다."""
+    """고객 id 로 Profile 을 조회한다. 지금은 PERSONAS 조회의 얇은 래퍼일 뿐이지만, 대화형
+    에이전트(consult_agent 의 customer 도구)가 이 함수 하나만 의존하도록 해 나중에 실제 고객
+    프로파일 저장소로 교체할 때 이 함수 본문만 바꾸면 되게 한다.
+
+    로스터가 비어 있는 지금은 어떤 id 로도 None 이 나온다 — 호출부는 이미 None 을 다룬다."""
     return _BY_ID.get(customer_id)

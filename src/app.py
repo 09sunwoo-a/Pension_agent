@@ -85,7 +85,13 @@ with tab_cat:
 # ==========================================
 with tab1:
     st.subheader("전체 페르소나 산출물 요약")
-    
+
+    if not PERSONAS:
+        st.info(
+            "등록된 고객이 없습니다. 시연용 고객 데이터가 정해지면 "
+            "`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 에 채웁니다."
+        )
+
     summary_data = []
     for nm, res in results.items():
         f = res["facts"]
@@ -107,204 +113,212 @@ with tab1:
 # Tab 2: 상세 조회 및 자연어 피드백
 # ==========================================
 with tab2:
-    col1, col2 = st.columns([2, 1])
+    if not PERSONAS:
+        # 로스터가 비어 있는 동안은 리뷰할 산출물 자체가 없다. 대화형 탭은 고객 없이도
+        # 지식 질의를 받으므로 여기서 화면 전체를 멈추지 않는다(st.stop 금지).
+        st.info(
+            "등록된 고객이 없습니다. 시연용 고객 데이터가 정해지면 "
+            "`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 에 채웁니다."
+        )
+    else:
+        col1, col2 = st.columns([2, 1])
     
-    with col1:
-        target_name = st.selectbox("리뷰할 고객 선택", [p.nm for p in PERSONAS])
-        target_res = results[target_name]
-        f = target_res["facts"]
+        with col1:
+            target_name = st.selectbox("리뷰할 고객 선택", [p.nm for p in PERSONAS])
+            target_res = results[target_name]
+            f = target_res["facts"]
         
-        # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — REQUIREMENTS.md ①~⑨ +
-        # §14 상담이력 전체를 화면 순서(①AI브리핑→②근거→③운용상태→...→⑨안내)로 노출한다.
-        # ── 헤더: ■ 고객 · 요건 N건
-        st.markdown(f"#### ■ {target_name} · 요건 {len(f['conditions'])}건")
-        st.caption(engine.customer_header_line(f["customer"]))  # 상단 항목(REQUIREMENTS.md §3.1)
-        st.write(", ".join(c.split(":", 1)[1] for c in f["conditions"]))
+            # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — REQUIREMENTS.md ①~⑨ +
+            # §14 상담이력 전체를 화면 순서(①AI브리핑→②근거→③운용상태→...→⑨안내)로 노출한다.
+            # ── 헤더: ■ 고객 · 요건 N건
+            st.markdown(f"#### ■ {target_name} · 요건 {len(f['conditions'])}건")
+            st.caption(engine.customer_header_line(f["customer"]))  # 상단 항목(REQUIREMENTS.md §3.1)
+            st.write(", ".join(c.split(":", 1)[1] for c in f["conditions"]))
 
-        # ── ② 왜 이 고객님인가요 (최대 3줄, 코드 산출)
-        if f.get("why_this_customer"):
-            st.markdown(f"**[{sections.title('why_this_customer')}]**")
-            for line in f["why_this_customer"]:
-                st.markdown(f"- {line}")
+            # ── ② 왜 이 고객님인가요 (최대 3줄, 코드 산출)
+            if f.get("why_this_customer"):
+                st.markdown(f"**[{sections.title('why_this_customer')}]**")
+                for line in f["why_this_customer"]:
+                    st.markdown(f"- {line}")
 
-        # ── ③ 보유현황 (3분류 운용현황 포함)
-        bf = f["briefing"]
-        src = "; ".join(engine.format_sources([bf["source"]]))
-        holdings = " | ".join(f"{k} {v}" for k, v in bf.items() if k != "source")
-        st.markdown(f"**[{sections.title('current_state')}]** {holdings}")
-        st.caption(f"근거 · {src}")
+            # ── ③ 보유현황 (3분류 운용현황 포함)
+            bf = f["briefing"]
+            src = "; ".join(engine.format_sources([bf["source"]]))
+            holdings = " | ".join(f"{k} {v}" for k, v in bf.items() if k != "source")
+            st.markdown(f"**[{sections.title('current_state')}]** {holdings}")
+            st.caption(f"근거 · {src}")
 
-        st.divider()
+            st.divider()
 
-        # ── ① AI 브리핑 (sentence — 종합 제안 문장, 2~3문장) + 근거 해설(insight)
-        st.markdown(f"**[{sections.title('ai_briefing')}]**")
-        if target_res.get("tier") == "LLM판단":
-            st.warning(f"⚠ 행내 전략 미매칭 · LLM 참고 의견(검토 필요)\n\n{target_res['sentence']}")
-        elif not f["items"]:
-            st.info(target_res["sentence"])
-        else:
-            st.markdown(
-                f"<div style='font-size:1.15rem;font-weight:800;margin:4px 0'>"
-                f"▷ {target_res['sentence']}</div>",
-                unsafe_allow_html=True,
-            )
-        if target_res.get("insight"):
-            st.caption(f"근거 해설 · {target_res['insight']}")
+            # ── ① AI 브리핑 (sentence — 종합 제안 문장, 2~3문장) + 근거 해설(insight)
+            st.markdown(f"**[{sections.title('ai_briefing')}]**")
+            if target_res.get("tier") == "LLM판단":
+                st.warning(f"⚠ 행내 전략 미매칭 · LLM 참고 의견(검토 필요)\n\n{target_res['sentence']}")
+            elif not f["items"]:
+                st.info(target_res["sentence"])
+            else:
+                st.markdown(
+                    f"<div style='font-size:1.15rem;font-weight:800;margin:4px 0'>"
+                    f"▷ {target_res['sentence']}</div>",
+                    unsafe_allow_html=True,
+                )
+            if target_res.get("insight"):
+                st.caption(f"근거 해설 · {target_res['insight']}")
 
-        st.markdown("**[전략 카드]**")
-        for i, it in enumerate(f["items"], 1):
-            c = it["card"]
-            with st.container(border=True):
-                st.markdown(f"**{i}. {c['headline']}** &nbsp;·&nbsp; {c['tag']}")
-                if c["product"]:
-                    tgt = f" &nbsp;·&nbsp; 대상 {c['target']}" if c["target"] else ""
-                    st.markdown(f"추천 상품 {c['product']}{tgt}")
-                elif c["action"]:
-                    st.markdown(f"실행 {c['action']}")
-                st.markdown(c["benefit"])
-
-        st.divider()
-
-        # ── ④ 수익률 상위 1% 고객님들이 많이 담은 상품은? (비개인화·참고용)
-        if f.get("top_holdings"):
-            st.markdown(f"**[{sections.BY_KEY['top_holdings'].full_title}]** *({sections.BY_KEY['top_holdings'].note})*")
-            for th in f["top_holdings"]:
-                st.markdown(f"- {th['product_name']} — {th['description']} (최근 1년 {th['return_1y']}%)")
-
-        # ── ⑤ 이런 상품이 적합할 수 있어요 (LLM 상품 1개 + 포트폴리오 1개, 폐쇄 후보군에서 선택)
-        reco = f.get("recommendation")
-        st.markdown(f"**[{sections.title('recommendation')}]**")
-        if reco:
-            with st.container(border=True):
-                prod = reco["product"]
-                st.markdown(f"**추천 상품** · {prod['name']} (최근 1년 {prod['return_1y']}%)")
-                if prod.get("description"):
-                    st.caption(prod["description"])
-                st.markdown(f"AI 추천 사유: {prod['reason']}")
-            if reco.get("portfolio"):
-                pf = reco["portfolio"]
+            st.markdown("**[전략 카드]**")
+            for i, it in enumerate(f["items"], 1):
+                c = it["card"]
                 with st.container(border=True):
-                    alloc = ", ".join(f"{a['product_name']} {a['weight_pct']}%" for a in pf["allocation"])
-                    st.markdown(f"**추천 포트폴리오** · {pf['name']}")
-                    st.caption(alloc)
-                    st.markdown(f"AI 추천 사유: {pf['reason']}")
-            if reco.get("combined_reason"):
-                st.markdown(f"*종합 AI 추천 사유: {reco['combined_reason']}*")
-        else:
-            st.caption("LLM 미가용 또는 적합 후보 없음 — 이 섹션은 근거 없는 추천 대신 비워둔다.")
+                    st.markdown(f"**{i}. {c['headline']}** &nbsp;·&nbsp; {c['tag']}")
+                    if c["product"]:
+                        tgt = f" &nbsp;·&nbsp; 대상 {c['target']}" if c["target"] else ""
+                        st.markdown(f"추천 상품 {c['product']}{tgt}")
+                    elif c["action"]:
+                        st.markdown(f"실행 {c['action']}")
+                    st.markdown(c["benefit"])
 
-        # ── 이 고객의 문제상황 (⑥⑦⑧ 후보군의 출발점 — 06/01 고객세그먼트 매칭 결과)
-        if f.get("problem_situations"):
-            names = ", ".join(s["title"] for s in f["problem_situations"][:3])
-            more = len(f["problem_situations"]) - 3
-            st.caption(f"이 고객의 문제상황: {names}" + (f" 외 {more}건" if more > 0 else ""))
+            st.divider()
 
-        # ── ⑥ 이렇게 말해보세요 (대고객 화법, script 있으면 그것을 우선 노출)
-        if f.get("talking_points"):
-            st.markdown(f"**[{sections.title('talking_points')}]**")
-            for tp in f["talking_points"]:
-                st.markdown(f"- ({tp['title']}) {tp.get('script') or tp['talk']}")
-                if tp.get("source"):
-                    st.caption(f"— 출처 {tp['source']}")
+            # ── ④ 수익률 상위 1% 고객님들이 많이 담은 상품은? (비개인화·참고용)
+            if f.get("top_holdings"):
+                st.markdown(f"**[{sections.BY_KEY['top_holdings'].full_title}]** *({sections.BY_KEY['top_holdings'].note})*")
+                for th in f["top_holdings"]:
+                    st.markdown(f"- {th['product_name']} — {th['description']} (최근 1년 {th['return_1y']}%)")
 
-        # ── ⑦ 예상 반론 및 대응 화법
-        if f.get("objections"):
-            st.markdown(f"**[{sections.title('objections')}]**")
-            for ob in f["objections"]:
-                st.markdown(f"- \"{ob['objection']}\" → {ob['response']}")
-                if ob.get("source"):
-                    st.caption(f"— 출처 {ob['source']}")
+            # ── ⑤ 이런 상품이 적합할 수 있어요 (LLM 상품 1개 + 포트폴리오 1개, 폐쇄 후보군에서 선택)
+            reco = f.get("recommendation")
+            st.markdown(f"**[{sections.title('recommendation')}]**")
+            if reco:
+                with st.container(border=True):
+                    prod = reco["product"]
+                    st.markdown(f"**추천 상품** · {prod['name']} (최근 1년 {prod['return_1y']}%)")
+                    if prod.get("description"):
+                        st.caption(prod["description"])
+                    st.markdown(f"AI 추천 사유: {prod['reason']}")
+                if reco.get("portfolio"):
+                    pf = reco["portfolio"]
+                    with st.container(border=True):
+                        alloc = ", ".join(f"{a['product_name']} {a['weight_pct']}%" for a in pf["allocation"])
+                        st.markdown(f"**추천 포트폴리오** · {pf['name']}")
+                        st.caption(alloc)
+                        st.markdown(f"AI 추천 사유: {pf['reason']}")
+                if reco.get("combined_reason"):
+                    st.markdown(f"*종합 AI 추천 사유: {reco['combined_reason']}*")
+            else:
+                st.caption("LLM 미가용 또는 적합 후보 없음 — 이 섹션은 근거 없는 추천 대신 비워둔다.")
 
-        # ── 판단근거
-        if f["rationale"]:
-            st.markdown("**[판단근거]**")
-            for s in f["rationale"]:
-                st.markdown(f"- {s}")
+            # ── 이 고객의 문제상황 (⑥⑦⑧ 후보군의 출발점 — 06/01 고객세그먼트 매칭 결과)
+            if f.get("problem_situations"):
+                names = ", ".join(s["title"] for s in f["problem_situations"][:3])
+                more = len(f["problem_situations"]) - 3
+                st.caption(f"이 고객의 문제상황: {names}" + (f" 외 {more}건" if more > 0 else ""))
 
-        # ── 근거 문서
-        if f["source_titles"]:
-            st.markdown(f"**[근거 문서]** {'; '.join(f['source_titles'])}")
+            # ── ⑥ 이렇게 말해보세요 (대고객 화법, script 있으면 그것을 우선 노출)
+            if f.get("talking_points"):
+                st.markdown(f"**[{sections.title('talking_points')}]**")
+                for tp in f["talking_points"]:
+                    st.markdown(f"- ({tp['title']}) {tp.get('script') or tp['talk']}")
+                    if tp.get("source"):
+                        st.caption(f"— 출처 {tp['source']}")
 
-        # ── 근거 규정 — 적합성 원칙 등 판단의 규정 출처를 추적 가능하게 노출
-        if f.get("regulations"):
-            st.markdown("**[근거 규정]**")
-            for rg in f["regulations"]:
-                st.markdown(f"- ({rg['title']}) {rg['regulation']}")
+            # ── ⑦ 예상 반론 및 대응 화법
+            if f.get("objections"):
+                st.markdown(f"**[{sections.title('objections')}]**")
+                for ob in f["objections"]:
+                    st.markdown(f"- \"{ob['objection']}\" → {ob['response']}")
+                    if ob.get("source"):
+                        st.caption(f"— 출처 {ob['source']}")
 
-        # ── ⑧ 상담에 참고하세요 (노하우/가이드 스니펫)
-        if f.get("consult_resources"):
-            st.markdown(f"**[{sections.title('consult_resources')}]**")
-            for res in f["consult_resources"]:
-                st.markdown(f"- {res['title']} — {res['snippet']}")
-                if res.get("screens"):
-                    st.caption("확인 화면 " + " ".join(res["screens"]))
-                if res.get("source"):
-                    st.caption(f"— 출처 {res['source']}")
+            # ── 판단근거
+            if f["rationale"]:
+                st.markdown("**[판단근거]**")
+                for s in f["rationale"]:
+                    st.markdown(f"- {s}")
 
-        # ── 다른 제안 (수익 개선폭 순)
-        if f["alternatives"]:
-            st.markdown("**[다른 제안]** 수익 개선폭 순")
-            for i, a in enumerate(f["alternatives"], 1):
-                st.markdown(f"{i}. {a['clause']} &nbsp; [{engine.effect_label(a['effect_grade'])}]")
+            # ── 근거 문서
+            if f["source_titles"]:
+                st.markdown(f"**[근거 문서]** {'; '.join(f['source_titles'])}")
 
-        # ── ⑨ 고객님께 안내해보세요 (가장 임박한 이벤트 1개 + 세미나 1개)
-        outreach = f.get("outreach") or {}
-        if outreach.get("event") or outreach.get("seminar"):
-            st.markdown(f"**[{sections.title('outreach')}]**")
-            for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
-                if item:
-                    st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")
-                    if item.get("lms_message"):
-                        st.caption(f"LMS 문구: {item['lms_message']}")
+            # ── 근거 규정 — 적합성 원칙 등 판단의 규정 출처를 추적 가능하게 노출
+            if f.get("regulations"):
+                st.markdown("**[근거 규정]**")
+                for rg in f["regulations"]:
+                    st.markdown(f"- ({rg['title']}) {rg['regulation']}")
 
-        # ── §14 상담 이력
-        if f.get("consult_history"):
-            st.markdown("**[상담 이력]**")
-            for line in f["consult_history"]:
-                st.markdown(f"- {line}")
+            # ── ⑧ 상담에 참고하세요 (노하우/가이드 스니펫)
+            if f.get("consult_resources"):
+                st.markdown(f"**[{sections.title('consult_resources')}]**")
+                for res in f["consult_resources"]:
+                    st.markdown(f"- {res['title']} — {res['snippet']}")
+                    if res.get("screens"):
+                        st.caption("확인 화면 " + " ".join(res["screens"]))
+                    if res.get("source"):
+                        st.caption(f"— 출처 {res['source']}")
 
-        # ── 생성 경로 및 리젝 사유
-        st.divider()
-        _tier = {"행내전략": "행내 전략 근거", "LLM판단": "⚠ LLM 판단 · 행내 근거 없음(검토 필요)",
-                 "미매칭": "미매칭 · 제안 없음"}.get(target_res.get("tier"), target_res.get("tier", ""))
-        route = target_res["source"] + (f" ({target_res['reason']})" if target_res["reason"] else "")
-        st.caption(f"근거 구분: {_tier}  ·  생성 경로: {route}")
-        for b in target_res["rejected"]:
-            st.markdown(f"- 리젝 사유: {b}")
+            # ── 다른 제안 (수익 개선폭 순)
+            if f["alternatives"]:
+                st.markdown("**[다른 제안]** 수익 개선폭 순")
+                for i, a in enumerate(f["alternatives"], 1):
+                    st.markdown(f"{i}. {a['clause']} &nbsp; [{engine.effect_label(a['effect_grade'])}]")
 
-        # ── 고지 / 확인 / 보류 사항
-        for label, key in (("고지 필요", "cautions"), ("확인 필요", "needs_confirm"), ("제안 보류", "unverified")):
-            if f[key]:
-                st.markdown(f"**[{label}]**")
-                for v in f[key]:
-                    st.markdown(f"- {v}")
+            # ── ⑨ 고객님께 안내해보세요 (가장 임박한 이벤트 1개 + 세미나 1개)
+            outreach = f.get("outreach") or {}
+            if outreach.get("event") or outreach.get("seminar"):
+                st.markdown(f"**[{sections.title('outreach')}]**")
+                for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
+                    if item:
+                        st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")
+                        if item.get("lms_message"):
+                            st.caption(f"LMS 문구: {item['lms_message']}")
+
+            # ── §14 상담 이력
+            if f.get("consult_history"):
+                st.markdown("**[상담 이력]**")
+                for line in f["consult_history"]:
+                    st.markdown(f"- {line}")
+
+            # ── 생성 경로 및 리젝 사유
+            st.divider()
+            _tier = {"행내전략": "행내 전략 근거", "LLM판단": "⚠ LLM 판단 · 행내 근거 없음(검토 필요)",
+                     "미매칭": "미매칭 · 제안 없음"}.get(target_res.get("tier"), target_res.get("tier", ""))
+            route = target_res["source"] + (f" ({target_res['reason']})" if target_res["reason"] else "")
+            st.caption(f"근거 구분: {_tier}  ·  생성 경로: {route}")
+            for b in target_res["rejected"]:
+                st.markdown(f"- 리젝 사유: {b}")
+
+            # ── 고지 / 확인 / 보류 사항
+            for label, key in (("고지 필요", "cautions"), ("확인 필요", "needs_confirm"), ("제안 보류", "unverified")):
+                if f[key]:
+                    st.markdown(f"**[{label}]**")
+                    for v in f[key]:
+                        st.markdown(f"- {v}")
     
-    with col2:
-        st.write("### 📝 피드백 작성")
-        st.caption("어색하거나 논리에 안 맞는 부분을 편하게 자연어로 남겨주세요.")
+        with col2:
+            st.write("### 📝 피드백 작성")
+            st.caption("어색하거나 논리에 안 맞는 부분을 편하게 자연어로 남겨주세요.")
         
-        with st.form("feedback_form", clear_on_submit=True):
-            issue_type = st.selectbox("어떤 종류의 문제인가요?", ["상품/규정 오류", "논리 어색함", "문장/말투 이상함", "기타 건의"])
-            feedback_text = st.text_area("자연어 피드백 입력", placeholder="예: 박지영 고객은 위험자산 한도 초과인데 디폴트옵션 설정하라고 뜨는게 이상해요.")
+            with st.form("feedback_form", clear_on_submit=True):
+                issue_type = st.selectbox("어떤 종류의 문제인가요?", ["상품/규정 오류", "논리 어색함", "문장/말투 이상함", "기타 건의"])
+                feedback_text = st.text_area("자연어 피드백 입력", placeholder="예: 이 고객은 위험자산 한도 초과인데 디폴트옵션 설정하라고 뜨는게 이상해요.")
             
-            submitted = st.form_submit_button("데이터로 저장하기")
+                submitted = st.form_submit_button("데이터로 저장하기")
             
-            if submitted:
-                if feedback_text.strip() == "":
-                    st.warning("피드백 내용을 입력해주세요.")
-                else:
-                    # CSV에 즉시 기록 (기본 상태 '대기중' 추가)
-                    with open(FEEDBACK_FILE, "a", encoding="utf-8", newline="") as file:
-                        writer = csv.writer(file)
-                        writer.writerow([
-                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                            target_name, 
-                            issue_type, 
-                            feedback_text,
-                            "대기중"
-                        ])
+                if submitted:
+                    if feedback_text.strip() == "":
+                        st.warning("피드백 내용을 입력해주세요.")
+                    else:
+                        # CSV에 즉시 기록 (기본 상태 '대기중' 추가)
+                        with open(FEEDBACK_FILE, "a", encoding="utf-8", newline="") as file:
+                            writer = csv.writer(file)
+                            writer.writerow([
+                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
+                                target_name, 
+                                issue_type, 
+                                feedback_text,
+                                "대기중"
+                            ])
                     
-                    st.success(f"{target_name} 님에 대한 피드백이 성공적으로 기록되었습니다!")
+                        st.success(f"{target_name} 님에 대한 피드백이 성공적으로 기록되었습니다!")
 
 
 # ==========================================

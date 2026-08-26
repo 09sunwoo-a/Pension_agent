@@ -47,14 +47,13 @@ cp .env.example .env      # 사내 GenAI 게이트웨이 URL·키 입력 (pensio
 
 ```bash
 # ── 실행
-python -m pension_agent.strategy_agent.agent 이현우    # 단일 고객 AI 브리핑 (CLI)
-python -m pension_agent.consult_agent -c C3            # 대화형 에이전트 REPL — 고객 화면이 열린 상태
+python -m pension_agent.strategy_agent.agent <고객명>  # 단일 고객 AI 브리핑 (CLI)
+python -m pension_agent.consult_agent -c <고객id>       # 대화형 에이전트 REPL — 고객 화면이 열린 상태
 streamlit run app.py                                   # 평가·피드백 대시보드 (+대화형 에이전트 테스트 탭)
 
 # ── 테스트 (LLM 키 없이 동작)
 python -m tests.test_engine                     # 엔진 감사 회귀 (①~⑤ 결정론 로직)
 python -m tests.test_support                    # ⑥~⑨ 문제상황·후보군·더미 규약·시효성 수치
-python -m tests.test_strategy_agent             # LLM 산출 검증·폴백 경로
 python -m tests.test_consult_agent              # 검색·라우팅·즉답 의도·도구 루프
 python -m tests.test_infra                      # 공용 인프라(세션·도구·임포트 경계)
 python -m scripts.kb_build.test_paths           # 경로·locator 실재 (폴더 재번호 회귀)
@@ -77,7 +76,8 @@ python -m scripts.demo_status                   # docs/DEMO_STATUS.md 갱신
 
 대화형 에이전트는 `-c/--customer` 로 "지금 열려 있는 고객"을 지정한다. 넘기지 않으면
 브리핑질의·LMS발송·수정 세 의도가 "고객 화면을 먼저 열어주세요"로 답한다. 고객 id 목록은
-`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 참고(예: 이현우=`C3`). 자세한 실행
+`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 참고 — **지금은 비어 있다**(옛 더미
+페르소나를 걷어냈고, 시연용 고객 데이터가 정해지면 다시 채운다). 자세한 실행
 조합은 [pension_agent/consult_agent/README.md](pension_agent/consult_agent/README.md).
 
 LLM 은 `.env` 의 `LLM_BASE_URL` 유무로 사내(genai)/외부테스트(anthropic)를 자동 전환한다 →

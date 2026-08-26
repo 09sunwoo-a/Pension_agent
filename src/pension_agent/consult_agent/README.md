@@ -19,7 +19,7 @@ r2 = ask("그럼 안 된다고 하면요?", history=r["history"])   # 후속 질
 
 # 브리핑질의·LMS발송·수정은 customer_id 가 필요하다(현재 열려 있는 브리핑 화면의 고객).
 # 넘기면 모든 턴이 src/session_data 에 상담이력으로도 함께 기록된다(REQUIREMENTS.md §14).
-r3 = ask("이 고객 평가금액 얼마야?", customer_id="C1", session_id="branch-101-2026-08-20")
+r3 = ask("이 고객 평가금액 얼마야?", customer_id="<고객id>", session_id="branch-101-2026-08-20")
 ```
 
 아래 명령은 전부 `src/` 에서 실행한다고 가정한다(`cd src`).
@@ -34,14 +34,14 @@ CA="python -m pension_agent.consult_agent"
 $CA "고객이 주식이 더 낫다는데 뭐라고 하지?"
 
 # 고객 화면이 열려 있는 상태로 테스트 — -c/--customer 로 customer_id 지정
-$CA "이현우 고객 투자성향 뭐야?" -c C3
+$CA "이 고객 투자성향 뭐야?" -c <고객id>
 
 # 실제로 주고받는 멀티턴 테스트 — REPL, 답변 보고 다음 질문을 그때그때 입력
-$CA -c C3
+$CA -c <고객id>
 $CA                                      # 고객 화면 없이 화법 코칭만 REPL로
 
 # 멀티턴을 재현 가능한 한 줄로 — 인자를 여러 개 주면 순서대로 한 턴씩(맥락 이어서) 실행. 회귀 테스트·버그 리포트용
-$CA -c C3 "이현우 고객 투자성향 뭐야?" "그럼 최근 3개월 수익률은?"
+$CA -c <고객id> "이 고객 투자성향 뭐야?" "그럼 최근 3개월 수익률은?"
 
 # 값·절차·정의도 같은 경로다 — 계획 루프가 필요한 재료를 골라 온다
 $CA "세액공제 한도가 얼마야?"
@@ -55,7 +55,8 @@ python -m pension_agent.consult_agent.kb         # 지식베이스 점검 리포
 `-c`/`--customer`를 넘기지 않으면 고객 관련 기능(브리핑 질의·수정·화면 연계)은 "고객 화면을
 먼저 열어주세요"라고 답한다 — 어느 고객인지가 있어야 성립하는 기능이기 때문이다(`CLAUDE.md` §3).
 지식 질의응답과 화법 코칭은 고객 화면 없이도 답한다. customer_id 목록은
-`../strategy_agent/customer.py`의 `PERSONAS` 참고(예: 이현우=`C3`).
+`../strategy_agent/customer.py`의 `PERSONAS` 참고 — **지금은 비어 있다**(옛 더미 페르소나를
+걷어냈고, 시연용 고객 데이터가 정해지면 다시 채운다).
 
 **LLM 이 없으면 답하지 않는다.** 규칙·검색만으로 대신 답을 만드는 경로는 두지 않는다 —
 근거가 덜 갖춰진 답변이 정상 답변처럼 보이는 것이 무응답보다 위험하다(`CLAUDE.md` §11).
@@ -68,7 +69,7 @@ python -m pension_agent.consult_agent.kb         # 지식베이스 점검 리포
 consult_agent/
 ├── CLAUDE.md           대화형 기준서 — 있어야 할 동작과 구현 gap 목록. 구현과 어긋나면 문서가 기준
 ├── graph.py            그래프 조립 · ask() (모든 턴을 session_store 에 기록)
-├── __main__.py         REPL — python -m pension_agent.consult_agent -c C3
+├── __main__.py         REPL — python -m pension_agent.consult_agent -c <고객id>
 ├── state.py            AgentState/Turn · 대화이력 포맷 · 공용 지식베이스(KB)
 ├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
 ├── kb.py               지식베이스 로드 · 검색 · 계층 인덱스(버킷)

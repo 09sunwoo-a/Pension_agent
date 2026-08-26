@@ -80,7 +80,7 @@
 | 자리 | 현재값 | 전환 시 |
 |---|---|---|
 | customer.TODAY | 2026-08-11 | 데모 고정 기준일. 실배포 시 date.today() 로 바꾸고 assets.json 날짜도 함께 교체 |
-| customer.PERSONAS | 6명 (C1~C6) | 하드코딩 페르소나. 실데이터 조인으로 교체 |
+| customer.PERSONAS | 0명 (비어 있음) | 하드코딩 페르소나. 옛 더미(C1~C6)를 걷어낸 상태 — 시연용 고객 데이터로 채운 뒤 실데이터 조인으로 교체 |
 | data/portfolios.json | 1건 | 채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체 |
 | engine.TOP_N / ALT_N | 1 / 1 | 제안 1개 + 예비 1개 (07_에이전트_기능정의/01 ① 4) |
 | consult_agent.screens.MODE | D (개발) | 단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, 화면번호 자체는 지식베이스 절차 카드에서 온다 |

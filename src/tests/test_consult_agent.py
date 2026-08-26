@@ -230,7 +230,7 @@ def check_intent_routing() -> bool:
         question = f"{intent}-라우팅-테스트"
         _OVERRIDES[question] = {"intent": intent}
         agent = G.build_agent()
-        out = agent.invoke({"question": question, "customer_id": "C1"})
+        out = agent.invoke({"question": question, "customer_id": "CX"})
         this_ok = out.get("answer") == f"({intent} 응답)"
         ok = ok and this_ok
         print(f"{'✓' if this_ok else '✗'} intent={intent} → {intent} 노드로 라우팅")
@@ -281,12 +281,12 @@ def check_lms_send_parsing() -> bool:
     """
     from pension_agent.consult_agent.nodes import lms
 
-    out = lms.lms_send({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "C1"})
+    out = lms.lms_send({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "CX"})
     pending = out.get("pending_action")
     ok1 = (bool(pending) and pending["kind"] == "lms" and pending["screen"]
            and pending["message"] == "안내 문구입니다"
            and "보낼지는 그 화면에서" in out["answer"])
-    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "C1"})["answer"]
+    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "CX"})["answer"]
     ok3 = "찾을 수 없어요" in lms.lms_send({"question": '"문구" 보내줘', "customer_id": None})["answer"]
     ok = ok1 and ok2 and ok3
     print(f"{'✓' if ok else '✗'} lms_send: 발송이 아니라 화면 연계를 제안한다")
@@ -586,6 +586,15 @@ def check_customer_material() -> int:
     ② 「하지 말 것」이 원장에 고객 요건이 실렸을 때만 — 즉 LLM 이 customer 도구를 부른
        턴에만 — 붙었다. 고객 상태는 코드가 이미 아는 값인데 LLM 의 도구 선택에 의존한
        것이고, 그래서 화법만 물은 턴에는 조용히 빠졌다(§8 · gap 10).
+
+    **로스터가 빈 동안 잠긴 검사.** 더미 페르소나(C1~C6)를 걷어내 customer.PERSONAS 가
+    비어 있어서, 실재하는 고객이 있어야만 서는 아래 검사는 들어냈다. 시연용 고객 데이터가
+    새로 정해지면 그 id 로 다시 세운다:
+      · customer 도구가 브리핑 재료(평가금액·성립 요건)를 싣는가
+      · customer 도구가 화면에 뜬 AI브리핑 산문(제안 문장·근거 해설)까지 싣는가
+      · conditions_of() 가 customer_id 만으로 고객 요건을 읽는가
+      · 원장에 고객 재료가 없는 턴에도 가드가 붙는가(고객 화면이 열려 있을 때)
+      · 재료 하나로 끝나는 질문이 계획 호출 1번으로 끝나는가(check_turn_cost)
     """
     from pension_agent.consult_agent import guard as GD
     from pension_agent.consult_agent.nodes import plan as P
@@ -598,55 +607,31 @@ def check_customer_material() -> int:
     print(f"{'✓' if gone else '✗'} 고객 재료를 답하던 두 번째 경로(briefing_qa)가 없다")
     ok += gone
 
-    found = tools.run("customer", {"customer_id": "C3"}, "이 고객 평가금액 얼마야?")
-    hit = bool(found) and "평가금액" in found["text"] and "성립 요건" in found["text"]
-    print(f"{'✓' if hit else '✗'} customer 도구가 브리핑 재료(값·요건)를 싣는다")
-    ok += hit
-
-    # 화면에 뜬 AI 산문(제안 문장·근거 해설)도 재료에 실린다 — briefing_qa 노드가 갖고
-    # 있던 노출 수준이다. 직원은 그 문장을 보면서 묻기 때문에, 재료에 없으면 "화면엔
-    # 저렇게 써 있는데 왜 다르게 말하느냐"가 된다. LLM 없이는 산문이 비므로 스텁을 쓴다.
-    from pension_agent.strategy_agent import agent as SA
-    orig_propose = SA.propose
-    SA.propose = lambda profile: {**orig_propose(profile),
-                                  "sentence": "만기 예금을 이렇게 제안해 보세요.",
-                                  "insight": "예금 100% 라 수익률이 낮습니다."}
-    try:
-        found = tools.run("customer", {"customer_id": "C3"}, "브리핑 요약해줘")
-        hit = bool(found) and "AI브리핑 문장" in found["text"] and "AI브리핑 근거해설" in found["text"]
-    finally:
-        SA.propose = orig_propose
-    print(f"{'✓' if hit else '✗'} customer 도구가 화면에 뜬 AI브리핑 산문까지 재료로 싣는다")
-    ok += hit
+    # 고객 로스터가 비어 있는 동안은 "재료를 싣는가"를 여기서 재지 못한다 — 아래
+    # 「로스터가 빈 동안 잠긴 검사」 참고.
 
     hit = tools.run("customer", {"customer_id": None}, "평가금액") is None
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 고객 재료를 만들지 않는다")
     ok += hit
 
     # ② 고객 상태 주의를 코드가 판단하는가.
-    hit = "low" in [c.split(":")[0] for c in GD.conditions_of("C3")]
-    print(f"{'✓' if hit else '✗'} conditions_of: customer_id 만으로 고객 요건을 읽는다")
-    ok += hit
-
     hit = GD.conditions_of(None) == [] and GD.conditions_of("없는고객") == []
     print(f"{'✓' if hit else '✗'} conditions_of: 고객이 없으면 요건을 지어내지 않는다")
     ok += hit
 
-    # 화법만 물어 원장에 고객 재료가 **하나도 없는** 턴. 예전에는 여기서 가드가 빠졌다.
+    # 화법만 물어 원장에 고객 재료가 **하나도 없는** 턴. 고객 화면이 닫혀 있으면
+    # 가드는 붙지 않는다(열려 있을 때 붙는지는 로스터가 빈 동안 재지 못한다).
     pitch_only = [{"tool": "pitch", "query": "q", "text": "수익률 이야기를 이렇게 꺼내세요.",
                    "atomic": [], "notices": [], "notice_scopes": [],
                    "allow": ["수익률 이야기를 이렇게 꺼내세요."], "sources": [], "meta": {}}]
     orig_gen = P.generate
     P.generate = lambda prompt, **kw: "(스텁 답변)"
     try:
-        out = P.compose({"question": "뭐라고 말하지?", "customer_id": "C3",
-                         "evidence": pitch_only})
-        hit = bool(out.get("guards"))
         closed = P.compose({"question": "뭐라고 말하지?", "evidence": pitch_only})
-        hit = hit and not closed.get("guards")
+        hit = not closed.get("guards")
     finally:
         P.generate = orig_gen
-    print(f"{'✓' if hit else '✗'} 원장에 고객 재료가 없어도 가드가 붙는다(고객 화면이 열려 있으면)")
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 가드를 붙이지 않는다")
     ok += hit
     return ok
 
@@ -1103,7 +1088,7 @@ def check_turn_cost() -> int:
     ev_customer = {"tool": "customer", "query": "q", "text": "· 평가금액 2억 3,000만원",
                    "atomic": [], "notices": [], "notice_scopes": [], "marks": [],
                    "related": [], "allow": ["· 평가금액 2억 3,000만원"],
-                   "sources": [{"id": "briefing.C3"}], "meta": {}}
+                   "sources": [{"id": "briefing.CX"}], "meta": {}}
 
     # ① 화법 슬롯 분해가 화법을 안 부르는 턴에서는 아예 안 돈다.
     called: list[str] = []
@@ -1112,7 +1097,7 @@ def check_turn_cost() -> int:
     orig_plan_gen = P.generate
     P.generate = lambda prompt, **kw: '{"tool": "customer", "query": "예금 잔액", "last": true}'
     try:
-        state = {"question": "이 고객 예금 잔액 얼마지", "customer_id": "C3"}
+        state = {"question": "이 고객 예금 잔액 얼마지", "customer_id": "CX"}
         state.update(P.plan_step(state))
     finally:
         pitch.extract_slots, P.generate = orig_extract, orig_plan_gen
@@ -1120,10 +1105,8 @@ def check_turn_cost() -> int:
     print(f"{'✓' if hit else '✗'} 화법을 안 부르는 턴은 슬롯 분해 호출이 없다")
     ok += hit
 
-    # ② 계획이 한 호출로 끝난다("last": true).
-    hit = state.get("plan_done") is True and len(state.get("plan_calls") or []) == 1
-    print(f"{'✓' if hit else '✗'} 재료 하나로 끝나는 질문은 계획 호출 1번으로 끝난다")
-    ok += hit
+    # ② 계획이 한 호출로 끝나는가("last": true)는 그 도구가 **실제로 재료를 내놨을
+    # 때만** 성립한다(plan.plan_step). 고객 재료가 없는 지금은 재지 못한다.
 
     # ③ 고객 재료만 있는 턴은 되묻기 판정을 돌리지 않는다.
     called.clear()
@@ -1538,11 +1521,11 @@ def check_history_material() -> int:
         orig_dir = session_store.SESSION_DATA_DIR
         session_store.SESSION_DATA_DIR = Path(tmp)
         try:
-            session_store.append_turn("C3", "s1", {
+            session_store.append_turn("CX", "s1", {
                 "role": "user", "text": "수수료 부담된다고 하시네요", "ts": "2026-08-01T09:00:00Z"})
-            session_store.append_turn("C3", "s1", {
+            session_store.append_turn("CX", "s1", {
                 "role": "agent", "text": "수수료는 " + "가" * 400, "ts": "2026-08-01T09:00:05Z"})
-            state = {"question": "지난번에 고객 상담에서 무슨 얘기 했지?", "customer_id": "C3"}
+            state = {"question": "지난번에 고객 상담에서 무슨 얘기 했지?", "customer_id": "CX"}
             found = tools.run("history", state, "지난 상담 내용")
             closed = tools.run("history", {"question": "지난번에 무슨 얘기 했지?"}, "지난 상담")
             unseen = tools.run("history", {"question": "q", "customer_id": "C_없음"}, "지난 상담")
@@ -1550,7 +1533,7 @@ def check_history_material() -> int:
             session_store.SESSION_DATA_DIR = orig_dir
 
     hit = bool(found) and "수수료 부담된다고 하시네요" in found["text"] \
-        and found["sources"][0]["id"] == "session.C3"
+        and found["sources"][0]["id"] == "session.CX"
     print(f"{'✓' if hit else '✗'} 지난 상담 기록이 재료로 올라온다")
     ok += hit
 
@@ -1569,7 +1552,7 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫혔거나 기록이 없으면 지어내지 않는다")
     ok += hit
 
-    hit = "history" not in tools.catalog({}) and "history" in tools.catalog({"customer_id": "C3"})
+    hit = "history" not in tools.catalog({}) and "history" in tools.catalog({"customer_id": "CX"})
     print(f"{'✓' if hit else '✗'} 못 쓰는 도구는 계획에 보여주지 않는다")
     ok += hit
 
@@ -1586,7 +1569,7 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 앞 턴의 미답을 이번 답변에서 사과하지 않는다")
     ok += hit
 
-    opened = meta.agent_help({"question": "뭘 도와줄 수 있어?", "customer_id": "C3"})["answer"]
+    opened = meta.agent_help({"question": "뭘 도와줄 수 있어?", "customer_id": "CX"})["answer"]
     shut = meta.agent_help({"question": "뭘 도와줄 수 있어?"})["answer"]
     hit = "지난 상담 기록" in opened and "지난 상담 기록" not in shut \
         and "단말 화면번호" in opened
@@ -1854,7 +1837,7 @@ def check_tool_loop() -> int:
 
         # ⑧ 고객 화면이 닫혀 있으면 customer 도구를 아예 보여주지 않는다(스텝 낭비 방지).
         hit = ("customer" not in tools.catalog({})
-               and "customer" in tools.catalog({"customer_id": "C1"}))
+               and "customer" in tools.catalog({"customer_id": "CX"}))
         print(f"{'✓' if hit else '✗'} 쓸 수 없는 도구는 카탈로그에서 제외")
         ok += hit
     finally:
