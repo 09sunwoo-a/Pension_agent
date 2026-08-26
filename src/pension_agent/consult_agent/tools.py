@@ -422,7 +422,25 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                  "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}],
-               allow=["\n".join(lines), json.dumps(facts, ensure_ascii=False, default=str)])
+               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)])
+
+
+#: 인용 허용 집합에서 빼는 facts 가지. 값이 아니라 **선별 전 후보 더미**다.
+#:
+#: allow 는 "이 답변이 인용해도 되는 값"의 집합이고, verify 는 답변의 수치가 그 안에 있는지만
+#: 본다. 그래서 답변이 쓰지도 않을 카드 더미를 넣으면 그 안의 온갖 숫자가 **아무 주장에나
+#: 근거를 대주는 꼴**이 된다. pools(⑦⑧ 후보군)는 카드 id·발췌가 통째로 들어와 이준호
+#: 케이스에서만 허용 수치를 22개 → 110개로 5배 불렸고, 그 결과 "만기일은 2026년 9월
+#: 11일"(오답)이 통과했다 — 9 와 11 이 무관한 카드 어딘가에 있었기 때문이다.
+#:
+#: 반대로 items·blocked_products·dropped·outreach 는 뺄 수 없다. 직원이 실제로 묻는
+#: 것들이다("왜 ELB 는 빠졌어?" → blocked_products 의 최소가입금액).
+_POOL_KEYS = ("pools",)
+
+
+def _citable(facts: dict) -> dict:
+    """인용 허용 집합에 실을 facts. 후보 더미만 걷어낸다."""
+    return {k: v for k, v in facts.items() if k not in _POOL_KEYS}
 
 
 # ─────────────────────────────────────────────────────────────

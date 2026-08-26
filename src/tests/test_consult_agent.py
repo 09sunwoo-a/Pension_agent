@@ -622,6 +622,15 @@ def check_customer_material() -> int:
     print(f"{'✓' if hit else '✗'} customer 도구가 화면에 뜬 AI브리핑 산문까지 재료로 싣는다")
     ok += hit
 
+    # 인용 허용 집합에 후보 더미(pools)를 싣지 않는다 — 답변이 쓰지도 않을 카드의 숫자가
+    # 아무 주장에나 근거를 대주면 검증이 무력해진다("만기일 2026년 9월 11일" 이 통과하던 자리).
+    from pension_agent.verify import verify_texts as _vt
+    _ev = tools.run("customer", {"customer_id": "198734-1205842"}, "만기")
+    hit = (_vt("만기일은 2026-09-10, 금액 4,050만원이에요.", _ev["allow"])[0]
+           and not _vt("만기일은 2026년 9월 11일입니다.", _ev["allow"])[0])
+    print(f"{'✓' if hit else '✗'} 고객 재료: 화면 값은 인용 통과, 후보 더미가 licensing 하던 오답은 거부")
+    ok += hit
+
     hit = tools.run("customer", {"customer_id": None}, "평가금액") is None
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 고객 재료를 만들지 않는다")
     ok += hit
