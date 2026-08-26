@@ -1819,9 +1819,19 @@ def check_tool_loop() -> int:
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
     tools.fits_question = lambda q, h, kind="", history=None: h
+
+    # 절차 카드는 검색 1위가 아니라 **이름으로 고정**한다. 예전에는 "디폴트옵션 변경 화면번호"
+    # 의 1위(proc.018)에 기댔는데, 그 카드의 화면번호는 ⚠ 유의 박스에서 잘못 딸려 온 것이라
+    # 데이터를 고치며 비었고(build_kb 의 화면번호 추출), 화면을 묻는 질의는 화면번호가 있는
+    # 카드를 앞세우므로(procedure_qa.search) 1위가 바뀌었다. 표시 복구를 보는 검사가 검색
+    # 순위에 흔들리지 않게 한다 — 이 검사가 보는 것은 검색이 아니라 근거별 선별 복구다.
+    from pension_agent.consult_agent.nodes import procedure_qa as _proc_qa
+    _proc_card = next(c for c in tools.KB.cards if c["id"] == "proc.041")   # 화면번호 + status=확인 필요
+    _orig_proc_search = _proc_qa.search
+    _proc_qa.search = lambda q, _c=_proc_card: [(2.0, _c)]
     try:
         # ① 두 도구를 부르고 두 근거가 한 답변에 다 들어간다. 절차 질의는 status=확인 필요
-        #    카드(proc.018)를 겨냥한다 — ⚠ 유의 텍스트는 이제 역할 선언상 authoring 이라
+        #    카드를 겨냥한다 — ⚠ 유의 텍스트는 이제 역할 선언상 authoring 이라
         #    표시로 강제되지 않고, 절차의 강제 표시는 상충 상태 표기에서만 나온다.
         script = [
             '{"tool": "fact", "query": "세액공제 한도"}',
@@ -1901,6 +1911,7 @@ def check_tool_loop() -> int:
         ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
+        _proc_qa.search = _orig_proc_search
 
     return ok
 
