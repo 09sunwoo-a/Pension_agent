@@ -51,7 +51,7 @@ from pension_agent.consult_agent.nodes import facts_qa, pitch as PITCHMOD, proce
 from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
 from pension_agent.consult_agent.kb import retrieve
 from pension_agent.consult_agent.select import llm_pick, pick
-from pension_agent.consult_agent.state import KB, AgentState
+from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
 
 class Evidence(TypedDict):
@@ -561,15 +561,20 @@ ADEQUACY_MAX_TOKENS = 200
 
 
 def fits_question(question: str, hits: list[tuple[float, dict]],
-                  kind: str = "지식") -> list[tuple[float, dict]]:
+                  kind: str = "지식", history: list[dict] | None = None) -> list[tuple[float, dict]]:
     """질문의 '실제 의도'에 답이 되는 후보만 남긴다(오답 차단). 순서·점수는 그대로 둔다.
 
     LLM 이 없는 id 를 지어내도 실재 후보와 대조해 걸러낸다 — select.llm_pick 과 같은
     안전장치다. LLM 이 죽으면 예외를 그대로 올린다: 게이트를 못 돌린 턴이 게이트 없이
     답을 만들면 §11 이 막으려는 상태가 된다.
+
+    **이전 대화를 함께 넘긴다.** 후속 질문("1번꺼"·"타행에서요")은 그 말만으로는 어떤
+    후보와도 맞지 않아서, 맥락 없이 판정하면 제대로 찾아온 카드까지 전부 탈락한다 —
+    계획·작성 프롬프트에 히스토리를 실을 때(§12 지워진 gap 1) 이 프롬프트만 빠져 있었다.
     """
     cards = "\n".join(_headline(c) for _, c in hits)
-    raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind),
+    raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
+                                          history_block=format_history(history)),
                    max_tokens=ADEQUACY_MAX_TOKENS)
     m = re.search(r"\[.*\]", raw, re.S)
     try:
@@ -585,7 +590,8 @@ def _adopt(state: AgentState, query: str, hits: list[tuple[float, dict]],
     """채택할 후보만 남겨 돌려준다. 0건이면 게이트를 돌리지 않는다(부를 이유가 없다)."""
     if not hits:
         return []
-    return fits_question(state.get("question") or query, hits, kind)
+    return fits_question(state.get("question") or query, hits, kind,
+                         history=state.get("history"))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -725,6 +731,12 @@ def ledger_marks(evidence: list[Evidence]) -> list[str]:
 def ledger_texts(evidence: list[Evidence]) -> list[str]:
     """원장의 검증 허용 텍스트 전부. verify_texts 가 이걸 재료로 본다."""
     return [t for e in evidence for t in e["allow"]]
+
+
+#: 출처의 역할. 답이 **그 재료에서 나온 것**인지, 표현을 **제한만** 한 것인지는 다른
+#: 사건이고, 직원에게도 다르게 보여야 한다(§3 · §8). 답을 내보내는 노드가 둘(compose ·
+#: clarify)이라 어휘는 한 곳에 둔다 — 갈리면 화면이 한쪽만 갈라 보여준다.
+GROUND, CAUTION = "근거", "주의"
 
 
 def ledger_sources(evidence: list[Evidence]) -> list[dict]:

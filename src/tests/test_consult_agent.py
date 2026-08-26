@@ -186,7 +186,7 @@ def check_pitch_stages() -> bool:
         return [] if any(kw.get(k) for k in ("customer_type", "objection_type", "stage")) else [(0.5, real)]
 
     orig_retrieve, orig_verify = tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="": h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None: h
     try:
         found = tools._pitch(
             {"question": "질문", "customer_type": "사업자", "stage": "이탈방어", "objection_type": None},
@@ -517,7 +517,7 @@ def check_verify_gate() -> bool:
     agent = G.build_agent()
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="": []
+    tools.fits_question = lambda q, h, kind="", history=None: []
     try:
         out = agent.invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
     finally:
@@ -743,7 +743,7 @@ def check_context_and_clarify() -> int:
     """
     from pension_agent.consult_agent.nodes import clarify as CL
     from pension_agent.consult_agent.nodes import plan as P
-    from pension_agent.consult_agent.state import format_history
+    from pension_agent.consult_agent.state import KB, format_history
 
     ok = 0
     history = [{"question": "실물이전 어떻게 처리해?", "stage": "계약이전",
@@ -846,6 +846,48 @@ def check_context_and_clarify() -> int:
            and routing.route_intent({"intent": "confirm_action"}) == "confirm_action")
     print(f"{'✓' if hit else '✗'} 제안도 되묻기도 없으면 '제안 없음' 안내를 유지한다")
     ok += hit
+
+    # ④ 적합성 게이트도 이전 대화를 본다 (gap 21).
+    #
+    # 실제 사례: 되묻기 다음 턴 "1번꺼" 에 도구가 화면 카드를 제대로 찾아왔는데, 게이트가
+    # "직원 질문: 1번꺼" 하나만 보고 판정해 전부 탈락시켰다 — 화면에는 "근거를 찾지
+    # 못했습니다" 가 떴다. 히스토리를 계획·작성 프롬프트에 싣던 gap 1 이 이 프롬프트만
+    # 빠뜨렸다. 후속 질문은 그 말만으로는 어떤 후보와도 맞지 않는다.
+    seen: dict[str, str] = {}
+    orig_gen, orig_fits = tools.generate, tools.fits_question
+    tools.fits_question = _REAL_FITS          # 게이트 본체를 재야 하므로 스텁을 잠시 걷는다
+    tools.generate = lambda p, **kw: seen.setdefault("p", p) and "[]"
+    try:
+        card = next(c for c in KB.cards if c["_kind"] == "screen")
+        tools._adopt({"question": "1번꺼", "history": history}, "화면번호", [(2.0, card)], "화면")
+    finally:
+        tools.generate, tools.fits_question = orig_gen, orig_fits
+    hit = "실물이전 어떻게 처리해?" in seen.get("p", "") and "타행 → 당행" in seen.get("p", "")
+    print(f"{'✓' if hit else '✗'} 적합성 게이트 프롬프트에 이전 대화·되물은 선택지가 실린다")
+    ok += hit
+
+    # ⑤ 되묻기 턴도 근거를 밝힌다 (gap 22).
+    #
+    # 선택지는 근거 카드에서 나온 것인데 sources 를 비워 화면이 "근거: 없음" 이라고 말했다.
+    # 직원 입장에서는 어디서 나온 갈래인지 모른 채 고르라는 말이 된다(§3).
+    ev = tools._ev("screen", "q", "■ [04-12-179] 퇴직연금 상품 조회",
+                   [{"id": "screen.04-12-179", "title": "퇴직연금 상품 조회", "doc": "화면번호 안내"}])
+    CL.generate = lambda p, **kw: ('{"ask": "어느 쪽인가요?", '
+                                   '"options": ["[04-12-179] 상품 조회", "[04-12-17A] NEW"]}')
+    try:
+        out = CL.clarify({"question": "퇴직연금 상품 조회 화면번호", "evidence": [ev]})
+    finally:
+        CL.generate = orig_gen
+    hit = ([s["id"] for s in out["sources"]] == ["screen.04-12-179"]
+           and all(s["role"] == tools.GROUND for s in out["sources"]))
+    print(f"{'✓' if hit else '✗'} 되묻기 턴이 선택지를 만든 근거를 출처로 싣는다")
+    ok += hit
+
+    # 출처 역할 어휘는 한 곳에서 온다 — 답을 내보내는 노드가 둘이라 갈리면 화면이
+    # 한쪽만 갈라 보여준다.
+    hit = (P.GROUND, P.CAUTION) == (tools.GROUND, tools.CAUTION)
+    print(f"{'✓' if hit else '✗'} compose·clarify 가 같은 출처 역할 어휘를 쓴다")
+    ok += hit
     return ok
 
 
@@ -866,7 +908,7 @@ def check_adequacy_and_shape() -> int:
 
     # ① 게이트가 재료 종류를 가리지 않는가 — 전부 버리면 어느 도구도 근거를 못 내놓는다.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="": []
+    tools.fits_question = lambda q, h, kind="", history=None: []
     try:
         blocked = [name for name in ("fact", "procedure", "segment", "method", "fieldtip", "pitch")
                    if tools.run(name, {"question": "세액공제 한도가 얼마야?"},
@@ -880,7 +922,7 @@ def check_adequacy_and_shape() -> int:
 
     # 0건이면 게이트를 부르지 않는다 — 부를 이유가 없는 자리에서 LLM 을 쓰지 않는다.
     called: list[str] = []
-    tools.fits_question = lambda q, h, kind="": (called.append(kind), h)[1]
+    tools.fits_question = lambda q, h, kind="", history=None: (called.append(kind), h)[1]
     try:
         tools.run("fact", {"question": "오늘 서울 날씨 어때?"}, "오늘 서울 날씨 어때?")
     finally:
@@ -903,7 +945,7 @@ def check_adequacy_and_shape() -> int:
     q = "디폴트옵션 변경 화면번호 알려줘"
     candidates = procedure_qa.search(q)
     keep = candidates[-1][1]["id"] if candidates else ""
-    tools.fits_question = lambda question, h, kind="": [x for x in h if x[1]["id"] == keep]
+    tools.fits_question = lambda question, h, kind="", history=None: [x for x in h if x[1]["id"] == keep]
     try:
         found = tools.run("procedure", {"question": q}, q)
     finally:
@@ -914,7 +956,7 @@ def check_adequacy_and_shape() -> int:
     ok += hit
 
     # 남길 것이 하나도 없을 때만 근거 없음이다.
-    tools.fits_question = lambda question, h, kind="": []
+    tools.fits_question = lambda question, h, kind="", history=None: []
     try:
         hit = tools.run("procedure", {"question": q}, q) is None
     finally:
@@ -1045,7 +1087,7 @@ def check_material_marks() -> int:
 
     # 도구가 실제로 표시를 실어 보내는가(선언이 아니라 배선을 본다).
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         q = "사전 고지를 안 하면 민원으로 돌아온다는데 현장에서는 어떻게 하나요?"
         found = tools.run("fieldtip", {"question": q}, q)
@@ -1121,7 +1163,7 @@ def check_relations() -> int:
     with_rel = next(f for f in by_id.values() if R.declared(f) and f.get("value"))
     without_rel = next(f for f in by_id.values() if not R.declared(f) and f.get("value"))
     orig_fits, orig_search = tools.fits_question, facts_qa.search
-    tools.fits_question = lambda question, h, kind="": h
+    tools.fits_question = lambda question, h, kind="", history=None: h
     facts_qa.search = lambda question: [(2.0, with_rel), (2.0, without_rel)]
     try:
         found = tools.run("fact", {"question": "q"}, "세액공제 공제율")
@@ -1232,7 +1274,7 @@ def check_turn_cost() -> int:
     orig_fits = tools.fits_question
     pitch.extract_slots = lambda st: called.append("slots") or {}
     tools.llm_pick = lambda kinds, q: []
-    tools.fits_question = lambda question, h, kind="": h
+    tools.fits_question = lambda question, h, kind="", history=None: h
     try:
         tools.run("pitch", {"question": "수수료 부담된다고 하시네요"}, "수수료 부담")
     finally:
@@ -1301,7 +1343,7 @@ def check_miss_recovery() -> int:
     question = "포트폴리오 운용현황 조회 화면 번호는?"
     shrunk = "운용현황 조회 화면번호"
     orig_fits = tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         hit = (not procedure_qa.search(shrunk)                       # 줄여 쓰면 0건인데
                and bool(procedure_qa.search(question))               # 원문으로는 찾고
@@ -1376,7 +1418,7 @@ def check_screen_registry() -> int:
 
     # 화면번호 질문이 그 카드에 닿는가.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         q = "포트폴리오 운용현황 조회 화면 번호는?"
         found = tools.run("screen", {"question": q}, q)
@@ -1420,7 +1462,7 @@ def check_screen_registry() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         q = "고객이 스타뱅킹에서 직접 상품변경 하려면 어느 메뉴로 가나요"
         found = tools.run("channel", {"question": q}, q)
@@ -1552,7 +1594,7 @@ def check_caution_roles() -> int:
     from pension_agent.consult_agent.nodes import procedure_qa as PQ
     by_id = {c["id"]: c for c in KB.cards}
     orig_search, orig_fits = PQ.search, tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         PQ.search = lambda q: [(2.0, by_id["proc.001"])]
         found = tools.run("procedure", {"question": "q"}, "적립금 조회 절차")
@@ -1564,7 +1606,7 @@ def check_caution_roles() -> int:
 
     # ④ caution 은 표시로 나간다 — 역할을 나눈 목적은 진짜 주의를 살리는 것이다.
     orig_pick, orig_fits = tools.pick, tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         tools.pick = lambda kinds, q, **kw: [(2.0, by_id["screen.06-10-182"])]
         found = tools.run("screen", {"question": "q"}, "연금납입정보 조회 화면")
@@ -1816,7 +1858,7 @@ def check_order_flipped() -> int:
         return []
 
     orig_pick, orig_retrieve, orig_verify = tools.llm_pick, tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="": h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None: h
     ok = 0
     try:
         # ① LLM 이 골랐으면 n-gram 은 아예 돌지 않는다.
@@ -1835,7 +1877,7 @@ def check_order_flipped() -> int:
 
         # ③ LLM 의 선택도 게이트를 그대로 통과해야 한다(1차가 됐다고 면제 아님).
         tools.llm_pick = lambda kinds, query: [(2.0, target)]
-        tools.fits_question = lambda q, h, kind="": []
+        tools.fits_question = lambda q, h, kind="", history=None: []
         hit = tools._pitch({"question": "질문"}, "질문") is None
         print(f"{'✓' if hit else '✗'} LLM 선택도 적합성 게이트 적용")
         ok += hit
@@ -1853,10 +1895,20 @@ def check_tool_loop() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
+
+    # 절차 카드는 검색 1위가 아니라 **이름으로 고정**한다. 예전에는 "디폴트옵션 변경 화면번호"
+    # 의 1위(proc.018)에 기댔는데, 그 카드의 화면번호는 ⚠ 유의 박스에서 잘못 딸려 온 것이라
+    # 데이터를 고치며 비었고(build_kb 의 화면번호 추출), 화면을 묻는 질의는 화면번호가 있는
+    # 카드를 앞세우므로(procedure_qa.search) 1위가 바뀌었다. 표시 복구를 보는 검사가 검색
+    # 순위에 흔들리지 않게 한다 — 이 검사가 보는 것은 검색이 아니라 근거별 선별 복구다.
+    from pension_agent.consult_agent.nodes import procedure_qa as _proc_qa
+    _proc_card = next(c for c in tools.KB.cards if c["id"] == "proc.041")   # 화면번호 + status=확인 필요
+    _orig_proc_search = _proc_qa.search
+    _proc_qa.search = lambda q, _c=_proc_card: [(2.0, _c)]
     try:
         # ① 두 도구를 부르고 두 근거가 한 답변에 다 들어간다. 절차 질의는 status=확인 필요
-        #    카드(proc.018)를 겨냥한다 — ⚠ 유의 텍스트는 이제 역할 선언상 authoring 이라
+        #    카드를 겨냥한다 — ⚠ 유의 텍스트는 이제 역할 선언상 authoring 이라
         #    표시로 강제되지 않고, 절차의 강제 표시는 상충 상태 표기에서만 나온다.
         script = [
             '{"tool": "fact", "query": "세액공제 한도"}',
@@ -1936,6 +1988,7 @@ def check_tool_loop() -> int:
         ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
+        _proc_qa.search = _orig_proc_search
 
     return ok
 
@@ -2047,7 +2100,7 @@ def check_atomic_spans() -> int:
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))
         orig_fits, orig_search = tools.fits_question, FQ.search
-        tools.fits_question = lambda question, h, kind="": h
+        tools.fits_question = lambda question, h, kind="", history=None: h
         FQ.search = lambda question: [(2.0, bare)]
         try:
             f = tools.run("fact", {"question": "q"}, "확정값")
@@ -2149,7 +2202,7 @@ def check_plan_failure() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     question = "고객이 주식이 더 낫다는데 뭐라고 하지?"
     base = {"question": question, "utterance": question}
 
@@ -2336,7 +2389,7 @@ def main() -> int:
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성
-    tools.fits_question = lambda q, h, kind="": h
+    tools.fits_question = lambda q, h, kind="", history=None: h
     agent = G.build_agent()
 
     for question, expected in CASES:

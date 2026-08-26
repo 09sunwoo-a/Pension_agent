@@ -29,6 +29,38 @@ _AUTHOR_ATTRIBUTION = re.compile(
     r"(팀원|팀장|과장|대리|차장|조사역|지점장)[^)]{0,10}\)"
 )
 
+# 작성자가 **누구인지**로 자료가 **무엇인지**를 추론한 문장.
+#
+# 실제로 나갔던 답변: "작성자가 인재개발부 소속이라 교육 목적으로 정리된 자료로 보이나
+# 본부 공식 가이드는 아니다." 소속은 자료의 성격을 말해주지 않는다. 이런 문장은 ① 확인할
+# 수단이 없고 ② 데이터가 판정할 재료도 없어(관계 선언이 아니다) 코드 대조를 통과해버리며
+# ③ 직원에게는 검증된 결론처럼 읽힌다. 자료의 지위는 문서 레지스트리(출처 종류·등급)가
+# 정하고, 카드는 그것을 다시 추론하지 않는다 — `CLAUDE.md` 「주의 ↔ 역할·적용 조건」.
+#
+# 원문 인용(quotes·source_text)은 훑지 않는다. 원문은 고치지 않으므로 경고해도 조치할 수
+# 없고, 저자 표기가 거기 남는 것은 출처라서다(루트 절대 규칙 1).
+_IDENTITY = r"(?:소속|부점|직급|본부|사업부|개발부|컨설팅부|지점|센터|팀장|차장|과장|대리|조사역|팀원)"
+_GUESS = r"(?:보인다|보이나|보이며|보이므로|듯하다|듯한|추정|일 것|것으로 판단|짐작)"
+_IDENTITY_INFERENCE = re.compile(
+    rf"(?:작성자|필자|글쓴이|작성 부서)[^.\n]{{0,40}}{_IDENTITY}[^.\n]{{0,80}}{_GUESS}"
+)
+
+#: 원문 인용 필드 — 저작이 만든 파생 텍스트가 아니라 옮겨온 원문이다.
+_QUOTE_FIELDS = ("quotes", "source_text", "quote")
+
+
+def _derived_strings(value, key: str = "") -> list[tuple[str, str]]:
+    """저작이 쓴 파생 텍스트만 (필드경로, 문자열) 로 펼친다. 원문 인용은 건너뛴다."""
+    if key in _QUOTE_FIELDS:
+        return []
+    if isinstance(value, str):
+        return [(key, value)]
+    if isinstance(value, dict):
+        return [s for k, v in value.items() for s in _derived_strings(v, k)]
+    if isinstance(value, list):
+        return [s for v in value for s in _derived_strings(v, key)]
+    return []
+
 
 def load_registry() -> dict[str, dict]:
     raw = json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
@@ -114,6 +146,14 @@ def validate(roots: list[Path | str], registry: dict | None = None) -> tuple[lis
                         f"[개인정보의심] {rid}({kind}).{fname} — 작성자 실명·부점·직급으로 보이는 "
                         f"패턴 감지, 저작 시 옮기지 않았는지 확인"
                     )
+
+        for fname, text in _derived_strings(fields):
+            if _IDENTITY_INFERENCE.search(text):
+                warns.append(
+                    f"[신원추론] {rid}({kind}).{fname} — 작성자가 누구인지로 자료의 성격을 "
+                    f"추론한 문장으로 보임. 자료의 지위는 출처 종류가 정한다(문서 레지스트리) — "
+                    f"확인 가능한 사실로 다시 쓸 것"
+                )
 
         if kind == "fact" and not fields.get("as_of"):
             warns.append(f"[최신성미기재] {rid}(fact) → fields.as_of 없음 — 근거 기준시점 확인 필요")
