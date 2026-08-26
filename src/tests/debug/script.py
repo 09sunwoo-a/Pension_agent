@@ -45,6 +45,16 @@ _KNOWN_WRONG = _CLEAN + ' 안내하실 때 "5,500만원 이상 13.2%"는 오기�
 #: 원장에 없는 수치를 지어낸 답변. 걸리는 게이트가 달라지는 것을 보려고 둔다.
 _OUT_OF_LEDGER = "세액공제 한도는 연 1,200만원이에요. 공제율은 총급여에 따라 갈려요."
 
+#: **실제 LLM 이 쓴 문장의 형태.** 값은 원장 그대로인데 표기가 다르다 — 원장은
+#: "1,485,000원"·"148.5만원"·"2026.06" 이고, LLM 은 직원이 실제로 말하는 대로
+#: "148만 5천원"·"2026년 6월" 이라고 쓴다. `verify.numbers()` 는 숫자 토큰의 집합
+#: 비교라, 만·천으로 끊긴 표기는 원장에 없는 토큰(148 · 5 · 118 · 8 · 6)을 만든다.
+#: **맞는 답변이 표기 때문에 버려지는 자리다.**
+_KOREAN_UNITS = (
+    "세액공제 한도는 연 900만원이에요. 총급여 5,500만원 이하면 16.5%라 148만 5천원, "
+    "초과면 13.2%라 118만 8천원을 돌려받아요. 2026년 6월 기준입니다."
+)
+
 
 @dataclass(frozen=True)
 class Scenario:
@@ -81,6 +91,12 @@ SCENARIOS: dict[str, Scenario] = {
             question="세액공제 한도가 얼마야?",
             plan=_FACT_STEP, compose=_OUT_OF_LEDGER, keep=("fact.k04.f2",),
             expect="verify_texts 가 원장 밖 수치로 폐기 → relations 는 실행되지 않는다",
+        ),
+        Scenario(
+            name="korean_units",
+            question="세액공제 한도가 얼마야?",
+            plan=_FACT_STEP, compose=_KOREAN_UNITS, keep=("fact.k04.f2",),
+            expect="값은 맞는데 표기가 달라 verify_texts 가 폐기 — 실제 실행에서 걸린 자리",
         ),
         Scenario(
             name="llm_dead",

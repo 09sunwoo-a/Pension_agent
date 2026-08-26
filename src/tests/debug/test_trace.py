@@ -48,6 +48,14 @@ def _run(name: str):
     return results[0], tr
 
 
+def _evidence_texts(name: str) -> list[str]:
+    """그 시나리오가 모으는 근거 원문. 원장에 무엇이 들어 있는지 대조할 때 쓴다."""
+    scn = script.SCENARIOS[name]
+    with script.installed(scn):
+        found = T.run("fact", {"question": scn.question}, "세액공제 한도")
+    return [found["text"]] if found else []
+
+
 # ─────────────────────────────────────────────────────────────
 # 1. 노드 순서 — 어느 노드를 거쳐 답이 나왔나
 # ─────────────────────────────────────────────────────────────
@@ -106,6 +114,28 @@ check(tr3.blocked_by() == "verify_texts" and "relations" not in gates3,
       "out_of_ledger: 원장 밖 수치에서 끊기고 relations 는 실행되지 않는다",
       str(sorted(gates3)))
 check(r3["answer"].startswith("■"), "out_of_ledger: 역시 근거 원문 폴백", r3["answer"][:30])
+
+
+# ─────────────────────────────────────────────────────────────
+# 5-2. 실제 실행에서 걸린 자리 — 값은 맞는데 표기가 달라서 버려진다
+# ─────────────────────────────────────────────────────────────
+# 실제 LLM 이 쓴 문장은 "148만 5천원"·"2026년 6월" 이었고, 원장은 "1,485,000원"·
+# "148.5만원"·"2026.06" 이다. 같은 값인데 숫자 토큰 집합이 달라 폐기됐다.
+# **이건 지어낸 수치를 막은 것이 아니라 맞는 답변을 표기 때문에 버린 것이다.**
+
+r5, tr5 = _run("korean_units")
+_blocked = set((tr5.gates().get("verify_texts") or TR.Gate("", True)).detail)
+check(tr5.blocked_by() == "verify_texts"
+      and {"수치 '148'", "수치 '5'", "수치 '118'", "수치 '8'", "수치 '6'"} <= _blocked,
+      "korean_units: 만·천으로 끊어 쓴 금액과 풀어 쓴 연월이 '원장 밖 수치' 로 걸린다",
+      str(sorted(_blocked)))
+check(r5["answer"].startswith("■"), "korean_units: 그래서 근거 원문 폴백", r5["answer"][:30])
+
+# 버려진 값이 실제로는 원장 안에 있다 — 표기만 달랐다는 것을 못박는다.
+_ledger = " ".join(_evidence_texts("korean_units"))
+check({"1485000", "148.5", "1188000", "2026.06"} <= V.numbers(_ledger),
+      "korean_units: 같은 값이 원장에 다른 표기로 들어 있다(오답이 아니었다)",
+      str(sorted(V.numbers(_ledger))))
 
 
 # ─────────────────────────────────────────────────────────────
