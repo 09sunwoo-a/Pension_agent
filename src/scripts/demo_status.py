@@ -43,6 +43,8 @@ UNSOURCED_FIELDS = [
      "② 왜 이 고객인가 · low 요건"),
     ("pension_started", "연금수령 개시 여부", "'연금개시가능잔여일'은 만55-연령이라 개시 여부가 아님",
      "§7 추가납 권유 금지 (민원 방지 규칙)"),
+    ("grade", "고객 위험등급(가입 상한)", "딕셔너리·목업 v3 모두 컬럼 없음 — 현재 PREF[투자성향] 파생값",
+     "적합성 게이트 (상품 위험등급 하드 상한)"),
 ]
 
 
@@ -118,8 +120,9 @@ def build() -> tuple[str, dict[str, int]]:
     # 4. 소스 미확정 필드
     n["fields"] = len(UNSOURCED_FIELDS)
     L += [f"## 4. 소스 미확정 필드 — {len(UNSOURCED_FIELDS)}건", "",
-          "데이터딕셔너리에서 대응 컬럼을 찾지 못한 `Profile` 필드. 데모에서는 페르소나에",
-          "더미 값을 채워 화면이 매끄럽게 보이지만, 실데이터 전환 때는 **여기부터** 확인한다.",
+          "데이터딕셔너리에서 대응 컬럼을 찾지 못한 `Profile` 필드. 데모에서는 목업 원장",
+          "(customers.json)의 값·파생값으로 채워 화면이 매끄럽게 보이지만, 실데이터 전환 때는",
+          "**여기부터** 확인한다.",
           "딕셔너리가 아직 정리 중이므로 '없다'가 아니라 '소스 확인 필요'로 읽는다.", ""]
     _rows(L, ["필드", "무엇", "딕셔너리 상태", "무엇이 걸려 있나"],
           [list(r) for r in UNSOURCED_FIELDS])
@@ -129,10 +132,9 @@ def build() -> tuple[str, dict[str, int]]:
         ("customer.TODAY", str(customer.TODAY),
          "데모 고정 기준일. 실배포 시 date.today() 로 바꾸고 assets.json 날짜도 함께 교체"),
         ("customer.PERSONAS",
-         f"{len(customer.PERSONAS)}명 ({', '.join(p.id for p in customer.PERSONAS)})"
-         if customer.PERSONAS else "0명 (비어 있음)",
-         "하드코딩 페르소나. 옛 더미(C1~C6)를 걷어낸 상태 — 시연용 고객 데이터로 채운 뒤 "
-         "실데이터 조인으로 교체"),
+         f"{len(customer.PERSONAS)}명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)"
+         if customer.PERSONAS else "0명 (비어 있음 — customers.json 미생성)",
+         "시연용 목업 9케이스. scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체"),
         ("data/portfolios.json", f"{len(engine.PORTFOLIOS)}건",
          "채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체"),
         ("engine.TOP_N / ALT_N", f"{engine.TOP_N} / {engine.ALT_N}",

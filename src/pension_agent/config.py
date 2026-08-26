@@ -39,6 +39,11 @@ DOTENV = SRC_ROOT / ".env"                          # 두 에이전트가 공유
 KB_DATA_DIR = PACKAGE_ROOT / "knowledge" / "data"           # 공용 지식 카드 (kb_build 산출물)
 STRATEGY_DATA_DIR = PACKAGE_ROOT / "strategy_agent" / "data"  # 상품·전략 카탈로그
 
+# 시연용 더미 고객 원장 (scripts/import_customers.py 산출물 — 원본은 저장소 루트의 xlsx).
+# DATA_ROOTS 밖에 두는 이유: records[] 를 가진 파일은 knowledge.Store 가 지식 카드로
+# 훑어버린다. 고객 레코드는 카드가 아니므로 스캔 경로 밖, 소유자(customer.py) 옆에 둔다.
+CUSTOMERS_JSON = PACKAGE_ROOT / "strategy_agent" / "customers.json"
+
 #: Store 가 훑는 루트. 앞의 것이 먼저 적재된다.
 DATA_ROOTS: list[Path] = [STRATEGY_DATA_DIR, KB_DATA_DIR]
 

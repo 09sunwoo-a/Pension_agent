@@ -8,17 +8,7 @@ test_engine.py(팀원 담당, ①~⑤ 산출물 감사)와 분리해 둔다.
   · ⑨ 더미 규약 붕괴 — 화면·발송문 딱지가 되살아나거나 dummy 플래그가 사라지는 것.
   · 원문 인용 훼손 — 시효성 수치를 갈아끼우면서 quotes 원문까지 건드리는 것.
 
-**지금은 축소 상태다.** 더미 페르소나(C1~C6)를 걷어내면서 그 페르소나의 산출물을 직접
-단언하던 검사를 함께 들어냈다(customer.PERSONAS 가 비어 있다). 시연용 고객 데이터가 새로
-정해지면 아래 항목을 그 데이터 기준으로 다시 세워야 한다:
-
-  · 1. 문제상황 매칭 — 요건이 있는 고객엔 세그먼트가 붙고, 요건 0건인 고객엔 사유를
-       지어내지 않는가 / 세그먼트 요건이 고객 요건의 부분집합인가 / 컴플라이언스 우선 정렬
-  · 1. 제외 조건 — 연금개시 계좌에 추가납·세액공제 세그먼트가 빠지는가
-  · 2. ⑥⑦⑧ — 화법 2건·반론 2건·참고자료 1건 이상 / ⑥ 과 ⑧ 이 같은 카드를 안 쓰는가 /
-       반론이 고객마다 다른가(전 고객 동일 폴백 회귀) / 후보군 상한 / 사후관리 카드만 인용 /
-       인용 카드의 실재 / ⑥ 화법의 원천 문서 표기
-  · 3. ⑨ — 고객마다 이벤트·세미나 각 1건 / 문제상황에 걸린 콘텐츠가 먼저 정렬되는가
+페르소나 절은 시연용 목업 9케이스(customers.json)를 기준으로 다시 세웠다.
 
 실행: python -m tests.test_support
 """
@@ -30,9 +20,15 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+import dataclasses
+
 from pension_agent.strategy_agent import engine
 from pension_agent.strategy_agent import situations as situations_mod
 from pension_agent.strategy_agent import support
+from pension_agent.strategy_agent.customer import PERSONAS, conditions
+
+FACTS = {p.nm: engine.prepare(p) for p in PERSONAS}
+BY_NAME = {p.nm: p for p in PERSONAS}
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -55,7 +51,108 @@ check(kb is not None and bool(kb.docs_by_id),
 
 
 # ─────────────────────────────────────────────────────────────
-# 1. 세그먼트 정의 — 새 판정 규칙을 만들지 않았는가
+# 1. 문제상황 매칭 — 성립 요건이 있는 고객은 관리 사유가 잡힌다
+# ─────────────────────────────────────────────────────────────
+
+for p in PERSONAS:
+    conds = conditions(p)
+    found = FACTS[p.nm]["problem_situations"]
+    if conds:
+        check(bool(found), f"문제상황: {p.nm}(요건 {len(conds)}건) 에 세그먼트가 매칭됨",
+              f"conds={sorted(conds)}")
+    else:
+        # 요건이 하나도 없는 고객에게 관리 사유를 지어내지 않는다.
+        check(not found, f"문제상황: {p.nm}(요건 0건) 은 매칭 없음 — 사유를 만들어내지 않는다")
+    for sit in found:
+        check(set(sit["conds"]) <= set(conds),
+              f"문제상황: {p.nm} — {sit['no']}번 세그먼트의 요건이 모두 성립",
+              f"{sit['conds']} ⊄ {sorted(conds)}")
+
+# 정렬 — 컴플라이언스(규정 위반 점검)가 앞에 온다 (박지민: 위험자산 한도 초과).
+_pj = FACTS["박지민"]["problem_situations"]
+check(_pj and _pj[0]["group"].startswith("컴플라이언스"),
+      "문제상황 정렬: 박지민은 컴플라이언스 세그먼트가 첫 번째", _pj[0]["group"] if _pj else "-")
+
+# 제외 조건 — 연금개시 계좌에는 추가납 세그먼트를 붙이지 않는다(REQUIREMENTS.md §7).
+started = dataclasses.replace(BY_NAME["한지우"], pension_started=True)
+not_started = dataclasses.replace(BY_NAME["한지우"], pension_started=False)
+excluded = {s["no"] for s in situations_mod.problem_situations(started, ["tax", "add"])}
+included = {s["no"] for s in situations_mod.problem_situations(not_started, ["tax", "add"])}
+check({"13", "15", "16"} & included and not ({"13", "15", "16"} & excluded),
+      "제외 조건: 연금개시 고객에게만 추가납·세액공제 세그먼트가 빠진다",
+      f"개시전 {sorted(included)} / 개시후 {sorted(excluded)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 1-1. ⑥⑦⑧ — 관리 사유가 있는 고객은 내용이 채워진다
+# ─────────────────────────────────────────────────────────────
+
+ACTIVE = [p for p in PERSONAS if conditions(p)]
+check(len(ACTIVE) == len(PERSONAS), "목업 9케이스는 전원 관리 사유 보유", str(len(ACTIVE)))
+
+for p in ACTIVE:
+    f = FACTS[p.nm]
+    tps, objs, res = f["talking_points"], f["objections"], f["consult_resources"]
+    check(len(tps) == 2, f"⑥ {p.nm}: 화법 정확히 2건", str(len(tps)))
+    check(all((t.get("script") or t.get("talk")) for t in tps), f"⑥ {p.nm}: 각 화법에 내용이 있다")
+    check(len({t["title"] for t in tps}) == len(tps),
+          f"⑥ {p.nm}: 화법 제목이 서로 다르다(스크립트 매핑 키)")
+    check(len(objs) == 2, f"⑦ {p.nm}: 예상 반론 정확히 2건", str(len(objs)))
+    check(all(o.get("objection") and o.get("response") for o in objs),
+          f"⑦ {p.nm}: 각 반론에 고객 발화와 대응 화법이 있다")
+    check(len(res) >= 1, f"⑧ {p.nm}: 참고 자료 1건 이상", str(len(res)))
+    check(not ({t["title"] for t in tps} & {r["title"] for r in res}),
+          f"⑧ {p.nm}: ⑥ 화법과 같은 카드를 다시 보여주지 않는다")
+
+# 고객마다 다른 반론이 나온다 — 예전 id 순 폴백은 전원 동일 2건이었다.
+objection_sets = {p.nm: tuple(o["objection"] for o in FACTS[p.nm]["objections"]) for p in ACTIVE}
+check(len(set(objection_sets.values())) > 1,
+      "⑦ 예상 반론이 고객마다 다르다(전 고객 동일 폴백 회귀)", str(objection_sets))
+
+# 후보군 상한 — LLM 선별이 고르기 좋은 크기.
+for p in ACTIVE:
+    pools = FACTS[p.nm]["pools"]
+    check(len(pools["objections"]) <= support.MAX_OBJECTION_CANDIDATES,
+          f"⑦ {p.nm}: 후보군이 상한 이내", str(len(pools["objections"])))
+    check(len(pools["consult_resources"]) <= support.MAX_RESOURCE_CANDIDATES,
+          f"⑧ {p.nm}: 후보군이 상한 이내", str(len(pools["consult_resources"])))
+
+# 사후관리 카드만 쓴다 · 인용 카드는 실재한다.
+_kb0 = support.pitch_kb()
+by_id = {c["id"]: c for c in (_kb0.cards if _kb0 else [])}
+for p in ACTIVE:
+    f = FACTS[p.nm]
+    used = [item.get("card_id") for item in (*f["talking_points"], *f["objections"],
+                                             *f["consult_resources"], *f["pools"]["objections"],
+                                             *f["pools"]["consult_resources"])
+            if item.get("card_id")]
+    scoped = [cid for cid in used if cid in by_id and by_id[cid].get("scope")]
+    check(all(by_id[cid]["scope"] == "사후관리" for cid in scoped),
+          f"후보군: {p.nm} 은 사후관리 카드만 인용", str(len(used)))
+    check(all(cid in by_id for cid in used),
+          f"후보군: {p.nm} 이 인용한 카드가 지식베이스에 실재한다",
+          str([cid for cid in used if cid not in by_id][:3]))
+
+# 출처 — 카드에서 온 항목은 원천 문서를 밝힌다.
+sourced = [item for p in ACTIVE for item in FACTS[p.nm]["talking_points"] if item.get("card_id")]
+check(sourced and all(item.get("source") for item in sourced),
+      "⑥ 카드에서 온 화법은 원천 문서를 함께 표기한다", str(len(sourced)))
+
+# ⑨ — 고객마다 이벤트·세미나 각 1건, 문제상황에 걸린 콘텐츠가 먼저 온다.
+for p in PERSONAS:
+    out = FACTS[p.nm]["outreach"]
+    check(out.get("event") and out.get("seminar"), f"⑨ {p.nm}: 이벤트·세미나 각 1건", str(out))
+_sit1 = FACTS["김현수"]["problem_situations"]
+ordered = support.outreach_candidates(_sit1)["event"]
+wanted = {s["id"] for s in _sit1}
+if len(ordered) > 1:
+    overlaps = [len(wanted & set(r["segments"])) for r in ordered]
+    check(overlaps == sorted(overlaps, reverse=True),
+          "⑨ 문제상황에 걸린 콘텐츠가 먼저 정렬된다", str(overlaps))
+
+
+# ─────────────────────────────────────────────────────────────
+# 1-2. 세그먼트 정의 — 새 판정 규칙을 만들지 않았는가
 # ─────────────────────────────────────────────────────────────
 
 # 세그먼트 조건이 코드 판정(CONDS)의 부분집합으로만 성립한다 — 새 판정 규칙을 만들지 않았다.

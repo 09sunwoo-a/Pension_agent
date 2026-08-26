@@ -162,7 +162,15 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     kept = []
     for b in built:
         pool = b["spec"].get("pool")
-        if pool and b["req"] > 0:
+        if pool and b["req"] <= 0:
+            # 재원 풀을 선언한 전략(정리·이동·납입)은 전부 금액 산식을 갖는다 — 대상 금액이
+            # 0원이면 요건은 성립해도 이 전략이 움직일 것이 없다. 예: 공격투자형 + 예금 100%
+            # 는 'mis' 요건이지만 위험자산 초과분이 0원이라 축소 전략(mis_fix)이 아니라 편중
+            # 해소(dep_shift)가 답이다. 0원을 그대로 흘리면 "초과분 0원을 매수" 같은 절이
+            # 렌더링된다(9케이스 목업 적재 때 실제로 그랬다).
+            dropped.append(f"{b['spec']['title']} — 대상 금액 0원 (요건은 성립하나 실행 대상 없음)")
+            continue
+        if pool:
             alloc = min(b["req"], pools.get(pool, 0))
             if alloc < MIN_ALLOC:
                 dropped.append(f"{b['spec']['title']} — 동일 재원({pool}) 이 선행 전략에 배분 완료")

@@ -6,21 +6,10 @@
 각 테스트는 감사 결함 번호와 대응한다. 신규 전략·상품·근거를 추가할 때는 본
 테스트를 함께 통과시켜야 한다.
 
-**지금은 축소 상태다.** 더미 페르소나(C1~C6)를 걷어내면서 그 페르소나의 산출물을 직접
-단언하던 검사를 함께 들어냈다(customer.PERSONAS 가 비어 있다). 남은 것은 고객 데이터 없이
-서는 검사 — 전략 정의 검증(validate)·절 규약·상품 데이터 규약·요건 판정 로직이다.
-시연용 고객 데이터가 새로 정해지면 아래 항목을 그 데이터 기준으로 다시 세워야 한다:
-
-  · 결함 4  최소가입금액이 적립금이 아니라 배분액과 대조되는가 (engine.gate_amount)
-  · 결함 5  위험자산 70% 한도 판정과 여력 0 에서의 디폴트옵션 지정
-  · 결함 6  예금자보호 한도 초과분 고지
-  · 결함 7  예금 편중 해소가 기준선 이하 상품을 권하지 않는가
-  · 결함 8~9 산출 문장의 주체 반영 · 동작 명사 적정
-  · 결함 11~12 흡수된 전략의 근거 보존 · 만기/편중 병합
-  · 결함 13~14 세액공제 대상액 한도 · 미확정 분기 기대효과 제외
-  · briefing 산출 · 카드 필드 완비 · 슬롯 전량 치환 · 출처 표기 · 제안 개수(TOP_N/ALT_N)
-  · Tier2(행내전략 미매칭 → LLM판단) 승격과 재료 이탈 폴백
-  · retPct·dorm 이 None 이어도 브리핑이 죽지 않는가
+페르소나 절은 시연용 목업 9케이스(customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)를
+기준으로 다시 세웠다 — 옛 C1~C6 시절의 세부 수치 단언 일부(예금자보호 고지·만기/편중 병합·
+흡수 근거 보존)는 새 데이터에 그 상황이 없어 세우지 않았고, 그 상황이 성립하는 케이스가
+다시 들어오면 그때 단언을 추가한다.
 
 실행: python -m tests.test_engine
 """
@@ -199,6 +188,175 @@ check(abs(Profile(id="T", nm="T", ag=40, bal=1, rk="안정형", grade="낮은위
                   ret=0, retPct=50, dopt="설정", room=0, dorm=0, nchM=0,
                   income_bracket=None).tax_credit_rate - 0.132) < 1e-9,
       "구간 미확인 시 보수적 적용")
+
+
+# ─────────────────────────────────────────────────────────────
+# 페르소나 회귀 — 시연용 목업 9케이스 전원
+#
+# 요건 판정 스냅샷은 데이터(xlsx)와 판정 로직을 함께 고정한다 — 어느 쪽이 바뀌어도 여기서
+# 드러난다. 원본 xlsx 를 교체했다면 이 표를 새 데이터 기준으로 함께 갱신한다.
+# ─────────────────────────────────────────────────────────────
+
+from pension_agent.strategy_agent import agent
+from pension_agent.strategy_agent.customer import PERSONAS
+
+BY_NAME = {p.nm: p for p in PERSONAS}
+check(len(PERSONAS) == 9, "목업 9케이스 적재", str(len(PERSONAS)))
+
+# 요건 판정 스냅샷 (00_시연케이스의 시연 포인트와 정합해야 한다)
+_EXPECTED_CONDS = {
+    "김현수": ["dep", "nod", "nch"],           # 현금성 방치 + 디폴트옵션 미설정
+    "박지민": ["lim", "tax", "add"],           # 실적배당 75% > 한도 70% + 세액공제 잔여
+    "이준호": ["mat"],                          # 예금 만기 D-17
+    "최서윤": ["dor", "nch"],                   # 8개월 미접촉 (판매중단펀드는 후속 요건화 대상)
+    "정민석": ["dor", "mis", "dep", "nch"],    # 공격투자형 + 예금 100%
+    "한지우": ["tax", "add"],                   # 세액공제 잔여 300만원
+    "오세훈": ["dep", "mat"],                   # 예금 만기 D-25
+    "윤가영": ["nod"],                          # 디폴트옵션 미등록 (이탈관찰은 후속 요건화 대상)
+    "송도윤": ["dor", "nod", "nch"],           # 11개월 미접촉 + 미등록
+}
+for nm, want in _EXPECTED_CONDS.items():
+    got = conditions(BY_NAME[nm])
+    check(got == want, f"{nm}: 요건 판정 스냅샷", f"{got} != {want}")
+
+# 전원 산출 스모크 — 로직 검사는 노출 개수를 넓게 열어 만든다(TOP_N 좁힘과 무관해야 한다).
+_WIDE = 99
+FACTS = {p.nm: engine.prepare(p, top_n=_WIDE) for p in PERSONAS}
+
+for nm, f in FACTS.items():
+    p_ = BY_NAME[nm]
+    bf = f.get("briefing") or {}
+    check(bf.get("source") == engine.BRIEFING_SOURCE, f"{nm}: briefing 근거 {engine.BRIEFING_SOURCE}")
+    check(str(p_.port[0]) in bf.get("보유구성", ""), f"{nm}: 보유구성이 코드로 산출됨",
+          bf.get("보유구성", ""))
+    check(bool(bf.get("운용수익률")), f"{nm}: 수익률이 briefing 에 제시됨")
+    check(("만기도래" in bf) == (p_.matDD is not None), f"{nm}: 만기 정보 조건부 표기")
+    # retPct 는 새 데이터에 모수가 없어 전원 None — 화면 문자열로 새지 않아야 한다.
+    check(p_.retPct is None and "None" not in str(f["customer"].get("수익률", "")),
+          f"{nm}: retPct=None 그레이스풀", str(f["customer"].get("수익률")))
+    # 스타클럽 등급은 전원 값이 있으므로 헤더에 표기된다.
+    check(f["customer"].get("스타클럽등급") == p_.club_grade, f"{nm}: 스타클럽등급 표기")
+    # 산출 문장 규약 — 주체 반영·종결.
+    for it in f["items"]:
+        fc = engine.final_clause(it)
+        check(fc.endswith(("제안", "안내")) if it["actor"] == "고객" else True,
+              f"{nm}: '{it['title']}' 주체 반영", fc[-20:])
+    _cr = engine.compose_rule(f)
+    check(_cr.endswith("하세요.") if f["items"]
+          else _cr.startswith("제안 가능한 실행 항목이 없습니다"), f"{nm}: 문장 종결", _cr[:30])
+    # 슬롯 전량 치환 · 카드 규약.
+    for it in f["items"]:
+        for text in (it["clause"], it["evidence"], *it["evidence_extra"],
+                     *it["card"].values()):
+            hit = re.search(r"\{[a-z_0-9]+\}", text)
+            check(hit is None, f"{nm}: '{it['title']}' 슬롯 전량 치환", hit.group() if hit else "")
+        check(bool(it["card"]["headline"] and it["card"]["tag"] and it["card"]["benefit"]),
+              f"{nm}: '{it['title']}' 카드 핵심 필드 존재")
+    # 요건이 성립하지 않는 전략을 정원 충족 목적으로 채우지 않는다.
+    conds_ = {c.split(":")[0] for c in f["conditions"]}
+    for it in f["items"]:
+        spec = engine.BY_ID[it["id"]]
+        check(spec.get("when") in conds_ or spec.get("trigger"),
+              f"{nm}: '{it['title']}' 요건 성립 확인", str(spec.get("when")))
+
+# 노출 개수 — 제안 1 + 예비 1, 좁혀도 후보 평가는 동일.
+for p_ in PERSONAS:
+    _d = engine.prepare(p_)
+    check(len(_d["items"]) <= 1 and len(_d["alternatives"]) <= 1,
+          f"{p_.nm}: 제안·예비 최대 1건", f"{len(_d['items'])}/{len(_d['alternatives'])}")
+    check(len(_d["candidates"]) == len(FACTS[p_.nm]["candidates"]),
+          f"{p_.nm}: 노출을 좁혀도 후보 평가는 동일")
+    check({a["id"] for a in _d["alternatives"]}.isdisjoint({i["id"] for i in _d["items"]}),
+          f"{p_.nm}: 예비와 제안이 겹치지 않음")
+
+# 결함 13 재현 — 세액공제 대상액은 잔여 한도를 넘지 않는다 (박지민 잔여 300만원).
+_tax = next((i for i in FACTS["박지민"]["items"] if i["id"] == "st.tax_fill"), None)
+check(_tax is not None, "박지민: 세액공제 전략 성립")
+if _tax:
+    check(_tax["amount"] == engine.won(3_000_000), "박지민: 세액공제 대상액 = 잔여 한도 300만원",
+          str(_tax["amount"]))
+check(any("총급여 구간 미확인" in n for n in FACTS["한지우"]["needs_confirm"]),
+      "한지우: 소득 구간 미확인이 확인 항목으로 노출")
+
+# 결함 5 재현 — 위험자산 70% 한도 (박지민 실적배당 75%).
+check("lim" in conditions(BY_NAME["박지민"]), "박지민: 위험자산 한도 초과 판정(75%)")
+check(any(i["id"] == "st.limit_fix" for i in FACTS["박지민"]["items"]),
+      "박지민: 한도 정리 전략 소집")
+check(any(rg["regulation"] for rg in FACTS["박지민"]["regulations"]),
+      "박지민: 위험자산 한도 규정 근거 노출")
+
+# 투자성향 불일치의 두 방향 — 축소 방향은 mis_fix 가 서고, 편중 방향은 0원이라 서지 않는다.
+_soo = engine.prepare(Profile(  # 축소 방향 합성 케이스 (옛 감사 케이스의 형태 보존)
+    id="T", nm="T", ag=52, bal=90_000_000, rk="안정추구형", grade="낮은위험",
+    port=[10, 8, 30, 52], ret=-3.2, retPct=None, dopt="미설정", room=0, dorm=30, nchM=2.0,
+), top_n=_WIDE)
+check(any(i["id"] == "st.mis_fix" for i in _soo["items"]), "축소 방향: 성향 정리 전략 성립")
+check(not any(i["id"] == "st.limit_fix" for i in _soo["items"]), "축소 방향: 성향 기준이 한도 기준을 대체")
+check("mis" in conditions(BY_NAME["정민석"]), "정민석: 편중 방향도 mis 요건 성립")
+check(not any(i["id"] == "st.mis_fix" for i in FACTS["정민석"]["items"]),
+      "정민석: 축소분 0원이면 mis_fix 미소집")
+check(any("투자성향 불일치 정리 — 대상 금액 0원" in d for d in FACTS["정민석"]["dropped"]),
+      "정민석: 0원 미소집 사유 기록")
+check(any(i["id"] == "st.dep_shift" for i in FACTS["정민석"]["items"]),
+      "정민석: 편중 해소 전략이 대신 선다")
+
+# 만기 요건 — D-17(이준호)·D-25(오세훈)는 성립, 창 밖은 위 합성 케이스가 고정.
+check("mat" in conditions(BY_NAME["이준호"]) and "mat" in conditions(BY_NAME["오세훈"]),
+      "이준호 D-17 · 오세훈 D-25 만기 요건 성립")
+for nm in ("이준호", "오세훈"):
+    check(any(i["id"] == "st.mat_reprice" for i in FACTS[nm]["items"]), f"{nm}: 만기 재예치 전략 소집")
+
+# 결함 7 재현 — 예금 편중 해소가 기준선 이하 상품을 권하지 않는다 (김현수).
+_dep = next((i for i in FACTS["김현수"]["items"] if i["id"] == "st.dep_shift"), None)
+check(_dep is not None, "김현수: 예금 편중 해소 성립")
+if _dep:
+    _base_rate = engine.BASELINES["BL.bank_deposit"]["rate"]
+    _rets = [engine._ret_of(r) for r in engine.PRODUCTS
+             if r["name"] in [n.split("(")[0] for n in _dep["products"].values()]]
+    check(all(v > _base_rate for v in _rets), "김현수: 기준선 초과 상품만 제안", str(_rets))
+
+# Tier2 — 미매칭 시 '제안 항목 없음', LLM 스텁으로 승격·재료 이탈 폴백.
+import contextlib
+import io
+from dataclasses import replace as _replace
+
+check(agent.propose(BY_NAME["이준호"], use_llm=False)["tier"] == "행내전략",
+      "매칭 전략 있으면 tier=행내전략")
+_calm = _replace(BY_NAME["한지우"], room=0)  # 요건 전부 제거 → 미매칭
+check(not conditions(_calm), "합성 무요건 고객: 요건 0건", str(conditions(_calm)))
+_r = agent.propose(_calm, use_llm=False)
+check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 실행 항목이 없습니다"),
+      "미매칭 시 '제안 항목 없음' 규칙 문장", _r["tier"])
+_saved = (agent.llm.available, agent.llm.generate)
+try:
+    agent.llm.available = lambda: True
+    agent.llm.generate = lambda prompt, system="": (
+        '{"insight": "현 구성 양호", '
+        '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
+    _r2 = agent.propose(_calm, use_llm=True)
+    check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
+          "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
+    agent.llm.generate = lambda prompt, system="": (
+        '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
+    _r3 = agent.propose(_calm, use_llm=True)
+    check(_r3["tier"] == "미매칭" and bool(_r3["rejected"]),
+          "재료 이탈 산출은 폴백(tier=미매칭)", str(_r3["rejected"])[:40])
+finally:
+    agent.llm.available, agent.llm.generate = _saved
+
+# dorm=None 이어도 브리핑이 죽지 않는다 (김현수는 실제로 상담이력이 없어 dorm=None 이다).
+check(BY_NAME["김현수"].dorm is None, "김현수: 상담이력 없음 → dorm=None")
+check("dor" not in conditions(BY_NAME["김현수"]), "dorm=None 이면 dor 요건 미성립")
+check("None" not in str(FACTS["김현수"]["customer"]["최근접촉"]),
+      "dorm=None 이 화면 문자열로 새지 않음", str(FACTS["김현수"]["customer"]["최근접촉"]))
+
+# 산출물(문자열) 형식 — 원화 기대효과 미노출 · 신규 섹션 존재 (이준호 기준).
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf):
+    agent._print(agent.propose(BY_NAME["이준호"], use_llm=False))
+_art = _buf.getvalue()
+check("기대효과" not in _art, "산출물에 '기대효과' 표기 없음")
+check(all(sec in _art for sec in ("판단근거", "근거 문서")), "산출물에 판단근거·근거 문서 섹션")
 
 
 # ─────────────────────────────────────────────────────────────

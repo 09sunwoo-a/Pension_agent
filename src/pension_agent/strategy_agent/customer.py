@@ -18,15 +18,18 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
 
 # 데모 고정 기준일. date.today() 를 쓰지 않는 이유는 산출 재현성이다 — 만기 잔여일수(matDD)·
 # 연말까지 남은 일수·이벤트/세미나 임박 순서가 모두 이 값에 상대적이라, 오늘 날짜를 쓰면 같은
 # 페르소나가 실행일마다 다른 브리핑을 낸다(test_engine.py 의 단언도 이 값을 전제한다).
-# data/assets.json 의 이벤트·세미나 날짜도 이 기준일에 맞춰 배치돼 있다. 실제 배포 시
-# date.today() 로 바꾸고 assets.json 의 날짜도 함께 실데이터로 교체한다.
-TODAY = date(2026, 8, 11)
+# 값은 시연 데이터 원장(customers.json meta.as_of ← 원본 xlsx 09_데이터사전 "기준일")과
+# 일치해야 한다 — 아래 로더가 불일치를 검출한다. data/assets.json 의 이벤트·세미나 날짜도
+# 이 기준일에 유효하도록 배치돼 있다. 실제 배포 시 date.today() 로 바꾸고 assets.json 의
+# 날짜도 함께 실데이터로 교체한다.
+TODAY = date(2026, 8, 24)
 
 # 위험등급. 오름차순으로 정의하며, 인덱스 비교로 상한 초과 여부를 판정한다.
 RISK = ["매우낮은위험", "낮은위험", "보통위험", "다소높은위험", "높은위험", "매우높은위험"]
@@ -221,18 +224,104 @@ def days_to_year_end() -> int:
 
 
 # ─────────────────────────────────────────────────────────────
-# 고객 로스터
+# 고객 로스터 — 시연용 더미 9케이스 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)
 #
-# 지금은 **비어 있다.** 시연용 고객 데이터가 새로 정해지는 중이라, 옛 더미 페르소나(C1~C6)와
-# 섞이지 않도록 전부 걷어냈다. 새 데이터는 여기에 `Profile(...)` 로 채운다 — 필드 의미는
-# 위 `Profile` 정의를, 어떤 값이 어느 소스에서 조인되는지는 docs/DEMO_STATUS.md 를 본다.
+# 원장은 `config.CUSTOMERS_JSON` 이다(scripts/import_customers.py 가 원본 xlsx 에서 생성 —
+# 손으로 고치지 않는다). 여기서는 그 레코드를 Profile 로 **매핑만** 한다. 매핑 규약:
 #
-# 로스터가 비어 있어도 상위 코드는 죽지 않는다: 브리핑 CLI·Streamlit 화면·문제상황 덤프는
-# 모두 "등록된 고객 없음" 으로 빠지고, `get_profile()` 은 None 을 반환한다(대화형 에이전트는
-# customer 도구 없이 지식 질의만 답한다).
+#   · port 4분류 [원리금보장(예금+GIC)+현금, 채권형, 실적배당 수익증권, ETF] — 원본의
+#     5분류(고유계정대/예금/GIC/수익증권/ETF)에서 접는다. 채권형은 수익증권 중 위험등급
+#     매우낮은위험·낮은위험인 상품의 평가금액 합. cash_idle_pct(고유계정대)는 port[0] 의
+#     부분집합이라는 기존 규약 그대로다.
+#   · grade(고객 위험등급)는 원본에 없다 → PREF[투자성향] 으로 **보수적으로 파생**한다.
+#     실데이터 전환 시 실제 고객 위험등급 컬럼으로 교체한다(docs/DEMO_STATUS.md §4).
+#   · retPct·balPct·income_bracket·customer_type 은 원본에 모수·컬럼이 없다 → None 으로
+#     둔다(각각 그레이스풀 생략·보수적 공제율 경로가 이미 있다).
+#   · matDD/matAmt 는 만기일 있는 보유상품(예금·GIC) 중 최근접 만기의 잔여일수·평가금액 합.
+#
+# 원본의 나머지 재료(배지 4종·판매중단·ISA·동연령 비교·상담이력)는 Profile 로 접지 않고
+# customers.json 에 그대로 남아 있다 — 요건화는 지식베이스 근거 확인이 선행돼야 한다
+# (루트 CLAUDE.md "지식베이스에 없는 기준은 만들지 않는다").
+#
+# customers.json 이 없으면 로스터는 빈 리스트다 — 브리핑 CLI·Streamlit 화면·문제상황
+# 덤프는 "등록된 고객 없음" 으로 빠지고 `get_profile()` 은 None 을 반환한다.
 # ─────────────────────────────────────────────────────────────
 
-PERSONAS: list[Profile] = []
+_BOND_GRADES = ("매우낮은위험", "낮은위험")  # 수익증권 중 채권형으로 접는 위험등급
+
+
+def _days_since(iso: str | None) -> int | None:
+    return (TODAY - date.fromisoformat(iso)).days if iso else None
+
+
+def _port(rec: dict) -> tuple[list[int], int]:
+    """원본 5분류 → port 4분류(%)와 cash_idle_pct. 정수 반올림 후 합 100 을 보정한다."""
+    sm, bal = rec["summary"], rec["summary"]["전체평가금액"]
+    bond = sum(p["평가금액"] for p in rec["products"]
+               if p["상품유형"] == "수익증권"
+               and p["퇴직연금상품위험등급구분코드"] in _BOND_GRADES)
+    amounts = [
+        sm["예금평가금액"] + sm["GIC평가금액"] + sm["고유계정대평가금액"] + sm["기타평가금액"],
+        bond,
+        sm["수익증권평가금액"] - bond,
+        sm["ETF평가금액"],
+    ]
+    port = [round(a * 100 / bal) for a in amounts]
+    port[port.index(max(port))] += 100 - sum(port)  # 반올림 오차는 최대 슬롯에서 흡수
+    return port, round(sm["고유계정대평가금액"] * 100 / bal)
+
+
+def _nearest_maturity(rec: dict) -> tuple[int | None, int]:
+    """만기일 있는 보유상품 중 최근접 만기의 (잔여일수, 그 날짜 평가금액 합)."""
+    dated = [(date.fromisoformat(p["약정만기년월일"]), p["평가금액"])
+             for p in rec["products"] if p.get("약정만기년월일")]
+    if not dated:
+        return None, 0
+    nearest = min(d for d, _ in dated)
+    return (nearest - TODAY).days, sum(a for d, a in dated if d == nearest)
+
+
+def _to_profile(rec: dict) -> Profile:
+    basic, sm, act = rec["basic"], rec["summary"], rec["activity"]
+    port, cash_pct = _port(rec)
+    mat_dd, mat_amt = _nearest_maturity(rec)
+    rk = basic["투자성향"]
+    return Profile(
+        id=rec["id"], nm=basic["고객명"], ag=basic["만나이"],
+        bal=sm["전체평가금액"], rk=rk,
+        grade=PREF[rk],  # 파생값 — 위 매핑 규약 참고
+        port=port,
+        ret=round(sm["최근1년IRP수익률"] * 100, 1),
+        retPct=None, balPct=None,
+        dopt="설정" if sm["디폴트옵션등록여부"] == "Y" else "미설정",
+        room=rec["tax_isa"]["세액공제잔여한도"] // 10_000,
+        dorm=_days_since(basic.get("최근상담일")),
+        nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
+        matDD=mat_dd, matAmt=mat_amt,
+        cash_idle_pct=cash_pct,
+        pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
+        invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
+        pension_started=rec["pension"]["연금개시여부"] == "Y",
+        club_grade=basic["KB스타클럽등급"],
+    )
+
+
+def _load_personas() -> list[Profile]:
+    from pension_agent import config  # noqa: PLC0415 — 경로는 config 소유(구조 규칙)
+
+    if not config.CUSTOMERS_JSON.is_file():
+        return []
+    doc = json.loads(config.CUSTOMERS_JSON.read_text(encoding="utf-8"))
+    as_of = doc.get("meta", {}).get("as_of")
+    if as_of != TODAY.isoformat():
+        # 기준일이 어긋나면 만기 잔여일수·미접촉 일수가 전부 밀린다. 조용히 계속하지 않는다.
+        raise ValueError(
+            f"customers.json 기준일({as_of})이 customer.TODAY({TODAY})와 다릅니다 — "
+            "원본 xlsx 교체 시 TODAY 를 함께 맞추세요.")
+    return [_to_profile(r) for r in doc["records"]]
+
+
+PERSONAS: list[Profile] = _load_personas()
 
 _BY_ID = {p.id: p for p in PERSONAS}
 

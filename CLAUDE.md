@@ -7,9 +7,10 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 
 **발표용 내부 데모다. 실데이터 전환 전이다.**
 
-- 고객 로스터(`customer.PERSONAS`)는 **지금 비어 있다** — 옛 더미 페르소나 6명(C1~C6)을
-  걷어냈고, 새로 정해진 시연용 더미 데이터로 채울 예정이다. 기준일은 `customer.TODAY` 고정,
-  안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.
+- 고객은 시연용 목업 9케이스다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`,
+  `scripts/import_customers.py` 가 `customers.json` 으로 내리고 `customer.py` 가 Profile 로
+  매핑한다(고칠 값은 xlsx 에 넣고 재생성). 기준일은 `customer.TODAY`(=원장 기준일 2026-08-24)
+  고정, 안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.
 - **화면에는 더미 표시를 붙이지 않는다**(발송문 포함). 발표 산출물에 딱지를 남기지 않기로
   했다. 대신 무엇이 더미인지는 `docs/DEMO_STATUS.md` 가 전담한다.
 - `src/app.py`(Streamlit)는 개발·테스트용 화면이다. 실서비스 프론트는 따로 만든다.
@@ -98,6 +99,7 @@ REQUIREMENTS) · 폴더 번호. 문서에서 `07/01 ①` 은 "기능정의 문�
 cd src
 python -m tests.test_engine               # 엔진 선정 로직
 python -m tests.test_support              # ⑥~⑨ · 더미 규약 · 시효성 수치
+python -m tests.test_strategy_agent       # LLM 산출 검증·폴백
 python -m tests.test_consult_agent        # 라우팅·즉답·도구 루프·하지말것 가드
 python -m tests.test_infra                # 공용 인프라 · 임포트 경계
 python -m scripts.kb_build.test_paths     # 경로·locator 실재
