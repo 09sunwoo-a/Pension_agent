@@ -387,6 +387,7 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
         return None
     from pension_agent.strategy_agent import agent as strategy_agent  # noqa: PLC0415
     from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.strategy_agent.engine import render as strategy_render  # noqa: PLC0415
     try:
         profile = strategy_customer.get_profile(customer_id)
         if profile is None:
@@ -428,12 +429,19 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 출처는 **고객 원장**이지 지식 카드가 아니다. 예전 표기("AI브리핑 재료 /
     # briefing.<id>")는 화면에서 카드 id 처럼 읽혀, 계좌에 그냥 들어 있는 값이 어딘가에서
     # 검색해 온 자료처럼 보였다. 검색으로 온 재료가 아니므로 관련도(score)도 없다.
+    # 항목–값 짝. 고객 재료는 `atomic` 이 비어 있어(위) 수치 집합 검사만 걸리는데, 그
+    # 검사는 **뒤바꾼 답을 못 잡는다** — "GIC 4,050만원"(예금 것)은 두 숫자가 다 재료에
+    # 있으니 통과한다. 지식 카드는 사람이 `tiers` 를 저작해 그 구멍을 막았지만 고객 값은
+    # 저작 대상이 아니다(카드가 아니라 고객마다 다른 원장 행이다). 대신 짝이 이미 원장
+    # 구조에 있으므로, 그것을 버리지 않고 함께 넘긴다(render.briefing_pairs → relations).
+    pairs = strategy_render.briefing_pairs(profile)
     return _ev("customer", query, "\n".join(lines),
                [{"id": f"customer.{customer_id}",
                  "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}],
-               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)])
+               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)],
+               cards=[{"id": f"customer.{customer_id}", "pairs": pairs}] if pairs else None)
 
 
 #: 인용 허용 집합에서 빼는 facts 가지. 값이 아니라 **선별 전 후보 더미**다.

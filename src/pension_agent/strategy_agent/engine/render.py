@@ -307,6 +307,45 @@ def _briefing(p: Profile) -> dict:
     return snap
 
 
+def briefing_pairs(p: Profile) -> list[dict]:
+    """`_briefing()` 이 한 줄로 납작하게 만들면서 잃는 **항목–값 짝**.
+
+    만기 두 건("GIC 3,020만원 D-174 · 예금 4,050만원 D-221")은 원장에서 각각 한 dict 로
+    짝지어져 있는데, 문자열 한 줄이 되고 나면 어느 금액이 어느 유형 것인지가 사라진다.
+    대화형의 수치 검사는 **집합 포함**이라(verify.py) 뒤바꾼 답도 통과한다 —
+    "GIC 4,050만원" 은 두 숫자가 다 재료에 있으므로 걸리지 않는다.
+
+    그래서 짝을 따로 내보낸다. 지식 카드의 `tiers` 와 달리 **사람이 저작할 것이 없다** —
+    관계는 이미 Profile 에 구조로 있고, 여기서 하는 일은 그것을 버리지 않고 함께 넘기는
+    것뿐이다. 판정은 `consult_agent/relations.py::miscategorized` 가 한다.
+
+    값 문자열은 `_briefing()` 이 쓰는 것과 **같은 표기**여야 한다 — 답변은 재료에 실린 표기를
+    보고 쓰므로, 여기서 다르게 포맷하면 임자를 못 찾아 판정이 통째로 비어버린다. 그래서 이
+    함수는 `_briefing()` 바로 옆에 둔다.
+    """
+    rows: list[dict] = []
+    for m in p.maturities or []:
+        rows.append({"kind": "만기도래", "label": m["type"],
+                     "values": [m["date"], f"D-{m['dd']}", won(m["amount"])]})
+    for h in p.holdings or []:
+        values = [won(h["amount"])]
+        if h.get("ret_own") is not None:
+            values.append(f"{h['ret_own'] * 100:.1f}%")
+        if h.get("rate"):
+            values.append(f"{h['rate'] * 100:.2f}%")
+        rows.append({"kind": "보유상품", "label": h["name"], "values": values})
+    for a in p.assets or []:
+        # 비중은 정규형도 함께 싣는다. 원장은 "75.0%" 로 적지만 답변은 "75%" 로 쓴다 —
+        # 표기가 어긋나면 임자를 못 찾아 «예금 비중 75%»(고유계정대 값) 같은 오답이
+        # 판정 불가로 빠져나간다. 값이 같은 두 표기이므로 임자도 같다.
+        pct = [f"{a['pct']}%"]
+        if float(a["pct"]).is_integer():
+            pct.append(f"{int(a['pct'])}%")
+        rows.append({"kind": "자산군별", "label": a["type"],
+                     "values": [won(a["amount"]), *pct]})
+    return rows
+
+
 def _build_ctx(p: Profile, spec: dict, products: dict[str, dict], amount: int,
                action: str, conds: list[str], extra: dict) -> tuple[dict | None, _Ctx]:
     """절 템플릿의 슬롯 컨텍스트를 만든다. 선정 항목과 대안 항목이 동일한 규칙으로

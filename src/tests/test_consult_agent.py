@@ -1202,6 +1202,91 @@ def check_relations() -> int:
     return ok
 
 
+def check_customer_pairs() -> int:
+    """고객 재료의 항목–값 짝 — 값을 엉뚱한 항목에 붙인 답을 잡는가 (§6 · CLAUDE.md §3).
+
+    회귀 대상: 고객 재료는 `atomic` 이 비어 있어(항목이 많아 원문 강제를 걸면 답변이 표
+    덤프가 된다) **수치 집합 검사만** 걸렸다. 그 검사는 재조합을 못 잡는다 — 한지우 고객의
+    만기가 «GIC 3,020만원 D-174 · 예금 4,050만원 D-221» 인데 "GIC 4,050만원이 D-221에
+    만기" 라고 답해도 네 숫자가 다 재료에 있으니 통과했다.
+
+    지식 카드는 사람이 `tiers` 를 저작해 그 구멍을 막았지만 고객 값은 저작 대상이 아니다
+    (카드가 아니라 고객마다 다른 원장 행이다). 대신 짝이 **이미 원장 구조에 있으므로**
+    그것을 그대로 내보낸다(`render.briefing_pairs`) — 사람이 선언할 것은 없다.
+
+    잡는 것만큼 통과시키는 것을 함께 잰다. 여기서 오탐이 나면 옳은 답이 화면에서 사라진다.
+    """
+    from pension_agent.consult_agent import relations as R
+    from pension_agent.strategy_agent import customer as SC
+    from pension_agent.strategy_agent.engine.pipeline import prepare as _prep
+    from pension_agent.strategy_agent.engine.render import briefing_pairs
+
+    ok = 0
+    HAN, KIM = "176903-5528417", "173544-2074623"   # 한지우(만기 2건) · 김현수(예금 15%)
+    ev = tools.run("customer", {"customer_id": HAN}, "만기 언제야")
+    cards = tools.ledger_related([ev])
+
+    hit = len(cards) == 1 and len(cards[0].get("pairs") or []) >= 8
+    print(f"{'✓' if hit else '✗'} customer 재료가 항목–값 짝을 원장에 올린다"
+          + ("" if hit else f" — cards {len(cards)}"))
+    ok += hit
+
+    # 잡아야 하는 것 — 전부 수치 집합 검사(verify_texts)는 통과하던 답이다.
+    BAD = [("만기 유형↔금액·잔여일수", "GIC 4,050만원이 D-221에 만기 도래합니다."),
+           ("만기 유형↔날짜", "예금 3,020만원이 2027-02-14 에 만기입니다."),
+           ("상품↔수익률", "RISE 미국S&P500 ETF 는 수익률 31.7% 입니다."),
+           ("상품↔금리", "기업은행 퇴직연금 정기예금 1년은 금리 3.30% 입니다."),
+           ("자산군↔비중", "예금 비중은 37.6% 입니다.")]
+    for label, answer in BAD:
+        loose = verify_texts(answer, tools.ledger_texts([ev]))[0]
+        hit = bool(R.check(answer, cards)) and loose
+        print(f"{'✓' if hit else '✗'} 짝 오답을 잡는다: {label}"
+              + ("" if hit else f" — 잡힘 {bool(R.check(answer, cards))} · 집합검사 {loose}"))
+        ok += hit
+
+    # 통과해야 하는 것 — 옳은 답과 나열문. 나열은 값이 자기 이름 **뒤**에 와서 거리만 보면
+    # 전부 오짝으로 읽히는 모양이라, 여기가 오탐이 가장 나기 쉬운 자리다.
+    GOOD = [("옳게 짝지은 답", "GIC 3,020만원이 2027-02-14 (D-174) 만기 도래합니다."),
+            ("만기 두 건 나열", "2027-02-14 (D-174) GIC 3,020만원, 2027-04-02 (D-221) 예금 4,050만원."),
+            ("자산군 나열", "수익증권 7,900만원(37.6%) · ETF 5,530만원(26.3%) · 예금 4,050만원(19.3%)."),
+            ("이름 없이 말한 값", "만기 자금 4,050만원은 재예치를 안내해보세요.")]
+    for label, answer in GOOD:
+        hit = not R.check(answer, cards)
+        print(f"{'✓' if hit else '✗'} 옳은 답을 막지 않는다: {label}"
+              + ("" if hit else f" — {R.check(answer, cards)[:1]}"))
+        ok += hit
+
+    # 지난 «예금 90%» 사고의 클래스. 김현수는 고유계정대 75% · 예금 15% 인데, 4분류 라벨이
+    # 잘못 적혀 있던 동안 답변이 예금 비중을 75%(고유계정대 값)로 말했다. 라벨은 고쳤지만
+    # 검증기는 여전히 못 잡던 자리다. 원장은 "75.0%" 로 적고 답변은 "75%" 로 쓰므로,
+    # 정규형을 함께 실어야 임자를 찾는다.
+    kim = briefing_pairs(SC.get_profile(KIM))
+    hit = bool(R.miscategorized("예금 비중은 75%입니다.", kim)) and not R.miscategorized(
+        "예금 비중은 15%입니다.", kim)
+    print(f"{'✓' if hit else '✗'} 비중 표기가 달라도(75.0% ↔ 75%) 임자를 찾는다")
+    ok += hit
+
+    # 9케이스 전원 오탐 스윕 — 원장 줄 자체는 정의상 옳은 문장이다. 여기서 걸리면
+    # 답변이 재료를 그대로 인용해도 막히는 뜻이 된다.
+    noise = []
+    for prof in SC.PERSONAS:
+        rows, snap = briefing_pairs(prof), _prep(prof)["briefing"]
+        for key in ("만기도래", "보유상품", "자산군별"):
+            if snap.get(key) and R.miscategorized(f"{key}는 {snap[key]} 입니다.", rows):
+                noise.append(f"{prof.nm}/{key}")
+    hit = not noise
+    print(f"{'✓' if hit else '✗'} 9케이스 전원: 원장 줄 자체를 오탐하지 않는다"
+          + ("" if hit else f" — {noise[:3]}"))
+    ok += hit
+
+    # 짝이 없는 재료(항목이 하나뿐이거나 없는 고객)에는 아무 판정도 하지 않는다.
+    hit = R.miscategorized("아무 말이나 4,050만원", [{"kind": "만기도래", "label": "예금",
+                                                 "values": ["4,050만원"]}]) == []
+    print(f"{'✓' if hit else '✗'} 항목이 하나뿐이면 판정하지 않는다(갈릴 것이 없다)")
+    ok += hit
+    return ok
+
+
 def check_turn_cost() -> int:
     """값 하나 묻는 턴이 LLM 을 몇 번 부르는가 — 직원은 상담 중에 이 화면을 읽는다.
 
@@ -2414,6 +2499,7 @@ def main() -> int:
     check_adequacy_and_shape()
     check_material_marks()
     check_relations()
+    check_customer_pairs()
     check_turn_cost()
     check_miss_recovery()
     check_screen_registry()
