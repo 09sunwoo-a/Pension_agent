@@ -103,7 +103,7 @@ def build() -> dict[str, Any]:
     return {
         "meta": {
             "title": "시연용 더미 고객 9케이스",
-            "as_of": "2026-08-24",  # 09_데이터사전 '기준일' — customer.TODAY 와 일치해야 한다
+            "as_of": "2026-08-24",  # 09_데이터사전 '기준일' — customer.AS_OF 와 일치해야 한다
             "source": SOURCE_XLSX.name,
             "note": "실제 고객/상품/수익률이 아닌 목업용 가상 데이터. 실거래·대고객 안내에 "
                     "사용 금지(09_데이터사전). 이 파일은 scripts/import_customers.py 산출물이다 "

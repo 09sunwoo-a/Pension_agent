@@ -1901,6 +1901,67 @@ def check_caution_roles() -> int:
     return ok
 
 
+def check_today_material() -> int:
+    """오늘 날짜 재료(§3) — 시점·기한이 걸린 질문에 답이 없던 자리.
+
+    작성 규약이 «재료에 없는 값은 계산해서 만들어내지 않는다(날짜·차액·비율 전부)»라,
+    오늘이 며칠인지가 재료에 없으면 "연말까지 며칠 남았다"를 **말할 수가 없다**. 세액공제는
+    연말이 마감이라 그 문장이 상담의 알맹이인데도 그랬다. 고칠 방향은 규약을 푸는 게 아니라
+    (풀면 LLM 의 학습 시점 감각이 그 자리를 채운다) 코드가 오늘을 재료로 싣는 것이다.
+
+    여기서 재는 것 셋:
+      ① 도구가 능력 목록에 있고 고객 화면과 무관하게 항상 쓸 수 있는가
+      ② 재료가 오늘 날짜와 «두 가지 세는 법»을 함께 밝히는가 — 하나만 실으면 126 인지
+         127 인지 분간되지 않아 하루짜리 오안내가 된다
+      ③ 그 수치가 검증기를 통과하는가 — 원장에 없으면 답변에서 잘려 나간다
+    """
+    ok = 0
+    from datetime import date
+
+    import tests
+    from pension_agent.strategy_agent import customer as CUST
+
+    hit = "date" in tools.usable({}) and "date" in tools.usable({"customer_id": "CX"})
+    print(f"{'✓' if hit else '✗'} 오늘 도구는 고객 화면이 닫혀 있어도 쓸 수 있다")
+    ok += hit
+
+    pinned = date.fromisoformat(tests.PINNED_TODAY)
+    left = CUST.days_to_year_end(pinned)
+    ev = tools.TOOLS["date"].run({}, "연말까지 얼마 남았어?")
+    text = (ev or {}).get("text", "")
+
+    hit = f"{pinned.year}년 {pinned.month}월 {pinned.day}일" in text
+    print(f"{'✓' if hit else '✗'} 재료가 오늘 날짜를 그대로 밝힌다")
+    ok += hit
+
+    hit = str(left) in text and str(left + 1) in text and "오늘을 세지 않은" in text
+    print(f"{'✓' if hit else '✗'} 연말 잔여일수를 두 가지 세는 법으로 함께 싣는다"
+          + ("" if hit else f" — {text!r}"))
+    ok += hit
+
+    # 원장 기준일은 고객 화면이 열려 있을 때만. 닫혀 있으면 어느 고객의 원장인지가 없다.
+    # 날짜값이 아니라 **줄**로 본다 — 테스트는 오늘을 AS_OF 로 고정한 채 돌아서 두 날짜가
+    # 같은 문자열이고, 값으로 비교하면 "닫혀 있어도 실려 있다"로 잘못 읽힌다.
+    opened = tools.TOOLS["date"].run({"customer_id": "198734-1205842"}, "오늘 며칠이야")
+    label = "고객 계좌 원장 기준일"
+    hit = (label in (opened or {}).get("text", "") and label not in text
+           and CUST.AS_OF.isoformat() in (opened or {}).get("text", ""))
+    print(f"{'✓' if hit else '✗'} 원장 스냅샷 기준일은 고객 화면이 열렸을 때만 함께 싣는다")
+    ok += hit
+
+    # ③ 답변이 그 수치를 써도 검증기가 자르지 않는가. 재료로 싣는 목적이 이것이다.
+    allow = (ev or {}).get("allow") or []
+    hit = verify_texts(f"올해가 {left}일 남았으니 연내 납입해야 세액공제를 받으세요.", allow)[0]
+    print(f"{'✓' if hit else '✗'} 답변이 그 잔여일수를 써도 검증기가 자르지 않는다")
+    ok += hit
+
+    # 반대로 재료에 없는 날짜 수치는 여전히 잘린다 — 재료를 실었다고 경계가 넓어지면 안 된다.
+    hit = not verify_texts(f"올해가 {left + 40}일 남았어요.", allow)[0]
+    print(f"{'✓' if hit else '✗'} 재료 밖 잔여일수는 그대로 잘린다(경계는 넓어지지 않았다)")
+    ok += hit
+    return ok
+
+
 def check_history_material() -> int:
     """상담 이력 재료(§3) — "지난번에 무슨 얘기 했지"가 답이 없던 자리.
 
@@ -3044,42 +3105,48 @@ def main() -> int:
             found = ", ".join(f"{s['id'].split('.')[-1]}({s['score']})" for s in out["sources"]) or "→ FALLBACK"
         print(f"{'✓' if ok else '✗'} {question[:32]:<34} {found}")
 
-    check_pitch_stages()
-    check_verify_gate()
-    check_intent_routing()
-    check_lms_send_parsing()
-    check_knowledge_intents()
-    check_screen_link()
-    check_customer_material()
-    check_context_and_clarify()
-    check_adequacy_and_shape()
-    check_material_marks()
-    check_relations()
-    check_turn_cost()
-    check_miss_recovery()
-    check_replan_on_empty()
-    check_screen_registry()
-    check_market_material()
-    check_product_advice()
-    check_caution_roles()
-    check_history_material()
-    check_history_selection()
-    check_hier_index()
-    check_order_flipped()
-    check_tool_loop()
-    check_all_kinds_reachable()
-    check_atomic_spans()
-    check_origin()
-    check_plan_failure()
-    check_llm_down()
-    check_notice_scope()
-    check_guard()
-    # 위 테스트들(특히 lms_send)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
-    # 것만** 지운다. 예전에는 디렉터리를 통째로 지웠는데, 경로가 옮겨진 뒤로는 존재하지
-    # 않는 곳을 지우고 있어서 실제로는 아무것도 정리되지 않았다(루트 CLAUDE.md 규칙 4의
-    # 같은 사고 — 경로를 하드코딩하면 한 칸 움직였을 때 조용히 빗나간다).
-    for fp in set(config.SESSION_DATA_DIR.glob("*.json")) - _SESSIONS_BEFORE:
-        fp.unlink()
+    # 검사 도중 예외가 나도 정리는 돈다. try/finally 가 없던 동안, 실패한 실행이
+    # 남긴 세션 파일(TEST_ACT.json)이 저장소에 그대로 커밋될 뻔했다 — 정리를
+    # 성공 경로에만 두면 «정리가 필요한 상황»에서만 정리가 안 된다.
+    try:
+        check_pitch_stages()
+        check_verify_gate()
+        check_intent_routing()
+        check_lms_send_parsing()
+        check_knowledge_intents()
+        check_screen_link()
+        check_customer_material()
+        check_context_and_clarify()
+        check_adequacy_and_shape()
+        check_material_marks()
+        check_relations()
+        check_turn_cost()
+        check_miss_recovery()
+        check_replan_on_empty()
+        check_screen_registry()
+        check_market_material()
+        check_product_advice()
+        check_caution_roles()
+        check_history_material()
+        check_today_material()
+        check_history_selection()
+        check_hier_index()
+        check_order_flipped()
+        check_tool_loop()
+        check_all_kinds_reachable()
+        check_atomic_spans()
+        check_origin()
+        check_plan_failure()
+        check_llm_down()
+        check_notice_scope()
+        check_guard()
+    finally:
+        # 위 테스트들(특히 lms_send)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
+        # 것만** 지운다. 예전에는 디렉터리를 통째로 지웠는데, 경로가 옮겨진 뒤로는 존재하지
+        # 않는 곳을 지우고 있어서 실제로는 아무것도 정리되지 않았다(루트 CLAUDE.md 규칙 4의
+        # 같은 사고 — 경로를 하드코딩하면 한 칸 움직였을 때 조용히 빗나간다).
+        for fp in set(config.SESSION_DATA_DIR.glob("*.json")) - _SESSIONS_BEFORE:
+            fp.unlink()
 
     total = _TALLY["ok"] + _TALLY["fail"]
     _stdout_print(f"\n{_TALLY['ok']}/{total} 통과")

@@ -169,7 +169,7 @@ for rec in situations_mod.SEGMENTS:
 
 # 종료된 콘텐츠는 노출하지 않는다.
 for key, rows in support.outreach_candidates().items():
-    check(all(r["end_date"] >= str(support.TODAY) for r in rows),
+    check(all(r["end_date"] >= str(support.today()) for r in rows),
           f"⑨ {key}: 종료된 콘텐츠가 후보에 없다")
 
 # 더미 표시는 기계판독(dummy) 하나뿐이다 — 화면·발송문 딱지는 붙이지 않는다.

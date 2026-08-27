@@ -24,7 +24,7 @@ engine.prepare() 가 항목에 미리 렌더링해 넘긴다(`amount_fmt`·`prod
 
 from __future__ import annotations
 
-from pension_agent.strategy_agent.customer import TODAY  # noqa: F401 — 기준일 재노출
+from pension_agent.strategy_agent.customer import AS_OF, today  # noqa: F401 — 두 시간축 재노출
 from pension_agent.strategy_agent.support.kb import (  # noqa: F401
     load_reference_kb,
     pitch_kb,
