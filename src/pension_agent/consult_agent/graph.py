@@ -23,12 +23,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 
 
 from pension_agent.session_store import append_turn
+
+from pension_agent.consult_agent import progress
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.clarify import clarify
@@ -84,6 +87,7 @@ _AGENT = None
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
+    on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
 
@@ -97,11 +101,16 @@ def ask(
     session_id: 상담 세션 구분자(REQUIREMENTS.md §14 상담이력 단위). 넘기지 않으면 "default"
     세션으로 기록된다 — 모든 턴은 intent 와 무관하게 이 진입점 한 곳에서 기록되므로, 새
     intent 가 추가돼도 상담이력 기록을 빠뜨릴 일이 없다.
+    on_progress: 진행 표시 콜백. 답변이 만들어지는 동안 "무엇을 하고 있는지" 한 줄씩
+    받는다(문구는 전부 코드가 정한다 — progress.py). ContextVar 로 전달되므로 상태·
+    history 에 콜러블이 들어가지 않고, 콜백이 죽어도 답변 생성은 계속된다.
     """
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    out = _AGENT.invoke({"question": question, "history": history or [], "customer_id": customer_id})
+    with progress.reporting(on_progress):
+        out = _AGENT.invoke(
+            {"question": question, "history": history or [], "customer_id": customer_id})
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),

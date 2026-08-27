@@ -2108,6 +2108,102 @@ def check_hier_index() -> int:
     return ok
 
 
+def check_l0_skip() -> int:
+    """전 카드 인덱스가 예산에 들어가는 종류는 버킷 선택(L0) 호출을 생략한다.
+
+    2단의 존재 이유는 "카드 전부는 컨텍스트에 못 싣는다"인데, channel(56장)처럼 그 전제가
+    안 서는 종류에서 L0 은 후보를 좁히지 않고 순차 LLM 왕복 하나만 쓴다 — 오히려 버킷
+    오선택으로 맞는 카드가 후보에서 빠지는 자리다. 판정은 kb.whole_index 가 데이터로
+    한다: 카드가 늘어 예산을 넘으면 저절로 2단으로 돌아간다(check_hier_index ⑧이 pitch
+    로 2단 경로를 그대로 고정하고 있다 — 이 검사는 그 반대짝이다).
+    """
+    from pension_agent.consult_agent import kb as K
+
+    ok = 0
+
+    # ① 판정 자체 — 작은 종류는 텍스트, 큰 종류는 None(= 2단 유지).
+    small = K.whole_index(tools.KB, ("channel",))
+    hit = small is not None and K.whole_index(tools.KB, ("pitch",)) is None
+    print(f"{'✓' if hit else '✗'} whole_index: channel 은 1단, pitch 는 2단 유지")
+    ok += hit
+
+    # ② 1단으로 돌 때 카드가 하나도 빠지지 않는다 — 왕복을 아끼는 것이지 후보를 줄이는 게
+    #    아니다. 제목만 남기는 압축(examples=0)까지 내려가서 얻은 1단도 아니다(예상질문이
+    #    최소 1개는 남는 예산일 때만 생략한다 — 선택 품질을 팔아 왕복을 사지 않는다).
+    n_channel = sum(1 for c in tools.KB.cards if c["_kind"] == "channel")
+    hit = small is not None and \
+        sum(1 for line in small.splitlines() if line.startswith("[")) == n_channel
+    print(f"{'✓' if hit else '✗'} 1단 인덱스에 channel 전 카드({n_channel}장)가 실린다")
+    ok += hit
+
+    # ③ 배선 — llm_pick(("channel",)) 은 LLM 을 카드 선택 한 번만 부른다(버킷 프롬프트 없음).
+    real = next(c["id"] for c in tools.KB.cards if c["_kind"] == "channel")
+    calls: list[str] = []
+    orig = select.generate
+    select.generate = lambda prompt, **kw: (calls.append(prompt), f'["{real}"]')[1]
+    try:
+        hits = _REAL_LLM_PICK(("channel",), "연금 수령 신청 스타뱅킹에서 돼?")
+    finally:
+        select.generate = orig
+    hit = len(calls) == 1 and "묶음 식별자" not in calls[0] \
+        and [c["id"] for _, c in hits] == [real]
+    print(f"{'✓' if hit else '✗'} llm_pick: 작은 종류는 호출 1번({len(calls)}회) · 버킷 프롬프트 없음")
+    ok += hit
+    return ok
+
+
+def check_progress() -> int:
+    """진행 표시 — 실제로 시작한 일만, 코드가 정한 문구로, 상태에 흔적 없이 흘린다.
+
+    답변 스트리밍은 못 한다(생성문이 게이트에서 통째로 폐기될 수 있다). 그래서 흘리는
+    것은 진행이고, 규칙은 progress.py 머리말의 셋이다. 여기서는 ① 문구가 코드 소유인지
+    (도구 선언 progress 라벨), ② 하지 않은 일을 알리지 않는지(재료 0건 턴에 '작성' 없음),
+    ③ 콜백이 죽어도 답변이 사는지를 고정한다.
+    """
+    from pension_agent.consult_agent import progress as PROG
+    from pension_agent.consult_agent.nodes import plan as P
+
+    ok = 0
+    events: list[str] = []
+
+    # ① 도구 실행이 도구 선언의 라벨로 알린다 — LLM 질의가 아니라.
+    orig_tool = tools.TOOLS["screen"]
+    tools.TOOLS["screen"] = tools.Tool("screen", orig_tool.desc, lambda st, q: None,
+                                       progress=orig_tool.progress)
+    try:
+        with PROG.reporting(events.append):
+            tools.run("screen", {"question": "질문"}, "LLM이 만든 질의")
+    finally:
+        tools.TOOLS["screen"] = orig_tool
+    hit = events == ["단말 화면번호을(를) 찾고 있어요"]
+    print(f"{'✓' if hit else '✗'} 도구 진행 표시는 코드 선언 라벨로 찍힌다 — {events}")
+    ok += hit
+
+    # ② 재료 0건 턴은 '작성' 을 알리지 않는다 — compose 가 생성 없이 '없음' 으로 답하므로,
+    #    알리면 하지 않은 일을 화면이 말하는 것이 된다.
+    events.clear()
+    with PROG.reporting(events.append):
+        out = P.compose({"question": "질문", "evidence": [], "plan_calls": []})
+    hit = events == [] and bool(out["answer"])
+    print(f"{'✓' if hit else '✗'} 재료 0건 턴은 작성 진행을 알리지 않는다 — {events}")
+    ok += hit
+
+    # ③ 콜백이 죽어도 답변 생성은 계속된다 — 진행 표시는 곁가지다.
+    def broken(text: str) -> None:
+        raise RuntimeError("표시 실패")
+
+    with PROG.reporting(broken):
+        out = P.compose({"question": "질문", "evidence": [], "plan_calls": []})
+    hit = bool(out["answer"])
+    print(f"{'✓' if hit else '✗'} 진행 콜백이 죽어도 답변은 나온다")
+    ok += hit
+
+    # ④ 콜백이 없으면(배치·테스트 기본) emit 은 no-op — 켜지 않은 화면에 아무 일도 없다.
+    PROG.emit("아무도 안 듣는 진행")   # 예외 없이 지나가면 통과
+    print("✓ 콜백 없는 emit 은 no-op 이다")
+    ok += 1
+    return ok
+
 
 def check_order_flipped() -> int:
     """카드 선택 1차가 LLM 인지 — 순서가 실제로 뒤집혔는지 검증한다.
@@ -2969,6 +3065,8 @@ def main() -> int:
         check_today_material()
         check_history_selection()
         check_hier_index()
+        check_l0_skip()
+        check_progress()
         check_order_flipped()
         check_tool_loop()
         check_all_kinds_reachable()
