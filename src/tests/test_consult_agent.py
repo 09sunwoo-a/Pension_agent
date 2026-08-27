@@ -1768,6 +1768,10 @@ def check_history_material() -> int:
         orig_dir = session_store.SESSION_DATA_DIR
         session_store.SESSION_DATA_DIR = Path(tmp)
         try:
+            # 과거 상담 1건 + 에이전트와 나눈 대화 1세션. 시효 표시는 **과거 상담이
+            # 실렸을 때** 붙는 것이라 이 픽스처에 record 가 있어야 그 검사가 성립한다.
+            session_store.append_turn("CX", "past-2026-07-01", {
+                "role": "record", "text": "타사 수수료 비교 문의", "ts": "2026-07-01T09:00:00Z"})
             session_store.append_turn("CX", "s1", {
                 "role": "user", "text": "수수료 부담된다고 하시네요", "ts": "2026-08-01T09:00:00Z"})
             session_store.append_turn("CX", "s1", {
@@ -1891,6 +1895,13 @@ def check_history_selection() -> int:
             fee = tools.run("history", {"customer_id": "CY"}, "수수료 얘기 했었나")
             chips = suggest.history_chips("CY")
             no_chips = suggest.history_chips("C_없음")
+
+            # 과거 상담이 없고 오늘 대화만 있는 고객 — 시효 표시가 붙으면 안 된다.
+            session_store.append_turn("CZ", "chat-0", {
+                "role": "user", "text": "평가금액 얼마야?", "ts": "2026-08-24T09:00:00Z"})
+            session_store.append_turn("CZ", "chat-0", {
+                "role": "agent", "text": "1억 2,000만원입니다", "ts": "2026-08-24T09:00:05Z"})
+            today_only = tools.run("history", {"customer_id": "CZ"}, "오늘 무슨 얘기 했지")
         finally:
             session_store.SESSION_DATA_DIR = orig_dir
 
@@ -1916,6 +1927,16 @@ def check_history_selection() -> int:
     # ③ 칩 — record 있는 고객에게만, 날짜·경과일은 계산값.
     hit = len(chips) == 2 and "7/1" in chips[0] and no_chips == []
     print(f"{'✓' if hit else '✗'} 추천 칩은 기록 있는 고객에게만, 최신 상담 날짜로 뜬다")
+    ok += hit
+
+    # 시효 표시는 과거 상담이 실렸을 때만. 방금 나눈 대화에 "지난 상담 기록입니다"가
+    # 붙으면 표시가 거짓말을 하고, 매번 붙는 표시는 정작 낡은 값이 실린 턴에서 안 읽힌다.
+    hit = bool(today_only) and today_only["notices"] == [] \
+        and "[과거 상담 기록]" not in today_only["text"]
+    print(f"{'✓' if hit else '✗'} 오늘 대화만 있으면 시효 표시를 달지 않는다")
+    ok += hit
+    hit = bool(plain) and tools.HISTORY_MARK in plain["notices"]
+    print(f"{'✓' if hit else '✗'} 과거 상담이 실리면 시효 표시를 단다")
     ok += hit
     return ok
 
