@@ -38,6 +38,21 @@ def reporting(callback: Callable[[str], None] | None) -> Iterator[None]:
         _CALLBACK.reset(token)
 
 
+def object_of(word: str) -> str:
+    """목적격 조사를 붙인다 — 받침이 있으면 «을», 없으면 «를».
+
+    "수치을(를) 찾고 있어요" 같은 병기 표기를 화면에 내보내지 않기 위해서다. 받침
+    유무는 한글 음절 분해로 결정론으로 갈리므로 추측이 아니다. 마지막 글자가 한글이
+    아니면(영문·숫자 라벨) 병기로 물러선다 — 틀린 조사보다 병기가 낫다.
+    """
+    if not word:
+        return word
+    code = ord(word[-1])
+    if 0xAC00 <= code <= 0xD7A3:
+        return word + ("을" if (code - 0xAC00) % 28 else "를")
+    return word + "을(를)"
+
+
 def emit(text: str) -> None:
     """진행 한 줄. 콜백이 없으면 아무것도 하지 않고, 콜백이 죽어도 삼킨다 —
     진행 표시는 곁가지라 본류(답변 생성)를 절대 끌고 넘어지면 안 된다."""

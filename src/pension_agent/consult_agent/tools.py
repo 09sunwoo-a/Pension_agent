@@ -910,7 +910,7 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
     if tool.progress:
         # 실제로 이 도구를 돌리기 직전에만 찍는다(progress.py ②). 문구는 도구 선언에서
         # 온다 — LLM 이 만든 질의(query)는 싣지 않는다.
-        progress.emit(f"{tool.progress}을(를) 찾고 있어요")
+        progress.emit(f"{progress.object_of(tool.progress)} 찾고 있어요")
     question = (state.get("question") or "").strip()
     attempts = [query] + ([question] if question and question != query else [])
     for attempt in attempts:

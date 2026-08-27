@@ -2175,8 +2175,15 @@ def check_progress() -> int:
             tools.run("screen", {"question": "질문"}, "LLM이 만든 질의")
     finally:
         tools.TOOLS["screen"] = orig_tool
-    hit = events == ["단말 화면번호을(를) 찾고 있어요"]
+    hit = events == ["단말 화면번호를 찾고 있어요"]
     print(f"{'✓' if hit else '✗'} 도구 진행 표시는 코드 선언 라벨로 찍힌다 — {events}")
+    ok += hit
+
+    # ①-보조 조사는 받침으로 갈린다 — 병기("을(를)")를 화면에 내보내지 않는다.
+    hit = (PROG.object_of("상담 화법") == "상담 화법을"
+           and PROG.object_of("업무 처리 절차") == "업무 처리 절차를"
+           and PROG.object_of("IRP") == "IRP을(를)")   # 한글 아니면 병기로 물러선다
+    print(f"{'✓' if hit else '✗'} 진행 문구의 목적격 조사가 받침에 맞게 붙는다")
     ok += hit
 
     # ② 재료 0건 턴은 '작성' 을 알리지 않는다 — compose 가 생성 없이 '없음' 으로 답하므로,
