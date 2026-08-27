@@ -15,6 +15,7 @@ from pension_agent.strategy_agent.customer import (
     Profile,
     churn,
     days_to_year_end,
+    tax_credit,
 )
 from pension_agent.strategy_agent.engine.catalog import (
     ASSETS,
@@ -338,7 +339,7 @@ def _briefing(p: Profile) -> dict:
     # 재료에 없으면 consult_agent 가 답을 써도 verify() 가 "재료 밖 수치"로
     # 거부한다 — 값은 Profile 에 있는데 답을 못 하던 상태가 정확히 그것이었다.
     snap["당해_납입액"] = won(p.pension_paid_ytd)
-    credit = int(min(p.pension_paid_ytd, TAX_CREDIT_CAP_WON) * p.tax_credit_rate)
+    credit = tax_credit(p.pension_paid_ytd, p.tax_credit_rate)
     snap["예상_세액공제액"] = (
         f"{won(credit)} (공제대상 {won(min(p.pension_paid_ytd, TAX_CREDIT_CAP_WON))}"
         f" × {p.tax_credit_rate * 100:.1f}%)"

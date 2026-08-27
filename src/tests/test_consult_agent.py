@@ -1903,6 +1903,86 @@ def check_caution_roles() -> int:
     return ok
 
 
+def check_tax_credit_calc() -> int:
+    """환급 예상액 계산기(07/01 ② 3번) — 「얼마 더 넣으면 얼마 받나」에 답이 없던 자리.
+
+    재료에는 **현재 납입액 기준 한 값**만 있었고("예상 세액공제액 118만원"), 재료 밖 계산은
+    금지라(§5) 직원이 실제로 묻는 것에 답할 방법이 없었다. 그 장이 근거로 든 것이 이것이다 —
+    직원 두 명이 각자 엑셀 계산기를 만들어 배포했을 만큼 니즈가 강하다.
+
+    여기서 재는 것 넷:
+      ① 입력 금액은 **직원이 친 말**에서 뽑는다(계획 LLM 의 재작성본이 아니라)
+      ② 총급여 구간이 미확인이면 두 경우를 다 낸다
+      ③ 한도를 이미 채웠으면 «추가 공제 없음»으로 갈리고, 그 갈래에는 결정세액 단서를
+         붙이지 않는다 — 최대 환급액을 단정할 때 걸리는 단서라 여기서는 무관하다(§7)
+      ④ 계산 결과는 인용할 수 있고, 계산 밖 금액은 잘린다
+    """
+    ok = 0
+    from pension_agent.consult_agent import relations as REL
+    from pension_agent.strategy_agent import customer as CUST
+
+    room = next(p for p in CUST.PERSONAS if p.room > 0)          # 잔여한도가 있는 고객
+    full = next(p for p in CUST.PERSONAS if p.room == 0)         # 한도를 채운 고객
+
+    # ① 금액은 직원 질문에서 온다. 계획이 넘기는 query 에 다른 수가 있어도 그쪽을 안 쓴다.
+    ev = tools.TOOLS["tax_credit"].run(
+        {"customer_id": room.id, "question": "300만원 더 넣으면 얼마 받아?"}, "세액공제 900만원")
+    hit = ev is not None and "추가 납입액 300만원" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 입력 금액은 직원 질문에서 뽑는다(계획의 재작성본이 아니다)")
+    ok += hit
+
+    # 단위 없는 맨숫자는 금액으로 보지 않는다 — 300원인지 300만원인지 가릴 근거가 없다.
+    bare = tools.TOOLS["tax_credit"].run(
+        {"customer_id": room.id, "question": "300 더 넣으면 얼마 받아?"}, "q")
+    hit = bare is not None and "질문에 금액이 없어 잔여한도로 계산했다" in bare["text"]
+    print(f"{'✓' if hit else '✗'} 단위 없는 맨숫자는 금액으로 읽지 않는다(잔여한도로 떨어진다)")
+    ok += hit
+
+    # ② 구간 미확인이면 두 경우를 다 낸다.
+    hit = all(f"{r * 100:.1f}%" in ev["text"] for r in CUST.TAX_CREDIT_RATE.values())
+    print(f"{'✓' if hit else '✗'} 총급여 구간 미확인이면 두 공제율을 다 싣는다")
+    ok += hit
+
+    # ③ 한도를 채운 고객은 다른 갈래로 가고, 그 갈래에는 결정세액 단서가 없다.
+    done = tools.TOOLS["tax_credit"].run(
+        {"customer_id": full.id, "question": "500만원 더 넣으면 얼마 받아?"}, "q")
+    hit = done is not None and "추가 공제 대상이 없다" in done["text"] and not done["notices"]
+    print(f"{'✓' if hit else '✗'} 한도를 채웠으면 «추가 공제 없음» + 결정세액 단서를 붙이지 않는다"
+          + ("" if hit else f" — notices={(done or {}).get('notices')}"))
+    ok += hit
+
+    # 반대로 금액을 내놓는 갈래에는 반드시 붙는다. 문장은 코드가 아니라 카드에서 온다.
+    card = tools.KB.facts[tools.TAX_FACT_ID]
+    hit = bool(ev["notices"]) and ev["notices"][0] in card["value"]
+    print(f"{'✓' if hit else '✗'} 금액을 내놓는 갈래에는 카드가 못박은 단서가 따라붙는다")
+    ok += hit
+
+    # ④ 계산 결과는 인용 가능, 계산 밖 금액은 잘린다.
+    gain = CUST.tax_credit(min(room.pension_paid_ytd + room.room * 10_000,
+                               CUST.TAX_CREDIT_CAP_WON), CUST.TAX_CREDIT_RATE["5500이하"]) \
+        - CUST.tax_credit(room.pension_paid_ytd, CUST.TAX_CREDIT_RATE["5500이하"])
+    hit = (_vt(f"16.5% 구간이면 {gain:,}원 더 돌려받으세요.", ev["allow"])[0]
+           and not _vt(f"16.5% 구간이면 {gain + 70_000:,}원 더 돌려받으세요.", ev["allow"])[0])
+    print(f"{'✓' if hit else '✗'} 계산 결과는 인용되고 계산 밖 금액은 잘린다 ({gain:,}원)")
+    ok += hit
+
+    # 공제율 카드의 조건–값 짝도 그대로 걸린다(오짝은 수치 검사로는 안 잡힌다).
+    cards = tools.ledger_related([ev])
+    hit = (not REL.check(ev["text"], cards)
+           and bool(REL.check("총급여 5,500만원 초과면 16.5% 적용돼요.", cards)))
+    print(f"{'✓' if hit else '✗'} 재료는 자기대조를 통과하고, 공제율 오짝은 잡힌다")
+    ok += hit
+
+    # 브리핑과 계산기가 같은 산식을 쓴다 — 두 곳이 각자 곱하면 화면과 답변이 갈린다.
+    from pension_agent.strategy_agent import agent as SA
+    shown = SA.propose(room)["facts"]["briefing"]["예상_세액공제액"]
+    now = CUST.tax_credit(room.pension_paid_ytd, room.tax_credit_rate)
+    hit = f"{now // 10_000:,}만원" in shown or f"{now:,}" in shown
+    print(f"{'✓' if hit else '✗'} 화면의 예상 세액공제액과 같은 산식을 쓴다 ({shown})")
+    ok += hit
+    return ok
+
+
 def check_labeled_pairs() -> int:
     """레이블–값 짝(§6) — 「이 항목의 값이라며 남의 수치를 붙였는가」.
 
@@ -3280,6 +3360,7 @@ def main() -> int:
         check_today_material()
         check_account_state()
         check_labeled_pairs()
+        check_tax_credit_calc()
         check_history_selection()
         check_hier_index()
         check_order_flipped()

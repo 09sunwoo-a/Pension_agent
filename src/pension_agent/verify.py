@@ -309,6 +309,27 @@ def first_measure(text: str) -> tuple[str, set[str]] | None:
     return None
 
 
+def first_amount(text: str) -> tuple[str, int] | None:
+    """텍스트에 처음 나오는 **금액**과 그 값(원). 금액이 없으면 None.
+
+    «금액»은 **단위가 붙은 수치**만이다("300만원"·"1억"·"148만 5천원"). 단위 없는 맨숫자
+    ("300 더 넣으면")는 금액으로 보지 않는다 — 상담 맥락에서 300원인지 300만원인지 가릴
+    근거가 없고, 그 추측이 계산기의 입력이 되면 **틀린 입력이 승인된 출력**이 되기 때문이다
+    (계산 결과는 원장에 실려 인용이 허가된다). 못 가리면 그냥 없는 것으로 둔다.
+
+    단위를 접는 일은 `_measures` 가 이미 한다 — 접은 값이 원표기 토큰과 함께 형태 집합에
+    들어 있으므로, 형태가 둘 이상이면 그중 가장 큰 수가 접은 값이다.
+    """
+    for toks, forms, date in _measures(text):
+        if date is not None:
+            continue                       # 날짜는 금액이 아니다
+        plain = [f for f in forms if re.fullmatch(r"\d+(?:\.\d+)?", f)]
+        if len(plain) < 2:
+            continue                       # 단위가 없어 접히지 않은 수 → 금액으로 보지 않는다
+        return " ".join(toks), int(float(max(plain, key=lambda f: float(f))))
+    return None
+
+
 def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
     """텍스트 묶음에서 인용 가능한 숫자를 걷는다. 상품명은 텍스트만으로는 판별할 수 없어
     비워 둔다 — 상품 목록을 아는 호출부가 known_products 로 넘긴다.

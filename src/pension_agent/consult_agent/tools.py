@@ -950,6 +950,107 @@ def _date(state: AgentState, query: str) -> Evidence | None:
 
 
 # ─────────────────────────────────────────────────────────────
+# 세액공제 환급 예상액 — `date` 와 같은 부류. 검색하지 않고 코드가 계산해 싣는다.
+#
+# 07/01 ② 가 정한 「계산기」의 첫 조각이다. 그 장이 근거로 든 것이 이것이다 — 직원 두 명이
+# 각자 엑셀로 세액공제 계산기를 만들어 배포했다(핫팁 199713·200518). 도구가 없어 사비로
+# 만들 만큼 강한 니즈인데, 지금 재료에는 **현재 납입액 기준 한 값**만 있어서
+# ("예상 세액공제액 118만원") "300만원 더 넣으면 얼마 더 받아?" 에 답할 수 없었다.
+#
+# ━━ 입력 수치는 **직원이 친 말**에서 뽑는다 ━━
+# 계획 LLM 이 넘기는 `query` 는 직원 질문의 재작성본이라, 줄여 쓰는 과정에서 말을 흘린다
+# (`run()` 주석의 화면번호 사례). 단어를 흘릴 수 있으면 숫자도 흘리는데, 검색은 0건으로
+# 티가 나는 반면 계산기는 **조용히 다른 답**을 낸다. 게다가 계산 결과는 원장에 실려 인용이
+# 허가되므로, 틀린 입력이 그대로 «승인된 숫자»가 된다 — LLM 이 경계를 넓히는 자리다.
+# 그래서 금액은 `state["question"]` 에서 코드가 뽑는다(`verify.first_amount`).
+#
+# ━━ 공제율은 두 구간을 다 낸다 ━━
+# 총급여 구간은 원장에 없다(demo_status §4 — 목업 9명 전원 미확인). 코드는 브리핑에서
+# 보수적으로 낮은 쪽을 쓰지만(과대산출 회피), 계산기가 그 값 하나만 내놓으면 16.5% 구간
+# 고객에게 "왜 적게 나와?" 가 된다. 두 경우를 다 싣고 어느 쪽인지는 직원이 가른다.
+# ─────────────────────────────────────────────────────────────
+
+#: 공제율의 근거 카드. 세율·한도·아래 단서가 전부 여기서 온다.
+TAX_FACT_ID = "fact.k04.f2"
+
+
+def _won(v: int) -> str:
+    from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
+
+    return won(v)
+
+
+def _tax_credit(state: AgentState, query: str) -> Evidence | None:
+    """세액공제 환급 예상액. 계산은 strategy_agent 것을 쓰고 여기서는 재료로 편다."""
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+    from pension_agent.verify import first_amount  # noqa: PLC0415
+
+    p = CUST.get_profile(customer_id)
+    card = KB.facts.get(TAX_FACT_ID)
+    if p is None or card is None:
+        return None
+
+    paid, cap = p.pension_paid_ytd, CUST.TAX_CREDIT_CAP_WON
+    # 잔여한도는 **원장 값을 쓴다**(`p.room`). 한도에서 IRP 납입액을 빼서 다시 계산하면
+    # 안 된다 — 한도 900만원은 연금저축과 **공유**라(fact.k04.f2 "연금저축 세액공제 포함")
+    # 연금저축에서 이미 쓴 몫을 IRP 납입액만으로는 알 수 없다. 실제로 당해 납입 0원인데
+    # 잔여한도가 0인 고객이 목업에 있다 — 다시 계산하면 그 고객에게 "900만원 더 넣으면
+    # 148.5만원" 이라고 말하게 된다(§3 "같은 판정을 두 번 구현하지 않는다").
+    room = p.room * 10_000
+    # 금액을 안 말했으면 «잔여한도를 채우면» 으로 읽는다. 원장 값이라 지어낸 수가 아니고,
+    # 직원이 실제로 묻는 것도 대개 그것이다("얼마나 더 받을 수 있어?").
+    said = first_amount(state.get("question") or "")
+    extra = said[1] if said else room
+    gain_base = min(extra, room)          # 잔여한도를 넘는 납입은 공제 대상이 아니다
+    target = paid + gain_base
+    gain = CUST.tax_credit(target, 1.0) - CUST.tax_credit(paid, 1.0)
+
+    lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객 (시스템 계산 — 검색 결과가 아니다)",
+             f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)}",
+             f"· 계산에 쓴 추가 납입액 {_won(extra)}"
+             + ("" if said else " (질문에 금액이 없어 잔여한도로 계산했다)")]
+
+    notices: list[str] = []
+    if gain <= 0:
+        # 환급 «금액»을 새로 단정하지 않는 갈래다. 아래 결정세액 단서도 붙이지 않는다 —
+        # 그 단서는 최대 환급액을 단정할 때 걸리는 것이라 여기서는 무관하다(CLAUDE.md §7).
+        lines.append(f"· 세액공제 잔여한도가 {_won(room)}이라 **추가 공제 대상이 없다** — "
+                     f"더 납입해도 올해 세액공제로 돌아오는 금액은 늘지 않는다 "
+                     f"(연 납입한도 {_won(cap)} 은 연금저축과 함께 쓴다)")
+    else:
+        lines.append(f"· 공제 대상 {_won(min(paid, cap))} → {_won(min(target, cap))} "
+                     f"(잔여한도 {_won(room)}까지)")
+        for when, rate in (("총급여 5,500만원 이하", CUST.TAX_CREDIT_RATE["5500이하"]),
+                           ("총급여 5,500만원 초과", CUST.TAX_CREDIT_RATE["5500초과"])):
+            now, after = CUST.tax_credit(paid, rate), CUST.tax_credit(target, rate)
+            lines.append(f"· {when}({rate * 100:.1f}%): 환급 예상 {now:,}원 → {after:,}원 "
+                         f"(늘어나는 금액 {after - now:,}원)")
+        lines.append("· 이 고객의 총급여 구간은 원장에 없어 두 경우를 다 실었다 — "
+                     "어느 구간인지 확인하면 하나로 좁혀진다")
+        notices.append(_caveat(card))
+
+    return _ev("tax_credit", query, "\n".join(lines),
+               KBMOD.sources_of(KB, [(1.0, card)]), notices=notices,
+               scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
+               cards=[card])
+
+
+#: 환급액에 따라붙는 단서를 카드에서 떼어 오는 표지. 코드가 문장을 갖지 않는다 —
+#: 세법이 바뀌면 카드가 바뀌고 답변도 함께 바뀌어야 한다(§7 "표시는 데이터 선언이 정한다").
+_CAVEAT_MARK = "단, "
+
+
+def _caveat(card: dict) -> str:
+    """공제율 카드가 못박은 단서. 없으면 카드 원문을 그대로 쓴다(지어내지 않는다)."""
+    value = card.get("value") or ""
+    at = value.find(_CAVEAT_MARK)
+    return value[at:].strip() if at >= 0 else value.strip()
+
+
+# ─────────────────────────────────────────────────────────────
 # 레지스트리
 # ─────────────────────────────────────────────────────────────
 
@@ -988,6 +1089,12 @@ TOOLS: dict[str, Tool] = {
         # 시점·기한이 걸린 질문은 재료가 없으면 답이 안 나온다(§8 "지어내지 않는다"가 그대로
         # «말하지 못한다»가 된다). 도구 설명이 곧 계획의 판단 재료이므로, 언제 부르는지를
         # 예시로 박아 둔다 — "얼마 안 남았다"류 문장을 쓰려는 턴이 전부 여기 걸려야 한다.
+        # 계산기(07/01 ② 3번)의 첫 조각. 「얼마 더 넣으면 얼마 받나」는 검색으로 답할 수
+        # 없고, 재료 밖 계산은 금지라(§5) 코드가 계산해 싣지 않으면 말할 방법이 없다.
+        Tool("tax_credit", "«얼마를 더 납입하면 세액공제로 얼마나 돌려받는지»를 계산한다 — "
+             "'300만원 더 넣으면 얼마 받아', '한도 채우면 얼마 돌려받아'처럼 **환급액·"
+             "납입액을 계산해 달라는** 질문에 쓴다(제도 설명이 아니라 이 고객의 금액)",
+             _tax_credit),
         Tool("date", "오늘이 며칠인지와 연말까지 남은 일수를 돌려준다 — '오늘 며칠이야', "
              "'연말까지 얼마 남았어', '언제까지 납입해야 해'처럼 **시점·기한**이 걸린 질문, "
              "그리고 답변에 '며칠 남았다·올해 안에'를 쓰려는 모든 경우에 먼저 부른다", _date),
@@ -995,7 +1102,7 @@ TOOLS: dict[str, Tool] = {
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable", "tax_credit"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:
