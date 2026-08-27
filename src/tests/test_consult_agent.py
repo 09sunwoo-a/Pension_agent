@@ -1903,6 +1903,64 @@ def check_caution_roles() -> int:
     return ok
 
 
+def check_fact_in_index() -> int:
+    """팩트가 카드 색인에 있는가 — LLM 카드 선택의 후보가 되는가(§3).
+
+    팩트는 오래도록 «id 로 참조되는 값»이기만 해서(kinds.json `consumed: reference`) 카드
+    색인 밖에 살았고, 그래서 **9종 재료 중 유일하게 LLM 카드 선택을 못 받았다**. 다른
+    종류는 LLM 이 버킷→카드로 고르고 못 고를 때만 n-gram 으로 물러서는데(select.pick),
+    팩트는 n-gram 하나뿐이라 직원 말과 카드 말이 다르면 통째로 0건이 났다 —
+    "연말정산 얼마나 돌려받아?" 가 세액공제 카드를, "중도에 깨면 세금 얼마나 떼?" 가
+    중도해지 카드를 못 찾았다. 하필 팩트는 한도·세율처럼 숫자를 묻는 재료다.
+
+    여기서 재는 것은 **배선**이다(모델의 판단이 아니라). LLM 이 골랐을 때 그 팩트가 실제로
+    돌아오는지, 그리고 못 골랐을 때 n-gram 이 예전 그대로인지.
+    """
+    ok = 0
+    from pension_agent.consult_agent import kb as K
+    from pension_agent.consult_agent.nodes import facts_qa
+
+    kb = tools.KB
+    # 같은 객체로 두 자리에 산다 — 사본이면 한쪽만 고쳐지는 자리가 생긴다(화법과 같은 규약).
+    f2 = kb.facts["fact.k04.f2"]
+    hit = any(c is f2 for c in kb.cards) and sum(1 for c in kb.cards if c["_kind"] == "fact") == len(kb.facts)
+    print(f"{'✓' if hit else '✗'} 팩트가 카드 색인에 **같은 객체로** 실린다 ({len(kb.facts)}장)")
+    ok += hit
+
+    # 버킷 카탈로그에 종류가 뜬다 — 여기 빠지면 LLM 후보에서 통째로 사라진다.
+    cat = K.index_catalog(kb, ("fact",))
+    hit = cat.startswith("■ fact") and "납입·세액공제" in cat
+    print(f"{'✓' if hit else '✗'} 팩트 버킷이 카탈로그에 뜬다")
+    ok += hit
+
+    # 슬라이스에 카드가 예상질문과 함께 실린다 — LLM 이 id 를 고를 재료다.
+    sl = K.index_slice(kb, ["X01"], kinds=("fact",))
+    hit = "fact.k04.f2" in sl and "예상질문" in sl
+    print(f"{'✓' if hit else '✗'} 팩트 슬라이스에 카드와 예상질문이 실린다")
+    ok += hit
+
+    # LLM 이 골랐을 때 그 팩트가 실제로 돌아오는가(배선 검증 — 캔드 응답).
+    # 이 스위트는 전역에서 llm_pick 을 꺼 두므로(머리말) 여기서만 원본을 되살린다 —
+    # check_hier_index 와 같은 방식이다. 모델 응답은 캔드로 고정한다.
+    canned = iter(['["X01"]', '["fact.k04.f2"]'])
+    real_gen, real_pick = select.generate, select.llm_pick
+    select.generate = lambda prompt, **kw: next(canned)
+    select.llm_pick = _REAL_LLM_PICK
+    try:
+        got = [h[1]["id"] for h in facts_qa.search("연말정산 얼마나 돌려받아?")]
+    finally:
+        select.generate, select.llm_pick = real_gen, real_pick
+    hit = got[:1] == ["fact.k04.f2"]
+    print(f"{'✓' if hit else '✗'} LLM 이 고른 팩트가 검색 결과로 돌아온다 {got[:1]}")
+    ok += hit
+
+    # 못 골랐을 때는 예전 n-gram 그대로다 — 넓히기만 하고 좁히지 않는다.
+    hit = [h[1]["no"] for h in facts_qa.search("세액공제 한도")][:1] == ["F2"]
+    print(f"{'✓' if hit else '✗'} LLM 이 못 고르면 n-gram 폴백이 예전대로 동작한다")
+    ok += hit
+    return ok
+
+
 def check_tax_credit_calc() -> int:
     """환급 예상액 계산기(07/01 ② 3번) — 「얼마 더 넣으면 얼마 받나」에 답이 없던 자리.
 
@@ -2418,10 +2476,16 @@ def check_hier_index() -> int:
     print(f"{'✓' if hit else '✗'} 카탈로그 결정론")
     ok += hit
 
-    # ③ L0 카탈로그가 작게 유지된다. 카드가 늘어도 여기가 커지면 안 된다(그게 계층의 목적).
+    # ③ L0 카탈로그가 작게 유지된다. **카드가 늘어도** 여기가 커지면 안 된다 — 그게 계층의
+    #    목적이고, 카드 수는 버킷 줄의 "(N장)" 한 자리만 움직인다.
+    #
+    #    한도를 2000 → 2200 으로 올린 것은 카드가 아니라 **종류가 하나 늘어서**다(9종 → 10종.
+    #    팩트가 색인 밖에 있다가 들어왔다). 종류 하나는 머리말 한 줄 + 버킷 줄 몇 개라
+    #    약 160자를 쓴다. 카드가 늘어 넘치면 그건 이 테스트가 잡아야 하는 회귀가 맞고,
+    #    종류가 늘어 넘치면 여기를 함께 고치는 것이 맞다 — 둘을 구분해 두려고 적는다.
     cat = K.index_catalog(kb)
-    hit = len(cat) <= 2000
-    print(f"{'✓' if hit else '✗'} L0 카탈로그 {len(cat)}자 ≤ 2000")
+    hit = len(cat) <= 2200
+    print(f"{'✓' if hit else '✗'} L0 카탈로그 {len(cat)}자 ≤ 2200 (종류 {len(K._KIND_ORDER)})")
     ok += hit
 
     # ④ 예산은 실제 상한이다 — 헤더·생략안내까지 포함해서 절대 넘지 않는다.
@@ -3361,6 +3425,7 @@ def main() -> int:
         check_account_state()
         check_labeled_pairs()
         check_tax_credit_calc()
+        check_fact_in_index()
         check_history_selection()
         check_hier_index()
         check_order_flipped()

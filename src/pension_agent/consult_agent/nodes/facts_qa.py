@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from pension_agent.consult_agent import select
 from pension_agent.consult_agent.kb import origin_of
 from pension_agent.consult_agent.state import KB
 
@@ -61,13 +62,35 @@ def _render(fact: dict) -> list[str]:
     return lines
 
 
-def search(question: str) -> list[tuple[float, dict]]:
-    """질문에 맞는 팩트 top-3. `fact` 도구가 부른다."""
+def _ngram(question: str) -> list[tuple[float, dict]]:
+    """라벨·본문 n-gram 으로 고른 팩트. LLM 이 아무것도 못 골랐을 때의 폴백이다."""
     ranked = sorted(
         ((_score(f, question), f) for f in KB.facts.values()),
         key=lambda x: (-x[0], x[1]["id"]),
     )
     return [(s, f) for s, f in ranked if s >= MIN_SCORE][:TOP_K]
+
+
+def search(question: str) -> list[tuple[float, dict]]:
+    """질문에 맞는 팩트 top-3. `fact` 도구가 부른다.
+
+    **LLM 이 먼저 고르고, 못 고르면 n-gram 으로 물러선다** — 다른 여덟 종류가 이미 그
+    길이다(select.pick). 팩트만 오래도록 n-gram 하나뿐이었는데, 팩트가 카드 색인 밖에
+    살아서(kinds.json `consumed: reference`) LLM 이 고를 후보가 될 수 없었기 때문이다.
+    그 대가는 직원 말과 카드 말이 다를 때 통째로 0건이었다 — "연말정산 얼마나 돌려받아?"
+    가 세액공제 카드(F2)를 못 찾고, "중도에 깨면 세금 얼마나 떼?" 가 중도해지 카드(F30)를
+    못 찾았다. 하필 팩트는 한도·세율처럼 **숫자를 묻는** 재료라 «자료가 없어요» 가 가장
+    아픈 자리다.
+
+    n-gram 채점은 그대로 둔다(`_ngram`). 색인에 들어갔다고 `retrieve` 의 채점으로 갈아타면
+    LLM 이 죽거나 아무것도 못 고른 턴의 결과가 조용히 달라진다 — 넓히기만 하고 좁히지
+    않는다.
+    """
+    # `select.llm_pick` 을 **모듈째로** 부른다. 이름을 이 모듈로 끌어오면 호출 시점이 아니라
+    # 임포트 시점에 묶여, 테스트·디버그가 LLM 선택을 끄려고 `select.llm_pick` 을 갈아끼워도
+    # 여기만 진짜를 부른다 — 스텁 줄을 모듈 수만큼 늘려야 하는 자리다.
+    hits = select.llm_pick(("fact",), question)
+    return hits[:TOP_K] if hits else _ngram(question)
 
 
 def render(hits: list[tuple[float, dict]]) -> str:

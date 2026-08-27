@@ -1673,6 +1673,17 @@ def build_facts(resolver: DocResolver) -> tuple[list[dict], list[dict]]:
         title = clean(item["title"])
         fields = {
             "no": no,
+            # 검색 색인에 실리기 위한 필드 셋. 팩트는 오래도록 «id 로 참조되는 값»이기만
+            # 해서(kinds.json `consumed: reference`) 카드 색인 밖에 있었고, 그래서 **9종 재료
+            # 중 유일하게 LLM 카드 선택의 후보가 못 됐다** — 다른 종류는 LLM 이 버킷→카드로
+            # 고르고 못 고를 때만 n-gram 으로 물러서는데(select.pick), 팩트는 n-gram 하나뿐이라
+            # 직원 말과 카드 말이 다르면("연말정산 얼마나 돌려받아?" vs 「세액공제」) 0건이 났다.
+            # 아래 넷이 그 색인이 요구하는 것이다(title·group·tags.topics·trigger_examples).
+            "title": title,
+            "group": group,
+            "tags": {"topics": topics_of(title, statement)},
+            # 트리거는 제목과 팩트 문장 첫 절이다 — 다른 종류(세그먼트·문제상황)와 같은 규약.
+            "trigger_examples": [t for t in (title, first_clause(statement)) if t][:3],
             # label 은 04 제목 전체를 쓴다. 레거시 fact 는 "연간 납입한도" 처럼 짧은 라벨이라,
             # 같은 주제라도 문자열이 달라 check_fact_conflicts 의 오탐이 나지 않는다. 값이 정말
             # 어긋나는지는 변환 리포트(_draft_kb_fact_review.md)로 사람이 본다.

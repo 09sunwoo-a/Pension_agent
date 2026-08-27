@@ -266,8 +266,6 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
     """
     st = Store([data_dir])
     kb = KnowledgeBase()
-    for r in st.records("fact"):
-        kb.facts[r["id"]] = _flat(r, "fact")
     for r in st.records("resource"):
         kb.resources[r["id"]] = {"id": r["id"], **(r.get("fields") or {})}
     for r in st.records("doc"):
@@ -281,6 +279,12 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
             kb.cards.append(card)
             if kind == "pitch":
                 kb.pitches.append(card)   # 같은 객체를 공유한다(사본 아님)
+            elif kind == "fact":
+                # 팩트는 **두 자리에 같은 객체로** 산다 — `facts` 는 id 로 참조하는 자리
+                # (화법의 supporting_facts·전략 근거), `cards` 는 검색 색인이다. 예전에는
+                # 앞엣것만 있어서 팩트가 LLM 카드 선택의 후보가 못 됐다(9종 중 유일).
+                # 사본을 만들면 한쪽만 고쳐지는 자리가 생기므로 화법과 같은 규약으로 둔다.
+                kb.facts[card["id"]] = card
 
     seen: dict[str, dict] = {}
     for r in st.records():
@@ -472,6 +476,7 @@ _BUCKET_LETTER = {"pitch": "P", "procedure": "R", "segment": "S", "method": "M",
 #: 그 상태였다(설명 없이 "■ screen — (총 87장)"으로만 떴다).
 _KIND_DESC = {
     "pitch": "고객에게 실제로 하는 말 — 대사·논거·반론 대응",
+    "fact": "제도·상품의 확정 수치 — 한도·세율·수수료",
     "procedure": "시스템에서 처리하는 절차 — 조회 경로·화면·처리 순서",
     "screen": "직원이 단말에서 여는 화면 — 화면번호·화면명",
     "channel": "고객이 앱·웹에서 직접 하는 경로 — 스타뱅킹·인터넷뱅킹 메뉴",
@@ -486,8 +491,8 @@ _KIND_DESC = {
 #: 버킷 카탈로그에 싣는 종류와 그 순서. **적재되는 종류는 전부 여기 있어야 한다** —
 #: 빠지면 그 종류의 카드가 버킷에 안 들어가고, LLM 이 고를 후보 목록에서 통째로 사라진다
 #: (n-gram 폴백으로만 닿게 되어, 사실상 "있는데 못 찾는" 상태가 된다).
-_KIND_ORDER = ("pitch", "procedure", "screen", "channel", "segment", "method", "fieldtip",
-               "market", "lineup")
+_KIND_ORDER = ("pitch", "fact", "procedure", "screen", "channel", "segment", "method",
+               "fieldtip", "market", "lineup")
 
 #: index_slice 의 기본 문자 예산. 한글은 대략 2자/토큰이라 4000자 ≈ 2k 토큰이고,
 #: 가장 큰 버킷(3,652자) 하나가 통째로 들어간다.
