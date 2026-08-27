@@ -113,12 +113,13 @@ from pension_agent.strategy_agent.customer import (  # noqa: F401
     PRIO,
     RISK,
     RISK_ASSET_CAP_PCT,
+    AS_OF,
     TAX_CREDIT_CAP_WON,
-    TODAY,
     Profile,
     churn,
     conditions,
     days_to_year_end,
+    today,
 )
 
 # ⑥~⑨ 규칙 계층 재노출 — 호출부(engine.pick_talking_points 등)와 테스트가 그대로 동작한다.
