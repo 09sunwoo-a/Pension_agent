@@ -2329,6 +2329,52 @@ def check_market_material() -> int:
     print(f"{'✓' if hit else '✗'} 표 안에만 있던 질문이 근거에 닿는다 — 출생연도별 TDF")
     ok += hit
 
+    # ── 검색이 «답을 가진 카드»에 닿는가 ───────────────────────────
+    #
+    # 셋 다 실측으로 잡은 자리다. 재료는 적재돼 있는데 순위가 엉켜서 «상품을 물으면 잘 못
+    # 찾는다»가 됐다 — 적재와 검색은 다른 문제라는 것을 이 검사가 지킨다.
+
+    # ① category 를 topics 에 넣지 않는다. 「상품」·「시황」은 두 글자 흔한 말이라, 질문에
+    #    "구성상품"·"편입상품"처럼 그 글자가 들어가면 **모든 카드가 똑같이** 가산점을 받아
+    #    무더기 동점이 되고 순위가 사실상 id 사전순이 된다(config.TOPIC_VOCAB 머리말이
+    #    금지한 그것). 갈래는 category 필드가 이미 들고 있다.
+    polluted = [c["id"] for c in cards
+                if {"상품", "시황"} & set(c["tags"].get("topics") or [])]
+    hit = not polluted
+    print(f"{'✓' if hit else '✗'} category 를 검색 태그에 섞지 않는다"
+          + ("" if hit else f" — {polluted[:3]}"))
+    ok += hit
+
+    # ② 같은 문서의 절이 걸리면 개요 카드는 자리를 비켜준다. 개요는 문서 키워드를 통째로
+    #    들고 있어 어떤 질문에나 걸리는데, **답이 든 표는 절에 있다**.
+    orig = tools.fits_question
+    tools.fits_question = lambda q, h, kind="", history=None: h
+    try:
+        found = tools.run("market", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
+    finally:
+        tools.fits_question = orig
+    ids = [s["id"] for s in (found or {}).get("sources") or []]
+    by_id = {c["id"]: c for c in cards}
+    hit = bool(ids) and all(by_id[i].get("parent") for i in ids)   # 전부 절 카드인가
+    print(f"{'✓' if hit else '✗'} 절이 걸리면 개요가 후보 자리를 먹지 않는다 — {ids}")
+    ok += hit
+
+    # ③ 「+65,469억원」을 이름 칸으로 읽지 않는다. 읽으면 그 열이 이름 열이 되어 값 열이
+    #    하나도 안 남고, **표가 통째로 버려진다** — 자금 동향 표가 그렇게 빠져서 「코스피
+    #    얼마야」가 검색되지 않았다.
+    flows = next((c for c in cards if c["title"].endswith("주간 자금 동향")), None)
+    hit = bool(flows) and "코스피" in (flows.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 수치에 한국어 단위가 붙어도 값으로 읽는다 — 코스피 행")
+    ok += hit
+
+    # 날짜는 반대다 — 일정표에서 「20일」은 값이 아니라 행 이름이다.
+    sched = [t for c in cards for t in (c.get("tables") or [])
+             if "일자" in (t.get("columns") or [])]
+    hit = bool(sched) and any("20일" in (r.get("keys") or [])
+                              for t in sched for r in t["rows"])
+    print(f"{'✓' if hit else '✗'} 일정표의 날짜는 행 이름으로 남는다 — 20일")
+    ok += hit
+
     # ── 오짝 판정: 막아야 할 것과 **막으면 안 되는 것** ─────────────
     #
     # 뒤쪽이 더 중요하다 — 검증기가 옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다

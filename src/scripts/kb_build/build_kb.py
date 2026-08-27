@@ -1145,13 +1145,29 @@ def _table_cells(line: str) -> list[str]:
     return [_market_emphasis(c) for c in _TABLE_LINE.match(line).group(1).split("|")]
 
 
+#: 수치에 붙는 단위. 이게 붙어 있어도 그 칸은 이름이 아니라 **값**이다.
+#:
+#: 날짜 단위(년·월·일)는 넣지 않는다 — 「20일」·「1975년」은 일정표·매핑표에서 **행 이름**
+#: 이기 때문이다(외국인 배당금 지급 일정의 일자 열, TDF 출생연도 열). 넣었더니 지급 일정
+#: 표 8행이 통째로 빠졌다. 금액·비율 단위만 값으로 본다.
+_UNIT = r"(?:억원|만원|조원|천원|억|조|만|천|원|%|pt|bp|배)"
+
+
 def _is_name(cell: str) -> bool:
-    """이름 칸인가 — 글자가 들어 있고 순수 수치·날짜가 아니다."""
+    """이름 칸인가 — 글자가 들어 있고 순수 수치·날짜·«수치+단위»가 아니다.
+
+    단위를 함께 보는 이유: 「+65,469억원」에는 «억원»이라는 글자가 있어서 글자 유무만 보면
+    이름으로 읽힌다. 그러면 그 열이 이름 열로 잡히고, 표에 값 열이 하나도 안 남아 **표가
+    통째로 버려진다** — 주간 자금 동향 표(코스피·코스닥 순매수)가 그렇게 빠져서 「코스피
+    얼마야」가 검색되지 않았다(실측).
+    """
     if not cell:
         return False
     if not re.search(r"[가-힣A-Za-z]", cell):
         return False
-    return not re.fullmatch(r"[\d.,\-~%\s]+", cell)
+    if re.fullmatch(r"[\d.,\-~%\s]+", cell):
+        return False
+    return not re.fullmatch(rf"[+\-]?[\d.,]+\s*{_UNIT}?", cell)
 
 
 def _key_columns(rows: list[list[str]]) -> int:
@@ -1354,9 +1370,13 @@ def build_market() -> tuple[list[dict], list[dict]]:
             "content": preamble or None,
             "parent": None,
             "tables": ov_tables or None,
-            "tags": {"topics": sorted({*topics_of(title, fm.get("topic") or "",
-                                                   " ".join(fm.get("key_points") or [])),
-                                       category})},
+            # category(시황·상품)를 topics 에 넣지 않는다 — 두 글자 흔한 말이라 "구성상품"·
+            # "편입상품"처럼 그 글자가 든 질문마다 **모든 카드가 똑같이** 가산점을 받아
+            # 무더기 동점이 되고, 순위가 사실상 id 사전순으로 정해진다(config.TOPIC_VOCAB
+            # 머리말이 금지한 바로 그것 — 실측으로 잡았다). 갈래는 category 필드가 이미 들고
+            # 있고, 검색은 trigger_examples 와 표 이름이 한다.
+            "tags": {"topics": topics_of(title, fm.get("topic") or "",
+                                         " ".join(fm.get("key_points") or []))},
             "trigger_examples": ([title] + _market_keywords(fm.get("trigger_keywords") or [])
                                  )[:24] + _table_triggers(ov_tables),
             **common,
@@ -1376,7 +1396,7 @@ def build_market() -> tuple[list[dict], list[dict]]:
                 "content": sec_body,
                 "parent": overview_id,
                 "tables": sec_tables or None,
-                "tags": {"topics": sorted({*topics_of(sec_title, sec_body), category})},
+                "tags": {"topics": topics_of(sec_title, sec_body)},
                 "trigger_examples": _market_triggers(sec_title, sec_body,
                                                      fm.get("trigger_keywords") or [])
                                     + _table_triggers(sec_tables),

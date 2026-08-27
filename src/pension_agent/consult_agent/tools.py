@@ -407,6 +407,20 @@ def _render_market(card: dict) -> str:
     return "\n".join(lines)
 
 
+def _prefer_sections(hits: list[tuple[float, dict]]) -> list[tuple[float, dict]]:
+    """같은 문서의 절이 함께 걸렸으면 그 문서의 **개요 카드는 뺀다.**
+
+    개요 카드는 문서의 front-matter 키워드를 통째로 들고 있어서(주간시황만 24개) 그 문서에
+    대한 어떤 질문에나 걸린다. 그런데 답이 든 **표는 절 카드에 있다** — 「지켜드림 금리」의
+    답은 디폴트옵션 절에 있고 개요에는 없는데, 둘이 동점이라 개요가 1위로 올라가 후보 두
+    자리 중 하나를 먹었다(실측). 개요는 문서의 현관이지 답이 아니다.
+
+    절이 하나도 없으면 개요를 그대로 둔다 — 넓은 질문("요즘 시장 어때")에는 그게 답이다.
+    """
+    parents = {c.get("parent") for _s, c in hits if c.get("parent")}
+    return [(s, c) for s, c in hits if c["id"] not in parents]
+
+
 def _market(state: AgentState, query: str) -> Evidence | None:
     """시황·상품 기반지식 — "요즘 시장 어때", "8월 추천펀드 뭐야", "디폴트옵션 알파드림 구성".
 
@@ -418,7 +432,9 @@ def _market(state: AgentState, query: str) -> Evidence | None:
     표 덤프가 되고(tools 머리말), 그건 이 재료를 못 쓰게 만드는 것과 같다. 지금 걸리는
     것은 수치 집합 검사뿐이다 — 값–조건 오짝은 못 잡는다(consult §12 gap 6).
     """
-    hits = _adopt(state, query, pick(("market",), query, top_k=MARKET_TOP_K), "시황·상품 기반지식")
+    hits = _adopt(state, query, _prefer_sections(
+        pick(("market",), query, top_k=MARKET_TOP_K * 3))[:MARKET_TOP_K],
+        "시황·상품 기반지식")
     if not hits:
         return None
     notices: list[str] = []
