@@ -391,6 +391,14 @@
       "value": {
         "type": "text"
       },
+      "content": {
+        "type": "text",
+        "nullable": true
+      },
+      "tables": {
+        "type": "list",
+        "nullable": true
+      },
       "as_of": {
         "type": "text",
         "nullable": true

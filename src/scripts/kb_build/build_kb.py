@@ -1616,6 +1616,19 @@ def _pitfalls(raw: str) -> list[dict]:
     return out
 
 
+def _fact_tables_text(body: list[str]) -> str:
+    """팩트 절에 있는 마크다운 표를 **원문 그대로** 이어 붙인다(표 사이는 빈 줄)."""
+    blocks: list[list[str]] = []
+    for raw in body:
+        if _TABLE_LINE.match(raw.strip()):
+            if not blocks or blocks[-1] is None:
+                blocks.append([])
+            blocks[-1].append(raw.rstrip())
+        elif blocks and blocks[-1] is not None and blocks[-1]:
+            blocks.append(None)          # 표 하나가 끝났다는 표시
+    return "\n\n".join("\n".join(b) for b in blocks if b)
+
+
 def _fact_status(raw: str) -> tuple[str, list[str]]:
     """상태 표기(✅ 확정 / ⚠ 확인 필요 / ⏳ 시효 민감, 복합 가능) → (대표 상태, 표시 전체)."""
     marks = [m for m in ("✅", "⚠", "⏳") if m in raw]
@@ -1671,10 +1684,28 @@ def build_facts(resolver: DocResolver) -> tuple[list[dict], list[dict]]:
             "nature": slots.get("성격") or None,
             "customer_facing": "⭕" in slots.get("대외안내", ""),
             "verify_points": slots.get("검증포인트") or None,
+            # 원문 표를 **그대로** 싣는다. 위 파서는 `**팩트**:` 한 줄과 `- **키**: 값`
+            # 슬롯만 줍고 `| … |` 줄은 어느 쪽에도 안 걸려 **조용히 버려졌다** — 그래서 F40 은
+            # label 이 「인출순서 4단계 × 세제」를 약속하는데 본문은 "인출순서와 원천별
+            # 세제:" 에서 끊긴 카드가 됐고, 직원이 그 표를 물으면 «자료가 없다»가 나갔다.
+            # 원문에는 있는데도.
+            #
+            # **싣는 것과 선언하는 것은 다른 일이다.** 아래 `tables` 는 값–조건 오짝을 대조할
+            # 수 있는 표만 선언한다(이름 열과 값 열이 갈리는 표 — `_market_tables`). 갈리지
+            # 않는 표(F17 대응표·F40 세제표는 값 칸이 「과세제외」처럼 말이다)는 선언하지
+            # 못하지만, **재료로는 실려야 한다** — 판정할 수 없다고 답하지 못할 이유는 없다.
+            "content": _fact_tables_text(item["body"]) or None,
             # 관계 선언(knowledge/CLAUDE.md §1·§2) — 답변이 값과 조건을 잘못 짝지었는지,
             # 알려진 오답을 그대로 말했는지 코드가 대조하는 재료다. 선언이 없는 팩트는
             # 대조 대상이 아니다(커버리지 = 저작된 범위).
             "tiers": _tiers(slots.get("조건별값", "")),
+            # 원문 표. 팩트 절의 알맹이가 표인 경우가 있는데(F40 인출순서 4단계 × 세제,
+            # F17 디폴트옵션 10종 대응표, F75), 위 파서는 `**팩트**:` 한 줄과 `- **키**: 값`
+            # 슬롯만 줍고 `| … |` 줄은 어느 쪽에도 안 걸려 **조용히 버려졌다**. 그래서
+            # label 은 「감면 30/40/50% 3단」을 약속하는데 본문은 "인출순서와 원천별 세제:"
+            # 에서 끊긴 카드가 됐고, 직원이 그 표를 물으면 «자료가 없다»가 나갔다 — 원문에는
+            # 있는데. 05 시황·상품이 쓰는 추출기를 그대로 쓴다(이름만 market 이고 범용이다).
+            "tables": _market_tables("\n".join(item["body"])) or None,
             "pitfalls": _pitfalls(slots.get("검증포인트", "")),
             "history": slots.get("이력") or None,
             "screens": sorted(set(_SCREEN.findall(statement))),

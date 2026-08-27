@@ -37,6 +37,12 @@ def _score(fact: dict, question: str) -> float:
 
 def _render(fact: dict) -> list[str]:
     lines = [f"■ {fact['label']}", "", fact.get("value") or ""]
+    # 원문 표. **싣지 않으면 값이 없는 카드가 된다** — 검증기는 근거 블록에 있는 수치만
+    # 인용을 허용하므로, 표가 재료에 없으면 직원이 물었을 때 "자료가 없어요" 가 그대로
+    # 나간다(원문에는 있는데도). 구조 선언(`tables`)은 오짝 대조용이고 렌더는 원문으로
+    # 한다 — 같은 표를 두 모양으로 실으면 답변이 표를 두 번 옮긴다.
+    if fact.get("content"):
+        lines += ["", fact["content"].strip()]
     if fact.get("status") and fact["status"] != "확정":
         lines.append(f"⚠ 상태: {fact['status']} — 인용 시 기준시점을 반드시 함께 말하세요.")
     if fact.get("verify_points"):
