@@ -175,6 +175,8 @@ class Profile:
     # — 위험자산 한도 등 기존 게이팅 로직은 계속 port 4분류만 본다). 없으면 3분류 운용현황
     # 표시를 생략한다(engine._three_way_breakdown 참고).
     invest_period_years: float | None = None  # 투자기간(가입 후 경과연수). 상품추천 LLM 입력.
+    joined: str | None = None  # IRP 가입일(ISO). 경과연수만으로는 "언제 가입했어?" 에 날짜로
+    # 답할 수 없다 — matDate 와 같은 이유다(재료에 없으면 LLM 이 오늘에서 빼서 말한다).
     pension_started: bool = False  # 연금수령 개시 여부. 참이면 추가납 요건(add·tax)이 성립하지 않는다
     # (conditions() — 07_에이전트_기능정의/01 ① "연금개시 계좌 → 추가납 권유 금지", 방법론 59 "연금개시 →
     # 추가입금 불가"; REQUIREMENTS.md §7). 상품추천 LLM 입력(§9)에도 쓴다.
@@ -557,6 +559,7 @@ def _to_profile(rec: dict) -> Profile:
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
+        joined=rec["pension"].get("IRP가입일"),
         pension_started=rec["pension"]["연금개시여부"] == "Y",
         pension_eligible=rec["pension"]["연금개시요건충족여부"] == "Y",
         club_grade=basic["KB스타클럽등급"],

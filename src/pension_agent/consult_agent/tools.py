@@ -588,6 +588,12 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     lines = [f"■ 고객 {customer_id} — 브리핑 재료"]
     lines += [f"· {k} {v}" for k, v in facts["customer"].items()]
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
+    # 계좌 상태 — **정상인 항목도 값으로** 싣는다. 화면(briefing)은 요건이 성립한 것만
+    # 렌더하는데(그게 맞다 — 한 장짜리 브리핑이다), 그 필터가 그대로 넘어오면 직원이
+    # "디폴트옵션 설정돼 있어?" 라고 물었을 때 **미설정 고객에게만** 답이 나갔다. 설정된
+    # 고객에게는 "준비된 자료가 없어요" — 정확히 "네, 돼 있습니다" 라고 답해야 하는 자리다.
+    # 값이 없어서가 아니라 문제일 때만 실려서였다(engine/render.py::_account_state).
+    lines += [f"· {k.replace('_', ' ')} {v}" for k, v in (facts.get("account_state") or {}).items()]
     if facts.get("conditions"):
         lines.append(f"· 성립 요건: {', '.join(facts['conditions'])}")
     # 「왜 이 고객이 관리 대상인가」 — 직원이 실제로 가장 많이 묻는 것인데 통째로 빠져

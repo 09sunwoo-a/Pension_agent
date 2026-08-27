@@ -42,6 +42,8 @@ from pension_agent.consult_agent.nodes import pitch, plan, understand
 from pension_agent.llm import LLMError
 from pension_agent.verify import numbers, verify_texts
 
+_vt = verify_texts
+
 # 카드 선택 1차(LLM)를 전역에서 끈다. 이 스위트가 재는 것은 n-gram 채점과 그래프 배선이고,
 # LLM 선택을 켜두면 키가 있는 환경에서 실제 호출이 나가 측정값이 흔들린다.
 # 진짜 llm_pick 을 검사하는 테스트(check_hier_index)는 아래 원본을 직접 부른다.
@@ -1901,6 +1903,74 @@ def check_caution_roles() -> int:
     return ok
 
 
+def check_account_state() -> int:
+    """계좌 상태 재료(§3) — «정상»인 항목을 물었을 때 답이 없던 자리.
+
+    화면(①~⑨)은 «왜 이 고객이 관리 대상인가»를 보여주는 자리라 요건이 성립한 항목만
+    렌더한다. 그게 맞다 — 한 장짜리 브리핑이다. 그런데 대화형은 같은 재료로 직원이 묻는
+    아무 질문에나 답하므로, 그 필터가 그대로 넘어오면 **부정 확인만 되고 긍정 확인이
+    안 된다**: "디폴트옵션 설정돼 있어?" 가 미설정 고객에게만 답해지고, 설정된 고객에게는
+    "준비된 자료가 없어요" 가 나갔다 — 정확히 "네, 돼 있습니다" 라고 답해야 하는 자리에서.
+
+    값이 없어서가 아니었다. 전부 Profile 에 있었고, 렌더 경로만 걸러냈다. 그래서 이 테스트는
+    **9명 전원**에 대해 재료가 있는지 본다 — 한 명이라도 빠지면 그 상태의 고객이 답을 못 받는
+    것이고, 그게 원래 증상이었다(고치기 전 0~3/9).
+    """
+    ok = 0
+    from pension_agent.strategy_agent import customer as CUST
+
+    STATES = ("디폴트옵션", "연금개시", "연금개시요건", "세액공제 잔여한도",
+              "판매중단 보유상품", "ISA 만기자금", "IRP 가입일")
+    texts = {p.id: ((tools.TOOLS["customer"].run({"customer_id": p.id}, "확인") or {}).get("text", ""))
+             for p in CUST.PERSONAS}
+    for key in STATES:
+        missing = [pid for pid, t in texts.items() if key not in t]
+        hit = not missing
+        print(f"{'✓' if hit else '✗'} 계좌 상태 «{key}» 가 9명 전원 재료에 있다"
+              + ("" if hit else f" — 빠진 고객 {len(missing)}명"))
+        ok += hit
+
+    # 값이 «정상»인 쪽도 말할 수 있어야 한다. 미설정만 실리던 것이 원래 증상이라, 설정된
+    # 고객에서 그 값이 나오는지를 따로 본다.
+    setted = [p for p in CUST.PERSONAS if p.dopt == "설정"]
+    hit = bool(setted) and all("디폴트옵션 설정" in texts[p.id] for p in setted)
+    print(f"{'✓' if hit else '✗'} 디폴트옵션이 «설정»된 고객도 그 사실을 재료로 갖는다 ({len(setted)}명)")
+    ok += hit
+
+    # 없는 것도 «없음»이라고 말할 수 있어야 한다 — 침묵과 부재는 다르다.
+    clean = [p for p in CUST.PERSONAS if not any(h.get("discontinued") for h in p.holdings)]
+    hit = bool(clean) and all("판매중단 보유상품 없음" in texts[p.id] for p in clean)
+    print(f"{'✓' if hit else '✗'} 판매중단 상품이 없는 고객은 «없음»을 재료로 갖는다 ({len(clean)}명)")
+    ok += hit
+
+    # 화면은 건드리지 않았다 — 계좌 상태는 briefing(화면 요건)이 아니라 별도 키다.
+    from pension_agent.strategy_agent import agent as SA
+    facts = SA.propose(CUST.PERSONAS[0])["facts"]
+    hit = ("account_state" in facts
+           and not (set(facts["account_state"]) & set(facts["briefing"]))
+           and not (set(facts["account_state"]) & set(facts["customer"])))
+    print(f"{'✓' if hit else '✗'} 계좌 상태는 화면(briefing·상단)이 아니라 대화형 재료다")
+    ok += hit
+
+    # 가입일은 **날짜로** 싣는다. 경과연수만 주면 LLM 이 오늘에서 빼서 날짜를 만들어 말한다.
+    p0 = CUST.PERSONAS[0]
+    ev = tools.TOOLS["customer"].run({"customer_id": p0.id}, "언제 가입했어?")
+    hit = bool(p0.joined) and p0.joined in (ev or {}).get("text", "")
+    print(f"{'✓' if hit else '✗'} 가입일이 경과연수가 아니라 날짜로 실린다")
+    ok += hit
+
+    # 실린 값은 인용할 수 있고, 안 실린 날짜는 여전히 막힌다(경계는 넓어지지 않았다).
+    from datetime import date, timedelta
+    allow = (ev or {}).get("allow") or []
+    real = date.fromisoformat(p0.joined)
+    wrong = real + timedelta(days=3)
+    hit = (_vt(f"{real.year}년 {real.month}월 {real.day}일에 가입하셨어요.", allow)[0]
+           and not _vt(f"{wrong.year}년 {wrong.month}월 {wrong.day}일에 가입하셨어요.", allow)[0])
+    print(f"{'✓' if hit else '✗'} 가입일은 인용되고, 하루라도 어긋난 날짜는 잘린다")
+    ok += hit
+    return ok
+
+
 def check_today_material() -> int:
     """오늘 날짜 재료(§3) — 시점·기한이 걸린 질문에 답이 없던 자리.
 
@@ -3129,6 +3199,7 @@ def main() -> int:
         check_caution_roles()
         check_history_material()
         check_today_material()
+        check_account_state()
         check_history_selection()
         check_hier_index()
         check_order_flipped()
