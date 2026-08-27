@@ -648,6 +648,21 @@ def check_briefing_shared() -> int:
     hit = SA._cache_key(profile, True, 1) != SA._cache_key(other, True, 1)
     print(f"{'✓' if hit else '✗'} 캐시 키는 id 가 아니라 프로파일 내용이다")
     ok += hit
+
+    # 무한히 쌓이지 않는다 — 실서비스는 고객 수만큼 부른다(시연 로스터 9명으로는 안 드러난다).
+    SA.clear_briefing_cache()
+    try:
+        for i in range(SA._BRIEFING_MAX + 5):
+            SA._BRIEFING_CACHE[f"key-{i}"] = {"x": i}
+            while len(SA._BRIEFING_CACHE) > SA._BRIEFING_MAX:
+                SA._BRIEFING_CACHE.popitem(last=False)
+        hit = len(SA._BRIEFING_CACHE) == SA._BRIEFING_MAX \
+            and "key-0" not in SA._BRIEFING_CACHE \
+            and f"key-{SA._BRIEFING_MAX + 4}" in SA._BRIEFING_CACHE
+    finally:
+        SA.clear_briefing_cache()
+    print(f"{'✓' if hit else '✗'} 캐시가 상한({SA._BRIEFING_MAX})에서 오래된 것부터 밀어낸다")
+    ok += hit
     return ok
 
 

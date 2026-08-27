@@ -27,6 +27,7 @@ import dataclasses
 import json
 import re
 import threading
+from collections import OrderedDict
 from typing import Any
 
 from pension_agent.strategy_agent import engine
@@ -465,7 +466,15 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
 # (`dataclasses.replace` 로 요건을 걷어낸 합성 고객 등)이 서로의 결과를 받는다.
 # ─────────────────────────────────────────────────────────────
 
-_BRIEFING_CACHE: dict[str, dict[str, Any]] = {}
+#: 들고 있을 브리핑 수의 상한. 시연 로스터는 9명이라 시연 중에는 아무것도 밀려나지 않고,
+#: 실서비스에서 고객 수만큼 무한히 쌓이는 것만 막는다(브리핑 한 편은 작지 않다).
+#:
+#: **밀려나면 다음 호출이 다시 만든다 — 그러면 화면과 대화형이 또 갈릴 수 있다.**
+#: 그래서 이 상한은 실서비스의 답이 아니라 «누수를 막는 하한선»이다. 프로세스를 넘어
+#: 브리핑을 공유하는 방법은 실서비스 프론트를 붙일 때 정한다(consult_agent/CLAUDE.md §13).
+_BRIEFING_MAX = 128
+
+_BRIEFING_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _BRIEFING_LOCK = threading.Lock()
 
 
@@ -498,7 +507,10 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
     브리핑을 받지 않는다 — 공유가 목적인 캐시에서 그건 화면과 대화를 갈라놓는 것과 같다.
     """
     key = _cache_key(p, use_llm, top_n)
-    cached = _BRIEFING_CACHE.get(key)
+    with _BRIEFING_LOCK:
+        cached = _BRIEFING_CACHE.get(key)
+        if cached is not None:
+            _BRIEFING_CACHE.move_to_end(key)      # 최근 쓴 것이 먼저 밀려나지 않게
     if cached is None:
         out = _propose(p, use_llm=use_llm, top_n=top_n)
         out["facts"]["summaries"] = engine.section_summaries(
@@ -508,6 +520,9 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
         # (둘 다 같은 입력의 산출이므로 어느 쪽이 이겨도 «하나로 통일»이라는 목적은 선다).
         with _BRIEFING_LOCK:
             cached = _BRIEFING_CACHE.setdefault(key, out)
+            _BRIEFING_CACHE.move_to_end(key)
+            while len(_BRIEFING_CACHE) > _BRIEFING_MAX:
+                _BRIEFING_CACHE.popitem(last=False)   # 가장 오래 안 쓴 것부터
     return copy.deepcopy(cached)
 
 
