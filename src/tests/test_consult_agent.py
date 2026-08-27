@@ -9,6 +9,7 @@ LLM 을 부르는 자리(understand·계획·문장생성)를 스텁으로 갈�
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 import sys
@@ -1409,6 +1410,122 @@ def check_miss_recovery() -> int:
 
     hit = P._no_evidence({}) == P.NO_EVIDENCE
     print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴에는 빈 '찾아본 곳'을 붙이지 않는다")
+    ok += hit
+    return ok
+
+
+#: 되묻기 판정 골든셋 — «되물어야 하는 질문»과 «되물으면 안 되는 질문»을 실제 지식베이스
+#: 재료로 고정한다. 판정 자체는 LLM 이 하므로 여기서 재는 것은 **판정이 내려졌을 때 턴이
+#: 어떻게 끝나는가**다. 그 배선이 바뀌지 않았음을 보증해야, 되묻기 판정을 다른 자리로
+#: 옮기는 변경(예: 작성과 동시 실행)이 답을 바꾸지 않았다고 말할 수 있다.
+#:
+#: (질문, 도구, 판정, 되묻기로 끝나야 하나, 근거에 있어야 할 갈래 표시)
+_CLARIFY_GOLDEN = (
+    # ① 진짜 갈래 — 근거에 신청 경로가 셋이라 어느 쪽인지 정해야 답이 갈린다.
+    ("계약이전 어떻게 신청해?", "procedure",
+     {"ask": "어느 경로로 신청하시나요?", "options": ["후선 의뢰", "스타뱅킹", "인터넷뱅킹"]},
+     True, "3경로"),
+    # ② 가짜 갈래 — 카드는 여러 장이지만 답은 화면번호 하나로 확정된다. 카드 수는 갈래가
+    #    아니다("근거가 여러 장 = 모호하다"로 읽으면 답할 수 있는 질문에 되묻게 된다).
+    ("실물이전 가능여부 조회 화면번호?", "screen", {"ask": None}, False, "06-AD-020"),
+)
+
+
+def check_clarify_golden() -> int:
+    """되묻기 판정 골든셋 — 판정이 내려진 뒤 **턴이 어떻게 끝나는가**를 실제 재료로 고정한다.
+
+    §5 가 정한 것은 둘이다. 되물으면 그 턴은 답변도 화면 연계 제안도 없이 끝나고(선택지와
+    출처만 나간다), 되묻지 않으면 답변 경로를 막지 않는다. 이 검사는 그 두 갈래를 **그래프
+    전체로** 통과시켜 잰다 — 노드 하나만 직접 부르면 배선이 바뀌었을 때 조용히 지나간다.
+
+    판정 자체(LLM)는 여기서 재지 않는다. 재료는 진짜 지식베이스에서 오고, 그 재료에 갈래가
+    실제로 실려 있는지(=LLM 이 볼 수 있는지)까지가 코드가 보증할 수 있는 범위다.
+    """
+    from pension_agent.consult_agent.nodes import clarify as CL
+    from pension_agent.consult_agent.nodes import plan as P
+
+    ok = 0
+    for question, tool, verdict, should_ask, marker in _CLARIFY_GOLDEN:
+        found = tools.run(tool, {"question": question}, question)
+        if not found:
+            print(f"✗ 골든셋 재료 확보: {tool}({question}) → 근거 없음")
+            continue
+
+        # 재료에 갈래(또는 확정 답)가 실제로 실려 있나 — 없으면 판정은 근거 없는 추측이 된다.
+        hit = marker in found["text"]
+        print(f"{'✓' if hit else '✗'} 골든셋 재료에 «{marker}» 가 실려 있다 — {question}")
+        ok += hit
+
+        seen: list[str] = []
+        orig_cl, orig_plan_node, orig_gen = CL.generate, G.plan_step, P.generate
+        CL.generate = lambda prompt, **kw: (seen.append(prompt), json.dumps(verdict))[1]
+        # 계획은 재료를 이미 넣어 둔 채로 끝낸다 — 이 검사가 재는 것은 판정 뒤의 배선이지
+        # 도구 선택이 아니다(모듈 전역 stub_plan_pitch 는 화법 재료로 덮어쓴다).
+        G.plan_step = lambda state: {"plan_done": True}
+        P.generate = lambda prompt, **kw: "안내드릴게요."
+        try:
+            agent = G.build_agent()
+            out = agent.invoke({"question": question, "evidence": [found],
+                                "plan_calls": [f"{tool}:{question}"]})
+        finally:
+            CL.generate, G.plan_step, P.generate = orig_cl, orig_plan_node, orig_gen
+
+        asked = bool(out.get("clarify"))
+        hit = asked == should_ask
+        print(f"{'✓' if hit else '✗'} {'되묻고 끝난다' if should_ask else '답변으로 흘러간다'}"
+              f" — {question}")
+        ok += hit
+
+        if should_ask:
+            # 되묻기 턴 — 선택지가 답으로 나가고, 출처가 실리고(§5 마지막·gap 22),
+            # 화면 연계 제안은 붙지 않는다(§5 · §10 은 다른 사건이다).
+            hit = all(o in out["answer"] for o in verdict["options"]) \
+                and bool(out.get("sources")) and not out.get("pending_action")
+            print(f"{'✓' if hit else '✗'} 되묻기 턴: 선택지+출처가 나가고 연계 제안은 없다")
+        else:
+            # 되묻지 않은 턴 — 답변이 나가고 되묻기 흔적이 남지 않는다.
+            hit = bool(out.get("answer")) and not out.get("clarify")
+            print(f"{'✓' if hit else '✗'} 되묻지 않은 턴: 답변이 그대로 나간다")
+        ok += hit
+
+        # 판정 프롬프트가 그 재료를 실제로 봤나 — 못 보면 판정은 질문 한 줄로 하는 추측이다.
+        hit = bool(seen) and marker in seen[0]
+        print(f"{'✓' if hit else '✗'} 판정 프롬프트에 근거가 실린다 — {question}")
+        ok += hit
+
+    # ③ 맥락으로 갈래가 이미 정해진 후속 질문 — 판정 프롬프트가 이전 대화를 본다.
+    #    "타행에서 가져오려는 고객"이 앞 턴에 나왔으면 방향은 정해진 것이고, 여기서 또
+    #    되물으면 직원은 방금 말한 것을 다시 말해야 한다(§5 "맥락으로 추측이 서면 되묻지
+    #    않는다"). 그 판단의 재료가 프롬프트에 실리는지가 코드의 몫이다.
+    history = [{"question": "타행에서 퇴직금 가져오려는 고객인데 뭐라고 말하지",
+                "stage": "계약이전"}]
+    evidence = [{"tool": "procedure", "query": "계약이전", "text": "전입 절차 / 전출 절차",
+                 "atomic": [], "notices": [], "notice_scopes": [], "marks": [], "related": [],
+                 "allow": [], "sources": [], "meta": {}}]
+    seen = []
+    orig_cl = CL.generate
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"ask": null}')[1]
+    try:
+        out = CL.clarify({"question": "그럼 계약이전은 어떻게 신청해?",
+                          "history": history, "evidence": evidence})
+    finally:
+        CL.generate = orig_cl
+    hit = bool(seen) and "타행에서 퇴직금 가져오려는 고객" in seen[0] and out == {}
+    print(f"{'✓' if hit else '✗'} 판정 프롬프트가 이전 대화를 본다(맥락으로 갈래가 정해진 후속 질문)")
+    ok += hit
+
+    # ④ 갈래가 있을 수 없는 재료뿐이면 판정 자체를 돌리지 않는다 — 오판의 기회를 없앤다.
+    #    (check_turn_cost 가 같은 것을 '아낀 호출' 쪽에서 재고, 여기서는 '판정 정확도' 쪽에서 잰다.)
+    called: list[str] = []
+    CL.generate = lambda prompt, **kw: (called.append("clarify"), '{"ask": null}')[1]
+    try:
+        for tool_name in ("customer", "history", "date"):
+            CL.clarify({"question": "이 고객 평가금액 얼마야",
+                        "evidence": [{**evidence[0], "tool": tool_name}]})
+    finally:
+        CL.generate = orig_cl
+    hit = not called
+    print(f"{'✓' if hit else '✗'} 고객·상담기록·날짜 재료뿐이면 되묻기 판정을 돌리지 않는다")
     ok += hit
     return ok
 
@@ -3064,6 +3181,7 @@ def main() -> int:
         check_relations()
         check_turn_cost()
         check_miss_recovery()
+        check_clarify_golden()
         check_replan_on_empty()
         check_screen_registry()
         check_market_material()
