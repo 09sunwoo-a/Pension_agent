@@ -649,11 +649,14 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     if len(lines) == 1:
         return None
 
+    # 시효 표시는 **과거 상담이 실제로 실렸을 때만** 단다. 방금 나눈 대화에 "지난 상담
+    # 기록입니다"를 붙이면 표시가 거짓말을 하고, 매번 붙는 표시는 읽히지 않는다 —
+    # 정작 낡은 값이 실린 턴에서도 그냥 지나가게 된다.
     return _ev("history", query, "\n".join(lines),
                [{"id": f"session.{customer_id}", "title": f"고객 {customer_id} 상담 이력",
                  "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],
-               notices=[HISTORY_MARK])
+               notices=[HISTORY_MARK] if records else [])
 
 
 # ─────────────────────────────────────────────────────────────
