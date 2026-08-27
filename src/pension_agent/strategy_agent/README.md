@@ -124,7 +124,7 @@ LLM 설정은 이 폴더가 아니라 **`src/.env`** 에 둔다(`pension_agent/l
 오래 안 쓴 것부터 밀어내는데, 밀려난 브리핑은 다음 호출이 다시 만든다 — 그러면 화면과
 대화형이 또 갈릴 수 있다. 즉 상한은 실서비스의 답이 아니라 누수를 막는 하한선이고,
 프로세스를 넘어 공유하는 방법은 실서비스 프론트를 붙일 때 정한다
-(`../consult_agent/CLAUDE.md` §13).
+(`../consult_agent/CLAUDE.md` §13 · `docs/PRODUCTION_RISKS.md` 2번).
 
 | 섹션 | facts 키 | 산출 |
 |---|---|---|
