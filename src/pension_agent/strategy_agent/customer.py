@@ -29,9 +29,10 @@ D 는 «행내 기준»이 아니라 «검증 전 제안값»이므로, 실데�
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from datetime import date
+
+from pension_agent.clock import TODAY_ENV, today  # noqa: F401 — 오늘은 공용이다
 
 # ─────────────────────────────────────────────────────────────
 # 시간축은 **둘**이다. 하나로 붙여 놓으면 원장이 사흘만 묵어도 고객에게 사흘 틀린 말이 나간다.
@@ -57,20 +58,9 @@ from datetime import date
 # ─────────────────────────────────────────────────────────────
 AS_OF = date(2026, 8, 24)
 
-#: 오늘을 고정하는 환경변수. 형식이 틀리면 조용히 실제 날짜로 넘어가지 않고 즉시 실패한다 —
-#: 오타 하나로 «고정한 줄 알았는데 안 고정된» 산출물이 나오는 것이 가장 나쁜 실패다.
-TODAY_ENV = "PENSION_TODAY"
-
-
-def today() -> date:
-    """상담 시점의 오늘. `PENSION_TODAY=YYYY-MM-DD` 가 있으면 그 날짜로 고정한다."""
-    pinned = os.environ.get(TODAY_ENV, "").strip()
-    if not pinned:
-        return date.today()
-    try:
-        return date.fromisoformat(pinned)
-    except ValueError as exc:
-        raise ValueError(f"{TODAY_ENV}={pinned!r} 는 YYYY-MM-DD 가 아닙니다") from exc
+#: 오늘은 여기 살지 않는다. 두 에이전트와 검증기가 함께 쓰는 값이라 공용(`pension_agent.clock`)
+#: 으로 올렸다 — 읽는 곳이 둘이면 한쪽만 고정된 채 갈라진다. 여기서는 도메인 쪽 이름으로
+#: 그대로 쓸 수 있게 재수출만 한다.
 
 
 def ledger_age_days() -> int:

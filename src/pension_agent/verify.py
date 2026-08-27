@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
+from pension_agent.clock import today
+
 # 수치 토큰. 천단위 쉼표는 숫자의 일부지만(4,050) **뒤따라오는 쉼표는 아니다** — 예전
 # 패턴(`\d[\d,]*`)은 "만기 D-17, 4,050만원"에서 `17,` 을 통째로 집어 원장의 `17` 과
 # 어긋났고, 그래서 **맞는 답변이 '원장 밖 수치'로 버려졌다**(compose 가 근거 원문을 그대로
@@ -103,16 +105,33 @@ def _valid(year: str | None, month: str, day: str | None) -> bool:
     return 1 <= int(month) <= 12 and (day is None or 1 <= int(day) <= 31)
 
 
-def _date_forms(text: str) -> set[str]:
+#: 연도 없이 말한 날짜를 «그 해»로 읽어 줄 범위(올해 기준 ±N년).
+#:
+#: 사람은 "12월 31일" 을 **올해**로 읽는다. 올해 그 날이 이미 지났으면 다음 occurrence
+#: (내년)로, 지난 일을 되짚는 말이면 작년으로 읽는다 — 어느 쪽이든 **오늘 언저리**다.
+#: 3년 전 납입이력의 월일을 빌려와 "12월 31일까지 납입하세요" 라고 말하는 것은 사람이
+#: 하는 해석이 아니고, 실제로 그게 이 검증기가 오답을 흘리던 마지막 경로였다.
+#:
+#: ±1 인 이유는 좁히는 쪽이라 넉넉히 잡아야 하기 때문이다. 연도를 안 쓰는 것은 정상
+#: 어법이고(지난 상담 "11월 13일에" · 만기 "2월 14일에"), 여기서 잘못 좁히면 **맞는 답변이
+#: 통째로 버려진다** — 이 파일이 네 번 겪은 사고가 전부 그것이다. 2년 넘게 떨어진 날짜를
+#: 연도 없이 부르는 말은 그 자체로 오해를 부르므로, 그때는 답변이 연도를 밝혀야 한다.
+BARE_YEAR_SPAN = 1
+
+
+def _near_today(year: str | None, this_year: int) -> bool:
+    """연도 없이 불러도 되는 날짜인가. 연도를 안 적은 원장 표기는 그대로 통과시킨다."""
+    return year is None or abs(int(year) - this_year) <= BARE_YEAR_SPAN
+
+
+def _date_forms(text: str, this_year: int) -> set[str]:
     """텍스트가 말하는 날짜의 정규형 전부 — **굵은 것도 함께** 낸다.
 
     원장이 "2026-09-10" 이라 적었으면 답변이 "2026년 9월" 이라 말하는 것도 참이므로
-    연월 형태를 함께 담는다. 연도를 뺀 형태("9월 10일")도 마찬가지다. 반대 방향
-    (원장은 연월까지만 아는데 답변이 일까지 말하는 것)은 담지 않는다 — 그건 답변이
-    재료보다 많이 주장한 것이라 걸러야 한다.
+    연월 형태를 함께 담는다. 반대 방향(원장은 연월까지만 아는데 답변이 일까지 말하는 것)은
+    담지 않는다 — 그건 답변이 재료보다 많이 주장한 것이라 걸러야 한다.
 
-    이 함수는 **허용 집합을 넓히기만 한다** — 여기서 무엇을 더 읽어도 답변이 더 거부되지는
-    않는다. 좁히는 것은 답변 쪽 덩이 하나뿐이다(_chunk_dates · _judge).
+    연도를 뺀 형태("9월 10일")는 **오늘 언저리의 날짜에서만** 낸다(위 BARE_YEAR_SPAN).
     """
     out: set[str] = set()
     for pattern in _CHUNK:
@@ -124,7 +143,8 @@ def _date_forms(text: str) -> set[str]:
                 out.add(_dform(year, month))
             if day is not None:
                 out.add(_dform(year, month, day))
-                out.add(_dform(None, month, day))
+                if _near_today(year, this_year):
+                    out.add(_dform(None, month, day))
     return out
 
 
@@ -239,7 +259,7 @@ def _measures(text: str) -> list[tuple[list[str], set[str], str | None]]:
     return out
 
 
-def numbers(text: str) -> set[str]:
+def numbers(text: str, this_year: int | None = None) -> set[str]:
     """텍스트가 말하는 수치(정규형). 스팬 안에 값이 있는지 판정할 때 호출부가 쓴다
     (compose 가 '값을 말했는데 원문 스팬을 안 실었다'를 잡는 데 필요하다).
 
@@ -253,7 +273,7 @@ def numbers(text: str) -> set[str]:
     for toks, forms, _raw in _measures(text):
         out |= forms
         out |= {_canon(t) for t in toks}
-    return out | _date_forms(text)
+    return out | _date_forms(text, this_year if this_year is not None else today().year)
 
 
 def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
