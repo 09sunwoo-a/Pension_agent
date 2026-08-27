@@ -504,6 +504,34 @@ def sources_of(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> list[dict]:
              "score": round(s, 2), "page": c.get("page")} for s, c in hits]
 
 
+def product_names(kb: KnowledgeBase) -> set[str]:
+    """지식베이스가 **선언한** 상품 이름 전부(카드의 `product_names`).
+
+    답변이 상품명을 말했을 때 「실재하는 상품인가」를 대조하는 등록부의 한쪽이다
+    (다른 쪽은 strategy_agent 의 상품 카탈로그 — `nodes/plan.py::_known_products`).
+
+    이게 없던 동안 등록부는 데모 카탈로그 12종뿐이었고, **행내 원문 표에 버젓이 있는
+    상품**(「KB 온국민 TDF 시리즈」·「KB RISE 미국ETF 모아드림」…)을 말한 답변이 전부
+    '미등록'으로 판정돼 통째로 버려졌다 — 그 자리에 근거 원문이 덤프됐다.
+
+    이름을 여기서 **추론하지 않는다.** 카드가 선언한 것만 읽는다 — 어느 칸을 상품명으로
+    볼지는 변환기가 정한다(`build_kb._PRODUCT_COLUMNS`).
+    """
+    return {n for c in kb.cards for n in (c.get("product_names") or []) if n}
+
+
+def advisory_note(kb: KnowledgeBase) -> str | None:
+    """지식베이스가 선언한 **인용 고지** — "정보 제공 목적 · 투자권유 시 자본시장법·당행
+    규정 준수 의무"(05 폴더 README 가 선언하고 변환기가 카드마다 싣는다).
+
+    카드가 아닌 재료(코드가 계산한 적합성 판정)에도 이 표시가 필요한데, 문구를 코드
+    상수로 두면 §12 gap 20 이 경계하는 모양이 된다 — 재료 종류마다 코드 상수가 하나씩
+    생기면 「표시는 데이터 선언이 정한다」(§7)가 사실상 없어진다. 그래서 선언된 문구를
+    한 곳에서 읽어 쓴다. 선언이 없으면 None 이고, 그러면 표시도 붙지 않는다.
+    """
+    return next((c["advisory"] for c in kb.cards if c.get("advisory")), None)
+
+
 _NO_GROUP = "(미분류)"
 
 

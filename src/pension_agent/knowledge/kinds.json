@@ -924,7 +924,7 @@
   },
   "market": {
     "consumed": "retrieval",
-    "desc": "시황 기반지식(05_시황_상품_기반지식/01_시황) — 상담 시 근거로 인용할 **시장 상황**. 시장 동향·자산군별 성과·환율·금리, 경제 이벤트 일정과 시나리오별 투자전략을 다룬다. lineup(운용 상품)과 나뉘어 있는 이유는 묻는 것이 다르기 때문이다 — 시황은 «시장이 어떻게 돌아가나», lineup 은 «우리가 뭘 파나»다. 하나로 묶으면 「8월 추천펀드」를 물었는데 환율 전망이 따라 나온다(screen·channel 을 나눈 것과 같은 이유). 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 와 표의 열 머리말·행 이름에서 온다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본) content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다** — 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다(knowledge/CLAUDE.md §1) — 각 행은 keys(이름 칸, 병합 셀은 위 행에서 이어받는다)·cells(나머지 칸 전부)·values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하지 않고 함께 선언한다. 이 선언이 열 머리말·행 이름을 검색 입구로 만들고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. category 는 원문 front-matter 가 밝힌 갈래이고 kind 는 거기서 나온다 — 검색 태그(tags.topics)에는 넣지 않는다(두 글자 흔한 말이라 모든 카드가 같은 점수를 받아 순위가 무너진다).",
+    "desc": "시황 기반지식(05_시황_상품_기반지식/01_시황) — 상담 시 근거로 인용할 **시장 상황**. 시장 동향·자산군별 성과·환율·금리, 경제 이벤트 일정과 시나리오별 투자전략을 다룬다. lineup(운용 상품)과 나뉘어 있는 이유는 묻는 것이 다르기 때문이다 — 시황은 «시장이 어떻게 돌아가나», lineup 은 «우리가 뭘 파나»다. 하나로 묶으면 「8월 추천펀드」를 물었는데 환율 전망이 따라 나온다(screen·channel 을 나눈 것과 같은 이유). 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 와 표의 열 머리말·행 이름에서 온다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본) content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다** — 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다(knowledge/CLAUDE.md §1) — 각 행은 keys(이름 칸, 병합 셀은 위 행에서 이어받는다)·cells(나머지 칸 전부)·values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하지 않고 함께 선언한다. 이 선언이 열 머리말·행 이름을 검색 입구로 만들고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. category 는 원문 front-matter 가 밝힌 갈래이고 kind 는 거기서 나온다 — 검색 태그(tags.topics)에는 넣지 않는다(두 글자 흔한 말이라 모든 카드가 같은 점수를 받아 순위가 무너진다). product_names 는 표의 «상품명»·«편입상품»·«디폴트옵션 상품» 칸에 적힌 이름들로, 답변이 그 상품명을 말해도 되는지 대조하는 **등록부**다(pension_agent/verify.py). 원문 산문에서 긁지 않고 표의 칸만 인정한다 — 저작자가 «이게 상품 이름이다»라고 적어둔 자리라 경계가 분명하고, LLM 이 지어낸 이름이 우연히 문장과 겹쳐 스스로의 근거가 되는 일이 없다. 합계 행의 라벨(「포트폴리오」)은 tables 와 같은 판정(_identifying)으로 걸러낸다. advisory 는 폴더 README 가 선언한 인용 고지(정보 제공 목적 · 투자권유 시 자본시장법·당행 규정 준수 의무)이고, volatile 과 같은 규약으로 붙일지도 문구도 데이터가 정한다 — 원문 유래는 01_시황 두 문서의 「유의사항(고지)」이며 02_상품 문서에는 같은 고지가 없다(폴더 단위 선언은 운영 판단이다, consult_agent/CLAUDE.md §8 관리대장).",
     "required": [
       "title",
       "category",
@@ -961,10 +961,18 @@
         "type": "list",
         "nullable": true
       },
+      "product_names": {
+        "type": "list",
+        "nullable": true
+      },
       "as_of": {
         "type": "text"
       },
       "volatile": {
+        "type": "text",
+        "nullable": true
+      },
+      "advisory": {
         "type": "text",
         "nullable": true
       },
@@ -994,7 +1002,7 @@
   },
   "lineup": {
     "consumed": "retrieval",
-    "desc": "운용 상품 기반지식(05_시황_상품_기반지식/02_상품) — 상담 시 근거로 인용할 **운용 상품**. 이달의 추천펀드와 성과·위험등급, 디폴트옵션 포트폴리오 9종의 편입상품·비중·금리, 투자성향 5단계·연금수령(예정) 포트폴리오, TDF 빈티지별 위험자산 비중을 다룬다. **strategy_agent 의 product kind 와 다른 것이다** — 그쪽은 적합성 게이트가 타입드 필드로 비교하는 관계형 카탈로그이고, 이쪽은 행내 배포자료의 원문·표를 검색해 답하는 재료다. market(시황)과 나뉘어 있는 이유는 묻는 것이 다르기 때문이다. 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 와 표의 열 머리말·행 이름에서 온다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본) content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다** — 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다(knowledge/CLAUDE.md §1) — 각 행은 keys(이름 칸, 병합 셀은 위 행에서 이어받는다)·cells(나머지 칸 전부)·values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하지 않고 함께 선언한다. 이 선언이 열 머리말·행 이름을 검색 입구로 만들고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. category 는 원문 front-matter 가 밝힌 갈래이고 kind 는 거기서 나온다 — 검색 태그(tags.topics)에는 넣지 않는다(두 글자 흔한 말이라 모든 카드가 같은 점수를 받아 순위가 무너진다).",
+    "desc": "운용 상품 기반지식(05_시황_상품_기반지식/02_상품) — 상담 시 근거로 인용할 **운용 상품**. 이달의 추천펀드와 성과·위험등급, 디폴트옵션 포트폴리오 9종의 편입상품·비중·금리, 투자성향 5단계·연금수령(예정) 포트폴리오, TDF 빈티지별 위험자산 비중을 다룬다. **strategy_agent 의 product kind 와 다른 것이다** — 그쪽은 적합성 게이트가 타입드 필드로 비교하는 관계형 카탈로그이고, 이쪽은 행내 배포자료의 원문·표를 검색해 답하는 재료다. market(시황)과 나뉘어 있는 이유는 묻는 것이 다르기 때문이다. 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 와 표의 열 머리말·행 이름에서 온다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본) content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다** — 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다(knowledge/CLAUDE.md §1) — 각 행은 keys(이름 칸, 병합 셀은 위 행에서 이어받는다)·cells(나머지 칸 전부)·values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하지 않고 함께 선언한다. 이 선언이 열 머리말·행 이름을 검색 입구로 만들고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. category 는 원문 front-matter 가 밝힌 갈래이고 kind 는 거기서 나온다 — 검색 태그(tags.topics)에는 넣지 않는다(두 글자 흔한 말이라 모든 카드가 같은 점수를 받아 순위가 무너진다). product_names 는 표의 «상품명»·«편입상품»·«디폴트옵션 상품» 칸에 적힌 이름들로, 답변이 그 상품명을 말해도 되는지 대조하는 **등록부**다(pension_agent/verify.py). 원문 산문에서 긁지 않고 표의 칸만 인정한다 — 저작자가 «이게 상품 이름이다»라고 적어둔 자리라 경계가 분명하고, LLM 이 지어낸 이름이 우연히 문장과 겹쳐 스스로의 근거가 되는 일이 없다. 합계 행의 라벨(「포트폴리오」)은 tables 와 같은 판정(_identifying)으로 걸러낸다. advisory 는 폴더 README 가 선언한 인용 고지(정보 제공 목적 · 투자권유 시 자본시장법·당행 규정 준수 의무)이고, volatile 과 같은 규약으로 붙일지도 문구도 데이터가 정한다 — 원문 유래는 01_시황 두 문서의 「유의사항(고지)」이며 02_상품 문서에는 같은 고지가 없다(폴더 단위 선언은 운영 판단이다, consult_agent/CLAUDE.md §8 관리대장).",
     "required": [
       "title",
       "category",
@@ -1031,10 +1039,18 @@
         "type": "list",
         "nullable": true
       },
+      "product_names": {
+        "type": "list",
+        "nullable": true
+      },
       "as_of": {
         "type": "text"
       },
       "volatile": {
+        "type": "text",
+        "nullable": true
+      },
+      "advisory": {
         "type": "text",
         "nullable": true
       },

@@ -259,6 +259,22 @@ def stale_mark(card: dict) -> str | None:
     return f"※ {warn}" + (f" — {as_of} 기준 표기입니다." if as_of else ".")
 
 
+def advisory_mark(card: dict) -> str | None:
+    """이 재료가 **정보 제공**이라는 표시. `stale_mark` 와 같은 규약 — 카드가 선언했을
+    때만 만들고, 문구도 데이터가 들고 있다(`advisory`).
+
+    시황·상품 자료는 직원이 그대로 고객에게 옮기기 가장 쉬운 재료이고, 그 순간 «안내»가
+    «권유»가 된다. 원문(05 시황 문서 「유의사항(고지)」)이 그래서 정보 제공 목적임과
+    자본시장법·당행 규정 준수 의무를 함께 적어뒀다. 상품 문서에는 같은 고지가 없지만
+    폴더가 단위로 선언한다 — 그것이 운영 판단이라는 기록은 CLAUDE.md §8 관리대장에 있다.
+
+    **표시를 코드가 붙이는 이유**는 guard.py 머리말과 같다: 프롬프트로 톤만 잡으면 LLM 이
+    무시해도 아무도 모른다. 검증기는 수치·상품명만 보지 톤은 보지 않는다.
+    """
+    note = (card.get("advisory") or "").strip()
+    return f"⚖ {note}" if note else None
+
+
 def _channel(state: AgentState, query: str) -> Evidence | None:
     """비대면 채널 처리 경로 — "고객이 스타뱅킹에서 직접 하려면 어느 메뉴인가".
 
@@ -451,17 +467,98 @@ def _market_like(kind: str, label: str) -> Callable[[AgentState, str], Evidence 
         notices: list[str] = []
         scopes: list[dict] = []
         for _s, c in hits:
-            mark = stale_mark(c)
-            if not mark:
+            # 시효 표시(※)와 인용 고지(⚖)는 다른 것을 말한다 — 앞은 «이 수치가 낡을 수
+            # 있다», 뒤는 «이건 정보 제공이지 권유가 아니다». 둘 다 카드의 선언에서 온다.
+            marks = [m for m in (stale_mark(c), advisory_mark(c)) if m]
+            if not marks:
                 continue
-            if mark not in notices:
-                notices.append(mark)
-            scopes.append(_scope(c["title"], [], [mark]))
+            notices += [m for m in marks if m not in notices]
+            scopes.append(_scope(c["title"], [], marks))
         return _ev(kind, query, "\n\n".join(_render_market(c) for _, c in hits),
                    KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
                    cards=[c for _s, c in hits])
 
     return run
+
+
+# ─────────────────────────────────────────────────────────────
+# 적합성 범위 — "이 고객에게 뭘 추천하지?" 에 답할 수 있는 것
+#
+# **권유가 아니라 범위다.** 직원이 상품을 물으면 답할 수 있는 것은 «이 고객 투자성향에서
+# 어디까지 가능한가»와 «그 안에 무엇이 있는가»이지, 한 상품을 고르는 것이 아니다 —
+# 무엇을 권유할지는 자본시장법과 당행 규정에 따라 직원이 정한다(§8 관리대장).
+#
+# 판정은 **하지 않는다.** strategy_agent 의 적합성 게이트가 이미 계산한 것을 그대로
+# 옮긴다(위험등급 상한·거래채널). 같은 판정을 두 번 구현하면 브리핑 화면 ⑤ 「이런 상품이
+# 적합할 수 있어요」와 대화형이 다른 목록을 말하게 된다.
+#
+# 이 도구가 없던 동안, 「이 고객 무슨 상품 추천해주지?」는 lineup 을 세 바퀴 돌고 재료
+# 0건으로 끝났다. 계산은 코드가 이미 해뒀는데 **대화형에 그걸 부를 도구가 없었다** —
+# 능력 표면은 도구 목록이므로(§3) 없는 도구는 없는 능력이다.
+# ─────────────────────────────────────────────────────────────
+
+#: 제외 상품을 몇 건까지 싣나. "왜 이건 없어?" 에 답하려면 사유가 필요하고, 열두 줄이
+#: 늘어서면 정작 통과 목록이 묻힌다.
+BLOCKED_MAX = 5
+
+
+def _suitable(state: AgentState, query: str) -> Evidence | None:
+    """적합성 게이트가 허용하는 범위와 그 안의 상품. 고객 화면이 닫혀 있으면 없다(§3)."""
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.strategy_agent import engine  # noqa: PLC0415
+    try:
+        profile = strategy_customer.get_profile(customer_id)
+        if profile is None:
+            return None
+        pool = engine.candidate_pool_for_recommendation(profile)
+        passed = pool["products"]
+        # 상한은 게이트가 쓰는 것과 같은 값이어야 한다 — 통과 목록만 옮기고 상한을 따로
+        # 셈하면 "다소높은위험까지 됩니다"와 목록이 어긋난다.
+        cap = profile.grade
+        conds = strategy_customer.conditions(profile)
+        if "mis" in conds and strategy_customer.PREF.get(profile.rk):
+            cap = strategy_customer.RISK[min(
+                strategy_customer.RISK.index(cap),
+                strategy_customer.RISK.index(strategy_customer.PREF[profile.rk]))]
+        blocked: list[tuple[dict, str]] = []
+        for row in engine.query_products(engine.PRODUCTS):
+            ok, why = engine.gate_static(row, profile, cap)
+            if not ok:
+                blocked.append((row, why))
+    except Exception:
+        return None
+    if not passed and not blocked:
+        return None
+    advice = advisory_mark({"advisory": KBMOD.advisory_note(KB)})
+
+    lines = [f"■ 고객 {customer_id} — 투자성향 {profile.rk} · 위험등급 {profile.grade}",
+             f"· 적합성 허용 상한: {cap} (이 등급까지의 상품만 안내할 수 있다)",
+             "",
+             f"── 적합성 게이트를 통과한 상품 {len(passed)}종"]
+    for r in passed:
+        ret = engine.product_return(r)
+        tail = f" · 최근 1년 {ret}%" if ret is not None else ""
+        lines.append(f"· {r['name']} — {r['risk']}{tail}"
+                     + (f" · {r['category']}" if r.get("category") else ""))
+    for pf in pool["portfolios"]:
+        lines.append(f"· [포트폴리오] {pf['name']} — {pf.get('description') or ''}".rstrip())
+    if blocked:
+        lines += ["", f"── 제외된 상품 {len(blocked)}종 (왜 목록에 없는지)"]
+        lines += [f"· {r['name']} — {why}" for r, why in blocked[:BLOCKED_MAX]]
+    return _ev("suitable", query, "\n".join(lines),
+               [{"id": f"suitable.{customer_id}",
+                 "title": f"{profile.nm} 고객 적합성 판정 (KB-PIN {customer_id})",
+                 "doc": "적합성 게이트 — 위험등급 상한·거래채널 판정 결과 "
+                        "(브리핑 화면 ⑤ 와 같은 후보군)",
+                 "score": None, "page": None}],
+               # 고지 문구를 **여기서 만들지 않는다.** 지식베이스가 선언한 것을 그대로
+               # 옮긴다 — 재료 종류마다 코드 상수를 하나씩 두면 §7 이 사실상 없어진다
+               # (§12 gap 20 이 그 경고다).
+               notices=[advice] if advice else [],
+               scopes=[_scope("적합성 판정", [], [advice])] if advice else [])
 
 
 def _customer(state: AgentState, query: str) -> Evidence | None:
@@ -693,7 +790,8 @@ ADEQUACY_MAX_TOKENS = 200
 
 
 def fits_question(question: str, hits: list[tuple[float, dict]],
-                  kind: str = "지식", history: list[dict] | None = None) -> list[tuple[float, dict]]:
+                  kind: str = "지식", history: list[dict] | None = None,
+                  query: str | None = None) -> list[tuple[float, dict]]:
     """질문의 '실제 의도'에 답이 되는 후보만 남긴다(오답 차단). 순서·점수는 그대로 둔다.
 
     LLM 이 없는 id 를 지어내도 실재 후보와 대조해 걸러낸다 — select.llm_pick 과 같은
@@ -703,9 +801,14 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     **이전 대화를 함께 넘긴다.** 후속 질문("1번꺼"·"타행에서요")은 그 말만으로는 어떤
     후보와도 맞지 않아서, 맥락 없이 판정하면 제대로 찾아온 카드까지 전부 탈락한다 —
     계획·작성 프롬프트에 히스토리를 실을 때(§12 지워진 gap 1) 이 프롬프트만 빠져 있었다.
+
+    **계획이 이번에 무엇을 찾는지도 함께 넘긴다**(`query`). 없으면 직원 질문을 그대로
+    쓴다. 왜 필요한지는 ADEQUACY_PROMPT 머리말에 적어뒀다 — 고객 특정 질문에서 일반
+    자료가 전멸하던 자리다.
     """
     cards = "\n".join(_headline(c) for _, c in hits)
     raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
+                                          query=query or question,
                                           history_block=format_history(history)),
                    max_tokens=ADEQUACY_MAX_TOKENS)
     m = re.search(r"\[.*\]", raw, re.S)
@@ -719,11 +822,15 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
 
 def _adopt(state: AgentState, query: str, hits: list[tuple[float, dict]],
            kind: str) -> list[tuple[float, dict]]:
-    """채택할 후보만 남겨 돌려준다. 0건이면 게이트를 돌리지 않는다(부를 이유가 없다)."""
+    """채택할 후보만 남겨 돌려준다. 0건이면 게이트를 돌리지 않는다(부를 이유가 없다).
+
+    직원 질문과 이번 질의를 **둘 다** 넘긴다. 예전에는 `question or query` 로 하나만
+    넘겨서, 계획이 무엇을 찾는 중인지가 게이트에 안 보였다.
+    """
     if not hits:
         return []
     return fits_question(state.get("question") or query, hits, kind,
-                         history=state.get("history"))
+                         history=state.get("history"), query=query)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -791,6 +898,13 @@ TOOLS: dict[str, Tool] = {
         # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
         # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
         # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.
+        # 「이 고객한테 뭘 추천하지」가 이 도구다. 설명에 **권유가 아니라 범위**임을 적는다 —
+        # 계획 LLM 이 읽는 유일한 판단 재료라, 여기가 흐리면 그 질문이 lineup 만 세 바퀴
+        # 돌다가 재료 0건으로 끝난다(실제로 그랬다).
+        Tool("suitable", "이 고객 투자성향으로 **어디까지 안내할 수 있는지** — 적합성 게이트가 "
+             "허용하는 위험등급 상한, 그 범위를 통과한 상품·포트폴리오 목록, 제외된 상품과 "
+             "그 사유를 돌려준다. 「이 고객한테 뭘 추천하지」·「무슨 상품 있어」가 여기다",
+             _suitable),
         Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·성립 요건, 그리고 이 고객이 "
              "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
@@ -799,7 +913,7 @@ TOOLS: dict[str, Tool] = {
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:

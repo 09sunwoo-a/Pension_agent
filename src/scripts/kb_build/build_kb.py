@@ -1047,19 +1047,20 @@ def _market_emphasis(text: str) -> str:
     return re.sub(r"\s{2,}", " ", out).strip()
 
 
-def _market_warn() -> str | None:
-    """폴더 README 의 ※ 경고 — "시황·상품 정보는 빠르게 달라진다"를 원문에서 읽는다.
+def _readme_note(marker: str) -> str | None:
+    """폴더 README 가 스스로 적어둔 선언 한 덩이를 읽는다 — `marker` 로 시작하는 줄과,
+    이어지는 들여쓴 줄들. 빈 줄에서 끊으므로 그 아래 설명 문단은 딸려오지 않는다.
 
-    이 문구를 코드가 들고 있으면 README 가 바뀔 때 두 곳이 갈린다(§12 gap 16 과 같은 사고).
-    없으면 None — 선언이 없는 재료에는 시효 표시를 붙이지 않는다(tools.stale_mark 규약).
+    문구를 코드가 들고 있으면 README 가 바뀔 때 두 곳이 갈린다(§12 gap 16 과 같은 사고).
+    없으면 None — **선언이 없으면 표시도 없다**(tools.stale_mark 규약).
     """
     readme = config.MARKET_DIR / "README.md"
     if not readme.exists():
         return None
     lines = readme.read_text(encoding="utf-8").splitlines()
     for i, ln in enumerate(lines):
-        if ln.strip().startswith("※"):
-            buf = [ln.strip().lstrip("※").strip()]
+        if ln.strip().startswith(marker):
+            buf = [ln.strip().lstrip(marker).strip()]
             for nxt in lines[i + 1:]:
                 if nxt.strip() and re.match(r"^\s+\S", nxt):
                     buf.append(nxt.strip())
@@ -1067,6 +1068,22 @@ def _market_warn() -> str | None:
                     break
             return _market_emphasis(" ".join(buf)) or None
     return None
+
+
+def _market_warn() -> str | None:
+    """※ 시효 경고 — "시황·상품 정보는 빠르게 달라진다"."""
+    return _readme_note("※")
+
+
+def _market_advisory() -> str | None:
+    """⚖ 인용 고지 — "정보 제공 목적 · 투자권유 시 자본시장법·당행 규정 준수 의무".
+
+    출처는 `01_시황/` 두 문서가 원문에 스스로 적어둔 「유의사항(고지)」이고, `02_상품/`
+    문서에는 같은 고지가 없다. 그래도 **05 카드 전부**에 싣는 것은 운영 판단이며 근거는
+    폴더 README 와 `consult_agent/CLAUDE.md` §8 관리대장에 있다 — 원문에 없는 문장을
+    원문 문서에 심지 않고, 선언은 폴더가 한 번만 한다.
+    """
+    return _readme_note("⚖")
 
 
 def _market_sections(body: str) -> tuple[str, list[tuple[str, str]]]:
@@ -1186,6 +1203,27 @@ def _key_columns(rows: list[list[str]]) -> int:
     return n
 
 
+def _carry_keys(body: list[list[str]], ncol: int) -> list[list[str]]:
+    """이름 열 ncol 개를 행마다 채운다 — 빈 칸은 **바로 위 행에서 이어받는다.**
+
+    원문이 병합 셀로 적은 자리다(디폴트옵션 표의 「지켜드림」은 편입상품 3행에 걸쳐 한 번만
+    적혀 있다). 이어받지 않으면 그 행이 어느 상품의 것인지 잃는다.
+    """
+    out: list[list[str]] = []
+    carry: list[str] = [""] * ncol
+    for cells in body:
+        row_keys: list[str] = []
+        for col in range(ncol):
+            val = cells[col].strip() if col < len(cells) else ""
+            if val:
+                carry[col] = val
+            elif carry[col]:
+                val = carry[col]
+            row_keys.append(val)
+        out.append(row_keys)
+    return out
+
+
 def _identifying(filled: list[list[str]], ncol: int) -> set[tuple[int, str]]:
     """행을 **가리킬 수 있는** 이름 칸만 남긴다 — 윗 열이 다른 여러 행에 걸친 이름은 뺀다.
 
@@ -1209,15 +1247,13 @@ def _identifying(filled: list[list[str]], ncol: int) -> set[tuple[int, str]]:
     return ident
 
 
-def _market_tables(text: str) -> list[dict]:
-    """마크다운 표 → `{"columns", "rows":[{"keys", "cells"}]}`.
+def _markdown_tables(text: str) -> list[tuple[list[str], list[list[str]]]]:
+    """본문의 마크다운 표를 `(열 머리말, 행들)` 로 훑는다 — 가공 없는 원표기 그대로.
 
-    빈 이름 칸은 **바로 위 행에서 이어받는다**. 원문이 병합 셀로 적은 자리라
-    (디폴트옵션 표의 `| | | **포트폴리오** | … | **100** |` 합계 행), 이어받지 않으면 그
-    행이 어느 상품의 것인지 잃는다 — 그러면 「알파드림 포트폴리오 수익률 4.23」이라는
-    **맞는 답변**이 남의 값으로 몰려 막힌다.
+    `_market_tables`(관계 선언)와 `_market_product_names`(상품 등록부)가 같은 표를 서로
+    다른 목적으로 읽는다. 훑기를 각자 갖고 있으면 한쪽만 고쳐지는 자리가 생긴다.
     """
-    out: list[dict] = []
+    out: list[tuple[list[str], list[list[str]]]] = []
     lines = text.splitlines()
     i = 0
     while i < len(lines):
@@ -1227,14 +1263,70 @@ def _market_tables(text: str) -> list[dict]:
         if i + 1 >= len(lines) or not _TABLE_SEP.match(lines[i + 1]):
             i += 1
             continue
-        columns = _table_cells(lines[i])
+        columns = [c.strip() for c in _table_cells(lines[i])]
         body: list[list[str]] = []
         j = i + 2
         while j < len(lines) and _TABLE_LINE.match(lines[j]) and not _TABLE_SEP.match(lines[j]):
             body.append(_table_cells(lines[j]))
             j += 1
         i = j
+        out.append((columns, body))
+    return out
 
+
+#: 상품명이 적히는 열 머리말. **이 열의 칸만** 상품 등록부로 인정한다.
+#:
+#: 등록부는 「답변이 이 이름을 말해도 되는가」의 상한이다(pension_agent/verify.py). 원문
+#: 산문에서 «KB ○○» 를 긁어 채우면, LLM 이 지어낸 이름이 우연히 문장과 겹칠 때 그 문장이
+#: 스스로의 근거가 된다 — 표의 칸은 저작자가 «이게 상품 이름이다»라고 적어둔 자리라
+#: 경계가 분명하다.
+_PRODUCT_COLUMNS = ("상품명", "편입상품", "디폴트옵션 상품")
+
+
+def _market_product_names(text: str) -> list[str]:
+    """표의 상품명 칸에 적힌 이름들.
+
+    판정 두 개를 표 파싱과 **같은 함수**로 한다 — 갈리면 등록부와 관계 선언이 서로 다른
+    이름을 갖게 된다.
+
+    · `_is_name()` — 병합 셀이 어긋나 흘러든 순수 수치·날짜(「100」·「2022-12-05」)를 뺀다.
+    · `_identifying()` — 합계 행의 라벨을 뺀다. 디폴트옵션 표의 편입상품 열에는 상품 이름
+      사이사이에 「포트폴리오」(합계 행)가 9번 나오는데, 그건 상품이 아니라 라벨이다.
+      횟수로는 못 가린다 — 「지켜드림」도 편입상품 3행에 걸쳐 3번 나온다. 갈리는 것은
+      **윗 열 조합이 하나뿐인가**다(지켜드림은 초저위험 밑에만, 포트폴리오는 아홉 상품 밑에
+      전부). 등록부에 「포트폴리오」가 들어가도 `KB…` 후보와는 안 겹쳐 무해하지만,
+      상품 등록부에 상품 아닌 말이 실려 있으면 읽는 사람이 먼저 속는다.
+    """
+    out: list[str] = []
+    for columns, body in _markdown_tables(text):
+        cols = [i for i, c in enumerate(columns) if c in _PRODUCT_COLUMNS]
+        if not cols:
+            continue
+        ncol = _key_columns(body)
+        filled = _carry_keys(body, ncol)
+        ident = _identifying(filled, ncol)
+        for r, cells in enumerate(body):
+            for i in cols:
+                # 이름 열이면 «행을 가리킬 수 있는가»를 묻고, 값 열이면 칸을 그대로 읽는다.
+                val = (filled[r][i] if i < ncol
+                       else (cells[i].strip() if i < len(cells) else ""))
+                if i < ncol and (i, val) not in ident:
+                    continue
+                if val and _is_name(val) and val not in out:
+                    out.append(val)
+    return out
+
+
+def _market_tables(text: str) -> list[dict]:
+    """마크다운 표 → `{"columns", "rows":[{"keys", "cells"}]}`.
+
+    빈 이름 칸은 **바로 위 행에서 이어받는다**. 원문이 병합 셀로 적은 자리라
+    (디폴트옵션 표의 `| | | **포트폴리오** | … | **100** |` 합계 행), 이어받지 않으면 그
+    행이 어느 상품의 것인지 잃는다 — 그러면 「알파드림 포트폴리오 수익률 4.23」이라는
+    **맞는 답변**이 남의 값으로 몰려 막힌다.
+    """
+    out: list[dict] = []
+    for columns, body in _markdown_tables(text):
         ncol = _key_columns(body)
         # 이름 열과 값 열이 둘 다 있어야 «어느 행의 값인가»를 말할 수 있다. 한쪽뿐인 표
         # (달력·일정표)는 선언하지 않는다 — 판정할 수 없는 것을 선언해두면 검사가 그것을
@@ -1242,19 +1334,7 @@ def _market_tables(text: str) -> list[dict]:
         if ncol == 0 or ncol >= max((len(r) for r in body), default=0):
             continue
 
-        filled: list[list[str]] = []
-        carry: list[str] = [""] * ncol
-        for cells in body:
-            row_keys: list[str] = []
-            for col in range(ncol):
-                val = cells[col].strip() if col < len(cells) else ""
-                if val:
-                    carry[col] = val
-                elif carry[col]:
-                    val = carry[col]
-                row_keys.append(val)
-            filled.append(row_keys)
-
+        filled = _carry_keys(body, ncol)
         ident = _identifying(filled, ncol)
         rows: list[dict] = []
         for cells, row_keys in zip(body, filled):
@@ -1270,7 +1350,7 @@ def _market_tables(text: str) -> list[dict]:
             rows.append({"keys": keys, "cells": rest,
                          "values": [c for c in rest if len(c) <= _VALUE_CELL_MAX]})
         if rows:
-            out.append({"columns": [c.strip() for c in columns], "rows": rows})
+            out.append({"columns": columns, "rows": rows})
     return out
 
 
@@ -1321,6 +1401,9 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
     warn = _market_warn()
     if not warn:
         note("[05 경고없음] README 의 ※ 시효 안내를 찾지 못함 — market 카드에 시효 표시가 빠진다")
+    advisory = _market_advisory()
+    if not advisory:
+        note("[05 고지없음] README 의 ⚖ 인용 고지를 찾지 못함 — 답변에 정보제공 고지가 빠진다")
 
     docs: list[dict] = []
     cards: dict[str, list[dict]] = {k: [] for k in MARKET_KINDS.values()}
@@ -1369,7 +1452,8 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
         preamble, sections = _market_sections(body)
         common = {
             "category": category, "group": title, "as_of": as_of,
-            "volatile": warn, "customer_facing": customer_facing,
+            "volatile": warn, "advisory": advisory,
+            "customer_facing": customer_facing,
         }
         prefix = "mkt" if kind == "market" else "lnp"
         overview_id = f"{prefix}.{slug}.00"
@@ -1381,6 +1465,7 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
             "content": preamble or None,
             "parent": None,
             "tables": ov_tables or None,
+            "product_names": _market_product_names(preamble) or None,
             # category(시황·상품)를 topics 에 넣지 않는다 — 두 글자 흔한 말이라 "구성상품"·
             # "편입상품"처럼 그 글자가 든 질문마다 **모든 카드가 똑같이** 가산점을 받아
             # 무더기 동점이 되고, 순위가 사실상 id 사전순으로 정해진다(config.TOPIC_VOCAB
@@ -1407,6 +1492,7 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
                 "content": sec_body,
                 "parent": overview_id,
                 "tables": sec_tables or None,
+                "product_names": _market_product_names(sec_body) or None,
                 "tags": {"topics": topics_of(sec_title, sec_body)},
                 "trigger_examples": _market_triggers(sec_title, sec_body,
                                                      fm.get("trigger_keywords") or [])
