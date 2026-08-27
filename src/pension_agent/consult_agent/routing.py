@@ -99,3 +99,18 @@ def route_clarify(state: AgentState) -> str:
     직원은 무엇에 답해야 하는지 모른다.
     """
     return "__end__" if state.get("clarify") else "compose"
+
+
+def route_confirm(state: AgentState) -> str:
+    """승낙 턴을 그대로 끝낼지, 답변 작성으로 보낼지.
+
+    화면 연계 승낙은 URL 하나가 답이라 그 자리에서 끝난다. 화법 제시 승낙은 **지식 카드가
+    답**이라 답변을 써야 하고, 그 경로는 계획 루프의 compose 하나뿐이다(graph.py "답변을
+    만드는 경로는 계획 루프 하나다") — 승낙 노드가 카드를 손으로 렌더하면 §5 형태 요구도
+    §7 표시도 §6 점검도 그 경로만 빠진다.
+
+    판정은 **코드가 아는 값**으로 한다: 근거를 실었는데 답변이 비어 있으면 아직 답이 없는
+    턴이다. 제안 종류(kind)로 가르지 않는 이유는, 앞으로 붙는 제안이 늘어도 "근거만 싣고
+    답은 compose 가 쓴다"는 규약 하나만 지키면 되기 때문이다.
+    """
+    return "compose" if state.get("evidence") and not state.get("answer") else "__end__"

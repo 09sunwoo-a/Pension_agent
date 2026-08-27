@@ -412,6 +412,34 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
             lines.append(f"· {label}: {v}")
     for sit in facts.get("problem_situations") or []:
         lines.append(f"· 문제상황 {sit['no']}: {sit['title']} [{sit['group']}]")
+    # 화면 ⑥⑦⑧ 이 **이 고객에게** 고른 화법·반론·참고자료. 위 문제상황에서 나온 짝이라
+    # 여기 붙는다(REQUIREMENTS.md §2 「문제상황 정의 — ⑥⑦⑧⑨ 의 출발점」).
+    #
+    # 이 세 줄이 없던 동안 "이 고객한테 뭐라고 말하지"는 `pitch` 도구가 지식베이스 화법
+    # 102건을 **고객과 무관하게** 검색해 답했다 — 화면 ⑥에 그 고객 맞춤 화법이 떠 있는데도.
+    # 화면과 대화가 같은 질문에 다른 카드를 말하는 상태였고, 그게 이 저장소가 가장
+    # 경계하는 실패다(CLAUDE.md §3). allow 에는 이미 facts 전체가 있어 인용은 허용됐지만,
+    # 재료 텍스트에 없으면 LLM 은 그 카드를 본 적이 없다.
+    #
+    # 값은 facts 를 **그대로** 옮긴다. 여기서 다시 고르면 그것이 두 번째 선정 경로가 되고,
+    # 화면과 다시 갈린다. 고르는 것은 strategy_agent 몫이다.
+    card_sources: list[dict] = []
+    for label, items, keys in (("이렇게 말해보세요", facts.get("talking_points"), ("title", "talk")),
+                               ("예상 반론", facts.get("objections"), ("objection", "response")),
+                               ("상담 참고", facts.get("consult_resources"), ("title", "snippet"))):
+        for item in items or []:
+            head, body = (str(item.get(k) or "").strip() for k in keys)
+            if not head and not body:
+                continue
+            mark = " · ".join(x for x in (item.get("card_id"), item.get("situation")) if x)
+            lines.append(f"· {label}: {head} — {body}" + (f" [{mark}]" if mark else ""))
+            # 이 줄들의 출처는 **지식 카드**다(고객 원장이 아니다). 답에 영향을 준 재료는
+            # 전부 출처에 실린다(§3) — 안 실으면 직원은 화법이 어디서 나왔는지 모른 채
+            # 읽는다. 검색으로 온 재료가 아니므로 관련도(score)는 없다.
+            if item.get("card_id"):
+                card_sources.append({"id": item["card_id"], "title": head,
+                                     "doc": item.get("source") or "출처 미상",
+                                     "score": None, "page": None})
     # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
     # 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 산문이므로 원문 스팬은 아니다.
     for label, text in (("AI브리핑 문장", result.get("sentence")),
@@ -428,11 +456,14 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 출처는 **고객 원장**이지 지식 카드가 아니다. 예전 표기("AI브리핑 재료 /
     # briefing.<id>")는 화면에서 카드 id 처럼 읽혀, 계좌에 그냥 들어 있는 값이 어딘가에서
     # 검색해 온 자료처럼 보였다. 검색으로 온 재료가 아니므로 관련도(score)도 없다.
+    # 같은 카드가 ⑥과 ⑧에 함께 뽑힐 수 있다(pitch.k03.038 이 실제로 그렇다) — 첫 등장만 남긴다.
+    seen: set[str] = set()
+    deduped = [s for s in card_sources if not (s["id"] in seen or seen.add(s["id"]))]
     return _ev("customer", query, "\n".join(lines),
                [{"id": f"customer.{customer_id}",
                  "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
-                 "score": None, "page": None}],
+                 "score": None, "page": None}, *deduped],
                allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)])
 
 
@@ -635,6 +666,109 @@ def _pitch(state: AgentState, query: str) -> Evidence | None:
 
 
 # ─────────────────────────────────────────────────────────────
+# 문제상황에 걸린 화법 — 화면 ⑥⑦⑧ 과 같은 후보군
+# ─────────────────────────────────────────────────────────────
+
+#: 한 번에 올리는 후보 상한. 상담 중에 읽을 수 있는 분량을 넘기면 아무도 안 읽는다
+#: (guard.PER_COND 와 같은 이유의 상한이다).
+PLAYBOOK_TOP_K = 2
+
+#: 찾을 화법 종류 = 화면 ⑥⑦⑧ 이 쓰는 card_type 그대로(proposal ⑥ · objection ⑦ · guide ⑧).
+#: 여기서 종류를 새로 정하지 않는다 — 정하면 화면과 갈린다.
+_PLAYBOOK_TYPES = ("proposal", "objection", "guide")
+
+
+def playbook_hits(state: AgentState, *, exclude: set[str] | None = None,
+                   top_k: int = PLAYBOOK_TOP_K) -> list[tuple[float, dict]]:
+    """이 고객의 문제상황에 걸린 화법 후보. 도구(`_situation`)와 제안 판정(`act`)이 함께 쓴다.
+
+    **매칭을 여기서 만들지 않는다.** 고객 상태 → 화법 연결은 strategy_agent 가 화면 ⑥⑦⑧
+    을 위해 이미 갖고 있고(3단: 카드의 `segments` → 세그먼트·화법 그룹 매핑 → n-gram,
+    `docs/REQUIREMENTS.md` §2), 그 함수를 그대로 부른다. 대화형이 자기 매칭을 만들면 같은
+    질문에 화면과 다른 카드를 말하게 된다(CLAUDE.md §3 — 같은 재료를 두 경로로 구현하지
+    않는다).
+
+    **금지 상속도 같은 이유로 공짜다.** `problem_situations()` 가 세그먼트의 `exclusions`
+    선언을 판정하므로(연금수령 개시 계좌에서 납입·세액공제 세그먼트 seg.13·15·16 이 빠진다),
+    여기서 따로 막지 않아도 화면이 막은 것은 후보에 애초에 없다 — 따로 막으면 그것이 두 번째
+    판정 경로가 되어 언젠가 화면과 갈린다.
+
+    카드 본체는 **대화형 KB**(`state.KB`)에서 id 로 다시 찾는다. strategy_agent 쪽은 KB 를
+    따로 적재하는 별도 인스턴스라, 그쪽 카드를 그대로 쓰면 시효성 판정이 노드마다 갈릴 수
+    있다(state.py 가 KB 를 한 번만 적재하는 이유와 같다).
+
+    슬롯(«방금 나온 상황»)으로 후보를 좁힌다 — 화면은 고객 상태만 보고 상담 **전에** 고르지만
+    여기는 상담 **중**이라, 직원이 방금 말한 상황까지 볼 수 있다. 이것이 화면과 다른 일을
+    하는 유일한 근거다. 슬롯 분해가 실패하면(LLM) 좁히지 않고 상태만으로 고른다.
+    """
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return []
+    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.strategy_agent.situations import problem_situations  # noqa: PLC0415
+    from pension_agent.strategy_agent.support import matching  # noqa: PLC0415
+    try:
+        profile = strategy_customer.get_profile(customer_id)
+        if profile is None:
+            return []
+        situations = problem_situations(profile, strategy_customer.conditions(profile))
+    except Exception:
+        return []
+    if not situations:
+        return []
+
+    try:
+        slots = PITCHMOD.extract_slots(state)
+    except LLMError:
+        # 슬롯은 후보를 **좁히는** 보조 정보다. 없으면 고객 상태만으로 고르면 되고, LLM 이
+        # 정말 죽었다면 뒤이은 작성이 같은 이유로 실패해 턴이 §11 로 끝난다.
+        slots = {}
+
+    by_id = {c["id"]: c for c in KB.cards}
+    skip = set(exclude or ())
+    best: dict[str, tuple[float, dict]] = {}
+    for card_type in _PLAYBOOK_TYPES:
+        # 종류마다 넉넉히 뽑아 슬롯으로 거른 뒤 합쳐서 상위 K 를 고른다 — 종류별로 K 를
+        # 나눠 가지면 이 고객에게 걸린 것이 한 종류에 몰려 있을 때 그 종류가 잘린다.
+        for score, card, _seg in matching.scored_situation_cards(situations, card_type, top_k * 3):
+            local = by_id.get(card["id"])
+            if local is None or local["id"] in skip:
+                continue
+            if not KBMOD.matches_scope(local, customer_type=slots.get("customer_type"),
+                                       stage=slots.get("stage")):
+                continue
+            if local["id"] not in best or score > best[local["id"]][0]:
+                best[local["id"]] = (score, local)
+    return sorted(best.values(), key=lambda x: (-x[0], x[1]["id"]))[:top_k]
+
+
+def _playbook(state: AgentState, query: str) -> Evidence | None:
+    """이 고객 상태에 걸린 화법·반론·참고자료 — 화면 ⑥⑦⑧ 과 같은 후보군에서.
+
+    `customer` 도구가 싣는 것은 화면이 **이미 고른** 2건이고, 여기는 그 **후보군 전체**에서
+    이번 대화 상황에 맞는 것을 고른다. 후보군이 같으므로 화면이 자른 것을 꺼내와도 화면과
+    어긋나지 않는다 — 다른 매칭이 만든 카드가 아니기 때문이다.
+
+    **후보군 전체를 원장에 싣지 않는다.** ⑦⑧ 후보군은 카드 id·발췌가 통째로 들어와 인용
+    허용 수치를 몇 배로 불리고, 그러면 무관한 카드의 숫자가 아무 주장에나 근거를 대준다
+    (`_POOL_KEYS` 주석의 사고 — 22개가 110개가 되면서 오답이 통과했다). 여기서는 고른
+    것만 올린다.
+    """
+    hits = playbook_hits(state, exclude=cited_cards(state))
+    hits = _adopt(state, query, hits, "고객 상태에 걸린 화법")
+    if not hits:
+        return None
+    return _ev("playbook", query, KBMOD.build_context(KB, hits), KBMOD.sources_of(KB, hits),
+               cards=[c for _s, c in hits])
+
+
+def cited_cards(state: AgentState) -> set[str]:
+    """이번 턴 원장이 이미 들고 있는 카드 id. 같은 카드를 두 번 싣지 않기 위해서다 —
+    `customer` 도구가 화면의 2건을 이미 실었다면 그건 여기서 다시 꺼낼 것이 아니다."""
+    return {s["id"] for e in (state.get("evidence") or []) for s in e["sources"] if s.get("id")}
+
+
+# ─────────────────────────────────────────────────────────────
 # 레지스트리
 # ─────────────────────────────────────────────────────────────
 
@@ -656,11 +790,16 @@ TOOLS: dict[str, Tool] = {
              "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
              _history),
+        # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
+        # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
+        # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.
+        Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·참고자료를 "
+             "브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다", _playbook),
     )
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "playbook"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:
