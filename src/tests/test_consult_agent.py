@@ -1214,9 +1214,14 @@ def check_customer_pairs() -> int:
     (카드가 아니라 고객마다 다른 원장 행이다). 대신 짝이 **이미 원장 구조에 있으므로**
     그것을 그대로 내보낸다(`render.briefing_pairs`) — 사람이 선언할 것은 없다.
 
+    판정은 거리가 아니라 **임자**다: ① 값 곁에 임자가 있으면 통과 ② 임자 없이 다른
+    이름만 있으면, 그 이름이 같은 유형의 자기 값을 말했는지로 비교의 생략과 오짝을
+    가른다 ③ 이름이 아예 없으면 위반이 아니라 임자를 답변에 덧붙인다(unattributed).
+
     잡는 것만큼 통과시키는 것을 함께 잰다. 여기서 오탐이 나면 옳은 답이 화면에서 사라진다.
     """
     from pension_agent.consult_agent import relations as R
+    from pension_agent.consult_agent.nodes import plan as P
     from pension_agent.strategy_agent import customer as SC
     from pension_agent.strategy_agent.engine.pipeline import prepare as _prep
     from pension_agent.strategy_agent.engine.render import briefing_pairs
@@ -1236,7 +1241,12 @@ def check_customer_pairs() -> int:
            ("만기 유형↔날짜", "예금 3,020만원이 2027-02-14 에 만기입니다."),
            ("상품↔수익률", "RISE 미국S&P500 ETF 는 수익률 31.7% 입니다."),
            ("상품↔금리", "기업은행 퇴직연금 정기예금 1년은 금리 3.30% 입니다."),
-           ("자산군↔비중", "예금 비중은 37.6% 입니다.")]
+           ("자산군↔비중", "예금 비중은 37.6% 입니다."),
+           # 임자가 자기 값(금액)을 곁들여도 남의 비중은 잡는다 — 반쪽짜리 문장.
+           # 예금이 자기 비중을 말한 적이 없다는 것(같은 유형 부재)이 판정 근거다.
+           ("반쪽짜리 문장", "예금은 4,050만원이고 비중은 37.6% 입니다."),
+           ("만기 자금을 엉뚱한 유형에", "예금 만기 자금 3,020만원을 재예치 안내해보세요."),
+           ("비중 항목 곁의 남의 수익률", "예금 비중 19.3%인데 수익률은 22.9%예요.")]
     for label, answer in BAD:
         loose = verify_texts(answer, tools.ledger_texts([ev]))[0]
         hit = bool(R.check(answer, cards)) and loose
@@ -1244,12 +1254,18 @@ def check_customer_pairs() -> int:
               + ("" if hit else f" — 잡힘 {bool(R.check(answer, cards))} · 집합검사 {loose}"))
         ok += hit
 
-    # 통과해야 하는 것 — 옳은 답과 나열문. 나열은 값이 자기 이름 **뒤**에 와서 거리만 보면
-    # 전부 오짝으로 읽히는 모양이라, 여기가 오탐이 가장 나기 쉬운 자리다.
+    # 통과해야 하는 것 — 옳은 답·나열문·비교 생략문. 나열은 값이 자기 이름 **뒤**에 와서
+    # 거리로 판정하면 전부 오짝으로 읽히는 모양이라, 여기가 오탐이 가장 나기 쉬운 자리다.
     GOOD = [("옳게 짝지은 답", "GIC 3,020만원이 2027-02-14 (D-174) 만기 도래합니다."),
             ("만기 두 건 나열", "2027-02-14 (D-174) GIC 3,020만원, 2027-04-02 (D-221) 예금 4,050만원."),
             ("자산군 나열", "수익증권 7,900만원(37.6%) · ETF 5,530만원(26.3%) · 예금 4,050만원(19.3%)."),
-            ("이름 없이 말한 값", "만기 자금 4,050만원은 재예치를 안내해보세요.")]
+            ("이름 없이 말한 값", "만기 자금 4,050만원은 재예치를 안내해보세요."),
+            # 자기 수익률을 이미 말한 항목 곁의 남의 수익률 — 비교의 생략이지 오짝이 아니다
+            ("비교 생략문", "피델리티 글로벌 테크놀로지 (주식-재간접)가 31.7%로 최고이고, 다음은 22.9%입니다."),
+            # 줄인 이름도 임자다 — 그 고객 안에서 한 상품만 가리키는 조각이면
+            ("줄인 이름의 임자", "고유계정대 말고 피델리티는 31.7%입니다."),
+            ("임자가 앞 문장에", "예금 만기가 다가옵니다. 금액은 4,050만원이고 날짜는 2027-04-02입니다."),
+            ("비교문", "GIC보다 예금이 큽니다 — 4,050만원 대 3,020만원.")]
     for label, answer in GOOD:
         hit = not R.check(answer, cards)
         print(f"{'✓' if hit else '✗'} 옳은 답을 막지 않는다: {label}"
@@ -1257,22 +1273,50 @@ def check_customer_pairs() -> int:
         ok += hit
 
     # 지난 «예금 90%» 사고의 클래스. 김현수는 고유계정대 75% · 예금 15% 인데, 4분류 라벨이
-    # 잘못 적혀 있던 동안 답변이 예금 비중을 75%(고유계정대 값)로 말했다. 라벨은 고쳤지만
-    # 검증기는 여전히 못 잡던 자리다. 원장은 "75.0%" 로 적고 답변은 "75%" 로 쓰므로,
-    # 정규형을 함께 실어야 임자를 찾는다.
+    # 잘못 적혀 있던 동안 답변이 예금 비중을 75%(고유계정대 값)로 말했다. 원장은 "75.0%",
+    # 답변은 "75%" — 표기 변형(_alts)이 임자를 이어야 잡는다.
     kim = briefing_pairs(SC.get_profile(KIM))
     hit = bool(R.miscategorized("예금 비중은 75%입니다.", kim)) and not R.miscategorized(
         "예금 비중은 15%입니다.", kim)
     print(f"{'✓' if hit else '✗'} 비중 표기가 달라도(75.0% ↔ 75%) 임자를 찾는다")
     ok += hit
 
+    # 임자 표시 — 이름 없이 인용한 값에는 임자를 덧붙인다. 축 신호어(만기·수익률·비중)가
+    # 있는 문장에만 붙는다 — "연 납입한도 1,800만원"의 1,800만원이 우연히 어느 예금의
+    # 만기 금액과 같을 때(최서윤), 만기 얘기가 아닌 문장에 붙이면 표시가 거짓말을 한다.
+    pairs = cards[0]["pairs"]
+    owned = R.unattributed("만기 자금 3,020만원을 재예치 안내해보세요.", pairs)
+    hit = len(owned) == 1 and "GIC" in owned[0]
+    print(f"{'✓' if hit else '✗'} 이름 없이 인용한 만기 금액에 임자(GIC)를 덧붙인다")
+    ok += hit
+    hit = R.unattributed("예금 만기가 다가옵니다. 금액은 4,050만원입니다.", pairs) == []
+    print(f"{'✓' if hit else '✗'} 임자가 답변 어딘가에 있으면 덧붙이지 않는다")
+    ok += hit
+    seo = briefing_pairs(SC.get_profile("165932-8741205"))   # 최서윤 — 예금 만기 1,800만원
+    hit = R.unattributed("연 납입한도는 1,800만원입니다.", seo) == []
+    print(f"{'✓' if hit else '✗'} 축 신호어가 없는 문장에는 임자를 씌우지 않는다(1,800만원 충돌)")
+    ok += hit
+
+    # compose 가 실제로 덧붙이는가 — 판정 함수만 있고 배선이 빠지면 화면은 그대로다.
+    _orig = P.generate
+    P.generate = lambda *a, **k: "만기 자금 3,020만원을 재예치 안내해보세요."
+    try:
+        out = P.compose({"question": "만기 얼마야", "evidence": [ev], "customer_id": HAN})
+    finally:
+        P.generate = _orig
+    hit = P.VALUE_OWNERS in out["answer"] and "GIC" in out["answer"]
+    print(f"{'✓' if hit else '✗'} compose 가 임자 표시를 답변에 덧붙인다")
+    ok += hit
+
     # 9케이스 전원 오탐 스윕 — 원장 줄 자체는 정의상 옳은 문장이다. 여기서 걸리면
-    # 답변이 재료를 그대로 인용해도 막히는 뜻이 된다.
+    # 답변이 재료를 그대로 인용해도 막히는 뜻이 된다. 임자 표시도 붙으면 안 된다(전부
+    # 임자 곁에 있으므로).
     noise = []
     for prof in SC.PERSONAS:
         rows, snap = briefing_pairs(prof), _prep(prof)["briefing"]
         for key in ("만기도래", "보유상품", "자산군별"):
-            if snap.get(key) and R.miscategorized(f"{key}는 {snap[key]} 입니다.", rows):
+            line = f"{key}는 {snap[key]} 입니다." if snap.get(key) else None
+            if line and (R.miscategorized(line, rows) or R.unattributed(line, rows)):
                 noise.append(f"{prof.nm}/{key}")
     hit = not noise
     print(f"{'✓' if hit else '✗'} 9케이스 전원: 원장 줄 자체를 오탐하지 않는다"
@@ -1281,7 +1325,7 @@ def check_customer_pairs() -> int:
 
     # 짝이 없는 재료(항목이 하나뿐이거나 없는 고객)에는 아무 판정도 하지 않는다.
     hit = R.miscategorized("아무 말이나 4,050만원", [{"kind": "만기도래", "label": "예금",
-                                                 "values": ["4,050만원"]}]) == []
+                                                 "values": [{"v": "4,050만원", "t": "amount"}]}]) == []
     print(f"{'✓' if hit else '✗'} 항목이 하나뿐이면 판정하지 않는다(갈릴 것이 없다)")
     ok += hit
     return ok

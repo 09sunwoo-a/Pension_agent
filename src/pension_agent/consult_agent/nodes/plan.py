@@ -65,6 +65,11 @@ def _no_evidence(state: AgentState) -> str:
 #: 빠진 필수 표시를 채워 넣는 블록의 머리말. 근거 원문 전체가 아니라 표시만 붙는다.
 MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
 
+#: 임자 표시 블록의 머리말. 답변이 짝 값(만기 금액·수익률·비중)을 **이름 없이** 인용하면
+#: 코드가 임자를 덧붙인다 — "만기 자금 3,020만원"만 보고 직원이 어느 상품 것인지 모른 채
+#: 안내하면 안 된다. 문장이 틀린 게 아니라 덜 갖춰진 것이므로 지우지 않고 채운다(§6).
+VALUE_OWNERS = "── 이 수치의 임자"
+
 #: 재료 성격 표시 블록의 머리말(§7). 어느 자료에서 온 말인지 · 고객에게 그대로 옮겨도
 #: 되는지. 답을 읽는 사람은 직원이고, 무엇을 옮길지는 직원이 거른다 — 그 판단에 필요한
 #: 표시를 주는 데까지가 에이전트의 몫이다.
@@ -368,7 +373,10 @@ def compose(state: AgentState) -> dict[str, Any]:
                             for label, missing in gaps]
 
     if answer:
-        parts = [answer] + ([MISSING_NOTICES, *appends] if appends else [])
+        owners = relations.unattributed(answer, [r for c in tools.ledger_related(evidence)
+                                                 for r in c.get("pairs") or []])
+        parts = ([answer] + ([MISSING_NOTICES, *appends] if appends else [])
+                 + ([VALUE_OWNERS, *owners] if owners else []))
     else:
         parts = [e["text"] for e in evidence]  # 생성문을 못 쓰면 근거 원문이 답이다
 

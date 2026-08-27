@@ -319,30 +319,34 @@ def briefing_pairs(p: Profile) -> list[dict]:
     관계는 이미 Profile 에 구조로 있고, 여기서 하는 일은 그것을 버리지 않고 함께 넘기는
     것뿐이다. 판정은 `consult_agent/relations.py::miscategorized` 가 한다.
 
+    값마다 **유형**(`t`)을 단다 — date(만기일)·dday(잔여일)·amount(금액)·share(비중)·
+    ret(수익률)·rate(금리). 유형이 없으면 "피델리티 31.7%로 최고이고 다음은 22.9%" 같은
+    비교 생략문(항목이 자기 수익률을 이미 말하고 남의 수익률을 이름 없이 잇는 문장)과
+    "예금은 4,050만원이고 비중은 37.6%"(금액은 맞고 비중은 남의 것) 를 가를 수 없다 —
+    앞은 통과해야 하고 뒤는 잡아야 하는데, 겉모양이 같다.
+
     값 문자열은 `_briefing()` 이 쓰는 것과 **같은 표기**여야 한다 — 답변은 재료에 실린 표기를
     보고 쓰므로, 여기서 다르게 포맷하면 임자를 못 찾아 판정이 통째로 비어버린다. 그래서 이
-    함수는 `_briefing()` 바로 옆에 둔다.
+    함수는 `_briefing()` 바로 옆에 둔다. 표기 변형(75.0%↔75%, 콤마 유무)은 relations 쪽이
+    푼다 — 여기는 원장 표기 그대로다.
     """
     rows: list[dict] = []
     for m in p.maturities or []:
         rows.append({"kind": "만기도래", "label": m["type"],
-                     "values": [m["date"], f"D-{m['dd']}", won(m["amount"])]})
+                     "values": [{"v": m["date"], "t": "date"},
+                                {"v": f"D-{m['dd']}", "t": "dday"},
+                                {"v": won(m["amount"]), "t": "amount"}]})
     for h in p.holdings or []:
-        values = [won(h["amount"])]
+        values = [{"v": won(h["amount"]), "t": "amount"}]
         if h.get("ret_own") is not None:
-            values.append(f"{h['ret_own'] * 100:.1f}%")
+            values.append({"v": f"{h['ret_own'] * 100:.1f}%", "t": "ret"})
         if h.get("rate"):
-            values.append(f"{h['rate'] * 100:.2f}%")
+            values.append({"v": f"{h['rate'] * 100:.2f}%", "t": "rate"})
         rows.append({"kind": "보유상품", "label": h["name"], "values": values})
     for a in p.assets or []:
-        # 비중은 정규형도 함께 싣는다. 원장은 "75.0%" 로 적지만 답변은 "75%" 로 쓴다 —
-        # 표기가 어긋나면 임자를 못 찾아 «예금 비중 75%»(고유계정대 값) 같은 오답이
-        # 판정 불가로 빠져나간다. 값이 같은 두 표기이므로 임자도 같다.
-        pct = [f"{a['pct']}%"]
-        if float(a["pct"]).is_integer():
-            pct.append(f"{int(a['pct'])}%")
         rows.append({"kind": "자산군별", "label": a["type"],
-                     "values": [won(a["amount"]), *pct]})
+                     "values": [{"v": won(a["amount"]), "t": "amount"},
+                                {"v": f"{a['pct']}%", "t": "share"}]})
     return rows
 
 
