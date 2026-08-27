@@ -471,9 +471,15 @@ def _citable(facts: dict) -> dict:
 #: 근거이지 현재 기준 값의 근거가 아니고, 둘을 섞으면 낡은 값이 오늘의 답으로 나간다.
 HISTORY_MARK = "※ 지난 상담 기록입니다 — 그때 나눈 이야기이지 지금 기준 값이 아닐 수 있습니다."
 
-#: 재료에 싣는 범위(세션 수 · 세션당 턴 수 · 발췌 길이). 상담 중에 읽을 분량을 넘기면
-#: 아무도 안 읽고 원장만 무거워진다.
-HISTORY_SESSIONS, HISTORY_TURNS, HISTORY_EXCERPT = 3, 8, 120
+#: 재료에 싣는 범위(과거 상담 세션 수 · 대화 세션 수 · 세션당 턴 수 · 발췌 길이). 상담 중에
+#: 읽을 분량을 넘기면 아무도 안 읽고 원장만 무거워진다.
+#:
+#: 과거 상담(record)과 에이전트 대화(user/agent)의 예산을 **따로** 둔다. 하나의 최신순
+#: 창을 같이 쓰면 graph.ask 가 매 턴 2턴씩 쌓는 대화 세션이 금방 창을 차지해, 정작
+#: "지난번에 무슨 얘기 했지"의 지난번(과거 상담)이 밀려난다 — 이 도구를 쓰는 이유가
+#: 사라지는 순서다.
+HISTORY_SESSIONS, HISTORY_DIALOG_SESSIONS = 3, 1
+HISTORY_TURNS, HISTORY_EXCERPT = 8, 120
 
 #: 세션 턴의 역할 → 사람이 읽는 이름. `record` 는 발화가 아니라 «과거 상담 결과 요약»이다
 #: (실서비스의 CRM 상담 기록 자리 — scripts/seed_sessions.py 가 목업으로 심는다).
@@ -488,6 +494,12 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     이번 질문과 무관한 수치까지 검증을 통과하게 된다. 발췌라도 그 안의 값은 원장에
     들어가므로, 재료가 시효 표시를 달고 나온다(HISTORY_MARK) — 답변이 그 값을 '지금
     기준'으로 말하지 않게 하는 것은 그 표시다.
+
+    계획 루프가 정한 `query` 는 **선별에만** 쓴다: 질의어가 걸리는 과거 상담을 최신순보다
+    앞세운다(코드 매칭 — LLM 아님). 매칭 0건은 이력 0건이 아니므로 최신순 그대로 싣는다 —
+    "관련 상담이 없습니다"를 도구가 지어내면 그게 근거가 되기 때문이다. 걸러내지 않고
+    순서만 바꾸는 이유도 같다: 질의어는 표현이 다를 수 있고, 뺐다가 틀리면 있는 기록을
+    없다고 답하게 된다.
 
     기록이 없으면 None 이다. "아직 상담 기록이 없습니다" 같은 문장을 도구가 지어내면
     그게 근거가 되고, 원장이 빈 채로 끝나는 정직한 '없음' 경로가 막힌다.
@@ -504,12 +516,25 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     # 읽는 곳은 **여기 하나**다. 과거 상담 기록(직원이 고객과 나눈 것)도 세션 저장소에
     # 들어와 있다 — 원장에서 따로 읽는 두 번째 경로를 두면 같은 상담이 두 번 실린다
     # (scripts/seed_sessions.py 가 목업을 심고, 실서비스에서는 CRM 이 같은 자리를 채운다).
-    lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
+    def _turns(session: dict) -> list[dict]:
+        return [t for t in (session.get("turns") or []) if (t.get("text") or "").strip()]
+
     recent = sorted(sessions, key=lambda s: s.get("started_at") or "", reverse=True)
-    for session in recent[:HISTORY_SESSIONS]:
-        turns = [t for t in (session.get("turns") or []) if (t.get("text") or "").strip()]
-        if not turns:
-            continue
+    records = [s for s in recent if any(t.get("role") == "record" for t in _turns(s))]
+    dialogs = [s for s in recent if s not in records and _turns(s)]
+
+    # 질의어 매칭 — 2자 이상 토큰이 상담 텍스트에 부분일치하면 그 세션을 앞세운다.
+    tokens = [w for w in (query or "").split() if len(w) >= 2]
+
+    def _hits(session: dict) -> int:
+        joined = " ".join(t.get("text") or "" for t in _turns(session))
+        return sum(1 for w in tokens if w in joined)
+
+    if tokens and any(_hits(s) for s in records):
+        records.sort(key=_hits, reverse=True)  # 동점은 sort 안정성으로 최신순 유지
+
+    def _render(session: dict, lines: list[str]) -> None:
+        turns = _turns(session)
         lines.append(f"· {(session.get('started_at') or '')[:10]} 상담 ({len(turns)}턴)")
         for turn in turns[-HISTORY_TURNS:]:
             text = " ".join((turn.get("text") or "").split())
@@ -517,6 +542,18 @@ def _history(state: AgentState, query: str) -> Evidence | None:
                 text = text[:HISTORY_EXCERPT] + "…"
             role = _HISTORY_ROLE.get(turn.get("role"), turn.get("role") or "?")
             lines.append(f"  - {role}: {text}")
+
+    # 구획을 나눠 싣는다 — 오늘 나눈 대화가 「과거 상담」으로 오독되면 방금 한 말이
+    # 지난 상담의 근거처럼 인용된다.
+    lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
+    if records:
+        lines.append("[과거 상담 기록]")
+        for session in records[:HISTORY_SESSIONS]:
+            _render(session, lines)
+    if dialogs:
+        lines.append("[에이전트와 나눈 최근 대화]")
+        for session in dialogs[:HISTORY_DIALOG_SESSIONS]:
+            _render(session, lines)
     if len(lines) == 1:
         return None
 

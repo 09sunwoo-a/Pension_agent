@@ -14,6 +14,7 @@ from pension_agent.strategy_agent import sections
 from pension_agent import llm
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import screens
+from pension_agent.consult_agent import suggest
 
 st.set_page_config(page_title="IRP 에이전트 평가 룸", layout="wide")
 st.title("📈 IRP 전략 제안 에이전트 평가 대시보드")
@@ -359,6 +360,17 @@ with tab_chat:
         st.session_state.chat_session_id = f"streamlit-{uuid.uuid4().hex[:8]}"
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
+
+    # ── 이 고객 관련 추천 질문 (consult_agent/suggest.py — 코드 조립, 상황 기반)
+    # 과거 상담이 있는 고객에게만 뜬다. 칩 문구 자체가 "지난 상담이 있었다"는 알림이고,
+    # 누르면 아래 pending_question 경로로 계획 루프(history 도구)를 탄다.
+    _chips = suggest.history_chips(customer_id)
+    if _chips:
+        st.markdown("**💡 이 고객 관련 추천 질문**")
+        _chip_cols = st.columns(len(_chips))
+        for _i, _chip in enumerate(_chips):
+            if _chip_cols[_i].button(_chip, key=f"chip-{customer_id}-{_i}", use_container_width=True):
+                st.session_state.pending_question = _chip
 
     QUESTION_GROUPS = {
         "화법 — 특정 상담 상황(situation)": [

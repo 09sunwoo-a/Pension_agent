@@ -1847,6 +1847,79 @@ def check_history_material() -> int:
 
 
 
+
+def check_history_selection() -> int:
+    """상담 이력의 선별 — 질의 반영·과거/오늘 분리·추천 칩(칩+검색 확장).
+
+    회귀 대상 셋.
+
+      ① `_history` 가 `query` 를 버리던 것. 계획 루프가 "어떤 질의로 부를지"를 정하는데
+         (§2) 도구가 그 질의를 안 읽으면 그 절반이 껍데기다 — 무슨 질문이든 같은 최신순
+         덤프가 나갔다. 이제 질의어가 걸리는 과거 상담을 앞세운다(순서만 — 걸러내면
+         표현이 다른 기록을 없다고 답하게 된다).
+      ② 과거 상담(record)과 에이전트 대화(user/agent)가 한 최신순 창을 쓰던 것. 시연 중
+         대화 몇 턴이면(graph.ask 가 매 턴 2턴 append) "지난번"이 창 밖으로 밀렸다.
+         예산을 갈라 과거 상담은 항상 실린다.
+      ③ 추천 칩(suggest.history_chips) — 기록이 있는 고객에게만, 코드 조립로만 뜬다.
+         LLM 이 칩을 쓰면 기록에 없는 내용이 질문에 실려 들어온다.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from pension_agent import session_store
+    from pension_agent.consult_agent import suggest
+
+    ok = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        orig_dir = session_store.SESSION_DATA_DIR
+        session_store.SESSION_DATA_DIR = Path(tmp)
+        try:
+            # 과거 상담 2건(최신=ETF, 과거=수수료) + 대화 세션 3개 — 옛 로직이면
+            # 대화 3세션이 최신순 창(3)을 다 차지해 record 가 밀린다.
+            session_store.append_turn("CY", "past-2026-05-01", {
+                "role": "record", "text": "수수료 부담 문의로 상품 전환 보류",
+                "ts": "2026-05-01T09:00:00Z"})
+            session_store.append_turn("CY", "past-2026-07-01", {
+                "role": "record", "text": "ETF 거래 편의성 문의", "ts": "2026-07-01T09:00:00Z"})
+            for i in range(3):
+                session_store.append_turn("CY", f"chat-{i}", {
+                    "role": "user", "text": f"오늘 질문 {i}", "ts": f"2026-08-2{i}T09:00:00Z"})
+                session_store.append_turn("CY", f"chat-{i}", {
+                    "role": "agent", "text": f"오늘 답변 {i}", "ts": f"2026-08-2{i}T09:00:05Z"})
+
+            plain = tools.run("history", {"customer_id": "CY"}, "지난 상담 내용")
+            fee = tools.run("history", {"customer_id": "CY"}, "수수료 얘기 했었나")
+            chips = suggest.history_chips("CY")
+            no_chips = suggest.history_chips("C_없음")
+        finally:
+            session_store.SESSION_DATA_DIR = orig_dir
+
+    # ② 대화가 아무리 쌓여도 과거 상담은 실린다 — 그리고 구획이 갈라져 있다.
+    hit = bool(plain) and "수수료 부담 문의" in plain["text"] and "ETF 거래" in plain["text"] \
+        and plain["text"].index("[과거 상담 기록]") < plain["text"].index("[에이전트와 나눈 최근 대화]")
+    print(f"{'✓' if hit else '✗'} 오늘 대화가 쌓여도 과거 상담이 밀리지 않는다(구획 분리)")
+    ok += hit
+
+    # 대화 세션은 최근 1개만 — 원장이 오늘 발화로 뒤덮이지 않게.
+    hit = bool(plain) and plain["text"].count("오늘 질문") == 1
+    print(f"{'✓' if hit else '✗'} 에이전트 대화는 최근 {tools.HISTORY_DIALOG_SESSIONS}세션만 싣는다")
+    ok += hit
+
+    # ① 질의어가 걸린 상담(수수료·5/1)이 최신(ETF·7/1)보다 앞선다. 걸러내지는 않는다.
+    hit = bool(fee) and fee["text"].index("수수료 부담") < fee["text"].index("ETF 거래")
+    print(f"{'✓' if hit else '✗'} 질의어가 걸린 과거 상담을 앞세운다(query 반영)")
+    ok += hit
+    hit = bool(fee) and "ETF 거래" in fee["text"]
+    print(f"{'✓' if hit else '✗'} 질의어와 다른 기록도 걸러내지 않는다(순서만 바꾼다)")
+    ok += hit
+
+    # ③ 칩 — record 있는 고객에게만, 날짜·경과일은 계산값.
+    hit = len(chips) == 2 and "7/1" in chips[0] and no_chips == []
+    print(f"{'✓' if hit else '✗'} 추천 칩은 기록 있는 고객에게만, 최신 상담 날짜로 뜬다")
+    ok += hit
+    return ok
+
+
 def check_hier_index() -> int:
     """계층 인덱스 — 버킷 카탈로그(L0) → 카드 슬라이스(L1).
 
@@ -2547,6 +2620,7 @@ def main() -> int:
     check_screen_registry()
     check_caution_roles()
     check_history_material()
+    check_history_selection()
     check_hier_index()
     check_order_flipped()
     check_tool_loop()
