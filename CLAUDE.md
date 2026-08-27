@@ -10,8 +10,9 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 - 고객은 시연용 목업 9케이스다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`,
   `scripts/import_customers.py` 가 `customers.json` 으로 내리고 `customer.py` 가 Profile 로
   매핑한다(고칠 값은 xlsx 에 넣고 재생성). 타겟 선정 룰베이스는 더미가 아니다 — 기획자가
-  행내 원문을 정규화해 확인해준 표다(`targets.json`). 기준일은 `customer.TODAY`(=원장 기준일 2026-08-24)
-  고정, 안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.
+  행내 원문을 정규화해 확인해준 표다(`targets.json`). 원장 기준일은 `customer.AS_OF`(2026-08-24) 고정이고, 상담 시점의 «오늘»은
+  `customer.today()`(실제 날짜 · `PENSION_TODAY` 로 고정 가능)로 갈라 둔다 — 잔여일수·경과일은
+  뒤쪽 기준, 안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.
 - **화면에는 더미 표시를 붙이지 않는다**(발송문 포함). 발표 산출물에 딱지를 남기지 않기로
   했다. 대신 무엇이 더미인지는 `docs/DEMO_STATUS.md` 가 전담한다.
 - `src/app.py`(Streamlit)는 개발·테스트용 화면이다. 실서비스 프론트는 따로 만든다.

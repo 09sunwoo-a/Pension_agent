@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pension_agent.strategy_agent.customer import TODAY
+from pension_agent.strategy_agent.customer import today as _today
 from pension_agent.strategy_agent.support.matching import ASSETS
 
 
@@ -59,7 +59,9 @@ def outreach_candidates(situations: list[dict] | None = None,
     정렬은 규칙(여기)이 하고, 그중 어느 것이 이 고객에게 맞는지는 LLM 이 고른다
     (agent._select_db_sections). LLM 이 없으면 next_event_and_seminar() 의 첫 건이 그대로 쓰인다.
     """
-    today = today or TODAY
+    # 기준은 원장 스냅샷(AS_OF)이 아니라 **오늘**이다 — 어제 끝난 세미나는 원장이 언제
+    # 찍혔든 오늘 안내할 수 없다.
+    today = today or _today()
     order = _outreach_order(situations)
     return {key: [_outreach_row(a) for a in sorted(_open_assets(content_type, today), key=order)]
             for content_type, key in (("이벤트", "event"), ("세미나", "seminar"))}
@@ -73,7 +75,7 @@ def next_event_and_seminar(situations: list[dict] | None = None,
     같으면 start_date 가 빠른 것을 고른다 — 진행 중이거나 미래 일정인 콘텐츠를 우선하고
     종료된 콘텐츠는 노출하지 않는다는 요건을 그대로 코드로 옮긴 것. LLM 은 개입하지 않는다.
     """
-    today = today or TODAY
+    today = today or _today()
     order = _outreach_order(situations)
 
     def _pick(content_type: str) -> dict | None:

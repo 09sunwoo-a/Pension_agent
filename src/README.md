@@ -97,6 +97,24 @@ python -m scripts.demo_status                   # docs/DEMO_STATUS.md 갱신
 LLM 은 `.env` 의 `LLM_BASE_URL` 유무로 사내(genai)/외부테스트(anthropic)를 자동 전환한다 →
 [pension_agent/README.md](pension_agent/README.md).
 
+### 오늘은 언제인가 — 시간축이 둘이다
+
+| | 무엇 | 어디에 쓰이나 |
+|---|---|---|
+| `customer.AS_OF` | 원장 스냅샷 기준일(2026-08-24) | 잔액·수익률·납입액이 «찍힌 날». `customers.json` 의 `meta.as_of` 와 묶여 있다 |
+| `customer.today()` | 상담 시점의 **오늘**(기본: 실제 날짜) | 만기까지 며칠·연말까지 며칠·마지막 접촉 이후 며칠 — 잔여일수와 경과일 전부 |
+
+둘을 하나로 붙여 두면 원장이 사흘만 묵어도 화면이 "만기 D-17"(실제 D-14) · "연말까지
+129일"(실제 126일)을 말한다. 잔액은 옮길 수 없지만 날짜 산술은 옮길 수 있어서 갈라 뒀다.
+
+```bash
+PENSION_TODAY=2026-12-01 python -m pension_agent.strategy_agent.agent 한지우   # 오늘을 고정해 본다
+```
+
+테스트는 `tests/__init__.py` 가 이 값을 `AS_OF` 로 고정한 채 돈다 — 안 그러면 600건 넘는
+단언이 실행일마다 흔들린다. 날짜 산술 자체는 `tests/test_infra.py` 「오늘·기준일」 절이
+날짜를 명시해 따로 검증한다.
+
 ## 구조
 
 ```mermaid

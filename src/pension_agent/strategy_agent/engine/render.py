@@ -22,7 +22,7 @@ from pension_agent.strategy_agent.engine.catalog import (
     PORT_LABELS,
 )
 from pension_agent.strategy_agent.engine.products import _branch_defs
-from pension_agent.strategy_agent.engine.text import _Ctx, _eul, _pname, _ro, won
+from pension_agent.strategy_agent.engine.text import _Ctx, _eul, _pname, _ro, dday, won
 
 
 # ─────────────────────────────────────────────────────────────
@@ -229,10 +229,10 @@ def _briefing(p: Profile) -> dict:
         # 날짜를 함께 싣는 이유도 같다 — 재료에 없으면 대화형이 기준일에서 계산해 말한다.
         if p.maturities:
             snap["만기도래"] = " · ".join(
-                f"{m['date']} (D-{m['dd']}) {m['type']} {won(m['amount'])}"
+                f"{m['date']} ({dday(m['dd'])}) {m['type']} {won(m['amount'])}"
                 for m in p.maturities)
         else:  # 만기 목록 없이 조립된 프로파일(합성 케이스) — 가장 가까운 건만 표기한다
-            when = f"{p.matDate} (D-{p.matDD})" if p.matDate else f"D-{p.matDD}"
+            when = f"{p.matDate} ({dday(p.matDD)})" if p.matDate else dday(p.matDD)
             snap["만기도래"] = f"{when} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
     # 근거 수치는 여기서 확정하고, 실제 제안 여부는 LLM 이 맥락상 판단한다(prompts.py).
@@ -285,7 +285,7 @@ def _briefing(p: Profile) -> dict:
     # ISA 만기자금 — **IRP 계좌 밖의 돈**이라 보유 현황과 갈라 적는다. 추가납입 상담의
     # 재원 후보이고, 만기가 임박하면 그 시점이 상담 창구가 된다(시연 케이스 2건).
     if p.isa:
-        dd = f" (D-{p.isa['dd']})" if p.isa.get("dd") is not None else ""
+        dd = f" ({dday(p.isa['dd'])})" if p.isa.get("dd") is not None else ""
         snap["ISA만기자금(IRP 외부)"] = (
             f"{won(p.isa['amount'])} · 만기 {p.isa['date']}{dd} · {p.isa['org']}")
     # 연도별 납입 이력 — "작년엔 얼마 넣었어" 는 당해 납입액만으로 답할 수 없다.

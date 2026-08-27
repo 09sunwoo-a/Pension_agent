@@ -15,6 +15,20 @@ from pension_agent.strategy_agent.engine.catalog import CARD_INDEX, DOC_TITLES
 # 표기 유틸
 # ─────────────────────────────────────────────────────────────
 
+def dday(dd: int | None) -> str:
+    """잔여일수의 화면 표기. **음수는 «지남»이라고 읽는다.**
+
+    예전에는 어디서나 f"D-{dd}" 로 찍었다. 오늘이 고정돼 있던 동안에는 시연 데이터의 만기가
+    전부 미래라 음수가 나올 일이 없었는데, 오늘이 실제 날짜로 움직이면서 지난 만기가
+    "D--87" 로 찍혔다 — 표기가 깨졌을 뿐 아니라 **이미 지난 만기를 아직 안 온 것처럼**
+    보여준다. 지난 것은 지났다고 말한다(그 돈이 어떻게 됐는지는 원장 스냅샷이 모르므로,
+    화면은 사실만 적고 판단은 직원에게 남긴다).
+    """
+    if dd is None:
+        return ""
+    return f"D-{dd}" if dd >= 0 else f"만기 경과 {-dd}일"
+
+
 def won(v: float) -> str:
     v = int(round(v))
     eok, rest = divmod(v, 100_000_000)
