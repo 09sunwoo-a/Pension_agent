@@ -87,15 +87,19 @@ def route_intent(state: AgentState) -> str:
 # ─────────────────────────────────────────────────────────────
 
 def route_plan(state: AgentState) -> str:
-    """도구를 한 번 더 부를지, 답을 쓸 준비를 할지. 상한은 plan.MAX_STEPS 가 정한다."""
-    return "clarify" if state.get("plan_done") else "plan"
+    """도구를 한 번 더 부를지, 답을 낼지. 상한은 plan.MAX_STEPS 가 정한다."""
+    return "answer" if state.get("plan_done") else "plan"
 
 
-def route_clarify(state: AgentState) -> str:
-    """되묻기로 턴을 끝낼지, 답변을 쓸지 (§5).
+def route_answer(state: AgentState) -> str:
+    """되묻기로 턴을 끝낼지, 화면 연계 제안까지 갈지 (§5).
 
-    되묻기 턴은 compose 도 offer 도 거치지 않고 끝난다 — 답변 전에 갈래를 정하는 것이
-    되묻기이고, 화면을 열기 전에 승낙을 받는 것이 연계 확인이다. 둘을 한 턴에 겹치면
-    직원은 무엇에 답해야 하는지 모른다.
+    되묻기 턴은 offer 를 거치지 않고 끝난다 — 답변 전에 갈래를 정하는 것이 되묻기이고,
+    화면을 열기 전에 승낙을 받는 것이 연계 확인이다. 둘을 한 턴에 겹치면 직원은 무엇에
+    답해야 하는지 모른다.
+
+    한때 이름이 `route_clarify` 였다. 되묻기 판정과 답변 작성이 각자 노드였고 이 분기가
+    그 사이에 있었기 때문이다 — 지금은 둘이 한 노드(nodes/answer.py)에서 함께 끝나므로
+    이 분기가 고르는 것은 «답을 썼나»가 아니라 «되물었나»다.
     """
-    return "__end__" if state.get("clarify") else "compose"
+    return "__end__" if state.get("clarify") else "offer"

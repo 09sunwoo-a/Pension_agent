@@ -819,9 +819,9 @@ def check_context_and_clarify() -> int:
     ok += hit
 
     # 되묻기 턴에는 화면 연계 제안이 붙지 않는다 — 배선으로 막는다(§5 마지막).
-    hit = routing.route_clarify({"clarify": {"question": "?"}}) == "__end__" \
-        and routing.route_clarify({}) == "compose"
-    print(f"{'✓' if hit else '✗'} 되묻기 턴은 compose·offer 를 거치지 않고 끝난다")
+    hit = routing.route_answer({"clarify": {"question": "?"}}) == "__end__" \
+        and routing.route_answer({}) == "offer"
+    print(f"{'✓' if hit else '✗'} 되묻기 턴은 offer 를 거치지 않고 끝난다")
     ok += hit
 
     # ③ 되묻기의 답이 확인 응답으로 오분류돼도 막다른 안내로 끝나지 않는다(gap 19).
@@ -1526,6 +1526,87 @@ def check_clarify_golden() -> int:
         CL.generate = orig_cl
     hit = not called
     print(f"{'✓' if hit else '✗'} 고객·상담기록·날짜 재료뿐이면 되묻기 판정을 돌리지 않는다")
+    ok += hit
+    return ok
+
+
+def check_answer_parallel() -> int:
+    """되묻기 판정과 답변 작성을 동시에 돌려도 **답이 달라지지 않는가**(nodes/answer.py).
+
+    아낀 것은 순차 왕복 하나이고, 아끼려고 판정을 건너뛰거나 규약을 바꾸지 않았다는 것이
+    이 검사의 전부다. 세 가지를 고정한다:
+
+      ① 되묻기로 결정되면 **써 둔 답은 나가지 않는다** — 투기 실행이 §5 를 뚫으면 안 된다.
+      ② 판정이 없는 턴(근거 0건·갈래 없는 재료)은 스레드를 띄우지 않고 그대로 작성한다.
+      ③ 진행 표시가 스레드를 건너간다 — ContextVar 는 자동으로 따라가지 않아서, 복사를
+         빠뜨리면 "작성하고 있어요"가 조용히 사라진다(progress.py).
+
+    판정이 LLM 장애로 죽었을 때의 답도 직렬일 때와 같아야 한다 — 그때는 원인만 남기고
+    작성 결과가 나갔다(route_clarify 가 clarify 키만 봤다). §11 이 요구하는 것은 «어느
+    단계에서 깨졌든 직원이 받는 답이 같을 것»이고, 작성이 성공했다면 그 답은 게이트를
+    통과한 답이다.
+    """
+    from pension_agent.consult_agent import progress as PROG
+    from pension_agent.consult_agent.nodes import answer as A
+    from pension_agent.consult_agent.nodes import clarify as CL
+    from pension_agent.consult_agent.nodes import plan as P
+
+    ok = 0
+    evidence = [{"tool": "procedure", "query": "q", "text": "전입 절차 / 전출 절차",
+                 "atomic": [], "notices": [], "notice_scopes": [], "marks": [], "related": [],
+                 "allow": ["전입 절차 / 전출 절차"], "sources": [{"id": "proc.x"}], "meta": {}}]
+    state = {"question": "계약이전 어떻게 신청해?", "evidence": evidence}
+
+    # ① 되묻기로 결정되면 써 둔 답은 버려진다.
+    orig_cl, orig_gen = CL.generate, P.generate
+    CL.generate = lambda prompt, **kw: '{"ask": "어느 방향인가요?", "options": ["전입", "전출"]}'
+    P.generate = lambda prompt, **kw: "전입 절차는 이렇습니다."
+    try:
+        out = A.answer(dict(state))
+    finally:
+        CL.generate, P.generate = orig_cl, orig_gen
+    hit = bool(out.get("clarify")) and "전입 절차는 이렇습니다." not in out["answer"]
+    print(f"{'✓' if hit else '✗'} 되묻기로 끝나면 동시에 써 둔 답변은 나가지 않는다")
+    ok += hit
+
+    # 판정이 죽어도 작성이 성공했으면 그 답이 나간다 — 직렬일 때와 같은 규약(§11).
+    def _dead(prompt, **kw):
+        raise LLMError("timeout")
+
+    CL.generate, P.generate = _dead, (lambda prompt, **kw: "전입 절차는 이렇습니다.")
+    try:
+        out = A.answer(dict(state))
+    finally:
+        CL.generate, P.generate = orig_cl, orig_gen
+    hit = not out.get("clarify") and "전입 절차는 이렇습니다." in out["answer"] \
+        and "LLMError" in (out.get("llm_error") or "")
+    print(f"{'✓' if hit else '✗'} 판정이 죽어도 작성이 됐으면 그 답이 나가고 원인이 남는다")
+    ok += hit
+
+    # ② 판정이 없는 턴은 판정 LLM 을 부르지 않는다(스레드도 띄우지 않는다).
+    called: list[str] = []
+    CL.generate = lambda prompt, **kw: (called.append("clarify"), '{"ask": null}')[1]
+    P.generate = lambda prompt, **kw: "고객 재료로 답합니다."
+    try:
+        out = A.answer({"question": "이 고객 평가금액 얼마야",
+                        "evidence": [{**evidence[0], "tool": "customer"}]})
+    finally:
+        CL.generate, P.generate = orig_cl, orig_gen
+    hit = not called and bool(out.get("answer"))
+    print(f"{'✓' if hit else '✗'} 갈래가 없는 재료뿐이면 판정 없이 바로 답을 쓴다")
+    ok += hit
+
+    # ③ 진행 표시가 스레드를 건너간다 — 작성은 다른 스레드에서 돈다.
+    events: list[str] = []
+    CL.generate = lambda prompt, **kw: '{"ask": null}'
+    P.generate = lambda prompt, **kw: "전입 절차는 이렇습니다."
+    try:
+        with PROG.reporting(events.append):
+            A.answer(dict(state))
+    finally:
+        CL.generate, P.generate = orig_cl, orig_gen
+    hit = any("작성" in e for e in events) and any("검증" in e for e in events)
+    print(f"{'✓' if hit else '✗'} 작성·검증 진행 표시가 스레드를 건너 전달된다 — {events}")
     ok += hit
     return ok
 
@@ -3182,6 +3263,7 @@ def main() -> int:
         check_turn_cost()
         check_miss_recovery()
         check_clarify_golden()
+        check_answer_parallel()
         check_replan_on_empty()
         check_screen_registry()
         check_market_material()

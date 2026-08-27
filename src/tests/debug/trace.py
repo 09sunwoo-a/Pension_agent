@@ -40,8 +40,14 @@ from pension_agent.consult_agent.nodes import plan as P
 from pension_agent.consult_agent.nodes import understand as U
 
 #: 그래프에 실리는 노드 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는 전역들.
-NODE_NAMES = ("understand", "plan_step", "compose", "clarify", "agent_help",
+#: 되묻기 판정과 답변 작성은 노드 하나(`answer`)에서 **동시에** 끝난다(nodes/answer.py) —
+#: 예전의 `clarify`·`compose` 두 노드 자리다. 두 LLM 호출이 서로 다른 스레드에서 나므로
+#: 한 노드의 호출 목록에 함께 실리는데, 정체는 프롬프트로 갈리므로(_stage) 구분은 남는다.
+NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
               "lms_send", "correction", "llm_down", "confirm_action", "offer")
+
+#: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
+ANSWER_NODE = "answer"
 
 #: compose 가 순서대로 거는 검사. 이 순서를 여기 적어두는 이유는 **실행되지 않은 게이트**를
 #: 말하기 위해서다 — 앞에서 끊기면 뒤는 아예 안 불리고, 그 사실이 진단의 핵심이다.
@@ -167,7 +173,7 @@ class Trace:
         return None
 
     def gates(self, turn: int = -1) -> dict[str, Gate]:
-        node = self.node("compose", turn)
+        node = self.node(ANSWER_NODE, turn)
         return {g.name: g for g in (node.gates if node else [])}
 
     def blocked_by(self, turn: int = -1) -> str | None:
@@ -179,7 +185,7 @@ class Trace:
 
     def draft(self, turn: int = -1) -> str:
         """compose 가 LLM 에게 받은 문장. 폐기됐어도 여기 남는다."""
-        node = self.node("compose", turn)
+        node = self.node(ANSWER_NODE, turn)
         for call in (node.calls if node else []):
             if call.stage == "compose":
                 return call.text
@@ -275,7 +281,7 @@ def instrument(trace: Trace):
             note = ""
             if name == "plan_step":
                 note = _plan_note(state, delta)
-            elif name == "compose":
+            elif name == ANSWER_NODE:
                 note = _compose_note(state, delta)
             trace.add_node(Node(name=name, delta=_summary(delta), note=note, seconds=elapsed))
             return delta
@@ -414,10 +420,10 @@ def render(trace: Trace, show_llm: bool = False, last_only: bool = False) -> str
             fields = " ".join(f"{k}={v}" for k, v in node.delta.items())
             # compose 의 한 줄 요약(처분)은 아래 게이트 트리의 마지막 줄에 있다 — 같은 말을
             # 두 번 세우지 않는다.
-            note = fields if node.name == "compose" else (node.note or fields or "변화 없음")
+            note = fields if node.name == ANSWER_NODE else (node.note or fields or "변화 없음")
             out.append(f"  {step} {_pad(label, 13)}[{_secs(node.seconds)}] {note}"
                        + (f"   ({calls})" if calls else ""))
-            if node.name == "compose":
+            if node.name == ANSWER_NODE:
                 out += _gate_lines(node)
         out.append(f"  ⏱ 턴 합계 {_secs(sum(n.seconds for n in turn.nodes))}"
                    f" (LLM {sum(c.seconds for n in turn.nodes for c in n.calls):.2f}s)")

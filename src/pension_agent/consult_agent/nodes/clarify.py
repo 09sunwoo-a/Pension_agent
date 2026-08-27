@@ -64,10 +64,21 @@ def _render(ask: str, options: list[str]) -> str:
     return "\n".join([ask, "", *(f"· {o}" for o in options)])
 
 
+def applicable(state: AgentState) -> bool:
+    """이 턴에 되묻기 판정을 **돌릴 수 있나**. 위 코드 관문 중 LLM 없이 결정되는 부분이다.
+
+    `clarify` 안에도 같은 판정이 남아 있다(직접 부르는 호출자를 위해). 밖으로 꺼낸 이유는
+    호출부가 «판정을 부를 것인가»를 미리 알아야 하기 때문이다 — 답변 작성과 동시에
+    돌릴 때, 애초에 판정이 없는 턴까지 스레드를 띄우면 아끼려던 것을 도로 쓴다.
+    """
+    evidence = [e for e in (state.get("evidence") or []) if e["tool"] not in _NO_BRANCH]
+    return bool(evidence) and not asked_last_turn(state.get("history"))
+
+
 def clarify(state: AgentState) -> dict[str, Any]:
     """되물을지 판정한다. 되묻지 않기로 하면 아무것도 바꾸지 않고 compose 로 흘려보낸다."""
     evidence = [e for e in (state.get("evidence") or []) if e["tool"] not in _NO_BRANCH]
-    if not evidence or asked_last_turn(state.get("history")):
+    if not applicable(state):
         return {}
 
     prompt = CLARIFY_PROMPT.format(
