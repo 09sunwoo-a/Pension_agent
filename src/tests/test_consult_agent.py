@@ -2215,18 +2215,20 @@ def check_tool_loop() -> int:
 
 
 def check_all_kinds_reachable() -> int:
-    """다섯 종류 카드가 전부 도구로 닿는지 — method 131장·fieldtip 10장이 답변 근거로
+    """카드 종류가 전부 도구로 닿는지 — method 131장·fieldtip 10장이 답변 근거로
     쓰이는 경로가 없던 것이 이 변경의 동기 중 하나였다(guard 가 caution 8건만 썼다).
+    market 23장은 적재 경로 자체가 없어 통째로 닿지 않던 자리다(check_market_material).
 
-    두 경로를 다 본다. method·fieldtip 은 trigger_examples 가 제목과 거의 같아서 n-gram
-    폴백이 화법보다 약하다 — 이 종류에서는 LLM 선택이 사실상 주 경로다.
+    두 경로를 다 본다. 이 종류들은 trigger_examples 가 제목과 거의 같아서 n-gram 폴백이
+    화법보다 약하다 — 사실상 LLM 선택이 주 경로다.
     """
     ok = 0
-    hit = {"fact", "procedure", "segment", "method", "fieldtip"} <= set(tools.TOOLS)
-    print(f"{'✓' if hit else '✗'} 다섯 종류 모두 도구로 등록됨")
+    hit = ({"fact", "procedure", "segment", "method", "fieldtip", "market", "lineup"}
+           <= set(tools.TOOLS))
+    print(f"{'✓' if hit else '✗'} 일곱 종류 모두 도구로 등록됨")
     ok += hit
 
-    for kind in ("method", "fieldtip"):
+    for kind in ("method", "fieldtip", "market", "lineup"):
         card = next(c for c in tools.KB.cards if c["_kind"] == kind)
 
         # ① LLM 선택 경로 — 주 경로다. 이 도구들은 select.pick() 을 거치므로 시임이 거기다.
@@ -2253,6 +2255,263 @@ def check_all_kinds_reachable() -> int:
     hit = "본부 공식 지침이 아닙니다" in tools._render_fieldtip(tip)
     print(f"{'✓' if hit else '✗'} fieldtip 근거에 '본부 지침 아님' 표시")
     ok += hit
+    return ok
+
+
+def check_market_material() -> int:
+    """시황·상품 기반지식(05 폴더)이 답변 재료로 닿는가.
+
+    회귀 대상: 05_시황_상품_기반지식 5개 문서는 「상담 시 근거로 인용할 시장·상품 데이터」
+    라고 폴더가 스스로 규정하고 문서마다 검색용 front-matter(trigger_keywords·key_points·
+    as_of)까지 갖춰 저작돼 있었는데, **변환기에 경로가 없어** 에이전트에게는 통째로 없는
+    재료였다(knowledge/CLAUDE.md 적재 감사 — 원문 폴더 중 유일하게 ❌ 였던 자리).
+    "8월 추천펀드 뭐야"·"디폴트옵션 알파드림 구성"에 답할 재료가 저장소에 있는데도
+    "찾지 못했습니다"로 끝났다 — screen 표A 88행이 빠져 있던 것과 같은 유형이다.
+
+    이 재료가 다른 것과 갈리는 지점은 **시효**다(CLAUDE.md §9). 제도 확정값과 달리 시황
+    수치는 주·월 단위로 낡으므로, 기준시점과 원문의 시효 경고가 답변에 함께 나가야 한다.
+    """
+    from pension_agent.consult_agent import marks as MARKS
+    from pension_agent.consult_agent import relations as REL
+    from pension_agent.consult_agent.kb import buckets
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES
+    from pension_agent.consult_agent.state import KB
+
+    ok = 0
+    # market(시황) · lineup(운용 상품) 두 종류다. 05 한 폴더에서 나오지만 **묻는 것이
+    # 달라** 갈라 놨다 — screen(직원이 단말에서)·channel(고객이 앱에서)과 같은 이유다.
+    cards = [c for c in KB.cards if c["_kind"] in ("market", "lineup")]
+
+    hit = len(cards) >= 20
+    print(f"{'✓' if hit else '✗'} 시황·상품 기반지식이 적재된다 ({len(cards)}장)")
+    ok += hit
+
+    # 두 갈래가 다 들어와야 하고, **갈래와 종류가 어긋나면 안 된다** — 상품 문서가 market
+    # 으로 들어가면 「추천펀드」를 물었을 때 시황 도구가 그걸 들고 있게 된다.
+    pairs = {(c["_kind"], c["category"]) for c in cards}
+    hit = pairs == {("market", "시황"), ("lineup", "상품")}
+    print(f"{'✓' if hit else '✗'} 시황→market · 상품→lineup 으로 갈라 적재된다 ({sorted(pairs)})")
+    ok += hit
+
+    # 도구·버킷도 함께 갈려야 라우팅이 쉬워진다. 종류만 나누고 도구를 하나로 두면 계획 LLM
+    # 은 여전히 도구 하나로 둘을 다 받는다(이 분리의 목적이 그것이다).
+    hit = ("market" in tools.TOOLS and "lineup" in tools.TOOLS
+           and tools.TOOLS["market"].desc != tools.TOOLS["lineup"].desc)
+    print(f"{'✓' if hit else '✗'} 도구가 둘로 갈리고 설명이 서로 다르다")
+    ok += hit
+
+    letters = {b["kind"]: code[0] for code, b in buckets(KB).items()
+               if b["kind"] in ("market", "lineup")}
+    hit = len(letters) == 2 and letters["market"] != letters["lineup"]
+    print(f"{'✓' if hit else '✗'} 버킷 카탈로그에서도 갈린다 ({letters})")
+    ok += hit
+
+    # 기준시점 없는 시황·상품 수치는 인용 불가다(폴더 README 수록 규칙) — 필수로 잡는다.
+    missing = [c["id"] for c in cards if not c.get("as_of")]
+    hit = not missing
+    print(f"{'✓' if hit else '✗'} 모든 카드가 기준시점을 갖는다"
+          + ("" if hit else f" — {missing[:3]}"))
+    ok += hit
+
+    orig = tools.fits_question
+    tools.fits_question = lambda q, h, kind="", history=None: h
+    try:
+        q = "디폴트옵션 알파드림 구성상품이 뭐야"
+        found = tools.run("lineup", {"question": q}, q)
+    finally:
+        tools.fits_question = orig
+
+    hit = bool(found) and "수협은행 노후보장 정기예금" in found["text"]
+    print(f"{'✓' if hit else '✗'} market 도구가 디폴트옵션 편입상품을 근거로 돌려준다")
+    ok += hit
+
+    # 시효 표시는 **데이터가 정한다** — 폴더 README 의 ※ 안내(volatile)와 카드의 as_of 다.
+    # 코드 상수로 붙이면 원문이 바뀔 때 두 곳이 갈린다(§12 지워진 gap 16·18 과 같은 자리).
+    hit = bool(found) and any("빠르게 달라집니다" in n for n in (found.get("notices") or []))
+    print(f"{'✓' if hit else '✗'} 시장·상품이 달라질 수 있다는 원문 경고가 함께 나간다")
+    ok += hit
+
+    sample = next((c for c in cards if c.get("volatile")), None)
+    hit = bool(sample) and sample["volatile"] in tools.stale_mark(sample) \
+        and sample["as_of"] in tools.stale_mark(sample)
+    print(f"{'✓' if hit else '✗'} 경고 문구와 기준시점을 원문에서 읽어 온다")
+    ok += hit
+
+    # 필드 이름을 코드표기로 인용한 원문(`as_of`)이 밑줄 제거로 깨지지 않는가 —
+    # 깨지면 직원이 존재하지 않는 필드를 찾게 된다.
+    hit = bool(sample) and "asof" not in sample["volatile"]
+    print(f"{'✓' if hit else '✗'} 원문의 필드 이름 표기가 깨지지 않는다")
+    ok += hit
+
+    # 행내한 자료는 고객에게 그대로 못 준다 — 원문 confidentiality 선언에서 온다.
+    internal = [c for c in cards if c.get("customer_facing") is False]
+    facing = [c for c in cards if c.get("customer_facing") is True]
+    hit = bool(internal) and bool(facing)
+    print(f"{'✓' if hit else '✗'} 고객용·행내한이 원문 표기대로 갈린다 "
+          f"(행내한 {len(internal)} · 고객용 {len(facing)})")
+    ok += hit
+
+    marks = MARKS.notes_for(KB, internal[:1]) if internal else []
+    hit = any("고객에게 그대로 안내하지는 마세요" in m for m in marks)
+    print(f"{'✓' if hit else '✗'} 행내한 자료를 쓰면 고객 안내 주의가 붙는다")
+    ok += hit
+
+    # 원문(content)은 고치지 않는다 — 표의 값이 그대로 실려 있어야 인용이 성립한다.
+    tdf = next((c for c in cards if "TDF" in c["title"]), None)
+    hit = bool(tdf) and "Glide-Path" in (tdf.get("content") or "")
+    print(f"{'✓' if hit else '✗'} 절 본문이 원문 그대로 실린다")
+    ok += hit
+
+    # 절 카드는 자기 문서의 개요 카드를 부모로 갖는다 — 어느 회차 자료인지가 카드에 남는다.
+    sections = [c for c in cards if c.get("parent")]
+    ids = {c["id"] for c in cards}
+    hit = bool(sections) and all(c["parent"] in ids for c in sections)
+    print(f"{'✓' if hit else '✗'} 절 카드가 개요 카드를 부모로 가리킨다 ({len(sections)}장)")
+    ok += hit
+
+    # 저작·검수 기록(추출 노트)은 카드가 아니다 — 직원 답변 재료가 아니라 저작 메모다.
+    hit = not any("추출 노트" in c["title"] for c in cards)
+    print(f"{'✓' if hit else '✗'} 추출 노트·목차는 카드로 만들지 않는다")
+    ok += hit
+
+    # 한 글자 키워드는 검색 예시에서 빠진다 — 「금」은 거의 모든 절에 걸려 갈래를 못 가른다.
+    one_char = [(c["id"], t) for c in cards for t in (c.get("trigger_examples") or [])
+                if len(t.strip()) < 2]
+    hit = not one_char
+    print(f"{'✓' if hit else '✗'} 한 글자 검색 키워드를 달지 않는다"
+          + ("" if hit else f" — {one_char[:3]}"))
+    ok += hit
+
+    # 새 종류를 적재하면 함께 손대야 하는 자리들 — 빠지면 "적재는 됐는데 검색되지 않는다".
+    hit = all(k in tools.TOOLS and k in ANSWER_SHAPES for k in ("market", "lineup"))
+    print(f"{'✓' if hit else '✗'} 도구·답변 형태 요구에 등록됨")
+    ok += hit
+
+    bucketed = {c["id"] for b in buckets(KB).values() for c in b["cards"]}
+    hit = all(c["id"] in bucketed for c in cards)
+    print(f"{'✓' if hit else '✗'} 버킷 카탈로그에 들어간다(LLM 후보 목록에 보인다)")
+    ok += hit
+
+    # ── 표를 관계로 선언했는가 (knowledge/CLAUDE.md §1) ──────────────
+    #
+    # 05 문서의 알맹이는 산문이 아니라 표다. 표를 텍스트 덩어리로만 실으면 두 가지가 같이
+    # 막힌다 — 검색 입구가 없고(「1975년생이면 TDF 몇 년」의 답이 표에 있는데 못 찾았다),
+    # 값–조건 오짝을 잡을 재료가 없다(「알파드림 금리 3.40」은 지켜드림의 값인데 통과했다).
+    tabled = [c for c in cards if c.get("tables")]
+    hit = len(tabled) >= 8
+    print(f"{'✓' if hit else '✗'} 표가 행 단위 관계로 선언된다 ({len(tabled)}장)")
+    ok += hit
+
+    deck = next((c for c in cards if c["id"].endswith("추천펀드_2026-08.01")), None)
+    rows = (deck or {}).get("tables", [{}])[0].get("rows") or []
+    # 병합 셀(합계 행)은 위 행에서 이름을 이어받는다 — 안 이어받으면 「알파드림 포트폴리오
+    # 수익률 4.23」이라는 **맞는 답변**이 남의 값으로 몰려 막힌다.
+    hit = any(r["keys"][:2] == ["저위험", "알파드림"] and "100" in r["values"] for r in rows)
+    print(f"{'✓' if hit else '✗'} 병합 셀 합계 행이 상품 이름을 이어받는다")
+    ok += hit
+
+    # 행을 못 가리는 이름(「포트폴리오」는 모든 상품 밑에 달려 있다)은 행 이름이 아니다.
+    hit = not any("포트폴리오" in (r.get("keys") or []) for r in rows)
+    print(f"{'✓' if hit else '✗'} 행을 못 가리는 이름은 행 이름으로 쓰지 않는다")
+    ok += hit
+
+    hit = REL.declared(deck or {})
+    print(f"{'✓' if hit else '✗'} 표를 선언한 카드가 관계 검사 대상이 된다")
+    ok += hit
+
+    # 표에서 나온 검색 입구 — 열 머리말(1975년)과 행 이름(알파드림 III)이 둘 다 있어야 한다.
+    tdf = next((c for c in cards if c["title"] == "TDF 포트폴리오"), None)
+    hit = bool(tdf) and "1975년" in (tdf.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 표의 열 머리말이 검색 입구가 된다 — 1975년")
+    ok += hit
+
+    hit = bool(deck) and "알파드림 III" in (deck.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 표의 행 이름이 검색 입구가 된다 — 알파드림 III")
+    ok += hit
+
+    orig = tools.fits_question
+    tools.fits_question = lambda q, h, kind="", history=None: h
+    try:
+        q = "1975년생이면 TDF 몇 년짜리 골라야 해?"
+        found = tools.run("lineup", {"question": q}, q)
+    finally:
+        tools.fits_question = orig
+    hit = bool(found) and "출생연도" in found["text"]
+    print(f"{'✓' if hit else '✗'} 표 안에만 있던 질문이 근거에 닿는다 — 출생연도별 TDF")
+    ok += hit
+
+    # ── 검색이 «답을 가진 카드»에 닿는가 ───────────────────────────
+    #
+    # 셋 다 실측으로 잡은 자리다. 재료는 적재돼 있는데 순위가 엉켜서 «상품을 물으면 잘 못
+    # 찾는다»가 됐다 — 적재와 검색은 다른 문제라는 것을 이 검사가 지킨다.
+
+    # ① category 를 topics 에 넣지 않는다. 「상품」·「시황」은 두 글자 흔한 말이라, 질문에
+    #    "구성상품"·"편입상품"처럼 그 글자가 들어가면 **모든 카드가 똑같이** 가산점을 받아
+    #    무더기 동점이 되고 순위가 사실상 id 사전순이 된다(config.TOPIC_VOCAB 머리말이
+    #    금지한 그것). 갈래는 category 필드가 이미 들고 있다.
+    polluted = [c["id"] for c in cards
+                if {"상품", "시황"} & set(c["tags"].get("topics") or [])]
+    hit = not polluted
+    print(f"{'✓' if hit else '✗'} category 를 검색 태그에 섞지 않는다"
+          + ("" if hit else f" — {polluted[:3]}"))
+    ok += hit
+
+    # ② 같은 문서의 절이 걸리면 개요 카드는 자리를 비켜준다. 개요는 문서 키워드를 통째로
+    #    들고 있어 어떤 질문에나 걸리는데, **답이 든 표는 절에 있다**.
+    orig = tools.fits_question
+    tools.fits_question = lambda q, h, kind="", history=None: h
+    try:
+        found = tools.run("lineup", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
+    finally:
+        tools.fits_question = orig
+    ids = [s["id"] for s in (found or {}).get("sources") or []]
+    by_id = {c["id"]: c for c in cards}
+    hit = bool(ids) and all(by_id[i].get("parent") for i in ids)   # 전부 절 카드인가
+    print(f"{'✓' if hit else '✗'} 절이 걸리면 개요가 후보 자리를 먹지 않는다 — {ids}")
+    ok += hit
+
+    # ③ 「+65,469억원」을 이름 칸으로 읽지 않는다. 읽으면 그 열이 이름 열이 되어 값 열이
+    #    하나도 안 남고, **표가 통째로 버려진다** — 자금 동향 표가 그렇게 빠져서 「코스피
+    #    얼마야」가 검색되지 않았다.
+    flows = next((c for c in cards if c["title"].endswith("주간 자금 동향")), None)
+    hit = bool(flows) and "코스피" in (flows.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 수치에 한국어 단위가 붙어도 값으로 읽는다 — 코스피 행")
+    ok += hit
+
+    # 날짜는 반대다 — 일정표에서 「20일」은 값이 아니라 행 이름이다.
+    sched = [t for c in cards for t in (c.get("tables") or [])
+             if "일자" in (t.get("columns") or [])]
+    hit = bool(sched) and any("20일" in (r.get("keys") or [])
+                              for t in sched for r in t["rows"])
+    print(f"{'✓' if hit else '✗'} 일정표의 날짜는 행 이름으로 남는다 — 20일")
+    ok += hit
+
+    # ── 오짝 판정: 막아야 할 것과 **막으면 안 되는 것** ─────────────
+    #
+    # 뒤쪽이 더 중요하다 — 검증기가 옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다
+    # 나쁘다(relations.py 머리말). 그래서 맞는 답변 쪽을 더 많이 건다.
+    tables = (deck or {}).get("tables") or []
+    for expect, label, answer in (
+        (True, "다른 행의 금리를 갖다 붙임",
+         "알파드림의 정기예금 금리는 3.40 이에요."),
+        (True, "형제 상품의 수익률을 갖다 붙임",
+         "모두드림 III 의 1년 수익률은 20.63 이에요."),
+        (False, "원문 그대로 옮긴 답",
+         "알파드림은 수협은행 노후보장 정기예금 디폴트옵션용(3년) 70, "
+         "키움키워드림적격TDF2030 20, 삼성글로벌EMP적격TDF2035 10 으로 구성돼요."),
+        (False, "산문 칸(상품특징)의 수치를 인용",
+         "알파드림은 시중은행 정기예금 70, TDF 30 투자하는 포트폴리오예요."),
+        (False, "합계 행의 값을 인용",
+         "알파드림 포트폴리오의 1년 수익률은 4.23 이에요."),
+        (False, "여러 행을 함께 말함",
+         "지켜드림은 3.40·3.25·3.32, 알파드림은 3.27 이에요."),
+        (False, "어느 행인지 안 밝힘 — 판정 불가는 위반이 아니다",
+         "정기예금 금리는 3.40 수준이에요."),
+    ):
+        broken = REL.table_mispaired(answer, tables)
+        hit = bool(broken) == expect
+        print(f"{'✓' if hit else '✗'} {'차단' if expect else '통과'}: {label}")
+        ok += hit
     return ok
 
 
@@ -2639,6 +2898,7 @@ def main() -> int:
     check_miss_recovery()
     check_replan_on_empty()
     check_screen_registry()
+    check_market_material()
     check_caution_roles()
     check_history_material()
     check_history_selection()
