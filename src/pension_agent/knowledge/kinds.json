@@ -924,7 +924,7 @@
   },
   "market": {
     "consumed": "retrieval",
-    "desc": "시황·상품 기반지식(05_시황_상품_기반지식) — 상담 시 근거로 인용할 시장 상황과 운용 상품 데이터. category 는 시황(시장 동향·이벤트·환율·자산군별 성과) 또는 상품(추천펀드·디폴트옵션 포트폴리오·TDF 빈티지)이다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본), content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 에서 온다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다**(주간 시황은 주차, 월간은 월, 상품은 월) — 시황·상품 수치는 주·월 단위로 낡으므로 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약 — 코드가 따로 들고 있으면 원문이 바뀔 때 두 곳이 갈린다). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다 (knowledge/CLAUDE.md §1 값↔성립 조건) — 각 행은 keys(이름 칸: 위험도·상품명·편입상품 등 왼쪽 이름 열들, 병합 셀은 위 행에서 이어받는다)와 cells(나머지 칸 전부), values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하는 것이 아니라 함께 선언한다 — fact 가 value 산문과 tiers 쌍을 함께 갖는 것과 같다. 이 선언이 두 가지를 푼다: 열 머리말·행 이름이 검색 입구(trigger_examples)가 되고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. values 와 cells 를 나눠 둔 이유는 판정을 비대칭으로 하기 위해서다 — 답변이 말한 행에서는 cells 전부(산문 칸의 수치 포함)를 인용 허용으로 보고, 말하지 않은 행에서는 values 만 남의 값으로 센다. 산문 칸의 수치를 남의 값으로 세면 맞는 답변이 막힌다.",
+    "desc": "시황 기반지식(05_시황_상품_기반지식/01_시황) — 상담 시 근거로 인용할 **시장 상황**. 시장 동향·자산군별 성과·환율·금리, 경제 이벤트 일정과 시나리오별 투자전략을 다룬다. lineup(운용 상품)과 나뉘어 있는 이유는 묻는 것이 다르기 때문이다 — 시황은 «시장이 어떻게 돌아가나», lineup 은 «우리가 뭘 파나»다. 하나로 묶으면 「8월 추천펀드」를 물었는데 환율 전망이 따라 나온다(screen·channel 을 나눈 것과 같은 이유). 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 와 표의 열 머리말·행 이름에서 온다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본) content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다** — 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다(knowledge/CLAUDE.md §1) — 각 행은 keys(이름 칸, 병합 셀은 위 행에서 이어받는다)·cells(나머지 칸 전부)·values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하지 않고 함께 선언한다. 이 선언이 열 머리말·행 이름을 검색 입구로 만들고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. category 는 원문 front-matter 가 밝힌 갈래이고 kind 는 거기서 나온다 — 검색 태그(tags.topics)에는 넣지 않는다(두 글자 흔한 말이라 모든 카드가 같은 점수를 받아 순위가 무너진다).",
     "required": [
       "title",
       "category",
@@ -938,7 +938,76 @@
       "category": {
         "type": "enum",
         "values": [
-          "시황",
+          "시황"
+        ]
+      },
+      "group": {
+        "type": "text",
+        "nullable": true
+      },
+      "topic": {
+        "type": "text",
+        "nullable": true
+      },
+      "content": {
+        "type": "text",
+        "nullable": true
+      },
+      "key_points": {
+        "type": "list",
+        "nullable": true
+      },
+      "tables": {
+        "type": "list",
+        "nullable": true
+      },
+      "as_of": {
+        "type": "text"
+      },
+      "volatile": {
+        "type": "text",
+        "nullable": true
+      },
+      "customer_facing": {
+        "type": "bool",
+        "nullable": true
+      },
+      "parent": {
+        "type": "text",
+        "nullable": true
+      },
+      "tags": {
+        "type": "obj"
+      },
+      "trigger_examples": {
+        "type": "list",
+        "nullable": true
+      }
+    },
+    "searchable": [
+      "title",
+      "topic",
+      "content",
+      "key_points",
+      "trigger_examples"
+    ]
+  },
+  "lineup": {
+    "consumed": "retrieval",
+    "desc": "운용 상품 기반지식(05_시황_상품_기반지식/02_상품) — 상담 시 근거로 인용할 **운용 상품**. 이달의 추천펀드와 성과·위험등급, 디폴트옵션 포트폴리오 9종의 편입상품·비중·금리, 투자성향 5단계·연금수령(예정) 포트폴리오, TDF 빈티지별 위험자산 비중을 다룬다. **strategy_agent 의 product kind 와 다른 것이다** — 그쪽은 적합성 게이트가 타입드 필드로 비교하는 관계형 카탈로그이고, 이쪽은 행내 배포자료의 원문·표를 검색해 답하는 재료다. market(시황)과 나뉘어 있는 이유는 묻는 것이 다르기 때문이다. 문서 개요 카드(parent 없음)와 절 카드(parent = 개요 카드 id)로 나뉘며, key_points·trigger_examples 는 원문 front-matter 의 key_points·trigger_keywords 와 표의 열 머리말·행 이름에서 온다. 06 추출지식에서 변환한 카드들과 달리 **문서 자체가 원문**이라(행내 배포자료를 원문 보존 규칙으로 옮긴 변환본) content 는 문서 절의 원문 텍스트 그대로이고 고치지 않는다. as_of 는 그 수치의 기준시점으로 **카드마다 다르다** — 기준일 없는 값은 인용 불가로 본다(폴더 README 수록 규칙). volatile 은 폴더 README 가 스스로 적어둔 '빠르게 달라진다'는 경고이고, 붙일지도 문구도 원문에서 읽는다(screen·channel 과 같은 규약). customer_facing 은 원문 front-matter 의 confidentiality 표기('고객용' vs '행내한')가 정하며, 표기가 없으면 선언하지 않는다. tables 는 절 안의 마크다운 표를 행 단위로 편 **관계 선언**이다(knowledge/CLAUDE.md §1) — 각 행은 keys(이름 칸, 병합 셀은 위 행에서 이어받는다)·cells(나머지 칸 전부)·values(그중 짧은 값 칸)를 갖는다. content 의 원문을 대신하지 않고 함께 선언한다. 이 선언이 열 머리말·행 이름을 검색 입구로 만들고, relations.table_mispaired() 가 «다른 행의 값을 갖다 붙인 답»을 잡는다. category 는 원문 front-matter 가 밝힌 갈래이고 kind 는 거기서 나온다 — 검색 태그(tags.topics)에는 넣지 않는다(두 글자 흔한 말이라 모든 카드가 같은 점수를 받아 순위가 무너진다).",
+    "required": [
+      "title",
+      "category",
+      "as_of",
+      "tags"
+    ],
+    "fields": {
+      "title": {
+        "type": "text"
+      },
+      "category": {
+        "type": "enum",
+        "values": [
           "상품"
         ]
       },

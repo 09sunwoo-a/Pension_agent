@@ -2129,11 +2129,12 @@ def check_all_kinds_reachable() -> int:
     화법보다 약하다 — 사실상 LLM 선택이 주 경로다.
     """
     ok = 0
-    hit = {"fact", "procedure", "segment", "method", "fieldtip", "market"} <= set(tools.TOOLS)
-    print(f"{'✓' if hit else '✗'} 여섯 종류 모두 도구로 등록됨")
+    hit = ({"fact", "procedure", "segment", "method", "fieldtip", "market", "lineup"}
+           <= set(tools.TOOLS))
+    print(f"{'✓' if hit else '✗'} 일곱 종류 모두 도구로 등록됨")
     ok += hit
 
-    for kind in ("method", "fieldtip", "market"):
+    for kind in ("method", "fieldtip", "market", "lineup"):
         card = next(c for c in tools.KB.cards if c["_kind"] == kind)
 
         # ① LLM 선택 경로 — 주 경로다. 이 도구들은 select.pick() 을 거치므로 시임이 거기다.
@@ -2183,16 +2184,32 @@ def check_market_material() -> int:
     from pension_agent.consult_agent.state import KB
 
     ok = 0
-    cards = [c for c in KB.cards if c["_kind"] == "market"]
+    # market(시황) · lineup(운용 상품) 두 종류다. 05 한 폴더에서 나오지만 **묻는 것이
+    # 달라** 갈라 놨다 — screen(직원이 단말에서)·channel(고객이 앱에서)과 같은 이유다.
+    cards = [c for c in KB.cards if c["_kind"] in ("market", "lineup")]
 
     hit = len(cards) >= 20
     print(f"{'✓' if hit else '✗'} 시황·상품 기반지식이 적재된다 ({len(cards)}장)")
     ok += hit
 
-    # 두 갈래가 다 들어와야 한다 — 시황만 적재되면 상품 질문이 통째로 빈다(그 반대도).
-    kinds = {c["category"] for c in cards}
-    hit = kinds == {"시황", "상품"}
-    print(f"{'✓' if hit else '✗'} 시황·상품 두 갈래가 모두 적재된다 ({sorted(kinds)})")
+    # 두 갈래가 다 들어와야 하고, **갈래와 종류가 어긋나면 안 된다** — 상품 문서가 market
+    # 으로 들어가면 「추천펀드」를 물었을 때 시황 도구가 그걸 들고 있게 된다.
+    pairs = {(c["_kind"], c["category"]) for c in cards}
+    hit = pairs == {("market", "시황"), ("lineup", "상품")}
+    print(f"{'✓' if hit else '✗'} 시황→market · 상품→lineup 으로 갈라 적재된다 ({sorted(pairs)})")
+    ok += hit
+
+    # 도구·버킷도 함께 갈려야 라우팅이 쉬워진다. 종류만 나누고 도구를 하나로 두면 계획 LLM
+    # 은 여전히 도구 하나로 둘을 다 받는다(이 분리의 목적이 그것이다).
+    hit = ("market" in tools.TOOLS and "lineup" in tools.TOOLS
+           and tools.TOOLS["market"].desc != tools.TOOLS["lineup"].desc)
+    print(f"{'✓' if hit else '✗'} 도구가 둘로 갈리고 설명이 서로 다르다")
+    ok += hit
+
+    letters = {b["kind"]: code[0] for code, b in buckets(KB).items()
+               if b["kind"] in ("market", "lineup")}
+    hit = len(letters) == 2 and letters["market"] != letters["lineup"]
+    print(f"{'✓' if hit else '✗'} 버킷 카탈로그에서도 갈린다 ({letters})")
     ok += hit
 
     # 기준시점 없는 시황·상품 수치는 인용 불가다(폴더 README 수록 규칙) — 필수로 잡는다.
@@ -2206,7 +2223,7 @@ def check_market_material() -> int:
     tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         q = "디폴트옵션 알파드림 구성상품이 뭐야"
-        found = tools.run("market", {"question": q}, q)
+        found = tools.run("lineup", {"question": q}, q)
     finally:
         tools.fits_question = orig
 
@@ -2272,7 +2289,7 @@ def check_market_material() -> int:
     ok += hit
 
     # 새 종류를 적재하면 함께 손대야 하는 자리들 — 빠지면 "적재는 됐는데 검색되지 않는다".
-    hit = "market" in tools.TOOLS and "market" in ANSWER_SHAPES
+    hit = all(k in tools.TOOLS and k in ANSWER_SHAPES for k in ("market", "lineup"))
     print(f"{'✓' if hit else '✗'} 도구·답변 형태 요구에 등록됨")
     ok += hit
 
@@ -2322,7 +2339,7 @@ def check_market_material() -> int:
     tools.fits_question = lambda q, h, kind="", history=None: h
     try:
         q = "1975년생이면 TDF 몇 년짜리 골라야 해?"
-        found = tools.run("market", {"question": q}, q)
+        found = tools.run("lineup", {"question": q}, q)
     finally:
         tools.fits_question = orig
     hit = bool(found) and "출생연도" in found["text"]
@@ -2350,7 +2367,7 @@ def check_market_material() -> int:
     orig = tools.fits_question
     tools.fits_question = lambda q, h, kind="", history=None: h
     try:
-        found = tools.run("market", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
+        found = tools.run("lineup", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
     finally:
         tools.fits_question = orig
     ids = [s["id"] for s in (found or {}).get("sources") or []]

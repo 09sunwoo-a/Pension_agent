@@ -47,7 +47,8 @@
 | `screen` | 검색(단말 화면 레지스트리 — 어느 화면인가) | `knowledge/data/kb_screens.json` |
 | `channel` | 검색(비대면 채널 경로 — 고객이 앱·웹에서 어디로 가나) | `knowledge/data/kb_channels.json` |
 | `fieldtip` | 검색(현장의 목소리 — 영업점 관찰) | `knowledge/data/kb_fieldtips.json` |
-| `market` | 검색(시황·상품 기반지식 — 시장 상황·운용 상품) | `knowledge/data/kb_market.json` |
+| `market` | 검색(시황 — 시장이 어떻게 돌아가나) | `knowledge/data/kb_market.json` |
+| `lineup` | 검색(운용 상품 — 우리가 뭘 파나. `product` 와 다르다: 그쪽은 게이트용 관계형 카탈로그) | `knowledge/data/kb_lineup.json` |
 
 `python -m pension_agent.knowledge.schema kinds` 로 최신 목록을 본다.
 

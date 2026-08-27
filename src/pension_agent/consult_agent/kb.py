@@ -461,9 +461,10 @@ def retrieve(kb: KnowledgeBase, *, top_k=3, kinds=None, segments=None,
 #: 겹치지 않게 N(number)을 쓴다. 여기 없는 종류는 X 로 묶이는데, 그러면 코드가 서로 구분되지
 #: 않으므로 **새 종류를 적재하면 여기 한 줄을 함께 늘린다** — 그러지 않으면 그 종류의 카드가
 #: 버킷 카탈로그에서 사실상 안 보인다(test_consult_agent 의 버킷 커버리지 검사가 잡는다).
-#: market 은 M(method)·S(segment)가 이미 쓰이고 있어 K(기반지식)를 쓴다.
+#: market 은 M(method)·S(segment)가 이미 쓰이고 있어 K(기반지식), lineup 은 L 을 쓴다.
 _BUCKET_LETTER = {"pitch": "P", "procedure": "R", "segment": "S", "method": "M",
-                  "fieldtip": "F", "screen": "N", "channel": "C", "market": "K"}
+                  "fieldtip": "F", "screen": "N", "channel": "C", "market": "K",
+                  "lineup": "L"}
 
 #: L0 카탈로그에 붙이는 종류별 한 줄 설명. "이 종류가 답이 되는 질문"을 적는다.
 #: **적재되는 종류는 전부 여기 있어야 한다** — 빠지면 카탈로그에 종류 이름과 장수만 뜨고
@@ -477,7 +478,8 @@ _KIND_DESC = {
     "segment": "대상 고객을 고르는 조건 — 누구를 왜 관리 대상으로 뽑나",
     "method": "판단 방법론 — 무엇을 어떤 기준으로 정하나",
     "fieldtip": "영업점 현장 관찰 — 본부 지침이 아닌 참고",
-    "market": "시황·상품 기반지식 — 시장 상황과 운용 상품(추천펀드·디폴트옵션·TDF)",
+    "market": "시장이 어떻게 돌아가나 — 시황·환율·금리·경제 이벤트와 투자전략",
+    "lineup": "우리가 뭘 파나 — 추천펀드·디폴트옵션 포트폴리오·투자성향별·TDF 빈티지",
 }
 
 #: 카드 종류 표시 순서(고정). 카탈로그가 실행마다 같은 순서로 나오게 한다.
@@ -485,7 +487,7 @@ _KIND_DESC = {
 #: 빠지면 그 종류의 카드가 버킷에 안 들어가고, LLM 이 고를 후보 목록에서 통째로 사라진다
 #: (n-gram 폴백으로만 닿게 되어, 사실상 "있는데 못 찾는" 상태가 된다).
 _KIND_ORDER = ("pitch", "procedure", "screen", "channel", "segment", "method", "fieldtip",
-               "market")
+               "market", "lineup")
 
 #: index_slice 의 기본 문자 예산. 한글은 대략 2자/토큰이라 4000자 ≈ 2k 토큰이고,
 #: 가장 큰 버킷(3,652자) 하나가 통째로 들어간다.

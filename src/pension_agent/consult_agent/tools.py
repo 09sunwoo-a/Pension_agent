@@ -372,7 +372,17 @@ def _fieldtip(state: AgentState, query: str) -> Evidence | None:
                KBMOD.sources_of(KB, hits), cards=[c for _s, c in hits])
 
 
-# ── 시황·상품 기반지식 — 05_시황_상품_기반지식 ──
+# ── 시황(market) · 운용 상품(lineup) 기반지식 — 05_시황_상품_기반지식 ──
+#
+# **둘은 다른 도구다.** 묻는 것이 다르기 때문이다 — market 은 «시장이 어떻게 돌아가나»
+# (시황·환율·금리·FOMC), lineup 은 «우리가 뭘 파나»(추천펀드·디폴트옵션 포트폴리오·TDF).
+# screen(직원이 단말에서)과 channel(고객이 앱에서)을 같은 원문 표에서 나눈 것과 같은 이유다.
+# 하나로 묶여 있던 동안 계획 LLM 은 도구 하나로 둘을 다 받아야 해서 무엇을 부를지 흐렸고,
+# 버킷 카탈로그도 시황 문서와 상품 문서를 한 묶음에 세웠다.
+#
+# 두 도구가 **같은 함수를 쓴다**(_market_like) — 재료의 성격이 같아서다(원문·표 · 기준시점 ·
+# 시효 경고). 갈리는 것은 어느 종류를 뒤지는지와 도구 설명뿐이다. 종류마다 렌더·검증을
+# 복사하면 한쪽만 고쳐지는 자리가 생긴다.
 #
 # 「이 자료는 상담 시 근거로 인용할 시장·상품 데이터」라고 폴더가 스스로 규정하고 문서마다
 # 검색용 front-matter(trigger_keywords·key_points·as_of)까지 갖춰 저작돼 있었는데, 적재
@@ -383,8 +393,8 @@ def _fieldtip(state: AgentState, query: str) -> Evidence | None:
 # notices 로 강제한다 — 답변에서 빠지면 코드가 채워 넣는다(§9). 붙일지도 문구도 데이터가
 # 정한다는 규약은 screen·channel 과 같다(stale_mark).
 
-#: 시황·상품 카드 후보 수. 카드 하나가 표 통째(디폴트옵션 9종 = 약 4천 자)인 경우가 있어
-#: 좁게 둔다 — 세 장이면 재료가 1만 자를 넘고, 답이 그 안에서 길을 잃는다.
+#: 후보 수. 카드 하나가 표 통째(디폴트옵션 9종 = 약 4천 자)인 경우가 있어 좁게 둔다 —
+#: 세 장이면 재료가 1만 자를 넘고, 답이 그 안에서 길을 잃는다.
 MARKET_TOP_K = 2
 
 
@@ -421,34 +431,37 @@ def _prefer_sections(hits: list[tuple[float, dict]]) -> list[tuple[float, dict]]
     return [(s, c) for s, c in hits if c["id"] not in parents]
 
 
-def _market(state: AgentState, query: str) -> Evidence | None:
-    """시황·상품 기반지식 — "요즘 시장 어때", "8월 추천펀드 뭐야", "디폴트옵션 알파드림 구성".
+def _market_like(kind: str, label: str) -> Callable[[AgentState, str], Evidence | None]:
+    """market·lineup 도구 본체. 재료의 성격이 같아 한 함수를 종류만 바꿔 쓴다.
 
     `fact`(제도 확정값)와 나누는 기준은 **시효**다. 세액공제 한도는 제도가 바뀌기 전까지
     참이고, 이 재료는 다음 회차 자료가 나오면 낡는다 — 그래서 기준시점 표시가 답에 반드시
     따라붙어야 하고(ANSWER_SHAPES), 그 표시는 카드의 선언에서 온다.
 
     본문은 원문 표·산문이라 atomic 으로 요구하지 않는다. 표를 통째로 원문 강제하면 답변이
-    표 덤프가 되고(tools 머리말), 그건 이 재료를 못 쓰게 만드는 것과 같다. 지금 걸리는
-    것은 수치 집합 검사뿐이다 — 값–조건 오짝은 못 잡는다(consult §12 gap 6).
+    표 덤프가 되고(tools 머리말), 그건 이 재료를 못 쓰게 만드는 것과 같다. 값–조건 오짝은
+    `tables` 선언을 relations.table_mispaired() 가 대조해 잡는다.
     """
-    hits = _adopt(state, query, _prefer_sections(
-        pick(("market",), query, top_k=MARKET_TOP_K * 3))[:MARKET_TOP_K],
-        "시황·상품 기반지식")
-    if not hits:
-        return None
-    notices: list[str] = []
-    scopes: list[dict] = []
-    for _s, c in hits:
-        mark = stale_mark(c)
-        if not mark:
-            continue
-        if mark not in notices:
-            notices.append(mark)
-        scopes.append(_scope(c["title"], [], [mark]))
-    return _ev("market", query, "\n\n".join(_render_market(c) for _, c in hits),
-               KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
-               cards=[c for _s, c in hits])
+
+    def run(state: AgentState, query: str) -> Evidence | None:
+        hits = _adopt(state, query, _prefer_sections(
+            pick((kind,), query, top_k=MARKET_TOP_K * 3))[:MARKET_TOP_K], label)
+        if not hits:
+            return None
+        notices: list[str] = []
+        scopes: list[dict] = []
+        for _s, c in hits:
+            mark = stale_mark(c)
+            if not mark:
+                continue
+            if mark not in notices:
+                notices.append(mark)
+            scopes.append(_scope(c["title"], [], [mark]))
+        return _ev(kind, query, "\n\n".join(_render_market(c) for _, c in hits),
+                   KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
+                   cards=[c for _s, c in hits])
+
+    return run
 
 
 def _customer(state: AgentState, query: str) -> Evidence | None:
@@ -728,8 +741,13 @@ TOOLS: dict[str, Tool] = {
         Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment),
         Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method),
         Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip),
-        Tool("market", "시황·상품 기반지식 — 시장 동향·추천펀드·디폴트옵션 포트폴리오·TDF 를 "
-                       "기준시점과 함께 돌려준다", _market),
+        Tool("market", "시장이 어떻게 돌아가나 — 시황·증시·환율·금리·경제 이벤트와 "
+                       "투자전략을 기준시점과 함께 돌려준다",
+             _market_like("market", "시황")),
+        Tool("lineup", "우리가 뭘 파나 — 이달의 추천펀드, 디폴트옵션 포트폴리오 구성상품·"
+                       "비중·금리, 투자성향별 포트폴리오, TDF 빈티지별 비중을 기준시점과 "
+                       "함께 돌려준다",
+             _market_like("lineup", "운용 상품")),
         # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
         # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
         # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.

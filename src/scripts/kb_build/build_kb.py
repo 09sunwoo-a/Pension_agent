@@ -1307,15 +1307,23 @@ def _market_triggers(title: str, text: str, keywords: list[str], limit: int = 8)
     return ([title] + hits)[: 1 + limit]
 
 
-def build_market() -> tuple[list[dict], list[dict]]:
-    """05 폴더 → (doc 레코드, market 카드). 하위 폴더 전부를 훑는다 — 주간·월간 정기자료가
+#: 원문 front-matter 의 category → 카드 종류. **시황과 상품은 다른 종류다** — 묻는 것이
+#: 다르기 때문이다(시황은 «시장이 어떻게 돌아가나», lineup 은 «우리가 뭘 파나»). 하나로 묶으면
+#: 「8월 추천펀드」를 물었는데 환율 전망이 따라 나오고, 계획 LLM 도 도구 하나로 둘을 다 받아야
+#: 해서 무엇을 부를지 흐려진다. screen(직원이 단말에서)·channel(고객이 앱에서)을 같은 표에서
+#: 나눈 것과 같은 이유다.
+MARKET_KINDS: dict[str, str] = {"시황": "market", "상품": "lineup"}
+
+
+def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
+    """05 폴더 → (doc 레코드, 종류별 카드). 하위 폴더 전부를 훑는다 — 주간·월간 정기자료가
     회차별로 쌓이는 폴더라(README 수록 규칙), 파일 목록을 코드에 적으면 다음 회차가 빠진다."""
     warn = _market_warn()
     if not warn:
         note("[05 경고없음] README 의 ※ 시효 안내를 찾지 못함 — market 카드에 시효 표시가 빠진다")
 
     docs: list[dict] = []
-    cards: list[dict] = []
+    cards: dict[str, list[dict]] = {k: [] for k in MARKET_KINDS.values()}
     for path in sorted(config.MARKET_DIR.rglob("*.md")):
         if path.name == "README.md" or path.name.startswith("_"):
             continue
@@ -1323,9 +1331,11 @@ def build_market() -> tuple[list[dict], list[dict]]:
         title = fm.get("title") or doc_title(path) or path.stem.replace("_", " ")
         category = fm.get("category")
         as_of = fm.get("as_of")
-        if category not in ("시황", "상품"):
+        if category not in MARKET_KINDS:
             note(f"[05 분류없음] {path.name} — front-matter category 가 시황/상품이 아님: {category!r}, 건너뜀")
             continue
+        kind = MARKET_KINDS[category]
+        out = cards[kind]
         if not as_of:
             note(f"[05 기준시점없음] {path.name} — front-matter as_of 없음, 건너뜀"
                  " (기준일 없는 시황·상품 수치는 인용 불가 — 폴더 README 수록 규칙)")
@@ -1361,9 +1371,10 @@ def build_market() -> tuple[list[dict], list[dict]]:
             "category": category, "group": title, "as_of": as_of,
             "volatile": warn, "customer_facing": customer_facing,
         }
-        overview_id = f"mkt.{slug}.00"
+        prefix = "mkt" if kind == "market" else "lnp"
+        overview_id = f"{prefix}.{slug}.00"
         ov_tables = _market_tables(preamble)
-        cards.append(record(overview_id, "market", {
+        out.append(record(overview_id, kind, {
             "title": title,
             "topic": clean(fm.get("topic") or "") or None,
             "key_points": fm.get("key_points") or None,
@@ -1391,7 +1402,7 @@ def build_market() -> tuple[list[dict], list[dict]]:
                 continue
             nn += 1
             sec_tables = _market_tables(sec_body)
-            cards.append(record(f"mkt.{slug}.{nn:02d}", "market", {
+            out.append(record(f"{prefix}.{slug}.{nn:02d}", kind, {
                 "title": sec_title,
                 "content": sec_body,
                 "parent": overview_id,
@@ -1920,7 +1931,9 @@ def main() -> int:
     docs, by_base = build_docs()
     # 05 는 문서 자체가 원문이라 doc 레지스트리에 함께 실린다 — 카드가 source.doc 로
     # 그 문서를 가리키고, 신뢰 표시(tier)·고객 안내 가능 여부도 거기서 한 번만 관리된다.
-    market_docs, market_cards = build_market()
+    market_docs, market_by_kind = build_market()
+    market_cards = market_by_kind["market"]
+    lineup_cards = market_by_kind["lineup"]
     docs += market_docs
     resolver = DocResolver(by_base, docs)
     segments = inherit_parent_source(build_segments(resolver))
@@ -1946,8 +1959,10 @@ def main() -> int:
     # 시황·상품은 카드마다 as_of 가 다르다(주간 8월 3주차 · 월간 9월 · 상품 8월). 파일
     # meta.as_of 하나로 접으면 어느 회차 수치인지가 사라지므로 여기는 "폴더 기준"만 적고,
     # 답변에 나가는 기준시점은 카드의 as_of 다(tools.stale_mark).
-    write("kb_market", "market", "시황·상품 기반지식 — 05_시황_상품_기반지식",
+    write("kb_market", "market", "시황 기반지식 — 05_시황_상품_기반지식/01_시황",
           market_cards, "2026-09", origin_dir=config.MARKET_DIR)
+    write("kb_lineup", "lineup", "운용 상품 기반지식 — 05_시황_상품_기반지식/02_상품",
+          lineup_cards, "2026-08", origin_dir=config.MARKET_DIR)
     # 보류 팩트는 활성화하지 않는다 — 04 규칙상 확인 전에는 검증 기준으로 쓸 수 없다.
     path = OUT_DIR / "_hold_kb_facts_pending.json"
     path.write_text(json.dumps(
@@ -1959,12 +1974,12 @@ def main() -> int:
          "records": pending}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     built = (segments + methods + pitches + facts + procedures + screens_
-             + channels + fieldtips + market_cards)
+             + channels + fieldtips + market_cards + lineup_cards)
     print(f"doc {len(docs)}건 · segment {len(segments)}건 · method {len(methods)}건 "
           f"· pitch {len(pitches)}건 · fact {len(facts)}건(보류 {len(pending)}건) "
           f"· procedure {len(procedures)}건 · screen {len(screens_)}건 "
           f"· channel {len(channels)}건 · fieldtip {len(fieldtips)}건 "
-          f"· market {len(market_cards)}건 → {OUT_DIR}")
+          f"· market {len(market_cards)}건 · lineup {len(lineup_cards)}건 → {OUT_DIR}")
     matched = sum(1 for s in built if (s.get("source") or {}).get("doc"))
     print(f"출처 해석: {matched}/{len(built)}건에 원천 문서 연결")
 
