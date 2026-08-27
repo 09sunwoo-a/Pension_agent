@@ -1,11 +1,11 @@
 {
   "meta": {
     "kind": "doc",
-    "title": "원천 문서 레지스트리 (01~04·07 폴더)",
+    "title": "원천 문서 레지스트리 (01~05·08 폴더)",
     "as_of": "2026-08",
     "confidential": true,
     "doc_id": "kb_docs",
-    "note": "src/tools/kb_build/build_kb.py 가 06_주제별_추출지식에서 생성한다. 직접 편집하지 말고 변환기·config 를 고쳐 다시 생성한다."
+    "note": "src/scripts/kb_build/build_kb.py 가 06_주제별_추출지식에서 생성한다. 직접 편집하지 말고 변환기·config 를 고쳐 다시 생성한다."
   },
   "records": [
     {
@@ -1341,6 +1341,67 @@
         "origin_file": "01_현장의목소리_HotTip_50건.md",
         "path": "08_인사이트/01_현장의목소리_HotTip_50건.md",
         "note": "영업점 Hot Tip 50건에서 뽑은 현장 관찰. 본부 공식 지침이 아니다."
+      }
+    },
+    {
+      "id": "doc.k05.주간금융시장동향_2026-08_3주차",
+      "kind": "doc",
+      "fields": {
+        "title": "주간 금융시장 동향 — 2026년 8월 3주차",
+        "short": "주간시황",
+        "dept": "WM고객그룹 WM투자상품부",
+        "published": "2026-08",
+        "origin": "시황상품",
+        "tier": "본부공식",
+        "customer_facing": true,
+        "origin_file": "주간 금융시장 동향 (고객용)",
+        "path": "05_시황_상품_기반지식/01_시황/01_주간금융시장동향_2026.08_3주차.md",
+        "note": "KB국민은행 WM고객그룹 WM투자상품부 「주간 금융시장 동향」 (고객용, 2026년 8월 3주차)"
+      }
+    },
+    {
+      "id": "doc.k05.월간이벤트_투자전략_2026-09",
+      "kind": "doc",
+      "fields": {
+        "title": "「Insight to Solution」 월간 주요 이벤트 & 투자전략 — 2026년 9월",
+        "short": "월간투자전략",
+        "dept": "WM고객그룹 WM투자상품부 투자전략팀",
+        "published": "2026-09",
+        "origin": "시황상품",
+        "tier": "본부공식",
+        "origin_file": "「Insight to Solution」 월간 주요 이벤트 & 투자전략 (2026년 9월)",
+        "path": "05_시황_상품_기반지식/01_시황/02_월간이벤트_투자전략_2026.09.md",
+        "note": "KB국민은행 WM고객그룹 WM투자상품부 투자전략팀 「Insight to Solution」 (2026.09)"
+      }
+    },
+    {
+      "id": "doc.k05.퇴직연금펀드_포트폴리오_2026-08",
+      "kind": "doc",
+      "fields": {
+        "title": "퇴직연금 펀드 8월 포트폴리오",
+        "short": "펀드포트폴리오",
+        "published": "2026-08",
+        "origin": "시황상품",
+        "tier": "본부공식",
+        "customer_facing": false,
+        "origin_file": "퇴직연금 펀드 8월 포트폴리오 (행내한)",
+        "path": "05_시황_상품_기반지식/02_상품/01_퇴직연금펀드_포트폴리오_2026.08.md",
+        "note": "KB국민은행 행내 배포자료 「퇴직연금 펀드 8월 포트폴리오」 (행내한, 2026.08)"
+      }
+    },
+    {
+      "id": "doc.k05.퇴직연금_추천펀드_2026-08",
+      "kind": "doc",
+      "fields": {
+        "title": "8월 퇴직연금 추천펀드",
+        "short": "추천펀드",
+        "published": "2026-08",
+        "origin": "시황상품",
+        "tier": "본부공식",
+        "customer_facing": false,
+        "origin_file": "8월 퇴직연금 추천펀드",
+        "path": "05_시황_상품_기반지식/02_상품/02_퇴직연금_추천펀드_2026.08.md",
+        "note": "KB국민은행 행내 배포자료 「8월 퇴직연금 추천펀드」 (2026.08)"
       }
     }
   ]

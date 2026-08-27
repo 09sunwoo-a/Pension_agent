@@ -31,7 +31,7 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 
 # ── 1. 변환기가 읽는 폴더가 실제로 있는가
 for name in ("EXTRACT_DIR", "INSIGHT_DIR", "GUIDE_DIR", "STARLEARN_DIR",
-             "HOTTIP_DIR", "KBTHINK_DIR", "FEATURE_DIR"):
+             "HOTTIP_DIR", "KBTHINK_DIR", "FEATURE_DIR", "MARKET_DIR"):
     p: Path = getattr(config, name)
     check(p.is_dir(), f"config.{name} 실재", str(p))
 
@@ -78,6 +78,40 @@ for stem, seed in config.GUIDE_DOCS.items():
         _drift.append(f"{stem} — 레지스트리 '{fields['title']}' vs 원문 '{origin}'")
 check(not _drift, f"레지스트리 제목 = 원문 제목 ({len(config.GUIDE_DOCS)}건 대조)",
       "; ".join(_drift[:3]))
+
+
+# ── 3-b. 05 문서마다 시드가 있고, 레지스트리 제목이 front-matter 제목인가
+#
+# 05 는 정기자료가 회차별로 쌓이는 폴더다(README 수록 규칙 — 주간·월간). 다음 회차 파일이
+# 들어오면 시드가 없어 부서·발행시점이 비고, 그 사실은 리포트 한 줄로만 지나간다.
+# 여기서 잡으면 파일을 넣은 사람이 그 자리에서 안다.
+_market_docs = {r["id"]: r["fields"] for r in
+                json.loads((config.OUT_DIR / "kb_docs.json").read_text(encoding="utf-8"))["records"]
+                if r["fields"].get("origin") == "시황상품"}
+_m_drift: list[str] = []
+_m_files = [p for p in sorted(config.MARKET_DIR.rglob("*.md"))
+            if p.name != "README.md" and not p.name.startswith("_")]
+for path in _m_files:
+    if path.stem not in config.MARKET_DOCS:
+        _m_drift.append(f"{path.name} — config.MARKET_DOCS 에 시드 없음")
+        continue
+    fm, _ = build_kb._market_front_matter(path.read_text(encoding="utf-8"))
+    fields = next((f for f in _market_docs.values() if f.get("origin_file") in
+                   (fm.get("source_file"), path.name)), None)
+    if fields is None:
+        _m_drift.append(f"{path.name} — 레지스트리에 없음")
+    elif fields["title"] != fm.get("title"):
+        _m_drift.append(f"{path.name} — 레지스트리 '{fields['title']}' vs 원문 '{fm.get('title')}'")
+check(not _m_drift, f"05 문서 시드·제목 = 원문 ({len(_m_files)}건 대조)", "; ".join(_m_drift[:3]))
+
+# ── 3-c. 05 카드의 시효 경고가 README 원문에서 온 것인가
+#
+# 시황 수치는 주·월 단위로 낡는다. 경고 문구를 코드가 들고 있으면 README 가 바뀔 때 두 곳이
+# 갈리고, 갈리면 답변이 틀린 안내를 한다(consult §12 지워진 gap 16·18 과 같은 사고).
+_warn = build_kb._market_warn()
+_readme = (config.MARKET_DIR / "README.md").read_text(encoding="utf-8")
+check(bool(_warn) and build_kb._market_emphasis(_warn) in build_kb._market_emphasis(_readme),
+      "05 시효 경고가 README 원문에서 온다", str(_warn)[:40])
 
 
 # ── 4. 최상위 폴더 번호를 코드에 하드코딩하지 않았는가

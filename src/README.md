@@ -1,198 +1,138 @@
 # 퇴직연금 에이전트 (Pension Agent)
 
 퇴직연금(IRP) 상담 전, 직원에게 **이 고객에게 무엇을 어떻게 제안할지**를 정리해 주는
-에이전트 묶음. **코드가 사실을 확정하고 LLM은 표현만 맡는** 구조라, 규제 도메인에서
-환각·불완전판매를 구조적으로 막는다.
+에이전트 묶음. **경계는 코드가 정하고 LLM 은 그 안에서만 말한다** — 어떤 근거를 모을지는
+LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코드가 쥔다([../CLAUDE.md](../CLAUDE.md) §2).
+요건 기준은 [../docs/REQUIREMENTS.md](../docs/REQUIREMENTS.md) 하나다.
 
-요건(화면 ①~⑨ · 상담이력 등)의 기준은 [../docs/REQUIREMENTS.md](../docs/REQUIREMENTS.md)
-하나다. 코드 주석은 외부 기획안·목업을 직접 인용하지 않고 이 문서를 가리킨다.
+## 실행
+
+명령은 **전부 `src/` 에서** 실행한다 — 그래야 `src/` 가 임포트 루트가 된다. 설치는 필요 없다.
+
+```bash
+cd src
+pip install -r requirements.txt
+cp .env.example .env      # 사내 게이트웨이 URL·키 (pension_agent/llm.py 가 읽음)
+
+CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
+CAD="python -m tests.debug"                    # 같은 것 + 트레이스
+```
+
+```bash
+# ── 브리핑 · 대화 · 화면
+python -m pension_agent.strategy_agent.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
+$CA "고객이 주식이 더 낫다는데 뭐라고 하지?"           # 단발 — 고객 화면 없이
+$CA -c 198734-1205842                                 # REPL — 고객 화면이 열린 상태
+$CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을 한 줄로 (맥락 이어서)
+streamlit run app.py                                  # 평가 대시보드 (개발용 화면)
+
+# ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다 — 모듈만 바꾸고 --debug)
+$CAD --debug "세액공제 한도가 얼마야?"
+$CAD --debug -c 198734-1205842                        # REPL — 턴마다 방금 턴만 찍는다
+$CAD --script tax_credit_asserts_wrong --debug --show-llm   # 키 없이 재현
+$CAD --list                                           # 시나리오 목록
+
+# ── 테스트 · 점검 (LLM 키 없이 돈다)
+python -m tests.test_engine            # ①~⑤ 결정론 로직
+python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치
+python -m tests.test_strategy_agent    # LLM 산출 검증 · 폴백
+python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드
+python -m tests.test_infra             # 공용 인프라 · 임포트 경계
+python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
+python -m scripts.kb_build.test_paths  # 경로 · locator 실재
+python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증
+python -m pension_agent.consult_agent.kb                          # 지식베이스 리포트
+
+# ── 재생성 (생성물은 손으로 고치지 않는다 — 생성기를 고친다)
+python -m scripts.kb_build.build_kb [--activate]   # 06_주제별_추출지식 → 카드
+python -m scripts.import_targets                   # 타겟 룰베이스 xlsx → targets.json
+python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
+```
+
+**고객 지정(`-c/--customer`)** 은 고객 id(KB-PIN)다. 없으면 브리핑질의·LMS발송·수정이
+"고객 화면을 먼저 열어주세요"로 답한다. id 는 `strategy_agent/customer.py` 의 `PERSONAS`
+(예: 이준호=`198734-1205842`). 실행 조합은
+[consult_agent/README.md](pension_agent/consult_agent/README.md).
+
+### 디버그 모드
+
+`tests/debug/` 는 파이프라인을 **밖에서 감싸서 보기만** 한다 — 값은 그대로 통과시키고
+운영 코드는 고치지 않는다.
+
+| 옵션 | |
+|---|---|
+| `--debug` | 답변 아래에 트레이스 (REPL 에서는 방금 턴만) |
+| `--show-llm` | compose 가 LLM 에게 받은 문장을 폐기됐어도 그대로 |
+| `--script N` | 캔드 LLM 시나리오 — API 키 없이 돈다 (`--list` 로 7종 확인) |
+| `--any-customer` | 이 체크아웃에 없는 고객 id 로도 진행(경고만) |
+
+트레이스는 노드 순서·상태 변화, LLM 호출 자리(understand·plan·clarify·tools·select),
+그리고 compose 게이트 `verify_texts`(원장 밖 수치) → `relations`(근거와의 관계) → `span`
+을 찍는다. **앞에서 끊기면 뒤는 아예 안 불리고, 그게 진단의 핵심이다.**
+
+없는 고객 id 는 시작할 때 끊는다 — 그냥 두면 «재료 0건»이 되어 오타와 구분되지 않는다.
+
+## 최근에 들어온 것
+
+- **재계획.** 근거를 못 낸 호출을 `plan_misses` 로 계획에 싣고, 근거 0건인 채 끝내려 하면
+  안 써 본 도구와 함께 **한 번만** 재계획시킨다. 두 번째 끝내기는 존중한다(정직한 '없음').
+  루프 상한 `plan.MAX_STEPS`=4.
+- **표기가 판정을 뒤집지 않는다.** `verify` 가 값 보존 정규형으로 대조 — `15.0%`=`15%`,
+  `1,485,000원`=`148만 5천원`, `2026-09-10`=`2026.09.10.`=`2026년 9월 10일`. 값이 다르면
+  여전히 폐기된다.
+- **시간축이 둘이다.** `customer.AS_OF`(원장 스냅샷이 찍힌 날 — 잔액·수익률의 시점)와
+  `clock.today()`(상담 시점 — 잔여일수·경과일의 기준). 하나로 붙여 두면 원장이 사흘만
+  묵어도 "만기 D-17"(실제 D-14)·"연말까지 129일"(실제 126일)이 나간다. `PENSION_TODAY=
+  YYYY-MM-DD` 로 고정하며, 테스트는 `tests/__init__.py` 가 `AS_OF` 로 고정한 채 돈다.
+  오늘이 며칠인지는 `date` 도구가 **재료로** 싣는다 — 재료 밖 날짜 계산은 금지이므로
+  (§5) 싣지 않으면 시한을 아예 말하지 못한다.
+- **날짜는 통짜로 대조한다.** 연·월·일로 흩으면 원장 어딘가에 2026 과 11 과 10 이 있다는
+  이유로 "만기는 2026년 11월 10일"(오답)이 통과한다. 정규형 하나로 맞추되 표기(ISO·한글·
+  점)는 가리지 않고, 연도를 뺀 날짜는 **오늘 언저리(±1년)** 로만 읽는다 — 3년 전
+  납입이력에서 월일만 빌려 오는 말은 사람이 하는 해석이 아니다.
+- **인용은 주장이 아니다.** 원문의 오기를 짚는 정정은 통과하고, 사실로 주장하면 폐기된다.
+- **상담이력 선별.** 도구가 계획의 `query` 를 읽어 걸리는 기록을 앞세우되 걸러내지는 않고,
+  과거 상담과 오늘 대화를 예산·구획으로 가른다. `suggest.history_chips` 는 기록 있는
+  고객에게만, 고정 템플릿 + 계산값으로만 칩을 띄운다.
+- **타겟 룰베이스.** 임계값의 기준은 기획자 확인표(`strategy_agent/targets.json`)다 —
+  어긋나면 코드가 틀린 것. 근거등급은 [../docs/DEMO_STATUS.md](../docs/DEMO_STATUS.md) §7.
 
 ## 디렉토리
 
 ```
 src/
-├─ pension_agent/          ← 임포트 가능한 단일 패키지. 모든 임포트가 여기서 시작한다
+├─ pension_agent/          단일 패키지. 임포트는 전부 절대 경로, 경로를 아는 파일은 config.py 하나
 │  ├─ config.py            경로·데이터 위치의 단일 출처
-│  ├─ llm.py               프로바이더 전환식 LLM 클라이언트 (환경 이전 시 여기만 수정)
+│  ├─ clock.py             «오늘»의 단일 출처 — 원장 스냅샷 기준일과는 다른 축
+│  ├─ llm.py               프로바이더 전환식 클라이언트 (환경 이전 시 여기만)
 │  ├─ verify.py            LLM 산출물의 재료 이탈 판정 — 두 에이전트 공통
-│  ├─ session_store.py     상담 세션·대화이력 (consult 가 쓰고 strategy 가 읽는다)
-│  ├─ tools.py             외부 연동 레지스트리 (LMS 발송 — 되돌릴 수 없는 행위의 게이트)
-│  ├─ knowledge/           데이터 접근 계층 — kinds·schema·store·similarity·checks + data/
-│  ├─ strategy_agent/      AI 브리핑 — 고객 1명 종합 → ①~⑨ 섹션
-│  │  └─ engine/           결정적 처리 계층 9개 모듈 (catalog·products·scoring·pipeline…)
-│  ├─ consult_agent/       직원 상담 대화 (LangGraph) — state·routing·graph + nodes/
-│  └─ market/              시황·금리 소스 (자리표시자)
-├─ tests/                  회귀 테스트 5종 + debug/(실행 트레이스 — 운영 코드 무수정)
-├─ scripts/                개발 스크립트 — kb_build(지식 변환) · demo_status(리포트)
-├─ app.py                  Streamlit 평가 대시보드 (개발·테스트용 화면)
-├─ requirements.txt
-├─ .env                    공용 LLM 설정 (커밋 금지) · .env.example 참고
-└─ AUTHORING.md            데이터 소스 추가 가이드 (사내 규정·상품 등 + 저작 프롬프트)
+│  ├─ session_store.py     상담 세션·이력 (consult 가 쓰고 strategy 는 읽는다)
+│  ├─ tools.py             외부 연동 레지스트리 (LMS 발송 게이트)
+│  ├─ knowledge/           데이터 접근 계층 — kinds·schema·store + data/
+│  ├─ strategy_agent/      AI 브리핑 → ①~⑨ · engine/ · targets.json
+│  ├─ consult_agent/       상담 대화 (LangGraph) — routing·graph·suggest + nodes/
+│  └─ market/              시황·금리 (자리표시자)
+├─ tests/                  회귀 5종 + debug/(트레이스 — 운영 코드 무수정)
+├─ scripts/                kb_build(지식 변환) · import_*(xlsx 적재) · demo_status
+├─ app.py                  Streamlit 평가 대시보드
+└─ AUTHORING.md            데이터 소스 추가 · 저작 프롬프트
 ```
 
-향후 `knowhow_agent/`(영업 노하우)도 `pension_agent/` 아래 같은 방식으로 붙는다.
-
-**임포트는 전부 절대 경로다** — `from pension_agent.strategy_agent import engine`. 모듈이
-`sys.path` 를 손대는 곳은 한 군데도 없고, 경로를 아는 파일은 `config.py` 하나다.
-`tests/test_infra.py` 가 이 두 가지를 회귀로 고정한다.
-
-## 실행 · 테스트
-
-아래 명령은 전부 `src/` 에서 실행한다.
-
-```bash
-pip install -r requirements.txt
-cp .env.example .env      # 사내 GenAI 게이트웨이 URL·키 입력 (pension_agent/llm.py 가 읽음)
-```
-
-```bash
-# ── 실행
-python -m pension_agent.strategy_agent.agent 이준호            # 단일 고객 AI 브리핑 (CLI)
-python -m pension_agent.consult_agent -c 198734-1205842        # 대화형 REPL — 고객 화면이 열린 상태
-streamlit run app.py                                   # 평가·피드백 대시보드 (+대화형 에이전트 테스트 탭)
-
-# ── 테스트 (LLM 키 없이 동작)
-python -m tests.test_engine                     # 엔진 감사 회귀 (①~⑤ 결정론 로직)
-python -m tests.test_support                    # ⑥~⑨ 문제상황·후보군·더미 규약·시효성 수치
-python -m tests.test_strategy_agent             # LLM 산출 검증·폴백 경로
-python -m tests.test_consult_agent              # 검색·라우팅·즉답 의도·도구 루프
-python -m tests.test_infra                      # 공용 인프라(세션·도구·임포트 경계)
-python -m tests.debug.test_trace                # 실행 트레이스 — 노드·게이트·폐기 사유
-python -m scripts.kb_build.test_paths           # 경로·locator 실재 (폴더 재번호 회귀)
-
-# ── 진단: 이 답이 어느 노드에서 어떻게 나왔나 (tests/debug — 운영 코드를 고치지 않는다)
-# 인자 규약이 위 REPL 과 같다. 평소 쓰던 줄의 모듈 이름만 바꾸고 --debug 를 붙이면 된다.
-CAD="python -m tests.debug"
-$CAD --debug "세액공제 한도가 얼마야?"                  # 단발 + 트레이스
-$CAD --debug -c 198734-1205842                          # REPL + 턴마다 트레이스
-$CAD --debug -c 198734-1205842 "이 고객 투자성향 뭐야?" "그럼 만기 자금은?"  # 멀티턴
-$CAD --script tax_credit_asserts_wrong --debug --show-llm  # 키 없이 재현(캔드 LLM)
-$CAD --list                                              # 시나리오 목록
-# -c 값은 손대지 않고 그대로 넘어간다. 다만 이 체크아웃에 없는 id 면 시작할 때 끊고 있는
-# id 를 알려준다 — 없는 id 는 에러 없이 '재료 0건' 이 돼서 오타와 구분되지 않기 때문이다.
-# 그대로 넘기려면 --any-customer (트레이스 맨 위에 경고가 남는다).
-
-# ── 무결성 점검
-python -m pension_agent.strategy_agent.engine   # 전략 정의 검증 — 근거 교차검증 포함
-python -m pension_agent.consult_agent.kb        # 지식베이스 점검 리포트 (ERROR 0 확인)
-python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증
-
-# ── 지식베이스 재생성 (06_주제별_추출지식 원문을 고친 뒤)
-python -m scripts.kb_build.build_kb             # _draft_ 로 생성 + 변환 리포트
-python -m scripts.kb_build.build_kb --activate  # 검토 후 활성화
-
-# ── 데모 점검 리포트 (무엇이 더미이고 무엇이 소스 미확정인지)
-python -m scripts.demo_status                   # docs/DEMO_STATUS.md 갱신
-```
-
-전부 `src/` 에서 `-m` 으로 실행한다 — 그래야 `src/` 가 임포트 루트가 되어 `pension_agent`
-패키지를 찾는다. 설치(`pip install -e .`)는 필요 없다.
-
-대화형 에이전트는 `-c/--customer` 로 "지금 열려 있는 고객"을 지정한다. 넘기지 않으면
-브리핑질의·LMS발송·수정 세 의도가 "고객 화면을 먼저 열어주세요"로 답한다. 고객 id(KB-PIN)
-목록은 `pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 참고(예: 이준호=
-`198734-1205842`) — 원장은 `customers.json`(scripts/import_customers.py 산출물)이다. 자세한 실행
-조합은 [pension_agent/consult_agent/README.md](pension_agent/consult_agent/README.md).
-
-LLM 은 `.env` 의 `LLM_BASE_URL` 유무로 사내(genai)/외부테스트(anthropic)를 자동 전환한다 →
-[pension_agent/README.md](pension_agent/README.md).
-
-### 오늘은 언제인가 — 시간축이 둘이다
-
-| | 무엇 | 어디에 쓰이나 |
-|---|---|---|
-| `customer.AS_OF` | 원장 스냅샷 기준일(2026-08-24) | 잔액·수익률·납입액이 «찍힌 날». `customers.json` 의 `meta.as_of` 와 묶여 있다 |
-| `clock.today()` | 상담 시점의 **오늘**(기본: 실제 날짜) | 만기까지 며칠·연말까지 며칠·마지막 접촉 이후 며칠 — 잔여일수와 경과일 전부. `customer.today()` 로도 부를 수 있다(재수출) |
-
-오늘을 읽는 곳은 `pension_agent/clock.py` 하나다 — 경로가 `config.py` 하나여야 하는 것과
-같은 이유다. 두 에이전트와 검증기가 함께 쓴다(`verify` 는 연도 없이 말한 날짜를 어느 해로
-읽을지에 이 값을 쓴다).
-
-둘을 하나로 붙여 두면 원장이 사흘만 묵어도 화면이 "만기 D-17"(실제 D-14) · "연말까지
-129일"(실제 126일)을 말한다. 잔액은 옮길 수 없지만 날짜 산술은 옮길 수 있어서 갈라 뒀다.
-
-```bash
-PENSION_TODAY=2026-12-01 python -m pension_agent.strategy_agent.agent 한지우   # 오늘을 고정해 본다
-```
-
-테스트는 `tests/__init__.py` 가 이 값을 `AS_OF` 로 고정한 채 돈다 — 안 그러면 600건 넘는
-단언이 실행일마다 흔들린다. 날짜 산술 자체는 `tests/test_infra.py` 「오늘·기준일」 절이
-날짜를 명시해 따로 검증한다.
-
-## 구조
-
-```mermaid
-flowchart TB
-    DOC["행내 원본 문서<br/>(스캔·PDF·PPT)"] -->|"LLM 저작 + 사람 검토<br/>(AUTHORING.md §4-b)"| KINDS
-    EXTRACT["06_주제별_추출지식<br/>(세그먼트·화법·팩트·절차)"] -->|"scripts/kb_build 결정론 변환<br/>+ 검토 게이트 (AUTHORING.md §4-a)"| KINDS
-
-    subgraph COMMON["pension_agent — 공용 인프라"]
-        KINDS["knowledge/kinds.json<br/>종류별 스키마 선언"]
-        SCHEMA["knowledge/schema.py<br/>검증기 · 저작프롬프트 생성"]
-        STORE["knowledge/store.py<br/>단일 레코드 로더"]
-        VERIFY["verify.py<br/>재료 이탈 판정(공용)"]
-        SESSION[("session_store.py<br/>상담이력 · 감사로그")]
-        KINDS --- SCHEMA
-    end
-
-    STORE --> PDATA
-    STORE --> SDATA
-
-    subgraph CONSULT["consult_agent — 직원 상담 대화 (LangGraph)"]
-        PDATA[("knowledge/data/*.json<br/>doc · fact · pitch · segment · procedure · resource")]
-        PDATA --> FLOW1["understand(라우팅) → situation_slots(슬롯분해)<br/>→ plan(도구 선택 루프, 최대 4회)<br/>→ 도구별 근거를 원장에 쌓음<br/>→ clarify(모호하면 되묻기) → compose(결합·검증)"]
-        FLOW3["customer 도구 · lms_send · correction<br/>(strategy_agent 를 직접 임포트해 호출)"]
-        FLOW5["offer → confirm_action<br/>화면 연계 제안·확인 후 URL"]
-    end
-
-    subgraph STRATEGY["strategy_agent — AI 브리핑(전략 제안 + ①~⑨ 섹션)"]
-        SDATA[("strategy_agent/data/*.json<br/>product·strategy·baseline·asset·top_holding·portfolio")]
-        SDATA --> FLOW2["①~⑤: 적합성 게이트 → 전략 카드 합성<br/>→ LLM 문장·추천 생성<br/>→ verify(숫자·상품명 재료 대조)"]
-        FLOW6["⑥~⑨: situations(문제상황 매칭)<br/>→ support(화법·반론·자료·안내 후보군)<br/>→ LLM 선별·스크립트화"]
-    end
-
-    PDATA -.->|"세그먼트 매칭 → 화법·절차 후보군"| FLOW6
-    PDATA -.->|"strategy.pitch_refs/objection_refs로<br/>실시간 조회(정적 참조)"| FLOW2
-    FLOW1 -.->|"customer 도구 → strategy_agent.agent.propose()"| FLOW2
-    FLOW3 -.->|"strategy_agent.agent.propose()"| FLOW2
-    FLOW3 -->|"매 턴 기록"| SESSION
-    SESSION -.->|"§14 상담이력 읽기 전용"| FLOW2
-    VERIFY -.-> FLOW1
-    VERIFY -.-> FLOW2
-    VERIFY -.-> FLOW3
-    VERIFY -.-> FLOW6
-    FLOW1 --> FLOW5
-    FLOW5 -->|"실행 기록"| SESSION
-```
+`sys.path` 를 손대는 모듈은 없다 — `tests/test_infra.py` 가 회귀로 고정한다.
 
 ## 핵심 설계
 
-- **코드 = 사실 / LLM = 표현.** 수치·상품·적합성은 코드가 정하고 LLM은 문장만 쓴다. 모든 LLM
-  산출은 `pension_agent/verify.py` 가 재료(숫자·상품명) 이탈을 대조하고, 실패하면 규칙 결과를 남기거나
-  섹션을 비운다 — 규칙 문장을 AI 산출로 오인시키지 않는다.
-- **저작은 검증을 통과해야 활성화된다.** 원본 문서를 LLM이 `kinds.json` 종류(kind)의 JSON으로
-  뽑고, 사람이 검토한 뒤 `schema.py` 검증기(필수필드·enum·참조·사실충돌·개인정보 패턴)를 통과해야
-  적재된다. 모든 데이터가 `{meta, records:[{id, kind, fields, …}]}` 단일 규격이라 새 데이터·새
-  종류는 파일/선언만 추가하면 붙는다 → [AUTHORING.md](AUTHORING.md).
-- **검색의 불확실성을 브리핑에 들이지 않는다.** strategy_agent 는 화법 카드를 검색하지 않고,
-  저작 시점에 연결해둔 `pitch_refs`/`objection_refs` 를 요청마다 실시간 조회한다(복사하지 않으므로
-  원본과 어긋나지 않는다). 상담이력도 같은 단방향 원칙 — consult_agent 가 쓰고 strategy_agent 는
-  읽기만 한다.
-- **화면 제목은 한 곳에서 정한다.** ①~⑨ 섹션의 제목·생성주체는 `strategy_agent/sections.py` 가
-  유일한 출처이고, CLI·Streamlit 이 전부 여기서 읽는다.
-- **외부 연동은 도구 레지스트리로 갈아끼운다.** LMS 발송 등은 `pension_agent/tools.py` 스텁으로 자리를
-  잡아두고, MCP 연동 시 함수 본문만 교체한다 — 라우팅 로직은 손대지 않는다.
-- **되돌릴 수 없는 행위는 제안하고 실행은 사람이 정한다.** 에이전트가 문맥을 보고 도구 호출을
-  판단하되(`act.offer`), 발송처럼 대외로 나가는 것은 직원의 확인을 한 턴 거친 뒤 실행한다
-  (`act.confirm_action`). 제안 여부도 규칙으로 정한다 — 매 턴 물으면 확인 절차가 의미를 잃는다.
-- **⑥~⑨ 는 전략이 아니라 문제상황에서 출발한다.** 06/01 고객세그먼트를 요건 판정 결과와 대조해
-  "이 고객이 왜 관리 대상인가"를 먼저 확정하고, 그 사유에 맞는 화법·반론·자료·안내 콘텐츠를
-  모은다. 관리 사유가 없는 고객은 비운다 — 사유를 만들어내지 않는다.
-- **출처는 원본 문서 이름으로 말한다.** 모든 카드가 `source.doc`(또는 파일 단위 선언인
-  `meta.source_doc`)으로 원천 문서 레지스트리(`doc` kind)를 가리키고, 화면·답변은 그것을 조인해
-  문서명·부서·기준시점을 함께 보여준다. 출처 문자열을 만드는 곳은 `consult_agent/kb.py::origin_of()`
-  하나이고, **적재 json 의 이름표로는 절대 물러서지 않는다** — 못 찾으면 원문 표기·추출지식 절을
-  거쳐 "확인 필요"라고 말한다. 지어내지 않는다.
-- **편집 가능 범위는 코드가 못박는다.** 브리핑 수정은 `strategy_agent.agent.EDITABLE_FIELDS`
-  (LLM이 쓴 산문)만 허용하고, 코드가 계산한 수치·상품명은 대화로 못 고친다. 승인된 수정도 이번
-  세션의 감사로그로만 남는다(재적용 루프는 다음 단계).
+- **근거는 원장에만 쌓인다.** 답변은 `state["evidence"]` 안에서만 나오고, `verify.py` 가
+  원장 밖 수치를 잘라낸다. 실패하면 규칙 결과를 남기거나 섹션을 비운다.
+- **저작은 검증을 통과해야 활성화된다.** 사람이 검토하고 `schema.py`(필수필드·enum·참조·
+  사실충돌·개인정보)를 통과해야 적재된다. 단일 규격이라 새 종류는 선언만 더한다 →
+  [AUTHORING.md](AUTHORING.md).
+- **검색의 불확실성을 브리핑에 들이지 않는다.** strategy_agent 는 화법을 검색하지 않고
+  저작 시점에 연결된 `pitch_refs`/`objection_refs` 를 실시간 조회한다.
+- **⑥~⑨ 는 문제상황에서 출발한다.** "왜 관리 대상인가"를 먼저 확정하고 그 사유에 맞는
+  화법·반론·자료를 모은다. 사유가 없는 고객은 비운다 — 만들어내지 않는다.
+- **출처는 원본 문서 이름으로 말한다.** `consult_agent/kb.py::origin_of()` 한 곳에서만
+  만들고, 못 찾으면 "확인 필요"라고 한다. 적재 json 의 이름표로 물러서지 않는다.
+- **되돌릴 수 없는 행위는 사람이 정한다.** 에이전트는 제안(`act.offer`)하고, 발송은 확인을
+  한 턴 거친다(`act.confirm_action`). 편집 가능 범위도 코드가 못박는다
+  (`EDITABLE_FIELDS` — 코드가 계산한 수치·상품명은 대화로 못 고친다).
