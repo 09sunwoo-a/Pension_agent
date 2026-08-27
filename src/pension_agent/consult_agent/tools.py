@@ -623,12 +623,26 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 출처는 **고객 원장**이지 지식 카드가 아니다. 예전 표기("AI브리핑 재료 /
     # briefing.<id>")는 화면에서 카드 id 처럼 읽혀, 계좌에 그냥 들어 있는 값이 어딘가에서
     # 검색해 온 자료처럼 보였다. 검색으로 온 재료가 아니므로 관련도(score)도 없다.
+    # 레이블–값 짝을 선언한다. 이 재료의 허용 집합에는 화면 값 말고도 ⑥⑦⑧ 의 화법·반론·
+    # 참고자료 수치가 함께 들어 있어서(직원이 그것도 묻는다) 집합 포함 검사만으로는
+    # "세액공제 잔여한도는 300만원이에요"(실제 0만원)가 통과한다 — 300 은 화법 문구에 실제로
+    # 있는 숫자다. 선언을 relations.labeled_mispaired() 가 대조한다(fact 의 tiers·05 표의
+    # tables 와 같은 자리다).
+    labeled = [{"label": k.replace("_", " "), "value": str(v)}
+               for src in (facts["customer"],
+                           {k: v for k, v in facts["briefing"].items() if k != "source"},
+                           facts.get("account_state") or {})
+               for k, v in src.items()]
     return _ev("customer", query, "\n".join(lines),
                [{"id": f"customer.{customer_id}",
                  "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}],
-               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)])
+               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)],
+               cards=[{"id": f"customer.{customer_id}", "labeled": labeled,
+                       # 재료 전문 — 항목 이름이 다른 자리(문제상황 제목 등)에도 나오면
+                       # 그 항목은 판정에서 뺀다(relations.checkable).
+                       "context": "\n".join(lines)}])
 
 
 #: 인용 허용 집합에서 빼는 facts 가지. 값이 아니라 **선별 전 후보 더미**다.

@@ -1903,6 +1903,85 @@ def check_caution_roles() -> int:
     return ok
 
 
+def check_labeled_pairs() -> int:
+    """레이블–값 짝(§6) — 「이 항목의 값이라며 남의 수치를 붙였는가」.
+
+    고객 재료의 허용 집합에는 화면 값 말고도 ⑥⑦⑧ 에 실린 화법·반론·참고자료의 수치가 함께
+    들어 있다 — 직원이 그것도 묻기 때문에 뺄 수 없다. 그래서 수치 집합 포함 검사만으로는
+    **"세액공제 잔여한도는 300만원이에요"(실제 0만원)가 통과했다** — 300 은 화법 문구
+    「적립금 300만원 이상…」에 실제로 있는 숫자다. 경계 밖으로 나간 게 아니라 **엉뚱한
+    이름표에 갖다 붙인 것**이라, 막을 자리는 verify 가 아니라 relations 다.
+
+    이 테스트가 재는 것 셋. 뒤엣것이 더 중요하다 — 옳은 문장을 거부하는 것은 틀린 문장을
+    통과시키는 것보다 나쁘다(relations.py 머리말).
+      ① 남의 값을 갖다 붙이면 잡는다
+      ② 재료를 그대로 옮긴 답변은 한 줄도 막지 않는다
+      ③ 이름이 재료의 다른 자리에도 나오는 항목은 아예 판정하지 않는다(판정 불가)
+    """
+    ok = 0
+    from pension_agent.consult_agent import relations as REL
+    from pension_agent.strategy_agent import customer as CUST
+
+    evs = {p.id: tools.TOOLS["customer"].run({"customer_id": p.id}, "확인") for p in CUST.PERSONAS}
+
+    # ① 그 항목의 값이 아닌 수치를 붙이면 잡는다.
+    cid = CUST.PERSONAS[0].id
+    cards = tools.ledger_related([evs[cid]])
+    rows = REL.checkable(cards[0]["labeled"], cards[0]["context"])
+    numeric = [r for r in rows if REL.numbers(r["value"])]
+    caught = cases = 0
+    for i, row in enumerate(numeric):
+        other = numeric[(i + 1) % len(numeric)]
+        if other["value"] == row["value"]:
+            continue
+        cases += 1
+        caught += bool(REL.check(f"{row['label']}은 {other['value']}이에요.", cards))
+    hit = cases and caught / cases >= 0.8
+    print(f"{'✓' if hit else '✗'} 남의 값을 갖다 붙이면 잡는다 ({caught}/{cases})")
+    ok += hit
+
+    # 원래 증상 그대로. 재료 밖 수치가 아니라 **재료 안에 있는 남의 수치**여야 의미가 있다.
+    ev = evs[cid]
+    room = [r for r in cards[0]["labeled"] if r["label"] == "세액공제 잔여한도"]
+    wrong = f"세액공제 잔여한도는 300만원이에요."
+    hit = bool(room) and bool(REL.check(wrong, cards)) and _vt(wrong, ev["allow"])[0]
+    print(f"{'✓' if hit else '✗'} 수치 검사는 통과하지만 관계 검사가 잡는다 (원래 증상)")
+    ok += hit
+
+    # ② 재료를 그대로 옮긴 답변은 막지 않는다 — 9명 전원의 모든 줄.
+    false_rej, total = 0, 0
+    for e in evs.values():
+        c2 = tools.ledger_related([e])
+        for line in e["text"].split("\n")[1:]:
+            total += 1
+            false_rej += bool(REL.check(line.strip("· ").strip(), c2))
+    hit = false_rej == 0
+    print(f"{'✓' if hit else '✗'} 재료를 그대로 옮긴 답변은 막지 않는다 ({total}줄 · 거짓 거부 {false_rej})")
+    ok += hit
+
+    # 여러 항목을 한 답변에 묶어도 마찬가지다.
+    joined = 0
+    for e in evs.values():
+        whole = " ".join(l.strip("· ").strip() for l in e["text"].split("\n")[1:])
+        joined += bool(REL.check(whole, tools.ledger_related([e])))
+    hit = joined == 0
+    print(f"{'✓' if hit else '✗'} 여러 항목을 묶어 말해도 막지 않는다 ({joined}/9)")
+    ok += hit
+
+    # ③ 이름이 겹치는 항목은 판정 대상에서 빠진다 — 「수익률」은 다른 값 안에도 있다.
+    labels = {r["label"] for r in rows}
+    hit = "수익률" not in labels and "운용수익률" in labels
+    print(f"{'✓' if hit else '✗'} 이름이 겹치는 항목은 판정하지 않는다(수익률 제외·운용수익률 유지)")
+    ok += hit
+
+    # context 를 안 넘기면 문제상황 제목 같은 다른 자리를 못 걸러낸다 — 넘기는 쪽이 안전하다.
+    hit = len(REL.checkable(cards[0]["labeled"], cards[0]["context"])) <= \
+          len(REL.checkable(cards[0]["labeled"]))
+    print(f"{'✓' if hit else '✗'} 재료 전문을 넘기면 판정 대상이 좁아진다(넓어지지 않는다)")
+    ok += hit
+    return ok
+
+
 def check_account_state() -> int:
     """계좌 상태 재료(§3) — «정상»인 항목을 물었을 때 답이 없던 자리.
 
@@ -3200,6 +3279,7 @@ def main() -> int:
         check_history_material()
         check_today_material()
         check_account_state()
+        check_labeled_pairs()
         check_history_selection()
         check_hier_index()
         check_order_flipped()

@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import re
 
-from pension_agent.verify import numbers
+from pension_agent.verify import first_measure, numbers
 
 #: 조건과 값이 "같은 자리에서" 만났다고 볼 거리(글자 수). 한 문장 안에서 값과 조건이
 #: 붙어 나오는 것을 보려는 것이라, 문단 전체로 넓히면 서로 다른 문장의 조건과 값이
@@ -194,6 +194,71 @@ def table_mispaired(answer: str, tables: list[dict]) -> list[str]:
     return bad
 
 
+# ─────────────────────────────────────────────────────────────
+# 레이블 ↔ 값 — 「이 항목의 값이라며 남의 수치를 붙였는가」
+#
+# 고객 재료는 표가 아니라 **이름표 붙은 값의 나열**이다(· 평가금액 1억 2,500만원 · 세액공제
+# 잔여한도 0만원 …). 그런데 그 재료의 허용 집합에는 화면 값 말고도 ⑥⑦⑧ 에 실린 화법·반론·
+# 참고자료의 수치가 함께 들어 있다 — 직원이 그것도 묻기 때문에 뺄 수 없다. 그래서 집합 포함
+# 검사로는 **"세액공제 잔여한도는 300만원이에요"(실제 0만원)가 통과한다** — 300 은 화법 문구
+# 「적립금 300만원 이상…」에 실제로 있는 숫자다. tiers 가 fact 에서, tables 가 05 표에서 하는
+# 일을 여기서 한다.
+#
+# ━━ 레이블 바로 뒤 첫 수치만 본다 ━━
+# 창 안의 수치를 전부 보면 맞는 답이 막힌다 — "잔여한도는 0만원이라 900만원 한도를 다
+# 채우셨어요" 의 900 은 그 항목의 값이 아니라 뒤따르는 다른 말이다. 사람이 "A 는 얼마"라고
+# 말할 때 A 바로 뒤에 오는 것이 A 의 값이다.
+#
+# ━━ 이름이 겹치는 항목은 아예 보지 않는다 ━━
+# 「수익률」은 다른 항목의 값 안에도 있다(동연령대비교 「평균 수익률 12.1%」). 그 자리를
+# 「수익률」 항목이라고 읽으면 원문을 그대로 옮긴 답변이 위반으로 잡힌다.
+#
+# 겹치는 범위는 **재료 전체**다. 항목 목록만 보고 판정 대상을 골랐더니, 문제상황 제목
+# 「세액공제 잔여한도 보유 고객 (최근 3년 납입 이력…)」을 그대로 옮긴 답변이 «잔여한도가
+# 3이라고 한다»로 잡혔다 — 재료를 그대로 옮긴 문장을 위반으로 만든 것이라 가장 나쁜 실패다.
+# 그래서 `context`(그 도구가 내놓은 재료 전문)에 제 이름이 두 번 이상 나오면 뺀다.
+# 판정 불가를 위반으로 바꾸지 않는다는 이 파일의 원칙 그대로다.
+# ─────────────────────────────────────────────────────────────
+
+#: 레이블 뒤 «그 항목의 값»이 나올 자리(글자 수). 조사·서술어가 끼는 만큼만 본다.
+LABEL_NEAR = 24
+
+
+def checkable(rows: list[dict], context: str = "") -> list[dict]:
+    """이름으로 가릴 수 있는 항목만. 재료 어디에든 제 이름이 다시 나오면 뺀다.
+
+    `context` 는 그 재료의 전문이다. 넘기지 않으면 항목 목록 안에서만 겹침을 본다 —
+    그건 판정을 넓히는 쪽이므로, 호출부는 전문을 넘기는 편이 안전하다.
+    """
+    labels = [str(r.get("label") or "") for r in rows]
+    values = " ".join(str(r.get("value") or "") for r in rows)
+    return [r for r in rows
+            if (lab := str(r.get("label") or ""))
+            and lab not in values
+            and not any(lab != other and lab in other for other in labels)
+            and context.count(lab) <= 1]
+
+
+def labeled_mispaired(answer: str, rows: list[dict], context: str = "") -> list[str]:
+    """답변이 어떤 항목을 이름으로 부르면서 **그 항목의 값이 아닌 수치**를 붙인 자리."""
+    bad: list[str] = []
+    for row in checkable(rows, context):
+        label, value = str(row["label"]), str(row.get("value") or "")
+        allowed = numbers(value)
+        if not allowed:
+            continue                      # 값에 수치가 없으면 짝지을 것이 없다
+        at = answer.find(label)
+        while at >= 0:
+            end = at + len(label)
+            said = first_measure(answer[end:end + LABEL_NEAR])
+            at = answer.find(label, end)
+            if said is None or said[1] & allowed:
+                continue                  # 값을 말하지 않았거나(판정 불가) 제 값을 말했다
+            bad.append(f"{label} 은(는) {value} 인데 답변은 {said[0]} 라고 한다")
+            break
+    return bad
+
+
 #: 인용부호. 틀렸다고 짚을 때는 그 문구를 따온다.
 _OPEN, _CLOSE = "\"'「『“‘", "\"'」』”’"
 
@@ -237,6 +302,7 @@ def known_wrong(answer: str, pitfalls: list[dict]) -> list[str]:
 def declared(card: dict) -> bool:
     """이 카드가 관계를 선언했는가 — 선언이 있어야 관계 검사가 원문 강제를 대신한다."""
     return bool(card.get("tiers")) or bool(card.get("tables")) or bool(
+        card.get("labeled")) or bool(
         any(p.get("wrong") for p in card.get("pitfalls") or []))
 
 
@@ -246,9 +312,11 @@ def check(answer: str, cards: list[dict]) -> list[str]:
     for card in cards:
         out += mispaired(answer, card.get("tiers") or [])
         out += table_mispaired(answer, card.get("tables") or [])
+        out += labeled_mispaired(answer, card.get("labeled") or [], card.get("context") or "")
         out += known_wrong(answer, card.get("pitfalls") or [])
     return out
 
 
-__all__ = ["CORRECTIONS", "CORRECTION_NEAR", "MIN_VALUE_CHARS", "NEAR",
-           "check", "declared", "known_wrong", "mispaired", "numbers", "table_mispaired"]
+__all__ = ["CORRECTIONS", "CORRECTION_NEAR", "LABEL_NEAR", "MIN_VALUE_CHARS", "NEAR",
+           "check", "checkable", "declared", "known_wrong", "labeled_mispaired",
+           "mispaired", "numbers", "table_mispaired"]
