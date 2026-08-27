@@ -22,8 +22,11 @@ LLM 미설정, 호출 실패, 응답 파싱 실패, 항목 임의 변경, 재료
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import json
 import re
+import threading
 from typing import Any
 
 from pension_agent.strategy_agent import engine
@@ -444,8 +447,43 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
     return engine.render_recommendation(product, portfolio, product_reason, portfolio_reason, combined_reason)
 
 
+# ─────────────────────────────────────────────────────────────
+# 브리핑 캐시 — 같은 고객의 브리핑은 프로세스당 한 번만 만든다
+#
+# **속도 이전에 일관성 때문이다.** 이 함수는 LLM 으로 산문(제안 문장·근거 해설)을 쓰므로
+# 같은 고객에 대해 부를 때마다 **다른 문장**이 나온다. 그런데 이 산출물은 두 곳이 읽는다 —
+# 브리핑 화면과, 그 화면을 보며 묻는 직원에게 답하는 대화형(consult_agent 의 `customer`
+# 도구가 sentence·insight 를 재료에 그대로 싣는다). 각자 따로 생성하면 화면에 뜬 문장과
+# 대화가 인용하는 문장이 갈리고, 그건 "화면에 저렇게 써 있는데 왜 다르게 말하느냐"가 된다
+# (consult_agent/CLAUDE.md §3 «화면에 뜬 것과 다른 값을 말하지 않는다» · 지워진 gap 25).
+#
+# 부수 효과가 지연이다. 브리핑 한 편은 순차 LLM 호출 11 회인데 대화형은 고객 질문마다 그걸
+# 새로 돌리고 있었다 — "이 고객 평가금액 얼마야" 한 마디가 순차 14 회였다(route·plan·
+# compose 를 뺀 나머지가 전부 여기서 나왔다).
+#
+# 키는 **프로파일 내용**이다. id 로 잡으면 같은 id 에서 파생시킨 다른 프로파일
+# (`dataclasses.replace` 로 요건을 걷어낸 합성 고객 등)이 서로의 결과를 받는다.
+# ─────────────────────────────────────────────────────────────
+
+_BRIEFING_CACHE: dict[str, dict[str, Any]] = {}
+_BRIEFING_LOCK = threading.Lock()
+
+
+def _cache_key(p: Profile, use_llm: bool, top_n: int) -> str:
+    """프로파일 내용 + 호출 옵션의 지문. 날짜 등 비직렬화 값은 문자열로 접는다."""
+    return json.dumps([dataclasses.asdict(p), use_llm, top_n],
+                      ensure_ascii=False, sort_keys=True, default=str)
+
+
+def clear_briefing_cache() -> None:
+    """캐시를 비운다. **입력이 바뀌었을 때** 부른다 — 고객 원장을 다시 적재했거나,
+    테스트가 LLM 스텁을 바꿔 끼워 같은 프로파일에서 다른 산출을 기대할 때다."""
+    with _BRIEFING_LOCK:
+        _BRIEFING_CACHE.clear()
+
+
 def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> dict[str, Any]:
-    """고객 프로파일에 대한 전략 제안 문장을 생성한다.
+    """고객 프로파일에 대한 전략 제안 문장을 생성한다. 같은 입력이면 한 번만 만든다(위 주석).
 
     tier 로 답변의 근거 계층을 구분한다(사람이 검토·관리할 수 있도록 provenance 를 남긴다).
       · '행내전략'  strategies.json 플레이북 전략이 매칭됨(Tier1). 확정 재료를 LLM 이 문장화.
@@ -455,11 +493,22 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
     facts["summaries"] 는 화면이 각 섹션을 접어둘 때 쓰는 요약 2줄이다. _propose() 의 탈출
     경로가 여러 갈래(LLM 미설정·호출 실패·파싱 실패·재료 이탈…)라 각 return 마다 붙이지 않고
     여기서 한 번에 채운다 — 어느 경로로 빠져나오든 요약이 비지 않는다.
+
+    반환값은 **캐시본의 복사본**이다. 호출부가 돌려받은 dict 를 고쳐도 다음 호출자가 고쳐진
+    브리핑을 받지 않는다 — 공유가 목적인 캐시에서 그건 화면과 대화를 갈라놓는 것과 같다.
     """
-    out = _propose(p, use_llm=use_llm, top_n=top_n)
-    out["facts"]["summaries"] = engine.section_summaries(
-        out["facts"], out["sentence"], out["insight"])
-    return out
+    key = _cache_key(p, use_llm, top_n)
+    cached = _BRIEFING_CACHE.get(key)
+    if cached is None:
+        out = _propose(p, use_llm=use_llm, top_n=top_n)
+        out["facts"]["summaries"] = engine.section_summaries(
+            out["facts"], out["sentence"], out["insight"])
+        # 생성은 락 밖에서 한다 — 11 회의 LLM 호출 동안 다른 호출자를 세우지 않는다.
+        # 동시에 처음 부른 둘이 각자 만들 수는 있고, 그때는 먼저 넣은 쪽으로 통일된다
+        # (둘 다 같은 입력의 산출이므로 어느 쪽이 이겨도 «하나로 통일»이라는 목적은 선다).
+        with _BRIEFING_LOCK:
+            cached = _BRIEFING_CACHE.setdefault(key, out)
+    return copy.deepcopy(cached)
 
 
 def _propose(p: Profile, *, use_llm: bool, top_n: int) -> dict[str, Any]:

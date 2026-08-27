@@ -578,6 +578,79 @@ def check_guard() -> int:
     return sum(1 for good, _ in cases if good)
 
 
+def check_briefing_shared() -> int:
+    """브리핑을 **화면과 대화형이 같은 것으로** 본다 (§3 · 지워진 gap 25).
+
+    `propose()` 는 LLM 으로 산문을 쓰므로 부를 때마다 다른 문장이 나온다. 그런데 그 산출을
+    화면(브리핑)과 대화형(`customer` 도구가 sentence·insight 를 재료에 그대로 싣는다)이
+    함께 읽는다 — 각자 생성하면 "화면에 저렇게 써 있는데 왜 다르게 말하느냐"가 된다.
+
+    부수 효과가 지연이다. 브리핑 한 편이 순차 LLM 11 회인데 대화형이 고객 질문마다 그걸
+    새로 돌리고 있었다("이 고객 평가금액 얼마야" 한 마디가 순차 14 회).
+
+    캐시가 «같은 값을 준다»만으로는 부족하다 — 돌려받은 것을 고쳤을 때 다음 호출자가
+    고쳐진 브리핑을 받으면, 공유하려던 장치가 도리어 둘을 갈라놓는다. 그것도 함께 잰다.
+    """
+    from pension_agent.strategy_agent import agent as SA
+    from pension_agent.strategy_agent import customer as CUST
+
+    ok = 0
+    calls: list[str] = []
+    orig_gen, orig_avail = SA.llm.generate, SA.llm.available
+    profile = CUST.PERSONAS[0]
+
+    SA.clear_briefing_cache()
+    SA.llm.available = lambda: True
+    # 부를 때마다 다른 문장을 내는 LLM — 캐시가 없으면 두 호출이 갈린다.
+    SA.llm.generate = lambda prompt, **kw: (
+        calls.append("llm"),
+        json.dumps({"insight": f"해설 {len(calls)}", "sentence": f"문장 {len(calls)}"},
+                   ensure_ascii=False))[1]
+    try:
+        first = SA.propose(profile)
+        n_first = len(calls)
+        second = SA.propose(profile)
+        n_second = len(calls) - n_first
+    finally:
+        SA.llm.generate, SA.llm.available = orig_gen, orig_avail
+        SA.clear_briefing_cache()
+
+    hit = n_first > 0 and n_second == 0
+    print(f"{'✓' if hit else '✗'} 같은 고객 브리핑은 한 번만 만든다 "
+          f"(1회차 LLM {n_first}회 → 2회차 {n_second}회)")
+    ok += hit
+
+    hit = first["sentence"] == second["sentence"] and first["insight"] == second["insight"]
+    print(f"{'✓' if hit else '✗'} 두 번째 호출이 같은 문장을 받는다(화면·대화형이 같은 브리핑)")
+    ok += hit
+
+    # 돌려받은 것을 고쳐도 캐시가 오염되지 않는다.
+    SA.clear_briefing_cache()
+    SA.llm.available, SA.llm.generate = (lambda: True), (
+        lambda prompt, **kw: '{"insight": "해설", "sentence": "문장"}')
+    try:
+        a = SA.propose(profile)
+        before = (a["sentence"], dict(a["facts"]["customer"]))
+        a["sentence"] = "호출부가 고친 문장"      # 최상위 값
+        a["facts"]["customer"] = {}              # 중첩된 값(얕은 복사로는 못 막는다)
+        b = SA.propose(profile)
+        hit = (b["sentence"], b["facts"]["customer"]) == before and bool(before[1])
+    finally:
+        SA.llm.generate, SA.llm.available = orig_gen, orig_avail
+        SA.clear_briefing_cache()
+    print(f"{'✓' if hit else '✗'} 돌려받은 브리핑을 고쳐도 다음 호출자는 원본을 받는다")
+    ok += hit
+
+    # 입력이 다르면 다른 브리핑이다 — id 가 같아도 내용이 다르면 캐시를 공유하지 않는다.
+    # (`dataclasses.replace` 로 요건을 걷어낸 합성 고객이 실제로 같은 id 를 갖는다.)
+    import dataclasses
+    other = dataclasses.replace(profile, room=0, isa=None, bal=profile.bal + 1)
+    hit = SA._cache_key(profile, True, 1) != SA._cache_key(other, True, 1)
+    print(f"{'✓' if hit else '✗'} 캐시 키는 id 가 아니라 프로파일 내용이다")
+    ok += hit
+    return ok
+
+
 def check_customer_material() -> int:
     """고객 재료는 **한 경로**이고, 그 고객에게 걸린 주의는 **코드가** 붙는다.
 
@@ -3255,6 +3328,7 @@ def main() -> int:
         check_lms_send_parsing()
         check_knowledge_intents()
         check_screen_link()
+        check_briefing_shared()
         check_customer_material()
         check_context_and_clarify()
         check_adequacy_and_shape()
