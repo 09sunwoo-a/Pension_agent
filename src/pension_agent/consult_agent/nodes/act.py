@@ -24,7 +24,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent import screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.tools import TOOL_REGISTRY
@@ -78,35 +77,47 @@ def _propose(state: AgentState) -> dict[str, Any] | None:
     return _propose_playbook(state)
 
 
+#: 제안 갈래를 여는 원장 재료. 이번 턴이 이 도구의 근거를 다뤘을 때 그 갈래의 나머지
+#: 후보를 제안한다 — 절차를 물은 턴에 화법을 제안하면 §3 「묻지 않은 값」의 제안 버전이다.
+_LANE_WORDS = {"pitch": "화법", "procedure": "업무 절차", "method": "관리 방법론"}
+
+
 def _propose_playbook(state: AgentState) -> dict[str, Any] | None:
-    """이 고객 상태에 걸린 화법을 더 보여줄지 제안한다(§10 의 제안·확인 형태를 그대로 쓴다).
+    """이 고객 상태에 걸린 재료(화법·방법론·절차)를 더 보여줄지 제안한다(§10 의 제안·확인
+    형태를 그대로 쓴다).
 
     **위 LMS 갈래가 지워진 이유를 그대로 피한다.** 그 갈래의 조건("답변에 따옴표 문장이
     있으면")은 화법 코칭이면 거의 항상 참이라 매 턴 붙었고, 그러면 §10 이 경계한 상태가
     된다. 여기 네 조건은 전부 **코드가 확인할 수 있는 사실**이고, 하나라도 어긋나면 안 붙는다.
 
       1. 고객 화면이 열려 있다 — 고객 상태가 있어야 성립하는 제안이다(§3)
-      2. 이번 턴이 **화법을 다룬 턴**이다(원장에 `pitch` 근거가 있다). 이 조건이 슬롯 분해의
-         LLM 호출을 화법 턴에만 쓰게 한다 — 값·화면번호만 물은 턴에 상담 화법을 들이밀지
-         않는다는 뜻이기도 하다
+      2. 이번 턴이 제안 갈래의 재료를 다뤘다(원장에 pitch·procedure·method 근거가 있고,
+         제안은 **그 갈래의** 나머지 후보만이다). 조건 ①③④는 관리 대상 고객이 열려 있으면
+         거의 항상 참이라, 턴마다 갈리는 게이트는 이것 하나다 — 이게 빠지면 그 고객을 보는
+         동안 매 턴 제안이 붙고, LMS 갈래가 죽은 그 상태가 재현된다. 슬롯 분해의 LLM 호출을
+         이 갈래 턴에만 쓰게 하는 것도 이 조건이다
       3. 이 고객에게 성립한 문제상황이 있다 — 없으면 관리 사유가 없는 고객이고, 사유를
          만들어내지 않는다
       4. 이번 턴이 **아직 쓰지 않은** 카드가 남아 있다 — 답변이 이미 말한 것을 다시
          보여드릴까요 하고 묻지 않는다
 
     화면 ⑥⑦⑧ 이 상담 **전에** 고객 상태만으로 2건을 고정하는 것과 달리, 여기는 상담 **중**
-    이라 «방금 나온 상황»(슬롯)까지 본다 — 그것이 화면의 반복이 아닌 유일한 근거다.
+    이라 «방금 나온 상황»(슬롯·이번 턴의 갈래)까지 본다 — 그것이 화면의 반복이 아닌 유일한
+    근거다.
     """
     if not state.get("customer_id"):
         return None
-    if not any(e["tool"] == "pitch" for e in (state.get("evidence") or [])):
+    used = {e["tool"] for e in (state.get("evidence") or [])}
+    lanes = tuple(lane for lane in tools.PLAYBOOK_LANES if lane in used)
+    if not lanes:
         return None
-    hits = tools.playbook_hits(state, exclude=tools.cited_cards(state))
+    hits = tools.playbook_hits(state, lanes=lanes, exclude=tools.cited_cards(state))
     if not hits:
         return None
     reason = _playbook_reason(state)
-    label = (f"이 고객 «{reason}» 상태에 걸린 화법 {len(hits)}건" if reason
-             else f"이 고객 상태에 걸린 화법 {len(hits)}건")
+    what = "·".join(dict.fromkeys(_LANE_WORDS[c["_kind"]] for _s, c in hits))
+    label = (f"이 고객 «{reason}» 상태에 걸린 {what} {len(hits)}건" if reason
+             else f"이 고객 상태에 걸린 {what} {len(hits)}건")
     # 관련도까지 남긴다 — 승낙 턴은 카드를 다시 고르지 않고 이때 고른 것을 그대로 싣는다(§10).
     return {"kind": "pitch", "label": label,
             "cards": [{"id": c["id"], "score": round(score, 3)} for score, c in hits],
@@ -193,9 +204,9 @@ def _show_playbook(pending: dict) -> dict[str, Any]:
         # 카드를 다시 찾지 못하면 지어내지 않는다 — 무엇을 보여드리기로 했는지 잃은 것이다.
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 물어봐 주세요.",
                 "sources": [], "pending_action": None}
-    ev = tools._ev("playbook", pending.get("label") or "고객 상태에 걸린 화법",
-                   KBMOD.build_context(KB, hits), KBMOD.sources_of(KB, hits),
-                   cards=[c for _s, c in hits])
+    # 종류별 렌더러·선언은 공용 빌더가 안다 — 여기서 화법 렌더러에 절차를 태우면 저작 메모가
+    # 새고 화면번호 강제가 빠진다(tools.playbook_evidence 주석).
+    ev = tools.playbook_evidence(pending.get("label") or "고객 상태에 걸린 재료", hits)
     if ev is None:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 물어봐 주세요.",
                 "sources": [], "pending_action": None}

@@ -773,8 +773,10 @@ def check_playbook_material() -> int:
     hits = tools.playbook_hits({"customer_id": SONG, "question": "증권사 얘기를 꺼내네요"})
     from pension_agent.strategy_agent.support import matching as M
     sits = problem_situations(SC.get_profile(SONG), SC.conditions(SC.get_profile(SONG)))
-    pool = {c["id"] for t in ("proposal", "objection", "guide")
-            for _s, c, _seg in M.scored_situation_cards(sits, t, 50)}
+    pool = ({c["id"] for t in ("proposal", "objection", "guide")
+             for _s, c, _seg in M.scored_situation_cards(sits, t, 50)}
+            | {c["id"] for _s, c, _seg in M.scored_situation_procedures(sits, 50)}
+            | {c["id"] for _s, c, _seg in M.scored_situation_methods(sits, 50)})
     hit = bool(hits) and all(c["id"] in pool for _s, c in hits)
     print(f"{'✓' if hit else '✗'} situation 후보가 화면 ⑥⑦⑧ 과 같은 매칭 결과 안에 있다")
     ok += hit
@@ -821,6 +823,40 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 이번 턴이 이미 쓴 카드를 다시 보여드릴까요 하고 묻지 않는다")
     ok += hit
 
+    # ③-b 갈래 일치 — 제안은 이번 턴이 다룬 갈래의 나머지 후보만이다. 절차를 물은 턴에
+    #     화법을 제안하면 §3 「묻지 않은 값」의 제안 버전이 된다.
+    hit = all(c["_kind"] == "pitch" for c in
+              (lambda a: [next(x for x in tools.KB.cards if x["id"] == cc["id"])
+                          for cc in a["cards"]])(action))
+    print(f"{'✓' if hit else '✗'} 화법 턴의 제안은 화법 카드만 담는다")
+    ok += hit
+
+    proc_ev = [{**pitch_ev[0], "tool": "procedure"}]
+    p_action = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": proc_ev})
+    by_id = {c["id"]: c for c in tools.KB.cards}
+    hit = bool(p_action) and all(by_id[c["id"]]["_kind"] == "procedure"
+                                 for c in p_action["cards"])
+    print(f"{'✓' if hit else '✗'} 절차 턴의 제안은 절차 카드만 담는다 — {p_action and p_action['label']}")
+    ok += hit
+
+    m_action = ACT._propose({"answer": "a", "customer_id": SONG,
+                             "evidence": [{**pitch_ev[0], "tool": "method"}]})
+    hit = bool(m_action) and all(by_id[c["id"]]["_kind"] == "method" for c in m_action["cards"])
+    print(f"{'✓' if hit else '✗'} 방법론 턴의 제안은 방법론 카드만 담는다")
+    ok += hit
+
+    # ③-c 종류별 렌더러·선언 — 화법 렌더러에 절차를 태우면 저작 메모(authoring)가 새고
+    #     화면번호가 원문 강제(atomic)를 안 받는다(지워진 gap 17 이 고친 실패의 재발 경로).
+    mixed = tools.playbook_hits({"customer_id": SONG, "question": "q"},
+                                lanes=("procedure", "method"))
+    pev = tools.playbook_evidence("점검", mixed)
+    proc_cards = [c for _s, c in mixed if c["_kind"] == "procedure"]
+    hit = (bool(pev) and "필자 해석" not in pev["text"] and "'role'" not in pev["text"]
+           and all(sc in pev["atomic"] for c in proc_cards for sc in (c.get("screens") or [])))
+    print(f"{'✓' if hit else '✗'} playbook 근거가 절차·방법론에 그 종류의 렌더러·선언을 쓴다"
+          f" (화면번호 atomic {len(pev['atomic'])}건 · 저작 메모 미유출)")
+    ok += hit
+
     # ④ 승낙 턴은 근거만 싣고 답변은 compose 가 쓴다.
     out = ACT.confirm_action({"question": "네", "customer_id": SONG,
                               "history": [{"pending_action": action}]})
@@ -854,9 +890,11 @@ def check_playbook_material() -> int:
     try:
         blocked = tools.playbook_hits({"customer_id": "PENSION-STARTED", "question": "뭐라고 말하지"})
         allowed_sits = {s["id"] for s in problem_situations(started, SC.conditions(started))}
-        pool2 = {c["id"] for t in ("proposal", "objection", "guide")
-                 for _s, c, _seg in M.scored_situation_cards(
-                     problem_situations(started, SC.conditions(started)), t, 50)}
+        sits2 = problem_situations(started, SC.conditions(started))
+        pool2 = ({c["id"] for t in ("proposal", "objection", "guide")
+                  for _s, c, _seg in M.scored_situation_cards(sits2, t, 50)}
+                 | {c["id"] for _s, c, _seg in M.scored_situation_procedures(sits2, 50)}
+                 | {c["id"] for _s, c, _seg in M.scored_situation_methods(sits2, 50)})
         hit = all(c["id"] in pool2 for _s, c in blocked) and "seg.13" not in allowed_sits
     finally:
         SC.get_profile = orig

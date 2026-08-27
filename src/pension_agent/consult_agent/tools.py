@@ -154,10 +154,18 @@ def _procedure(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, procedure_qa.search(query), "업무 처리 절차")
     if not hits:
         return None
+    atomic, notices, scopes = _procedure_decls([c for _s, c in hits])
+    return _ev("procedure", query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
+               atomic=atomic, notices=notices, scopes=scopes, cards=[c for _s, c in hits])
+
+
+def _procedure_decls(cards: list[dict]) -> tuple[list[str], list[str], list[dict]]:
+    """절차 카드의 원문 스팬·표시 선언. `procedure` 도구와 `playbook`(문제상황 후보에 절차가
+    섞일 때)이 함께 쓴다 — 두 곳이 각자 선언하면 한쪽만 화면번호 강제가 빠지는 날이 온다."""
     atomic: list[str] = []
     notices: list[str] = []
     scopes: list[dict] = []
-    for _s, c in hits:
+    for c in cards:
         keys = list(c.get("screens") or [])
         marks = KBMOD.role_texts(c.get("cautions"), "caution")
         if c.get("status") == "확인 필요":
@@ -166,8 +174,7 @@ def _procedure(state: AgentState, query: str) -> Evidence | None:
         notices += marks
         if marks:
             scopes.append(_scope(c.get("title") or c["id"], keys, marks))
-    return _ev("procedure", query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
-               atomic=atomic, notices=notices, scopes=scopes, cards=[c for _s, c in hits])
+    return atomic, notices, scopes
 
 
 def _render_screen(card: dict) -> str:
@@ -329,16 +336,23 @@ def _method(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, pick(("method",), query, top_k=2), "관리 방법론")
     if not hits:
         return None
+    notices, scopes = _method_decls([c for _s, c in hits])
     return _ev("method", query, "\n\n".join(_render_method(c) for _, c in hits),
                KBMOD.sources_of(KB, hits),
-               notices=[t for _s, c in hits
-                        for t in KBMOD.role_texts(c.get("cautions"), "caution")],
-               # 방법론에는 값 스팬이 없어 '이 카드를 썼는지'를 가릴 수 없다(keys 빈 묶음) —
-               # 「하지 말 것」은 판단이 안 설 때 유지하는 쪽이 맞다.
-               scopes=[_scope(c.get("title") or c["id"], [], marks)
-                       for _s, c in hits
-                       if (marks := KBMOD.role_texts(c.get("cautions"), "caution"))],
-               cards=[c for _s, c in hits])
+               notices=notices, scopes=scopes, cards=[c for _s, c in hits])
+
+
+def _method_decls(cards: list[dict]) -> tuple[list[str], list[dict]]:
+    """방법론 카드의 표시 선언. `method` 도구와 `playbook` 이 함께 쓴다.
+
+    방법론에는 값 스팬이 없어 '이 카드를 썼는지'를 가릴 수 없다(keys 빈 묶음) —
+    「하지 말 것」은 판단이 안 설 때 유지하는 쪽이 맞다.
+    """
+    notices = [t for c in cards for t in KBMOD.role_texts(c.get("cautions"), "caution")]
+    scopes = [_scope(c.get("title") or c["id"], [], marks)
+              for c in cards
+              if (marks := KBMOD.role_texts(c.get("cautions"), "caution"))]
+    return notices, scopes
 
 
 def _render_fieldtip(card: dict) -> str:
@@ -673,12 +687,16 @@ def _pitch(state: AgentState, query: str) -> Evidence | None:
 #: (guard.PER_COND 와 같은 이유의 상한이다).
 PLAYBOOK_TOP_K = 2
 
-#: 찾을 화법 종류 = 화면 ⑥⑦⑧ 이 쓰는 card_type 그대로(proposal ⑥ · objection ⑦ · guide ⑧).
-#: 여기서 종류를 새로 정하지 않는다 — 정하면 화면과 갈린다.
+#: 갈래 — 화면 ⑥⑦⑧ 이 쓰는 후보 축 그대로다. pitch 갈래의 세 card_type(proposal ⑥ ·
+#: objection ⑦ · guide ⑧)과, ⑧ 이 화법과 번갈아 싣는 방법론·절차(`resource.py`
+#: `_situation_resources`). 여기서 축을 새로 정하지 않는다 — 정하면 화면과 갈린다.
+PLAYBOOK_LANES = ("pitch", "procedure", "method")
+
 _PLAYBOOK_TYPES = ("proposal", "objection", "guide")
 
 
-def playbook_hits(state: AgentState, *, exclude: set[str] | None = None,
+def playbook_hits(state: AgentState, *, lanes: tuple[str, ...] | None = None,
+                   exclude: set[str] | None = None,
                    top_k: int = PLAYBOOK_TOP_K) -> list[tuple[float, dict]]:
     """이 고객의 문제상황에 걸린 화법 후보. 도구(`_situation`)와 제안 판정(`act`)이 함께 쓴다.
 
@@ -700,6 +718,11 @@ def playbook_hits(state: AgentState, *, exclude: set[str] | None = None,
     슬롯(«방금 나온 상황»)으로 후보를 좁힌다 — 화면은 고객 상태만 보고 상담 **전에** 고르지만
     여기는 상담 **중**이라, 직원이 방금 말한 상황까지 볼 수 있다. 이것이 화면과 다른 일을
     하는 유일한 근거다. 슬롯 분해가 실패하면(LLM) 좁히지 않고 상태만으로 고른다.
+
+    `lanes` 는 어느 축의 후보를 볼지다(PLAYBOOK_LANES 부분집합). 제안 판정(`act`)은 이번
+    턴이 다룬 갈래만 넘긴다 — 절차를 물은 턴에 화법을 제안하면 §3 「묻지 않은 값」의 제안
+    버전이 된다. 도구로 직접 불릴 때는 전 갈래를 본다(None) — 그때는 질문 자체가 이
+    재료를 향한 것이라 갈래를 좁힐 근거가 질문에 없다.
     """
     customer_id = state.get("customer_id")
     if not customer_id:
@@ -724,26 +747,37 @@ def playbook_hits(state: AgentState, *, exclude: set[str] | None = None,
         # 정말 죽었다면 뒤이은 작성이 같은 이유로 실패해 턴이 §11 로 끝난다.
         slots = {}
 
+    # 갈래마다 넉넉히 뽑아 슬롯으로 거른 뒤 합쳐서 상위 K 를 고른다 — 갈래별로 K 를
+    # 나눠 가지면 이 고객에게 걸린 것이 한 갈래에 몰려 있을 때 그 갈래가 잘린다.
+    scored: list[tuple[float, dict, dict]] = []
+    for lane in (lanes or PLAYBOOK_LANES):
+        if lane == "pitch":
+            for card_type in _PLAYBOOK_TYPES:
+                scored += matching.scored_situation_cards(situations, card_type, top_k * 3)
+        elif lane == "procedure":
+            scored += matching.scored_situation_procedures(situations, top_k * 3)
+        elif lane == "method":
+            scored += matching.scored_situation_methods(situations, top_k * 3)
+
     by_id = {c["id"]: c for c in KB.cards}
     skip = set(exclude or ())
     best: dict[str, tuple[float, dict]] = {}
-    for card_type in _PLAYBOOK_TYPES:
-        # 종류마다 넉넉히 뽑아 슬롯으로 거른 뒤 합쳐서 상위 K 를 고른다 — 종류별로 K 를
-        # 나눠 가지면 이 고객에게 걸린 것이 한 종류에 몰려 있을 때 그 종류가 잘린다.
-        for score, card, _seg in matching.scored_situation_cards(situations, card_type, top_k * 3):
-            local = by_id.get(card["id"])
-            if local is None or local["id"] in skip:
-                continue
-            if not KBMOD.matches_scope(local, customer_type=slots.get("customer_type"),
-                                       stage=slots.get("stage")):
-                continue
-            if local["id"] not in best or score > best[local["id"]][0]:
-                best[local["id"]] = (score, local)
+    for score, card, _seg in scored:
+        local = by_id.get(card["id"])
+        if local is None or local["id"] in skip:
+            continue
+        # 슬롯 스코프는 화법 카드의 축이다(tags.stage·customer_type). 절차·방법론 카드에는
+        # 그 축이 없어서 여기 걸면 슬롯이 잡힌 턴마다 전부 탈락한다 — 화법에만 건다.
+        if local["_kind"] == "pitch" and not KBMOD.matches_scope(
+                local, customer_type=slots.get("customer_type"), stage=slots.get("stage")):
+            continue
+        if local["id"] not in best or score > best[local["id"]][0]:
+            best[local["id"]] = (score, local)
     return sorted(best.values(), key=lambda x: (-x[0], x[1]["id"]))[:top_k]
 
 
 def _playbook(state: AgentState, query: str) -> Evidence | None:
-    """이 고객 상태에 걸린 화법·반론·참고자료 — 화면 ⑥⑦⑧ 과 같은 후보군에서.
+    """이 고객 상태에 걸린 화법·반론·방법론·절차 참고자료 — 화면 ⑥⑦⑧ 과 같은 후보군에서.
 
     `customer` 도구가 싣는 것은 화면이 **이미 고른** 2건이고, 여기는 그 **후보군 전체**에서
     이번 대화 상황에 맞는 것을 고른다. 후보군이 같으므로 화면이 자른 것을 꺼내와도 화면과
@@ -755,11 +789,49 @@ def _playbook(state: AgentState, query: str) -> Evidence | None:
     것만 올린다.
     """
     hits = playbook_hits(state, exclude=cited_cards(state))
-    hits = _adopt(state, query, hits, "고객 상태에 걸린 화법")
+    hits = _adopt(state, query, hits, "고객 상태에 걸린 재료")
     if not hits:
         return None
-    return _ev("playbook", query, KBMOD.build_context(KB, hits), KBMOD.sources_of(KB, hits),
-               cards=[c for _s, c in hits])
+    return playbook_evidence(query, hits)
+
+
+def playbook_evidence(query: str, hits: list[tuple[float, dict]]) -> Evidence | None:
+    """(관련도, 카드) 목록 → playbook 원장 항목. 도구와 승낙 턴(`act._show_playbook`)이
+    함께 쓴다.
+
+    후보에는 종류가 섞인다(화법·방법론·절차 — 화면 ⑧ 이 세 갈래를 번갈아 싣는 것과 같은
+    축이다). **종류마다 렌더러와 선언을 그 종류의 도구 것 그대로 쓴다** — 화법 렌더러
+    (`kb.build_context`)에 절차 카드를 태우면 두 가지가 깨진다: ① `cautions` 를 역할(role)
+    구분 없이 뿌려 저작 메모(authoring)가 직원에게 노출되고(§12 지워진 gap 17 이 고친
+    실패의 재발), ② 화면번호가 `atomic` 강제를 받지 않아 LLM 이 옮겨 적다 틀려도 아무도
+    못 잡는다.
+    """
+    if not hits:
+        return None
+    pitch_hits = [(sc, c) for sc, c in hits if c["_kind"] == "pitch"]
+    proc_hits = [(sc, c) for sc, c in hits if c["_kind"] == "procedure"]
+    method_hits = [(sc, c) for sc, c in hits if c["_kind"] == "method"]
+
+    blocks: list[str] = []
+    atomic: list[str] = []
+    notices: list[str] = []
+    scopes: list[dict] = []
+    if pitch_hits:
+        blocks.append(KBMOD.build_context(KB, pitch_hits))
+    if proc_hits:
+        blocks.append(procedure_qa.render(proc_hits))
+        p_atomic, p_notices, p_scopes = _procedure_decls([c for _sc, c in proc_hits])
+        atomic += p_atomic
+        notices += p_notices
+        scopes += p_scopes
+    if method_hits:
+        blocks.append("\n\n".join(_render_method(c) for _sc, c in method_hits))
+        m_notices, m_scopes = _method_decls([c for _sc, c in method_hits])
+        notices += m_notices
+        scopes += m_scopes
+    return _ev("playbook", query, "\n\n".join(blocks), KBMOD.sources_of(KB, hits),
+               atomic=atomic, notices=notices, scopes=scopes or None,
+               cards=[c for _sc, c in hits])
 
 
 def cited_cards(state: AgentState) -> set[str]:
@@ -793,8 +865,9 @@ TOOLS: dict[str, Tool] = {
         # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
         # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
         # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.
-        Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·참고자료를 "
-             "브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다", _playbook),
+        Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·"
+             "관리방법론·업무절차 참고자료를 브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다",
+             _playbook),
     )
 }
 
