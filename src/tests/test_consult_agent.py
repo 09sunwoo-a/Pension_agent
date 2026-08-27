@@ -186,7 +186,7 @@ def check_pitch_stages() -> bool:
         return [] if any(kw.get(k) for k in ("customer_type", "objection_type", "stage")) else [(0.5, real)]
 
     orig_retrieve, orig_verify = tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None: h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None: h
     try:
         found = tools._pitch(
             {"question": "질문", "customer_type": "사업자", "stage": "이탈방어", "objection_type": None},
@@ -517,7 +517,7 @@ def check_verify_gate() -> bool:
     agent = G.build_agent()
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: []
     try:
         out = agent.invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
     finally:
@@ -908,7 +908,7 @@ def check_adequacy_and_shape() -> int:
 
     # ① 게이트가 재료 종류를 가리지 않는가 — 전부 버리면 어느 도구도 근거를 못 내놓는다.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: []
     try:
         blocked = [name for name in ("fact", "procedure", "segment", "method", "fieldtip", "pitch")
                    if tools.run(name, {"question": "세액공제 한도가 얼마야?"},
@@ -922,7 +922,7 @@ def check_adequacy_and_shape() -> int:
 
     # 0건이면 게이트를 부르지 않는다 — 부를 이유가 없는 자리에서 LLM 을 쓰지 않는다.
     called: list[str] = []
-    tools.fits_question = lambda q, h, kind="", history=None: (called.append(kind), h)[1]
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: (called.append(kind), h)[1]
     try:
         tools.run("fact", {"question": "오늘 서울 날씨 어때?"}, "오늘 서울 날씨 어때?")
     finally:
@@ -945,7 +945,7 @@ def check_adequacy_and_shape() -> int:
     q = "디폴트옵션 변경 화면번호 알려줘"
     candidates = procedure_qa.search(q)
     keep = candidates[-1][1]["id"] if candidates else ""
-    tools.fits_question = lambda question, h, kind="", history=None: [x for x in h if x[1]["id"] == keep]
+    tools.fits_question = lambda question, h, kind="", history=None, query=None: [x for x in h if x[1]["id"] == keep]
     try:
         found = tools.run("procedure", {"question": q}, q)
     finally:
@@ -956,7 +956,7 @@ def check_adequacy_and_shape() -> int:
     ok += hit
 
     # 남길 것이 하나도 없을 때만 근거 없음이다.
-    tools.fits_question = lambda question, h, kind="", history=None: []
+    tools.fits_question = lambda question, h, kind="", history=None, query=None: []
     try:
         hit = tools.run("procedure", {"question": q}, q) is None
     finally:
@@ -1087,7 +1087,7 @@ def check_material_marks() -> int:
 
     # 도구가 실제로 표시를 실어 보내는가(선언이 아니라 배선을 본다).
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         q = "사전 고지를 안 하면 민원으로 돌아온다는데 현장에서는 어떻게 하나요?"
         found = tools.run("fieldtip", {"question": q}, q)
@@ -1186,7 +1186,7 @@ def check_relations() -> int:
     with_rel = next(f for f in by_id.values() if R.declared(f) and f.get("value"))
     without_rel = next(f for f in by_id.values() if not R.declared(f) and f.get("value"))
     orig_fits, orig_search = tools.fits_question, facts_qa.search
-    tools.fits_question = lambda question, h, kind="", history=None: h
+    tools.fits_question = lambda question, h, kind="", history=None, query=None: h
     facts_qa.search = lambda question: [(2.0, with_rel), (2.0, without_rel)]
     try:
         found = tools.run("fact", {"question": "q"}, "세액공제 공제율")
@@ -1297,7 +1297,7 @@ def check_turn_cost() -> int:
     orig_fits = tools.fits_question
     pitch.extract_slots = lambda st: called.append("slots") or {}
     tools.llm_pick = lambda kinds, q: []
-    tools.fits_question = lambda question, h, kind="", history=None: h
+    tools.fits_question = lambda question, h, kind="", history=None, query=None: h
     try:
         tools.run("pitch", {"question": "수수료 부담된다고 하시네요"}, "수수료 부담")
     finally:
@@ -1366,7 +1366,7 @@ def check_miss_recovery() -> int:
     question = "포트폴리오 운용현황 조회 화면 번호는?"
     shrunk = "운용현황 조회 화면번호"
     orig_fits = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         hit = (not procedure_qa.search(shrunk)                       # 줄여 쓰면 0건인데
                and bool(procedure_qa.search(question))               # 원문으로는 찾고
@@ -1529,7 +1529,7 @@ def check_screen_registry() -> int:
 
     # 화면번호 질문이 그 카드에 닿는가.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         q = "포트폴리오 운용현황 조회 화면 번호는?"
         found = tools.run("screen", {"question": q}, q)
@@ -1573,7 +1573,7 @@ def check_screen_registry() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         q = "고객이 스타뱅킹에서 직접 상품변경 하려면 어느 메뉴로 가나요"
         found = tools.run("channel", {"question": q}, q)
@@ -1659,6 +1659,167 @@ def check_screen_registry() -> int:
     return ok
 
 
+def check_product_advice() -> int:
+    """「이 고객 무슨 상품 추천해주지?」가 답이 되는가 — 그리고 그 답이 권유가 아닌가.
+
+    회귀 대상은 한 질문에서 함께 터진 결함 넷이다. 실제 트레이스에서 lineup 이 세 바퀴
+    돌며 전부 '재료 없음'을 내고, 겨우 쓴 문장은 '미등록 상품명'으로 폐기돼, 화면에는
+    고객 브리핑 재료가 통째로 떨어졌다.
+
+    ① 적합성 게이트가 **계획이 무엇을 찾는 중인지**를 못 봤다. 직원 질문만 보고 판정하니
+       「투자성향별 포트폴리오」 같은 일반 자료가 "이 고객에 대한 답이 아니다"로 전멸했다.
+    ② 상품 등록부가 데모 카탈로그 12종뿐이라, 행내 원문 표에 버젓이 있는 상품
+       (「KB 온국민 TDF 시리즈」)을 말한 답변이 '미등록'으로 통째로 버려졌다.
+    ③ 상품명 정규식이 문장을 삼켜 **실재 상품과 지어낸 상품을 한 이름으로** 붙였다.
+    ④ 적합성 게이트가 이미 계산해둔 «허용 범위»를 부를 도구가 대화형에 없었다.
+    """
+    from pension_agent.consult_agent import kb as KBMOD
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
+    from pension_agent.consult_agent.state import KB
+    ok = 0
+
+    # ── ① 게이트가 계획 질의를 받는다 ──────────────────────────────
+    seen: dict[str, str] = {}
+    orig_gen, orig_fits = tools.generate, tools.fits_question
+    tools.fits_question = _REAL_FITS          # 게이트 본체를 재야 하므로 스텁을 걷는다
+    tools.generate = lambda p, **kw: seen.setdefault("p", p) and "[]"
+    try:
+        card = next(c for c in KB.cards if c["_kind"] == "lineup")
+        tools._adopt({"question": "이 고객 무슨 상품 추천해주지?"},
+                     "투자성향별 추천 포트폴리오", [(2.0, card)], "운용 상품")
+    finally:
+        tools.generate, tools.fits_question = orig_gen, orig_fits
+    prompt = seen.get("p", "")
+    hit = "이 고객 무슨 상품 추천해주지?" in prompt and "투자성향별 추천 포트폴리오" in prompt
+    print(f"{'✓' if hit else '✗'} 적합성 게이트 프롬프트에 직원 질문과 계획 질의가 함께 실린다")
+    ok += hit
+
+    # 「고객 이름이 안 적힌 자료는 뺀다」로 읽히지 않도록 판단 기준에 명시돼 있는가.
+    hit = "일반 자료는 남긴다" in prompt
+    print(f"{'✓' if hit else '✗'} 고객 특정 질문에서도 일반 자료를 남기라는 기준이 실린다")
+    ok += hit
+
+    # ── ② 등록부가 지식베이스 상품명을 안다 ────────────────────────
+    names = KBMOD.product_names(KB)
+    hit = "KB 온국민 TDF 시리즈" in names and "KB RISE 미국ETF 모아드림 (주식-재간접)" in names
+    print(f"{'✓' if hit else '✗'} 지식베이스가 선언한 상품명이 등록부에 있다 ({len(names)}종)")
+    ok += hit
+
+    # 등록부는 **표의 상품명 칸**만 본다 — 합계 행의 라벨은 상품이 아니다.
+    hit = "포트폴리오" not in names
+    print(f"{'✓' if hit else '✗'} 합계 행 라벨(「포트폴리오」)은 상품 등록부에 안 들어간다")
+    ok += hit
+
+    known = plan._known_products()
+    hit = "KB 온국민TDF2040 C-P" in known and "KB 온국민 TDF 시리즈" in known
+    print(f"{'✓' if hit else '✗'} 등록부가 상품 카탈로그와 지식베이스를 합친다 ({len(known)}종)")
+    ok += hit
+
+    # ── ③ 상품명 경계 — 실재 상품은 통과하고 지어낸 이름만 걸린다 ──
+    #
+    # 트레이스에 찍힌 실제 문장이다. 예전 정규식은 마크다운 강조를 넘어
+    # 'KB 온국민 TDF 시리즈**나 **KBSTAR 미국나스닥100' 을 **한 이름**으로 읽어,
+    # 원문 표에 있는 앞쪽까지 미등록으로 판정했다.
+    ledger = ["KB 온국민 TDF 시리즈 · KB 온국민TDF2040 C-P"]
+    real = "동연령 인기 상품인 **KB 온국민 TDF 시리즈**를 보실 수 있어요."
+    mixed = ("**KB 온국민 TDF 시리즈**나 **KBSTAR 미국나스닥100**을 보실 수 있어요.")
+    tail = "다만 KB 온국민TDF2040 C-P의 적격 TDF 위험자산 한도는 확인이 필요해요."
+    made_up = "KB 무지개 성장 펀드를 보실 수 있어요."
+
+    hit = verify_texts(real, ledger, known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 원문 표에 있는 상품명을 말한 답변이 통과한다")
+    ok += hit
+
+    hit = verify_texts(tail, ledger, known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 상품명 뒤에 조사가 붙어도 통과한다")
+    ok += hit
+
+    # 예전 정규식은 이 문장에서 두 이름을 **한 토큰**으로 읽어, 원문 표에 있는 앞쪽까지
+    # 미등록으로 몰았다. 지금은 마크다운 강조에서 끊겨 앞쪽만 후보가 되고 통과한다.
+    from pension_agent.verify import _PROD
+    hit = _PROD.findall(mixed) == ["KB 온국민 TDF 시리즈"]
+    print(f"{'✓' if hit else '✗'} 실재 상품과 지어낸 상품이 붙어 있어도 따로 잡힌다")
+    ok += hit
+
+    # 이 문장은 여전히 거부된다 — 다만 걸리는 이유가 «지어낸 이름이 달고 온 수치»여야지,
+    # 원문 표에 있는 앞쪽 상품이 「미등록」으로 몰려서는 안 된다.
+    _good, bad = verify_texts(mixed, ledger, known_products=known)
+    hit = not any(b.startswith("상품명") for b in bad)
+    print(f"{'✓' if hit else '✗'} 앞쪽 실재 상품이 뒤쪽 때문에 미등록으로 몰리지 않는다")
+    ok += hit
+
+    hit = not verify_texts(made_up, ledger, known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 등록부에 없는 상품명은 여전히 거부된다")
+    ok += hit
+
+    # 등록부에 있어도 **이번 턴 재료에 없으면** 인용할 수 없다 — 등록부를 12종에서
+    # 80여 종으로 넓히면서 함께 조인 자리다.
+    hit = not verify_texts(real, ["다른 재료"], known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 등록 상품이어도 이번 턴 원장에 없으면 못 쓴다")
+    ok += hit
+
+    # ── ④ 적합성 범위 도구 ─────────────────────────────────────────
+    cid = "176903-5528417"
+    q = "이 고객 무슨 상품 추천해주지?"
+    found = tools.run("suitable", {"question": q, "customer_id": cid}, q)
+    text = (found or {}).get("text", "")
+    hit = bool(found) and "적합성 허용 상한: 다소높은위험" in text
+    print(f"{'✓' if hit else '✗'} suitable 이 이 고객에게 허용되는 위험등급 상한을 말한다")
+    ok += hit
+
+    hit = "KB 성장형 MP" in text and "KB 온국민TDF2040 C-P" in text
+    print(f"{'✓' if hit else '✗'} 게이트를 통과한 상품이 목록으로 나온다")
+    ok += hit
+
+    # "왜 이건 없어?" 에 답할 수 있어야 목록을 믿을 수 있다.
+    hit = "KB 글로벌리츠 ETF" in text and "허용 상한" in text.split("제외된 상품")[-1]
+    print(f"{'✓' if hit else '✗'} 제외된 상품과 그 사유가 함께 나온다")
+    ok += hit
+
+    # 답이 상품명을 말할 텐데, 그 이름이 이번 턴 원장에 있어야 통과한다(위 ③ 의 조임).
+    hit = verify_texts("KB 성장형 MP 를 보실 수 있어요.", tools.ledger_texts([found]),
+                       known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} suitable 재료로 쓴 답변이 검증을 통과한다")
+    ok += hit
+
+    hit = "suitable" in tools.TOOLS and "suitable" in ANSWER_SHAPES
+    print(f"{'✓' if hit else '✗'} suitable 이 도구 목록과 답변 형태 요구 양쪽에 있다")
+    ok += hit
+
+    # 고객 화면이 닫혀 있으면 성립하지 않는다(§3) — 카탈로그에도 안 뜬다.
+    hit = ("suitable" not in tools.usable({})
+           and "suitable" in tools.usable({"customer_id": cid}))
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 suitable 을 제안하지 않는다")
+    ok += hit
+
+    # ── 스탠스 — 권유가 아니라 정보 제공 ───────────────────────────
+    #
+    # 표시는 **코드가** 붙인다(guard.py 규약). 프롬프트로 톤만 잡으면 LLM 이 무시해도
+    # 아무도 모른다 — 검증기는 수치·상품명만 보지 톤은 안 본다.
+    note = KBMOD.advisory_note(KB)
+    hit = bool(note) and "정보 제공" in note and "자본시장" in note
+    print(f"{'✓' if hit else '✗'} 인용 고지를 지식베이스 선언에서 읽어 온다")
+    ok += hit
+
+    hit = any("정보 제공" in n for n in (found or {}).get("notices") or [])
+    print(f"{'✓' if hit else '✗'} 적합성 판정 재료에 정보제공 고지가 붙는다")
+    ok += hit
+
+    # 선언이 없는 재료에는 붙지 않는다 — 무조건 붙는 표시는 §7 이 막는 것이다.
+    hit = tools.advisory_mark({}) is None
+    print(f"{'✓' if hit else '✗'} 선언이 없으면 고지를 붙이지 않는다")
+    ok += hit
+
+    hit = "권유하지 않는다" in COMPOSE_SYSTEM and "직원이 정한다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 한 상품을 골라 권유하는 것을 금지한다")
+    ok += hit
+
+    hit = "투자권유가 아니라는 표시" in ANSWER_SHAPES["suitable"]
+    print(f"{'✓' if hit else '✗'} suitable 의 답변 형태가 '권유 아님'을 요구한다")
+    ok += hit
+    return ok
+
+
 def check_caution_roles() -> int:
     """주의·비고의 역할 선언 — 저작 메모(authoring)가 직원 답변에 새지 않는가.
 
@@ -1705,7 +1866,7 @@ def check_caution_roles() -> int:
     from pension_agent.consult_agent.nodes import procedure_qa as PQ
     by_id = {c["id"]: c for c in KB.cards}
     orig_search, orig_fits = PQ.search, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         PQ.search = lambda q: [(2.0, by_id["proc.001"])]
         found = tools.run("procedure", {"question": "q"}, "적립금 조회 절차")
@@ -1717,7 +1878,7 @@ def check_caution_roles() -> int:
 
     # ④ caution 은 표시로 나간다 — 역할을 나눈 목적은 진짜 주의를 살리는 것이다.
     orig_pick, orig_fits = tools.pick, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         tools.pick = lambda kinds, q, **kw: [(2.0, by_id["screen.06-10-182"])]
         found = tools.run("screen", {"question": "q"}, "연금납입정보 조회 화면")
@@ -2124,7 +2285,7 @@ def check_order_flipped() -> int:
         return []
 
     orig_pick, orig_retrieve, orig_verify = tools.llm_pick, tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None: h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None: h
     ok = 0
     try:
         # ① LLM 이 골랐으면 n-gram 은 아예 돌지 않는다.
@@ -2143,7 +2304,7 @@ def check_order_flipped() -> int:
 
         # ③ LLM 의 선택도 게이트를 그대로 통과해야 한다(1차가 됐다고 면제 아님).
         tools.llm_pick = lambda kinds, query: [(2.0, target)]
-        tools.fits_question = lambda q, h, kind="", history=None: []
+        tools.fits_question = lambda q, h, kind="", history=None, query=None: []
         hit = tools._pitch({"question": "질문"}, "질문") is None
         print(f"{'✓' if hit else '✗'} LLM 선택도 적합성 게이트 적용")
         ok += hit
@@ -2161,7 +2322,7 @@ def check_tool_loop() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
 
     # 절차 카드는 검색 1위가 아니라 **이름으로 고정**한다. 예전에는 "디폴트옵션 변경 화면번호"
     # 의 1위(proc.018)에 기댔는데, 그 카드의 화면번호는 ⚠ 유의 박스에서 잘못 딸려 온 것이라
@@ -2375,7 +2536,7 @@ def check_market_material() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         q = "디폴트옵션 알파드림 구성상품이 뭐야"
         found = tools.run("lineup", {"question": q}, q)
@@ -2491,7 +2652,7 @@ def check_market_material() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         q = "1975년생이면 TDF 몇 년짜리 골라야 해?"
         found = tools.run("lineup", {"question": q}, q)
@@ -2520,7 +2681,7 @@ def check_market_material() -> int:
     # ② 같은 문서의 절이 걸리면 개요 카드는 자리를 비켜준다. 개요는 문서 키워드를 통째로
     #    들고 있어 어떤 질문에나 걸리는데, **답이 든 표는 절에 있다**.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     try:
         found = tools.run("lineup", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
     finally:
@@ -2641,7 +2802,7 @@ def check_atomic_spans() -> int:
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))
         orig_fits, orig_search = tools.fits_question, FQ.search
-        tools.fits_question = lambda question, h, kind="", history=None: h
+        tools.fits_question = lambda question, h, kind="", history=None, query=None: h
         FQ.search = lambda question: [(2.0, bare)]
         try:
             f = tools.run("fact", {"question": "q"}, "확정값")
@@ -2743,7 +2904,7 @@ def check_plan_failure() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     question = "고객이 주식이 더 낫다는데 뭐라고 하지?"
     base = {"question": question, "utterance": question}
 
@@ -2930,7 +3091,7 @@ def main() -> int:
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성
-    tools.fits_question = lambda q, h, kind="", history=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
     agent = G.build_agent()
 
     for question, expected in CASES:
@@ -2964,6 +3125,7 @@ def main() -> int:
         check_replan_on_empty()
         check_screen_registry()
         check_market_material()
+        check_product_advice()
         check_caution_roles()
         check_history_material()
         check_today_material()
