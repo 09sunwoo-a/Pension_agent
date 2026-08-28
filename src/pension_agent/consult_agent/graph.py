@@ -12,8 +12,9 @@
 그래프 구조(노드·분기 다이어그램)는 README.md 참고. 이 파일은 그래프를
 조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
 노드 함수는 기능별로 나뉘어 있다 — 상태정의는 state.py, 분기 predicate 는 routing.py,
-화법 슬롯 분해는 pitch.py, 계획 루프는 plan.py, 메타 질문 응답은 meta.py, LMS발송은 lms.py,
-브리핑수정은 correction.py. LLM 프롬프트는 prompts.py.
+화법 슬롯 분해는 pitch.py, 계획 루프는 plan.py, 되묻기 판정·답변 작성은 answer.py,
+메타 질문 응답은 meta.py, LMS발송은 lms.py, 브리핑수정은 correction.py.
+LLM 프롬프트는 prompts.py.
 
 **답변을 만드는 경로는 계획 루프 하나다.** 값·절차·고객군·브리핑 질의가 각자 노드를 갖고
 있던 시절이 있었는데, 같은 재료를 두 경로로 답하면 프롬프트·검증·표시 규약이 갈리고
@@ -23,6 +24,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from langgraph.graph import END, START, StateGraph
@@ -30,21 +32,25 @@ from langgraph.graph import END, START, StateGraph
 
 from pension_agent.session_store import append_turn
 
+from pension_agent.consult_agent import progress, suggest
+
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
-from pension_agent.consult_agent.nodes.clarify import clarify
+from pension_agent.consult_agent.nodes.answer import answer
 from pension_agent.consult_agent.nodes.correction import correction
 from pension_agent.consult_agent.nodes.lms import lms_send
 from pension_agent.consult_agent.nodes.meta import agent_help
-from pension_agent.consult_agent.nodes.plan import compose, llm_down, plan_step
+from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
 from pension_agent.consult_agent.routing import (
-    LLM_DOWN, route_clarify, route_intent, route_plan,
+    LLM_DOWN, route_answer, route_confirm, route_intent, route_plan,
 )
 from pension_agent.consult_agent.state import HISTORY_LIMIT, AgentState
 
-# 답변을 만든 뒤 화면 연계를 제안할 노드. 제안 여부는 offer 안의 규칙이 정한다(§10) —
-# 여기 있다는 것은 "제안이 붙을 수 있는 자리"라는 뜻이지 매번 붙는다는 뜻이 아니다.
-_OFFERING_NODES = ("compose",)
+#: 답변 끝 추천질문 블록의 머리말. `plan.MISSING_NOTICES`·`MATERIAL_MARKS` 와 같은 꼴로,
+#: **프론트가 이 블록만 떼어낼 수 있게** 고정 문자열로 둔다(반환값의 "followups" 를 쓰면
+#: 떼어낼 필요도 없다). 지금은 텍스트로 붙이고, 실서비스 프론트가 칩 UI 를 따로 만든다.
+FOLLOWUP_HEADER = "── 이어서 물어보실 수 있어요"
+
 
 
 def build_agent():
@@ -52,8 +58,7 @@ def build_agent():
     g.add_node("understand", understand)
     g.add_node("agent_help", agent_help)
     g.add_node("plan", plan_step)
-    g.add_node("clarify", clarify)
-    g.add_node("compose", compose)
+    g.add_node("answer", answer)
     g.add_node("lms_send", lms_send)
     g.add_node("correction", correction)
     g.add_node(LLM_DOWN, llm_down)
@@ -66,14 +71,19 @@ def build_agent():
         ["agent_help", "plan", "lms_send", "correction", "confirm_action", LLM_DOWN],
     )
     # 계획 루프 — LLM 이 도구를 고르고(plan), 코드가 상한에서 끊고(route_plan),
-    # 모은 근거만으로 답을 쓴다(compose). 능력 표면은 intent enum 이 아니라 tools.TOOLS 다.
-    g.add_conditional_edges("plan", route_plan, ["plan", "clarify"])
-    # 되묻기 턴은 여기서 끝난다 — 답변도 화면 연계 제안도 붙지 않는다(§5).
-    g.add_conditional_edges("clarify", route_clarify, {"compose": "compose", "__end__": END})
-    for node in _OFFERING_NODES:
-        g.add_edge(node, "offer")
+    # 모은 근거만으로 답을 낸다(answer). 능력 표면은 intent enum 이 아니라 tools.TOOLS 다.
+    g.add_conditional_edges("plan", route_plan, ["plan", "answer"])
+    # answer 안에서 되묻기 판정과 답변 작성이 함께 끝난다(nodes/answer.py). 되묻기로
+    # 끝난 턴에는 화면 연계 제안이 붙지 않는다 — 제안이 붙을 수 있는 자리는 여기뿐이고,
+    # 붙일지는 offer 안의 규칙이 정한다(§10).
+    g.add_conditional_edges("answer", route_answer, {"offer": "offer", "__end__": END})
+    # 승낙 턴 — 화면 연계는 URL 하나로 끝나고, 화법 제시는 근거만 실린 채 answer 로 간다.
+    # 답변을 만드는 경로를 둘로 늘리지 않기 위해서다(routing.route_confirm). 그 턴에는
+    # 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자다(clarify.applicable).
+    g.add_conditional_edges("confirm_action", route_confirm,
+                            {"answer": "answer", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_send", "correction", "confirm_action", LLM_DOWN):
+    for node in ("agent_help", "lms_send", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 
@@ -84,6 +94,7 @@ _AGENT = None
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
+    on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
 
@@ -97,11 +108,23 @@ def ask(
     session_id: 상담 세션 구분자(REQUIREMENTS.md §14 상담이력 단위). 넘기지 않으면 "default"
     세션으로 기록된다 — 모든 턴은 intent 와 무관하게 이 진입점 한 곳에서 기록되므로, 새
     intent 가 추가돼도 상담이력 기록을 빠뜨릴 일이 없다.
+    on_progress: 진행 표시 콜백. 답변이 만들어지는 동안 "무엇을 하고 있는지" 한 줄씩
+    받는다(문구는 전부 코드가 정한다 — progress.py). ContextVar 로 전달되므로 상태·
+    history 에 콜러블이 들어가지 않고, 콜백이 죽어도 답변 생성은 계속된다.
     """
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    out = _AGENT.invoke({"question": question, "history": history or [], "customer_id": customer_id})
+    with progress.reporting(on_progress):
+        out = _AGENT.invoke(
+            {"question": question, "history": history or [], "customer_id": customer_id})
+    answer = out["answer"]
+    # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
+    # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가
+    # 추가될 때 빠지고, 빠진 것이 눈에 안 띈다(상담이력 기록을 여기서 하는 것과 같은 이유).
+    followups = suggest.followup_questions(out)
+    if followups:
+        answer += "\n\n" + FOLLOWUP_HEADER + "\n" + "\n".join(f"· {q}" for q in followups)
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),
@@ -122,11 +145,17 @@ def ask(
             "role": "user", "text": question, "intent": out.get("intent"),
         })
         append_turn(customer_id, session_id, {
+            # 기록에는 **추천질문을 붙이기 전의 답변**을 남긴다. 추천질문은 화면 장치이지
+            # 고객에게 한 안내가 아니고, 이 기록은 `history` 도구가 다음 상담에서 재료로
+            # 되읽는 텍스트다 — 거기에 UI 문구가 섞이면 그게 지난 상담 내용이 된다.
             "role": "agent", "text": out.get("answer", ""), "intent": out.get("intent"),
         })
 
     return {
-        "answer": out["answer"], "sources": out.get("sources", []), "history": new_history,
+        "answer": answer, "sources": out.get("sources", []), "history": new_history,
+        # 추천질문만 따로 쓰고 싶은 프론트를 위해 리스트로도 준다 — answer 끝의 블록과
+        # 같은 내용이다(프론트가 붙이면 answer 쪽 블록은 떼면 된다).
+        "followups": followups,
         "intent": out.get("intent"),  # 프론트가 correction 처럼 미완성 기능을 표시할 때 씀
         # 확인을 기다리는 도구 제안. 화면이 버튼으로 실행하고 싶을 때 이걸 그대로 쓰면 된다
         # (대화로 "네" 라고 답해도 같은 경로로 실행된다).

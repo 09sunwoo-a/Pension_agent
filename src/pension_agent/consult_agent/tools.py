@@ -46,6 +46,7 @@ from typing import TypedDict
 
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent import marks as MARKS
+from pension_agent.consult_agent import progress
 from pension_agent.consult_agent import relations as REL
 from pension_agent.consult_agent.nodes import facts_qa, pitch as PITCHMOD, procedure_qa, segment_qa
 from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
@@ -83,6 +84,10 @@ class Tool:
     name: str
     desc: str            # 계획 프롬프트에 실리는 한 줄 설명
     run: Callable[[AgentState, str], Evidence | None]
+    # 진행 표시에 찍히는 재료 이름("단말 화면번호"…). 문구는 코드가 정한다는 규칙
+    # (progress.py ①)이 도구에 적용된 자리다 — LLM 이 만든 질의는 진행 표시에 싣지
+    # 않는다(질의가 곧 지어낸 문장일 수 있다). 비어 있으면 그 도구는 진행을 알리지 않는다.
+    progress: str = ""
 
 
 def _clean(spans: list[str] | None) -> list[str]:
@@ -154,10 +159,18 @@ def _procedure(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, procedure_qa.search(query), "업무 처리 절차")
     if not hits:
         return None
+    atomic, notices, scopes = _procedure_decls([c for _s, c in hits])
+    return _ev("procedure", query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
+               atomic=atomic, notices=notices, scopes=scopes, cards=[c for _s, c in hits])
+
+
+def _procedure_decls(cards: list[dict]) -> tuple[list[str], list[str], list[dict]]:
+    """절차 카드의 원문 스팬·표시 선언. `procedure` 도구와 `playbook`(문제상황 후보에 절차가
+    섞일 때)이 함께 쓴다 — 두 곳이 각자 선언하면 한쪽만 화면번호 강제가 빠지는 날이 온다."""
     atomic: list[str] = []
     notices: list[str] = []
     scopes: list[dict] = []
-    for _s, c in hits:
+    for c in cards:
         keys = list(c.get("screens") or [])
         marks = KBMOD.role_texts(c.get("cautions"), "caution")
         if c.get("status") == "확인 필요":
@@ -166,8 +179,7 @@ def _procedure(state: AgentState, query: str) -> Evidence | None:
         notices += marks
         if marks:
             scopes.append(_scope(c.get("title") or c["id"], keys, marks))
-    return _ev("procedure", query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
-               atomic=atomic, notices=notices, scopes=scopes, cards=[c for _s, c in hits])
+    return atomic, notices, scopes
 
 
 def _render_screen(card: dict) -> str:
@@ -345,16 +357,23 @@ def _method(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, pick(("method",), query, top_k=2), "관리 방법론")
     if not hits:
         return None
+    notices, scopes = _method_decls([c for _s, c in hits])
     return _ev("method", query, "\n\n".join(_render_method(c) for _, c in hits),
                KBMOD.sources_of(KB, hits),
-               notices=[t for _s, c in hits
-                        for t in KBMOD.role_texts(c.get("cautions"), "caution")],
-               # 방법론에는 값 스팬이 없어 '이 카드를 썼는지'를 가릴 수 없다(keys 빈 묶음) —
-               # 「하지 말 것」은 판단이 안 설 때 유지하는 쪽이 맞다.
-               scopes=[_scope(c.get("title") or c["id"], [], marks)
-                       for _s, c in hits
-                       if (marks := KBMOD.role_texts(c.get("cautions"), "caution"))],
-               cards=[c for _s, c in hits])
+               notices=notices, scopes=scopes, cards=[c for _s, c in hits])
+
+
+def _method_decls(cards: list[dict]) -> tuple[list[str], list[dict]]:
+    """방법론 카드의 표시 선언. `method` 도구와 `playbook` 이 함께 쓴다.
+
+    방법론에는 값 스팬이 없어 '이 카드를 썼는지'를 가릴 수 없다(keys 빈 묶음) —
+    「하지 말 것」은 판단이 안 설 때 유지하는 쪽이 맞다.
+    """
+    notices = [t for c in cards for t in KBMOD.role_texts(c.get("cautions"), "caution")]
+    scopes = [_scope(c.get("title") or c["id"], [], marks)
+              for c in cards
+              if (marks := KBMOD.role_texts(c.get("cautions"), "caution"))]
+    return notices, scopes
 
 
 def _render_fieldtip(card: dict) -> str:
@@ -588,6 +607,12 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     lines = [f"■ 고객 {customer_id} — 브리핑 재료"]
     lines += [f"· {k} {v}" for k, v in facts["customer"].items()]
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
+    # 계좌 상태 — **정상인 항목도 값으로** 싣는다. 화면(briefing)은 요건이 성립한 것만
+    # 렌더하는데(그게 맞다 — 한 장짜리 브리핑이다), 그 필터가 그대로 넘어오면 직원이
+    # "디폴트옵션 설정돼 있어?" 라고 물었을 때 **미설정 고객에게만** 답이 나갔다. 설정된
+    # 고객에게는 "준비된 자료가 없어요" — 정확히 "네, 돼 있습니다" 라고 답해야 하는 자리다.
+    # 값이 없어서가 아니라 문제일 때만 실려서였다(engine/render.py::_account_state).
+    lines += [f"· {k.replace('_', ' ')} {v}" for k, v in (facts.get("account_state") or {}).items()]
     if facts.get("conditions"):
         lines.append(f"· 성립 요건: {', '.join(facts['conditions'])}")
     # 「왜 이 고객이 관리 대상인가」 — 직원이 실제로 가장 많이 묻는 것인데 통째로 빠져
@@ -601,6 +626,36 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
             lines.append(f"· {label}: {v}")
     for sit in facts.get("problem_situations") or []:
         lines.append(f"· 문제상황 {sit['no']}: {sit['title']} [{sit['group']}]")
+    # 화면 ⑥⑦⑧ 이 **이 고객에게** 고른 화법·반론·참고자료. 위 문제상황에서 나온 짝이라
+    # 여기 붙는다(REQUIREMENTS.md §2 「문제상황 정의 — ⑥⑦⑧⑨ 의 출발점」).
+    #
+    # 이 세 줄이 없던 동안 "이 고객한테 뭐라고 말하지"는 `pitch` 도구가 지식베이스 화법
+    # 102건을 **고객과 무관하게** 검색해 답했다 — 화면 ⑥에 그 고객 맞춤 화법이 떠 있는데도.
+    # 화면과 대화가 같은 질문에 다른 카드를 말하는 상태였고, 그게 이 저장소가 가장
+    # 경계하는 실패다(CLAUDE.md §3). allow 에는 이미 facts 전체가 있어 인용은 허용됐지만,
+    # 재료 텍스트에 없으면 LLM 은 그 카드를 본 적이 없다.
+    #
+    # 값은 facts 를 **그대로** 옮긴다. 여기서 다시 고르면 그것이 두 번째 선정 경로가 되고,
+    # 화면과 다시 갈린다. 고르는 것은 strategy_agent 몫이다.
+    card_sources: list[dict] = []
+    card_lines: list[str] = []
+    for label, items, keys in (("이렇게 말해보세요", facts.get("talking_points"), ("title", "talk")),
+                               ("예상 반론", facts.get("objections"), ("objection", "response")),
+                               ("상담 참고", facts.get("consult_resources"), ("title", "snippet"))):
+        for item in items or []:
+            head, body = (str(item.get(k) or "").strip() for k in keys)
+            if not head and not body:
+                continue
+            mark = " · ".join(x for x in (item.get("card_id"), item.get("situation")) if x)
+            card_lines.append(f"· {label}: {head} — {body}" + (f" [{mark}]" if mark else ""))
+            # 이 줄들의 출처는 **지식 카드**다(고객 원장이 아니다). 답에 영향을 준 재료는
+            # 전부 출처에 실린다(§3) — 안 실으면 직원은 화법이 어디서 나왔는지 모른 채
+            # 읽는다. 검색으로 온 재료가 아니므로 관련도(score)는 없다.
+            if item.get("card_id"):
+                card_sources.append({"id": item["card_id"], "title": head,
+                                     "doc": item.get("source") or "출처 미상",
+                                     "score": None, "page": None})
+    lines += card_lines
     # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
     # 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 산문이므로 원문 스팬은 아니다.
     for label, text in (("AI브리핑 문장", result.get("sentence")),
@@ -617,12 +672,40 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 출처는 **고객 원장**이지 지식 카드가 아니다. 예전 표기("AI브리핑 재료 /
     # briefing.<id>")는 화면에서 카드 id 처럼 읽혀, 계좌에 그냥 들어 있는 값이 어딘가에서
     # 검색해 온 자료처럼 보였다. 검색으로 온 재료가 아니므로 관련도(score)도 없다.
+    # 같은 카드가 ⑥과 ⑧에 함께 뽑힐 수 있다(pitch.k03.038 이 실제로 그렇다) — 첫 등장만 남긴다.
+    seen: set[str] = set()
+    deduped = [s for s in card_sources if not (s["id"] in seen or seen.add(s["id"]))]
+    # 레이블–값 짝을 선언한다. 이 재료의 허용 집합에는 화면 값 말고도 ⑥⑦⑧ 의 화법·반론·
+    # 참고자료 수치가 함께 들어 있어서(직원이 그것도 묻는다) 집합 포함 검사만으로는
+    # "세액공제 잔여한도는 300만원이에요"(실제 0만원)가 통과한다 — 300 은 화법 문구에 실제로
+    # 있는 숫자다. 선언을 relations.labeled_mispaired() 가 대조한다(fact 의 tiers·05 표의
+    # tables 와 같은 자리다).
+    labeled = [{"label": k.replace("_", " "), "value": str(v)}
+               for src in (facts["customer"],
+                           {k: v for k, v in facts["briefing"].items() if k != "source"},
+                           facts.get("account_state") or {})
+               for k, v in src.items()]
     return _ev("customer", query, "\n".join(lines),
                [{"id": f"customer.{customer_id}",
                  "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
-                 "score": None, "page": None}],
-               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)])
+                 "score": None, "page": None}, *deduped],
+               allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)],
+               cards=[{"id": f"customer.{customer_id}", "labeled": labeled,
+                       # 재료 전문 — 항목 이름이 다른 자리(문제상황 제목·⑥⑦⑧ 카드 문구
+                       # 등)에도 나오면 그 항목은 판정에서 뺀다(relations.checkable).
+                       #
+                       # **밑줄을 공백으로 펴서 넘긴다.** `labeled` 의 레이블은 정규화된
+                       # 이름("당해 납입액")인데 재료 줄은 원장 키 그대로("당해_납입액")라,
+                       # 그냥 넘기면 **자기 이름이 한 번도 안 세어진다** — 「재료 어디에든
+                       # 제 이름이 다시 나오면 뺀다」가 통째로 작동하지 않는다. 그 상태에서
+                       # ⑧ 의 일반 제도 설명("전년·당해 납입액이 세액공제 한도 900만원에
+                       # 미달하는 고객")이 이 고객의 「당해 납입액 600만원」과 짝지어져
+                       # "600인데 900이라 한다"로 잡혔다 — 카드 원문을 고객 값 주장으로
+                       # 오독한 것이다(§6 — 검증기가 옳은 문장을 거부하는 것은 틀린 문장을
+                       # 통과시키는 것보다 나쁘다). 이름이 두 자리에 나오면 가릴 수 없으므로
+                       # 그 항목만 빠지고, 안 겹치는 항목의 판정은 그대로 남는다.
+                       "context": "\n".join(lines).replace("_", " ")}])
 
 
 #: 인용 허용 집합에서 빼는 facts 가지. 값이 아니라 **선별 전 후보 더미**다.
@@ -806,6 +889,7 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     쓴다. 왜 필요한지는 ADEQUACY_PROMPT 머리말에 적어뒀다 — 고객 특정 질문에서 일반
     자료가 전멸하던 자리다.
     """
+    progress.emit("찾은 자료가 질문에 맞는지 확인하고 있어요")
     cards = "\n".join(_headline(c) for _, c in hits)
     raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
                                           query=query or question,
@@ -874,7 +958,6 @@ def _pitch(state: AgentState, query: str) -> Evidence | None:
 
 
 # ─────────────────────────────────────────────────────────────
-# 오늘 — 검색하지 않는 도구. 코드가 계산해서 내놓는다.
 #
 # 작성 규약(COMPOSE_SYSTEM 1번)이 «재료에 없는 값은 재료 안 값에서 계산해서 만들어내지도
 # 않는다(날짜·차액·비율 전부)»다. 옳은 규약이다 — 그런데 그 결과 **오늘이 며칠인지가 어디에도
@@ -930,27 +1013,294 @@ def _date(state: AgentState, query: str) -> Evidence | None:
 
 
 # ─────────────────────────────────────────────────────────────
+# 세액공제 환급 예상액 — `date` 와 같은 부류. 검색하지 않고 코드가 계산해 싣는다.
+#
+# 07/01 ② 가 정한 「계산기」의 첫 조각이다. 그 장이 근거로 든 것이 이것이다 — 직원 두 명이
+# 각자 엑셀로 세액공제 계산기를 만들어 배포했다(핫팁 199713·200518). 도구가 없어 사비로
+# 만들 만큼 강한 니즈인데, 지금 재료에는 **현재 납입액 기준 한 값**만 있어서
+# ("예상 세액공제액 118만원") "300만원 더 넣으면 얼마 더 받아?" 에 답할 수 없었다.
+#
+# ━━ 입력 수치는 **직원이 친 말**에서 뽑는다 ━━
+# 계획 LLM 이 넘기는 `query` 는 직원 질문의 재작성본이라, 줄여 쓰는 과정에서 말을 흘린다
+# (`run()` 주석의 화면번호 사례). 단어를 흘릴 수 있으면 숫자도 흘리는데, 검색은 0건으로
+# 티가 나는 반면 계산기는 **조용히 다른 답**을 낸다. 게다가 계산 결과는 원장에 실려 인용이
+# 허가되므로, 틀린 입력이 그대로 «승인된 숫자»가 된다 — LLM 이 경계를 넓히는 자리다.
+# 그래서 금액은 `state["question"]` 에서 코드가 뽑는다(`verify.first_amount`).
+#
+# ━━ 공제율은 두 구간을 다 낸다 ━━
+# 총급여 구간은 원장에 없다(demo_status §4 — 목업 9명 전원 미확인). 코드는 브리핑에서
+# 보수적으로 낮은 쪽을 쓰지만(과대산출 회피), 계산기가 그 값 하나만 내놓으면 16.5% 구간
+# 고객에게 "왜 적게 나와?" 가 된다. 두 경우를 다 싣고 어느 쪽인지는 직원이 가른다.
+# ─────────────────────────────────────────────────────────────
+
+#: 공제율의 근거 카드. 세율·한도·아래 단서가 전부 여기서 온다.
+TAX_FACT_ID = "fact.k04.f2"
+
+
+def _won(v: int) -> str:
+    from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
+
+    return won(v)
+
+
+def _tax_credit(state: AgentState, query: str) -> Evidence | None:
+    """세액공제 환급 예상액. 계산은 strategy_agent 것을 쓰고 여기서는 재료로 편다."""
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+    from pension_agent.verify import first_amount  # noqa: PLC0415
+
+    p = CUST.get_profile(customer_id)
+    card = KB.facts.get(TAX_FACT_ID)
+    if p is None or card is None:
+        return None
+
+    paid, cap = p.pension_paid_ytd, CUST.TAX_CREDIT_CAP_WON
+    # 잔여한도는 **원장 값을 쓴다**(`p.room`). 한도에서 IRP 납입액을 빼서 다시 계산하면
+    # 안 된다 — 한도 900만원은 연금저축과 **공유**라(fact.k04.f2 "연금저축 세액공제 포함")
+    # 연금저축에서 이미 쓴 몫을 IRP 납입액만으로는 알 수 없다. 실제로 당해 납입 0원인데
+    # 잔여한도가 0인 고객이 목업에 있다 — 다시 계산하면 그 고객에게 "900만원 더 넣으면
+    # 148.5만원" 이라고 말하게 된다(§3 "같은 판정을 두 번 구현하지 않는다").
+    room = p.room * 10_000
+    # 금액을 안 말했으면 «잔여한도를 채우면» 으로 읽는다. 원장 값이라 지어낸 수가 아니고,
+    # 직원이 실제로 묻는 것도 대개 그것이다("얼마나 더 받을 수 있어?").
+    said = first_amount(state.get("question") or "")
+    extra = said[1] if said else room
+    gain_base = min(extra, room)          # 잔여한도를 넘는 납입은 공제 대상이 아니다
+    target = paid + gain_base
+    gain = CUST.tax_credit(target, 1.0) - CUST.tax_credit(paid, 1.0)
+
+    lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객 (시스템 계산 — 검색 결과가 아니다)",
+             f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)}",
+             f"· 계산에 쓴 추가 납입액 {_won(extra)}"
+             + ("" if said else " (질문에 금액이 없어 잔여한도로 계산했다)")]
+
+    notices: list[str] = []
+    if gain <= 0:
+        # 환급 «금액»을 새로 단정하지 않는 갈래다. 아래 결정세액 단서도 붙이지 않는다 —
+        # 그 단서는 최대 환급액을 단정할 때 걸리는 것이라 여기서는 무관하다(CLAUDE.md §7).
+        lines.append(f"· 세액공제 잔여한도가 {_won(room)}이라 **추가 공제 대상이 없다** — "
+                     f"더 납입해도 올해 세액공제로 돌아오는 금액은 늘지 않는다 "
+                     f"(연 납입한도 {_won(cap)} 은 연금저축과 함께 쓴다)")
+    else:
+        lines.append(f"· 공제 대상 {_won(min(paid, cap))} → {_won(min(target, cap))} "
+                     f"(잔여한도 {_won(room)}까지)")
+        for when, rate in (("총급여 5,500만원 이하", CUST.TAX_CREDIT_RATE["5500이하"]),
+                           ("총급여 5,500만원 초과", CUST.TAX_CREDIT_RATE["5500초과"])):
+            now, after = CUST.tax_credit(paid, rate), CUST.tax_credit(target, rate)
+            lines.append(f"· {when}({rate * 100:.1f}%): 환급 예상 {now:,}원 → {after:,}원 "
+                         f"(늘어나는 금액 {after - now:,}원)")
+        lines.append("· 이 고객의 총급여 구간은 원장에 없어 두 경우를 다 실었다 — "
+                     "어느 구간인지 확인하면 하나로 좁혀진다")
+        notices.append(_caveat(card))
+
+    return _ev("tax_credit", query, "\n".join(lines),
+               KBMOD.sources_of(KB, [(1.0, card)]), notices=notices,
+               scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
+               cards=[card])
+
+
+#: 환급액에 따라붙는 단서를 카드에서 떼어 오는 표지. 코드가 문장을 갖지 않는다 —
+#: 세법이 바뀌면 카드가 바뀌고 답변도 함께 바뀌어야 한다(§7 "표시는 데이터 선언이 정한다").
+_CAVEAT_MARK = "단, "
+
+
+def _caveat(card: dict) -> str:
+    """공제율 카드가 못박은 단서. 없으면 카드 원문을 그대로 쓴다(지어내지 않는다)."""
+    value = card.get("value") or ""
+    at = value.find(_CAVEAT_MARK)
+    return value[at:].strip() if at >= 0 else value.strip()
+
+# 문제상황에 걸린 화법 — 화면 ⑥⑦⑧ 과 같은 후보군
+# ─────────────────────────────────────────────────────────────
+
+#: 한 번에 올리는 후보 상한. 상담 중에 읽을 수 있는 분량을 넘기면 아무도 안 읽는다
+#: (guard.PER_COND 와 같은 이유의 상한이다).
+PLAYBOOK_TOP_K = 2
+
+#: 갈래 — 화면 ⑥⑦⑧ 이 쓰는 후보 축 그대로다. pitch 갈래의 세 card_type(proposal ⑥ ·
+#: objection ⑦ · guide ⑧)과, ⑧ 이 화법과 번갈아 싣는 방법론·절차(`resource.py`
+#: `_situation_resources`). 여기서 축을 새로 정하지 않는다 — 정하면 화면과 갈린다.
+PLAYBOOK_LANES = ("pitch", "procedure", "method")
+
+_PLAYBOOK_TYPES = ("proposal", "objection", "guide")
+
+
+def playbook_hits(state: AgentState, *, lanes: tuple[str, ...] | None = None,
+                   exclude: set[str] | None = None,
+                   top_k: int = PLAYBOOK_TOP_K) -> list[tuple[float, dict]]:
+    """이 고객의 문제상황에 걸린 화법 후보. 도구(`_situation`)와 제안 판정(`act`)이 함께 쓴다.
+
+    **매칭을 여기서 만들지 않는다.** 고객 상태 → 화법 연결은 strategy_agent 가 화면 ⑥⑦⑧
+    을 위해 이미 갖고 있고(3단: 카드의 `segments` → 세그먼트·화법 그룹 매핑 → n-gram,
+    `docs/REQUIREMENTS.md` §2), 그 함수를 그대로 부른다. 대화형이 자기 매칭을 만들면 같은
+    질문에 화면과 다른 카드를 말하게 된다(CLAUDE.md §3 — 같은 재료를 두 경로로 구현하지
+    않는다).
+
+    **금지 상속도 같은 이유로 공짜다.** `problem_situations()` 가 세그먼트의 `exclusions`
+    선언을 판정하므로(연금수령 개시 계좌에서 납입·세액공제 세그먼트 seg.13·15·16 이 빠진다),
+    여기서 따로 막지 않아도 화면이 막은 것은 후보에 애초에 없다 — 따로 막으면 그것이 두 번째
+    판정 경로가 되어 언젠가 화면과 갈린다.
+
+    카드 본체는 **대화형 KB**(`state.KB`)에서 id 로 다시 찾는다. strategy_agent 쪽은 KB 를
+    따로 적재하는 별도 인스턴스라, 그쪽 카드를 그대로 쓰면 시효성 판정이 노드마다 갈릴 수
+    있다(state.py 가 KB 를 한 번만 적재하는 이유와 같다).
+
+    슬롯(«방금 나온 상황»)으로 후보를 좁힌다 — 화면은 고객 상태만 보고 상담 **전에** 고르지만
+    여기는 상담 **중**이라, 직원이 방금 말한 상황까지 볼 수 있다. 이것이 화면과 다른 일을
+    하는 유일한 근거다. 슬롯 분해가 실패하면(LLM) 좁히지 않고 상태만으로 고른다.
+
+    `lanes` 는 어느 축의 후보를 볼지다(PLAYBOOK_LANES 부분집합). 제안 판정(`act`)은 이번
+    턴이 다룬 갈래만 넘긴다 — 절차를 물은 턴에 화법을 제안하면 §3 「묻지 않은 값」의 제안
+    버전이 된다. 도구로 직접 불릴 때는 전 갈래를 본다(None) — 그때는 질문 자체가 이
+    재료를 향한 것이라 갈래를 좁힐 근거가 질문에 없다.
+    """
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return []
+    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.strategy_agent.situations import problem_situations  # noqa: PLC0415
+    from pension_agent.strategy_agent.support import matching  # noqa: PLC0415
+    try:
+        profile = strategy_customer.get_profile(customer_id)
+        if profile is None:
+            return []
+        situations = problem_situations(profile, strategy_customer.conditions(profile))
+    except Exception:
+        return []
+    if not situations:
+        return []
+
+    try:
+        slots = PITCHMOD.extract_slots(state)
+    except LLMError:
+        # 슬롯은 후보를 **좁히는** 보조 정보다. 없으면 고객 상태만으로 고르면 되고, LLM 이
+        # 정말 죽었다면 뒤이은 작성이 같은 이유로 실패해 턴이 §11 로 끝난다.
+        slots = {}
+
+    # 갈래마다 넉넉히 뽑아 슬롯으로 거른 뒤 합쳐서 상위 K 를 고른다 — 갈래별로 K 를
+    # 나눠 가지면 이 고객에게 걸린 것이 한 갈래에 몰려 있을 때 그 갈래가 잘린다.
+    scored: list[tuple[float, dict, dict]] = []
+    for lane in (lanes or PLAYBOOK_LANES):
+        if lane == "pitch":
+            for card_type in _PLAYBOOK_TYPES:
+                scored += matching.scored_situation_cards(situations, card_type, top_k * 3)
+        elif lane == "procedure":
+            scored += matching.scored_situation_procedures(situations, top_k * 3)
+        elif lane == "method":
+            scored += matching.scored_situation_methods(situations, top_k * 3)
+
+    by_id = {c["id"]: c for c in KB.cards}
+    skip = set(exclude or ())
+    best: dict[str, tuple[float, dict]] = {}
+    for score, card, _seg in scored:
+        local = by_id.get(card["id"])
+        if local is None or local["id"] in skip:
+            continue
+        # 슬롯 스코프는 화법 카드의 축이다(tags.stage·customer_type). 절차·방법론 카드에는
+        # 그 축이 없어서 여기 걸면 슬롯이 잡힌 턴마다 전부 탈락한다 — 화법에만 건다.
+        if local["_kind"] == "pitch" and not KBMOD.matches_scope(
+                local, customer_type=slots.get("customer_type"), stage=slots.get("stage")):
+            continue
+        if local["id"] not in best or score > best[local["id"]][0]:
+            best[local["id"]] = (score, local)
+    return sorted(best.values(), key=lambda x: (-x[0], x[1]["id"]))[:top_k]
+
+
+def _playbook(state: AgentState, query: str) -> Evidence | None:
+    """이 고객 상태에 걸린 화법·반론·방법론·절차 참고자료 — 화면 ⑥⑦⑧ 과 같은 후보군에서.
+
+    `customer` 도구가 싣는 것은 화면이 **이미 고른** 2건이고, 여기는 그 **후보군 전체**에서
+    이번 대화 상황에 맞는 것을 고른다. 후보군이 같으므로 화면이 자른 것을 꺼내와도 화면과
+    어긋나지 않는다 — 다른 매칭이 만든 카드가 아니기 때문이다.
+
+    **후보군 전체를 원장에 싣지 않는다.** ⑦⑧ 후보군은 카드 id·발췌가 통째로 들어와 인용
+    허용 수치를 몇 배로 불리고, 그러면 무관한 카드의 숫자가 아무 주장에나 근거를 대준다
+    (`_POOL_KEYS` 주석의 사고 — 22개가 110개가 되면서 오답이 통과했다). 여기서는 고른
+    것만 올린다.
+    """
+    hits = playbook_hits(state, exclude=cited_cards(state))
+    hits = _adopt(state, query, hits, "고객 상태에 걸린 재료")
+    if not hits:
+        return None
+    return playbook_evidence(query, hits)
+
+
+def playbook_evidence(query: str, hits: list[tuple[float, dict]]) -> Evidence | None:
+    """(관련도, 카드) 목록 → playbook 원장 항목. 도구와 승낙 턴(`act._show_playbook`)이
+    함께 쓴다.
+
+    후보에는 종류가 섞인다(화법·방법론·절차 — 화면 ⑧ 이 세 갈래를 번갈아 싣는 것과 같은
+    축이다). **종류마다 렌더러와 선언을 그 종류의 도구 것 그대로 쓴다** — 화법 렌더러
+    (`kb.build_context`)에 절차 카드를 태우면 두 가지가 깨진다: ① `cautions` 를 역할(role)
+    구분 없이 뿌려 저작 메모(authoring)가 직원에게 노출되고(§12 지워진 gap 17 이 고친
+    실패의 재발), ② 화면번호가 `atomic` 강제를 받지 않아 LLM 이 옮겨 적다 틀려도 아무도
+    못 잡는다.
+    """
+    if not hits:
+        return None
+    pitch_hits = [(sc, c) for sc, c in hits if c["_kind"] == "pitch"]
+    proc_hits = [(sc, c) for sc, c in hits if c["_kind"] == "procedure"]
+    method_hits = [(sc, c) for sc, c in hits if c["_kind"] == "method"]
+
+    blocks: list[str] = []
+    atomic: list[str] = []
+    notices: list[str] = []
+    scopes: list[dict] = []
+    if pitch_hits:
+        blocks.append(KBMOD.build_context(KB, pitch_hits))
+    if proc_hits:
+        blocks.append(procedure_qa.render(proc_hits))
+        p_atomic, p_notices, p_scopes = _procedure_decls([c for _sc, c in proc_hits])
+        atomic += p_atomic
+        notices += p_notices
+        scopes += p_scopes
+    if method_hits:
+        blocks.append("\n\n".join(_render_method(c) for _sc, c in method_hits))
+        m_notices, m_scopes = _method_decls([c for _sc, c in method_hits])
+        notices += m_notices
+        scopes += m_scopes
+    return _ev("playbook", query, "\n\n".join(blocks), KBMOD.sources_of(KB, hits),
+               atomic=atomic, notices=notices, scopes=scopes or None,
+               cards=[c for _sc, c in hits])
+
+
+def cited_cards(state: AgentState) -> set[str]:
+    """이번 턴 원장이 이미 들고 있는 카드 id. 같은 카드를 두 번 싣지 않기 위해서다 —
+    `customer` 도구가 화면의 2건을 이미 실었다면 그건 여기서 다시 꺼낼 것이 아니다."""
+    return {s["id"] for e in (state.get("evidence") or []) for s in e["sources"] if s.get("id")}
+
+
+# ─────────────────────────────────────────────────────────────
 # 레지스트리
 # ─────────────────────────────────────────────────────────────
 
 TOOLS: dict[str, Tool] = {
     t.name: t for t in (
-        Tool("pitch", "고객에게 실제로 할 말(대사·반론 대응·논거)을 만든다", _pitch),
-        Tool("fact", "제도·상품의 확정된 수치를 기준시점·출처와 함께 돌려준다", _fact),
-        Tool("procedure", "업무를 어떤 순서·채널로 처리하는지와 걸리는 주의를 돌려준다", _procedure),
-        Tool("screen", "단말 화면번호를 찾는다 — '무슨무슨 조회/등록은 몇 번 화면인가'", _screen),
+        Tool("pitch", "고객에게 실제로 할 말(대사·반론 대응·논거)을 만든다", _pitch,
+             progress="상담 화법"),
+        Tool("fact", "제도·상품의 확정된 수치를 기준시점·출처와 함께 돌려준다", _fact,
+             progress="제도·상품 수치"),
+        Tool("procedure", "업무를 어떤 순서·채널로 처리하는지와 걸리는 주의를 돌려준다", _procedure,
+             progress="업무 처리 절차"),
+        Tool("screen", "단말 화면번호를 찾는다 — '무슨무슨 조회/등록은 몇 번 화면인가'", _screen,
+             progress="단말 화면번호"),
         Tool("channel", "고객이 스타뱅킹·인터넷뱅킹에서 직접 처리하는 메뉴 경로를 돌려준다",
-             _channel),
-        Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment),
-        Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method),
-        Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip),
+             _channel, progress="비대면 채널 경로"),
+        Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment,
+             progress="고객군 정의"),
+        Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method,
+             progress="관리 방법론"),
+        Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip,
+             progress="영업점 현장 관찰"),
         Tool("market", "시장이 어떻게 돌아가나 — 시황·증시·환율·금리·경제 이벤트와 "
                        "투자전략을 기준시점과 함께 돌려준다",
-             _market_like("market", "시황")),
+             _market_like("market", "시황"), progress="시황 자료"),
         Tool("lineup", "우리가 뭘 파나 — 이달의 추천펀드, 디폴트옵션 포트폴리오 구성상품·"
                        "비중·금리, 투자성향별 포트폴리오, TDF 빈티지별 비중을 기준시점과 "
                        "함께 돌려준다",
-             _market_like("lineup", "운용 상품")),
+             _market_like("lineup", "운용 상품"), progress="운용 상품 자료"),
         # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
         # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
         # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.
@@ -962,20 +1312,34 @@ TOOLS: dict[str, Tool] = {
              "그 사유를 돌려준다. 「이 고객한테 뭘 추천하지」·「무슨 상품 있어」가 여기다",
              _suitable),
         Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·성립 요건, 그리고 이 고객이 "
-             "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer),
+             "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer,
+             progress="고객 브리핑 재료"),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
-             _history),
+             _history, progress="지난 상담 기록"),
         # 시점·기한이 걸린 질문은 재료가 없으면 답이 안 나온다(§8 "지어내지 않는다"가 그대로
         # «말하지 못한다»가 된다). 도구 설명이 곧 계획의 판단 재료이므로, 언제 부르는지를
         # 예시로 박아 둔다 — "얼마 안 남았다"류 문장을 쓰려는 턴이 전부 여기 걸려야 한다.
+        # 계산기(07/01 ② 3번)의 첫 조각. 「얼마 더 넣으면 얼마 받나」는 검색으로 답할 수
+        # 없고, 재료 밖 계산은 금지라(§5) 코드가 계산해 싣지 않으면 말할 방법이 없다.
+        Tool("tax_credit", "«얼마를 더 납입하면 세액공제로 얼마나 돌려받는지»를 계산한다 — "
+             "'300만원 더 넣으면 얼마 받아', '한도 채우면 얼마 돌려받아'처럼 **환급액·"
+             "납입액을 계산해 달라는** 질문에 쓴다(제도 설명이 아니라 이 고객의 금액)",
+             _tax_credit),
         Tool("date", "오늘이 며칠인지와 연말까지 남은 일수를 돌려준다 — '오늘 며칠이야', "
              "'연말까지 얼마 남았어', '언제까지 납입해야 해'처럼 **시점·기한**이 걸린 질문, "
-             "그리고 답변에 '며칠 남았다·올해 안에'를 쓰려는 모든 경우에 먼저 부른다", _date),
+             "그리고 답변에 '며칠 남았다·올해 안에'를 쓰려는 모든 경우에 먼저 부른다", _date,
+             progress="오늘 날짜·기한"),
+        # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
+        # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
+        # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.
+        Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·"
+             "관리방법론·업무절차 참고자료를 브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다",
+             _playbook, progress="이 고객 상태에 걸린 참고자료"),
     )
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable", "tax_credit", "playbook"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:
@@ -1006,6 +1370,10 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
     tool = TOOLS.get(name)
     if tool is None:
         return None
+    if tool.progress:
+        # 실제로 이 도구를 돌리기 직전에만 찍는다(progress.py ②). 문구는 도구 선언에서
+        # 온다 — LLM 이 만든 질의(query)는 싣지 않는다.
+        progress.emit(f"{progress.object_of(tool.progress)} 찾고 있어요")
     question = (state.get("question") or "").strip()
     attempts = [query] + ([question] if question and question != query else [])
     for attempt in attempts:

@@ -8,6 +8,8 @@
 카드 429장의 평면 목록은 약 30k 토큰이라 행내 모델(gemma4-31b·dna3.0-35b)의 컨텍스트에
 실을 수 없다. 그래서 ① 버킷 카탈로그(수백 토큰)로 주제 묶음을 고르고 ② 그 버킷의 카드만
 보여주고 id 를 고르게 한다. 두 호출 모두 2k 토큰 아래다.
+단, **종류 전체가 예산에 들어가면 ①을 생략하고 1단으로 돈다**(llm_pick 참고) — 2단은
+목적이 아니라 컨텍스트 제약의 결과라서, 제약이 없는 종류에서는 왕복 낭비다.
 
 ━━ 안전장치 3겹 ━━
 ① 후보가 kb 적재분으로 한정된다 — 저작되지 않은 내용은 애초에 후보가 될 수 없다.
@@ -26,7 +28,7 @@ from __future__ import annotations
 import json
 import re
 
-from pension_agent.consult_agent.kb import index_catalog, index_slice, retrieve
+from pension_agent.consult_agent.kb import index_catalog, index_slice, retrieve, whole_index
 from pension_agent.consult_agent.prompts import BUCKET_PROMPT, SELECT_PROMPT
 from pension_agent.consult_agent.state import KB
 from pension_agent.llm import generate
@@ -48,12 +50,21 @@ def _json_list(text: str) -> list:
 
 
 def llm_pick(kinds: tuple[str, ...], query: str) -> list[tuple[float, dict]]:
-    """버킷 → 카드 2단으로 고른 카드. 고른 것이 없으면 빈 목록, LLM 이 죽으면 `LLMError`."""
-    codes = _json_list(generate(
-        BUCKET_PROMPT.format(catalog=index_catalog(KB, kinds), question=query),
-        max_tokens=60,
-    ))
-    card_slice = index_slice(KB, codes, kinds=kinds)
+    """버킷 → 카드 2단으로 고른 카드. 고른 것이 없으면 빈 목록, LLM 이 죽으면 `LLMError`.
+
+    **전 카드 인덱스가 예산에 들어가는 종류는 1단으로 돈다**(kb.whole_index). 2단의
+    존재 이유는 "카드 전부는 컨텍스트에 못 싣는다"인데, 그 전제가 안 서는 종류에서
+    버킷 선택은 후보를 좁히지 않고 순차 LLM 왕복 하나만 쓴다 — 오히려 버킷 오선택으로
+    맞는 카드가 후보에서 빠지는 자리다. 판정은 데이터가 하므로 카드가 늘면 저절로
+    2단으로 돌아간다.
+    """
+    card_slice = whole_index(KB, kinds)
+    if card_slice is None:
+        codes = _json_list(generate(
+            BUCKET_PROMPT.format(catalog=index_catalog(KB, kinds), question=query),
+            max_tokens=60,
+        ))
+        card_slice = index_slice(KB, codes, kinds=kinds)
     # 고른 버킷이 없으면 2차 호출은 낭비다 — 빈 결과로 두고 호출부가 폴백하게 한다.
     picked = _json_list(generate(
         SELECT_PROMPT.format(card_slice=card_slice, question=query),

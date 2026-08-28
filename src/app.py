@@ -438,14 +438,20 @@ with tab_chat:
         with st.chat_message("user"):
             st.markdown(question)
         with st.chat_message("assistant"):
-            with st.spinner("생각 중..."):
+            # 진행 표시 — "생각 중..." 하나로 수 초를 버티는 대신, 지금 무엇을 하고 있는지를
+            # 단계별로 흘린다(문구는 전부 코드가 정한다 — consult_agent/progress.py).
+            # 특히 마지막 검증 단계가 보이는 것이 핵심이다: 지연이 «생각이 느린 것»이 아니라
+            # «근거 대조를 하는 것»으로 읽혀야 한다. 끝나면 접어서 답변만 남긴다.
+            with st.status("답변을 준비하고 있어요…", expanded=True) as _status:
                 try:
                     result = consult_graph.ask(
                         question,
                         history=st.session_state.chat_history,
                         customer_id=customer_id,
                         session_id=st.session_state.chat_session_id,
+                        on_progress=_status.write,
                     )
+                    _status.update(label="답변 완료", state="complete", expanded=False)
                 except Exception as e:
                     msg = str(e)
                     if "LLM 미설정" in msg:
@@ -454,6 +460,7 @@ with tab_chat:
                     else:
                         answer = f"오류 발생: {type(e).__name__}: {e}"
                     result = {"answer": answer, "sources": [], "history": st.session_state.chat_history}
+                    _status.update(label="답변을 만들지 못했어요", state="error", expanded=False)
             render_answer(result["answer"])
             # 근거는 원문 문서명으로 읽어준다(카드 id 는 역추적용으로 뒤에). 답이 나온
             # 재료(근거)와 표현을 제한한 재료(주의)는 갈라 보여준다 — 섞으면 질문과 무관한

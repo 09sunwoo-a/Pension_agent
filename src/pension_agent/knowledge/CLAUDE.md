@@ -135,7 +135,7 @@
 "refs": ["fact.k04.f2", "fact.k04.f4"]
 ```
 
-## 현재 데이터 실측 (2026-08-25 · 주의 역할 축은 2026-08-26 갱신)
+## 현재 데이터 실측 (2026-08-25 · 주의 역할 축은 2026-08-26 · 고객군→상태 코드는 2026-08-27 재측정)
 
 | 관계 축 | 선언 위치 | 채워진 정도 |
 |---|---|---|
@@ -144,7 +144,7 @@
 | 주의 역할 (§3) | 전 종류 `{role, text}` — procedure 70 · method 8 · segment 5 · screen 66 · channel 38 항목 (screen·channel 비고는 이전 실측에서 빠져 있었다) | **187/187 역할 선언** — caution 14 · info 66 · authoring 107 |
 | 주의 적용 조건 (§3 `applies`) | 없음 — caution 은 근거로 쓰이면 무조건 표시 | 0건 |
 | 카드→고객군 (§4) | `segments` (method·procedure·fieldtip·pitch 에 선언됨) | **0/317 — 전부 빈칸** |
-| 고객군→상태 코드 (§4) | `segment.conds` / `exclusions` | 15/86 · 3/86 |
+| 고객군→상태 코드 (§4) | `segment.conds` / `exclusions` | 20/86 · 3/86 |
 | 공통 주제 어휘 | `tags.topics` | 채워짐(fieldtip 10건만 빈 리스트) |
 | 질문→카드 입구 | `trigger_examples` | 화법 102건 중 **90건이 1개뿐** — 원문에 인용문이 하나씩만 있어서다. 표현이 조금만 달라도 검색이 못 찾는다(본문에 답이 있어도) |
 | 카드↔카드 (§5) | 없음 — "→ F2" 텍스트 | 0건 — 화법 102건 전부 근거 미연결(`kb` 리포트 WARN "supporting_facts 없음") |

@@ -266,8 +266,6 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
     """
     st = Store([data_dir])
     kb = KnowledgeBase()
-    for r in st.records("fact"):
-        kb.facts[r["id"]] = _flat(r, "fact")
     for r in st.records("resource"):
         kb.resources[r["id"]] = {"id": r["id"], **(r.get("fields") or {})}
     for r in st.records("doc"):
@@ -281,6 +279,12 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
             kb.cards.append(card)
             if kind == "pitch":
                 kb.pitches.append(card)   # 같은 객체를 공유한다(사본 아님)
+            elif kind == "fact":
+                # 팩트는 **두 자리에 같은 객체로** 산다 — `facts` 는 id 로 참조하는 자리
+                # (화법의 supporting_facts·전략 근거), `cards` 는 검색 색인이다. 예전에는
+                # 앞엣것만 있어서 팩트가 LLM 카드 선택의 후보가 못 됐다(9종 중 유일).
+                # 사본을 만들면 한쪽만 고쳐지는 자리가 생기므로 화법과 같은 규약으로 둔다.
+                kb.facts[card["id"]] = card
 
     seen: dict[str, dict] = {}
     for r in st.records():
@@ -391,7 +395,7 @@ def score_parts(
 MIN_TOPICAL = 0.5
 
 
-def _matches_scope(pitch: dict, customer_type=None, stage=None, **_ignored) -> bool:
+def matches_scope(pitch: dict, customer_type=None, stage=None, **_ignored) -> bool:
     """stage/customer_type 이 주어지면, 그 값(또는 '공통')과 안 맞는 카드는 후보에서 제외한다.
 
     챕터가 늘어나면서 거절유형 라벨이 챕터를 넘어 같은 문자열을 쓰는 경우가 생겼다
@@ -426,7 +430,7 @@ def retrieve(kb: KnowledgeBase, *, top_k=3, kinds=None, segments=None,
 
     hits = []
     for p in pool:
-        if not _matches_scope(p, **criteria):
+        if not matches_scope(p, **criteria):
             continue
         tag_s, top_s = score_parts(p, **criteria)
         if top_s < MIN_TOPICAL:
@@ -472,6 +476,7 @@ _BUCKET_LETTER = {"pitch": "P", "procedure": "R", "segment": "S", "method": "M",
 #: 그 상태였다(설명 없이 "■ screen — (총 87장)"으로만 떴다).
 _KIND_DESC = {
     "pitch": "고객에게 실제로 하는 말 — 대사·논거·반론 대응",
+    "fact": "제도·상품의 확정 수치 — 한도·세율·수수료",
     "procedure": "시스템에서 처리하는 절차 — 조회 경로·화면·처리 순서",
     "screen": "직원이 단말에서 여는 화면 — 화면번호·화면명",
     "channel": "고객이 앱·웹에서 직접 하는 경로 — 스타뱅킹·인터넷뱅킹 메뉴",
@@ -486,8 +491,8 @@ _KIND_DESC = {
 #: 버킷 카탈로그에 싣는 종류와 그 순서. **적재되는 종류는 전부 여기 있어야 한다** —
 #: 빠지면 그 종류의 카드가 버킷에 안 들어가고, LLM 이 고를 후보 목록에서 통째로 사라진다
 #: (n-gram 폴백으로만 닿게 되어, 사실상 "있는데 못 찾는" 상태가 된다).
-_KIND_ORDER = ("pitch", "procedure", "screen", "channel", "segment", "method", "fieldtip",
-               "market", "lineup")
+_KIND_ORDER = ("pitch", "fact", "procedure", "screen", "channel", "segment", "method",
+               "fieldtip", "market", "lineup")
 
 #: index_slice 의 기본 문자 예산. 한글은 대략 2자/토큰이라 4000자 ≈ 2k 토큰이고,
 #: 가장 큰 버킷(3,652자) 하나가 통째로 들어간다.
@@ -582,6 +587,35 @@ def _card_line(card: dict, examples: int) -> str:
         if ex:
             parts.append(f"예상질문: {ex}")
     return " | ".join(parts)
+
+
+def whole_index(kb: KnowledgeBase, kinds: tuple[str, ...] | None = None,
+                *, budget_chars: int = INDEX_BUDGET_CHARS) -> str | None:
+    """이 종류 **전체** 카드의 L1 인덱스가 예산에 들어가면 그 텍스트를, 아니면 None.
+
+    버킷 선택(L0) 호출을 생략할 수 있는지의 판정이다. 2단(버킷 → 카드)이 필요한 이유는
+    "카드 429장 평면 목록 ≈ 30k 토큰"인데, 종류별로 재보면 그 전제가 안 서는 종류가
+    있다 — channel(56장 3,492자)·market·lineup·fieldtip 은 전 카드를 한 번에 보여줘도
+    예산 안이다. 그런 종류에서 버킷을 고르게 하는 것은 후보를 좁히는 게 아니라 LLM
+    왕복 하나를 그냥 쓰는 것이고, 버킷 오선택으로 답이 든 카드가 후보에서 빠지는 자리만
+    하나 늘린다.
+
+    판정은 데이터가 한다 — 카드가 늘어 예산을 넘으면 None 이 되고 호출부는 저절로
+    2단으로 돌아간다. 제목만 남기는 압축(examples=0)까지는 내려가지 않는다: 예상질문이
+    없는 제목 나열은 2단에서 보던 것보다 후보 정보가 얇아져, 왕복 하나를 아끼려고
+    선택 품질을 파는 것이 된다(그 자리는 그대로 2단이 맞다 — screen 이 이 경우다).
+    """
+    bk = buckets(kb, kinds)
+    if not bk:
+        return None
+    for examples in (2, 1):
+        blocks = ["\n".join([f"── {b['kind']} / {b['group']}"] +
+                            [_card_line(c, examples) for c in b["cards"]])
+                  for b in bk.values()]
+        text = "\n".join(blocks)
+        if len(text) <= budget_chars:
+            return text
+    return None
 
 
 def index_slice(kb: KnowledgeBase, codes: list[str] | tuple[str, ...],

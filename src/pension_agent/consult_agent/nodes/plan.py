@@ -23,7 +23,7 @@ import json
 import re
 from typing import Any
 
-from pension_agent.consult_agent import guard, relations, tools
+from pension_agent.consult_agent import guard, progress, relations, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
@@ -139,6 +139,10 @@ def plan_step(state: AgentState) -> dict[str, Any]:
 
     if len(calls) >= MAX_STEPS:
         return {"plan_done": True}
+
+    # 진행 표시 — 실제로 계획 LLM 을 부르기 직전에만 찍는다(위의 상한 조기 종료는 계획이
+    # 아니다). 재계획 바퀴에도 찍는다 — 다시 정하는 것도 정하는 일이다.
+    progress.emit("무엇을 찾아볼지 정하고 있어요")
 
     question = state["question"]
     try:
@@ -389,16 +393,24 @@ def compose(state: AgentState) -> dict[str, Any]:
     if note:
         prompt = f"{prompt}\n\n{note}"
 
+    progress.emit("모은 근거로 답변을 작성하고 있어요")
     try:
         answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
     except LLMError as exc:
         # 재료는 모았는데 문장을 못 쓴 것이다. 아래 폴백(근거 원문 그대로 싣기)으로 흘려보내면
         # 완성된 답변처럼 보이는 카드 덩어리가 나간다 — LLM 이 죽었을 때 다른 단계가 내는
         # 안내와 결과가 달라진다(§11). 여기서 끊고 같은 안내로 답한다.
+        # 실패 원인을 상태에도 남긴다 — plan_step 이 앞 단계의 원인을 지우고 들어오므로
+        # (`alive`), 여기서 안 남기면 «LLM 이 죽은 턴»이 상태만 보면 정상 턴과 구별되지
+        # 않는다. 뒤에 붙는 것들(추천질문 등)이 실패 안내를 정상 답변으로 오인한다.
         return {"answer": LLM_FAILED.format(reason=f"{type(exc).__name__}: {exc}"),
+                "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}
 
     if answer:
+        # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
+        # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
+        progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
         ok, _bad = verify_texts(answer, tools.ledger_texts(evidence),
                                 known_products=_known_products())
         if not ok:

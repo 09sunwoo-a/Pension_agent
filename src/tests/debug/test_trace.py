@@ -37,7 +37,7 @@ from tests.debug.__main__ import main
 from tests.debug.runner import run
 
 #: 계측 전 원본. 검사 8(복원)이 이것과 대조한다 — import 시점에 잡아둬야 의미가 있다.
-_ORIGINALS = {"compose": G.compose, "verify_texts": P.verify_texts,
+_ORIGINALS = {"answer": G.answer, "verify_texts": P.verify_texts,
               "relations": P.relations, "span": P._span_verdict,
               "fits_question": T.fits_question}
 
@@ -65,12 +65,12 @@ def _evidence_texts(name: str) -> list[str]:
 # ─────────────────────────────────────────────────────────────
 # 1. 노드 순서 — 어느 노드를 거쳐 답이 나왔나
 # ─────────────────────────────────────────────────────────────
-# clarify 가 사이에 있는 것이 정상이다. 계획 루프가 끝나면 되물을지 한 번 판정하고
-# (routing.route_plan → clarify), 되묻지 않기로 하면 compose 로 간다(route_clarify).
+# 계획 루프가 끝나면 answer 하나로 간다(routing.route_plan → answer). 되묻기 판정과
+# 답변 작성이 그 안에서 함께 끝나고(nodes/answer.py), 되묻지 않았으면 offer 로 간다.
 
 r, tr = _run("tax_credit_asserts_wrong")
-check(tr.node_names() == ["understand", "plan_step", "clarify", "compose", "offer"],
-      "노드 순서: understand → plan → clarify → compose → offer", str(tr.node_names()))
+check(tr.node_names() == ["understand", "plan_step", "answer", "offer"],
+      "노드 순서: understand → plan → answer → offer", str(tr.node_names()))
 check((tr.node("plan_step") or types.SimpleNamespace(note="")).note.startswith(
           "fact:세액공제 한도 → 채택 fact.k04.f2"),
       "계획 단계가 부른 도구·질의·채택 카드가 보인다",
@@ -97,7 +97,7 @@ draft = tr.draft()
 check(r["answer"].startswith("■") and draft and draft not in r["answer"],
       "asserts_wrong: 화면에 나간 것은 생성문이 아니라 근거 원문이다(말투가 달라지는 자리)",
       r["answer"][:40])
-check((tr.node("compose") or types.SimpleNamespace(note="")).note.startswith("폴백"),
+check((tr.node(TR.ANSWER_NODE) or types.SimpleNamespace(note="")).note.startswith("폴백"),
       "asserts_wrong: 처분이 '폴백' 으로 기록된다")
 
 rc, trc = _run("tax_credit_correction")
@@ -177,7 +177,7 @@ check(tr4.gates() == {}, "llm_dead: 게이트는 하나도 실행되지 않는�
 # 7. 계측이 새지 않는다 — 이 스위트가 다른 스위트를 오염시키면 안 된다
 # ─────────────────────────────────────────────────────────────
 
-check(G.compose is _ORIGINALS["compose"], "복원: graph.compose 가 원본으로 돌아왔다")
+check(G.answer is _ORIGINALS["answer"], "복원: graph.answer 가 원본으로 돌아왔다")
 check(P.verify_texts is _ORIGINALS["verify_texts"] is V.verify_texts,
       "복원: plan.verify_texts 가 원본 함수다")
 check(P.relations is _ORIGINALS["relations"] is REL,
