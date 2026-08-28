@@ -5,7 +5,7 @@
     python -m tests.debug.reps --brief      # 요약표만 — 이것만 붙여넣어도 진단이 된다
     python -m tests.debug.reps 4 7          # 케이스 골라서
     python -m tests.debug.reps --demo       # 시연 대본 순서대로 (docs/DEMO_SCENARIO.md)
-    python -m tests.debug.reps --demo --debug   # 대본 + 트레이스 (리허설용)
+    python -m tests.debug.reps --demo --debug   # 대본 + 재료→답변 로그 (시연에서 띄울 것)
 
 왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
 이어진다(멀티턴 재현이 목적이다). 대표 질문 10개는 서로 독립이어야 하므로 케이스마다
@@ -23,8 +23,10 @@
 
 `--demo` 는 검토가 아니라 **리허설**이다. `docs/DEMO_SCENARIO.md` 의 대본을 그 순서로,
 고객 블록마다 한 세션으로 돌린다 — 후속 질문(T2·T3b·T8b·T11)이 앞 턴을 이어받아야
-대본대로이기 때문이다. 화면에 나가는 것만 보여주고 트레이스는 `--debug` 를 붙일 때만
-붙인다: 시연에서 청중이 보는 것과 같은 화면을 먼저 확인해야 한다.
+대본대로이기 때문이다. 화면에 나가는 것만 보여주고, `--debug` 를 붙이면 턴마다
+**어떤 재료가 들어가서 LLM 이 뭐라고 썼는지**를 짧게 붙인다(`_log`) — 시연에서 «지어낸 게
+아니다»를 보여주는 자리다. 검토용의 전체 트레이스(노드·게이트 트리)는 진단 도구라
+청중에게 띄울 것이 아니다.
 
 **상담 기록을 남기지 않는다.** `graph.ask()` 는 턴마다 상담이력을 기록하는데(기준서 §2 —
 진입점 한 곳에서 빠짐없이), `session_data/` 에는 시연 픽스처가 들어 있다
@@ -129,6 +131,42 @@ def _tools(turn: TR.Turn) -> str:
         name = signature.split(":")[0].strip()
         out.append(name + ("✗" if "재료 없음" in result else ""))
     return " → ".join(out) or "(없음)"
+
+
+def _log(turn: TR.Turn, result: dict) -> str:
+    """시연용 한 줄 로그 — **어떤 재료가 들어가서 LLM 이 뭐라고 썼나**, 그것만.
+
+    트레이스 전체(`TR.render`)는 노드 순서와 게이트 트리까지 그리는 진단 도구다. 시연에서
+    청중이 알고 싶은 건 그게 아니라 «지어낸 게 아니라 이 자료를 보고 쓴 것»이라는 사실
+    하나이고, 그건 도구가 무엇을 어떤 질의로 찾아왔는지와 그 카드가 뭔지면 다 보인다.
+    검토용(`CASES`)은 폐기 사유를 봐야 하므로 그쪽은 여전히 전체 트레이스를 쓴다.
+    """
+    titles = {s["id"]: (s.get("title") or "") for s in result.get("sources") or []}
+    out = ["   ┌ 무엇을 찾아봤나"]
+    step = 0
+    for node in turn.nodes:
+        if node.name != "plan_step" or "→" not in node.note:
+            continue
+        step += 1
+        signature, _, found = node.note.partition("→")
+        tool, _, query = signature.strip().partition(":")
+        out.append(f"   │ {step}. {tool.strip()} «{query.strip()}»")
+        if "재료 없음" in found:
+            out.append("   │      → 없음 (다른 도구로 넘어감)")
+            continue
+        for token in found.split():
+            if token in ("채택",):
+                continue
+            cid = token.split("(")[0]
+            out.append(f"   │      → {cid}  {titles.get(cid, '')}".rstrip())
+
+    compose = next((n for n in turn.nodes if n.name == "compose"), None)
+    blocked = next((g.name for g in compose.gates if not g.passed), None) if compose else None
+    answer = len(result.get("answer") or "")
+    verdict = (f"검증에서 걸림({blocked}) — 생성문 폐기" if blocked else
+               "근거와 대조 통과" if (compose and compose.gates) else "대조할 수치 없음")
+    out.append(f"   └ 위 재료만 보고 LLM 이 {answer}자 작성 · {verdict}")
+    return "\n".join(out)
 
 
 @contextmanager
@@ -251,7 +289,7 @@ def main(argv: list[str]) -> int:
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
                     if demo and debug and not brief:
                         print()
-                        print(TR.render(tr, last_only=True))
+                        print(_log(tr.turns[-1], result))
                 else:
                     if trace_by_default and not brief:
                         print()
