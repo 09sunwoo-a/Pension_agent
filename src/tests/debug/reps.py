@@ -26,15 +26,27 @@
 대본대로이기 때문이다. 화면에 나가는 것만 보여주고 트레이스는 `--debug` 를 붙일 때만
 붙인다: 시연에서 청중이 보는 것과 같은 화면을 먼저 확인해야 한다.
 
+**상담 기록을 남기지 않는다.** `graph.ask()` 는 턴마다 상담이력을 기록하는데(기준서 §2 —
+진입점 한 곳에서 빠짐없이), `session_data/` 에는 시연 픽스처가 들어 있다
+(`scripts/seed_sessions.py`). 그대로 돌리면 리허설 턴이 픽스처에 덧붙고, 대본 T5
+(「지난번엔 무슨 얘기 했지?」)가 **10개월 전 고객 발언 대신 방금 리허설을 읽는다** —
+돌릴수록 시연이 망가진다. 그래서 실행 전후로 디렉터리를 통째로 되돌린다. 기록 기능
+자체는 그대로 돈다(끄면 그 경로를 예행하지 못한다) — 남은 것만 지운다.
+
 **오늘은 2026-08-24 로 고정된다**(`tests/__init__.py` — 원장 스냅샷 기준일). 만기
 잔여일수·미접촉 일수가 실행일마다 달라지면 두 번의 실행을 비교할 수 없다.
 """
 
 from __future__ import annotations
 
+import pathlib
+import shutil
 import sys
+import tempfile
 import unicodedata
+from contextlib import contextmanager
 
+from pension_agent import config
 from pension_agent import llm as LLM
 from tests.debug import trace as TR
 from tests.debug.runner import session
@@ -119,6 +131,27 @@ def _tools(turn: TR.Turn) -> str:
     return " → ".join(out) or "(없음)"
 
 
+@contextmanager
+def _fixtures_intact():
+    """`session_data/` 를 실행 전 상태로 되돌린다.
+
+    골라서 지우지 않고 **통째로 스냅샷·복원**하는 이유는, 무엇이 픽스처이고 무엇이 이번
+    실행이 만든 것인지 이 스크립트가 알 필요가 없어서다. 새 고객이 픽스처에 추가돼도
+    여기는 손대지 않아도 된다.
+    """
+    src = config.SESSION_DATA_DIR
+    backup = pathlib.Path(tempfile.mkdtemp(prefix="reps-session-"))
+    if src.exists():
+        shutil.copytree(src, backup / "session_data")
+    try:
+        yield
+    finally:
+        if (backup / "session_data").exists():
+            shutil.rmtree(src, ignore_errors=True)
+            shutil.move(str(backup / "session_data"), str(src))
+        shutil.rmtree(backup, ignore_errors=True)
+
+
 def _pad(text: str, width: int) -> str:
     """한글은 두 칸을 차지한다 — `str.ljust` 로 맞추면 표가 어긋난다."""
     used = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
@@ -189,39 +222,40 @@ def main(argv: list[str]) -> int:
     trace_by_default = not demo
 
     rows: list[list[str]] = []
-    for no, sees, customer, turns in blocks:
-        if picked and not demo and str(no) not in picked:
-            continue
-        labelled = (turns if demo else
-                    tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
-        if demo and not brief:
-            print(f"\n{'━' * 70}\n{sees}"
-                  + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))
+    with _fixtures_intact():
+        for no, sees, customer, turns in blocks:
+            if picked and not demo and str(no) not in picked:
+                continue
+            labelled = (turns if demo else
+                        tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
+            if demo and not brief:
+                print(f"\n{'━' * 70}\n{sees}"
+                      + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))
 
-        with session(customer_id=customer) as (ask, tr):
-            for i, (label, question) in enumerate(labelled):
-                if not brief:
-                    if demo:
-                        print(f"\n{'─' * 70}\n[{label}] > {question}\n")
-                    else:
-                        who = f"  [고객 {customer}]" if customer else ""
-                        print(f"\n{'═' * 70}\n[{label}] {sees}{who}\n> {question}\n")
-                try:
-                    result = ask(question)
-                except Exception as exc:                       # noqa: BLE001 — 한 턴이 죽어도
-                    print(f"   실행 중단 — {type(exc).__name__}: {exc}")    # 나머지는 돈다
-                    rows.append([label, "—", "—", "", f"예외 {type(exc).__name__}", sees])
-                    break
-                if not brief:
-                    _print_answer(result)
-                rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
-                if demo and debug and not brief:
-                    print()
-                    print(TR.render(tr, last_only=True))
-            else:
-                if trace_by_default and not brief:
-                    print()
-                    print(TR.render(tr))
+            with session(customer_id=customer) as (ask, tr):
+                for i, (label, question) in enumerate(labelled):
+                    if not brief:
+                        if demo:
+                            print(f"\n{'─' * 70}\n[{label}] > {question}\n")
+                        else:
+                            who = f"  [고객 {customer}]" if customer else ""
+                            print(f"\n{'═' * 70}\n[{label}] {sees}{who}\n> {question}\n")
+                    try:
+                        result = ask(question)
+                    except Exception as exc:                       # noqa: BLE001 — 한 턴이 죽어도
+                        print(f"   실행 중단 — {type(exc).__name__}: {exc}")    # 나머지는 돈다
+                        rows.append([label, "—", "—", "", f"예외 {type(exc).__name__}", sees])
+                        break
+                    if not brief:
+                        _print_answer(result)
+                    rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
+                    if demo and debug and not brief:
+                        print()
+                        print(TR.render(tr, last_only=True))
+                else:
+                    if trace_by_default and not brief:
+                        print()
+                        print(TR.render(tr))
 
     print(f"\n{'═' * 70}\n요약 — 도구를 무엇을 어떤 순서로 골랐나\n")
     head = ["#", "도구(순서)", "게이트", "연계", "처분", "무엇을 보나"]
