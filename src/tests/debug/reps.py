@@ -160,12 +160,14 @@ def _log(turn: TR.Turn, result: dict) -> str:
             cid = token.split("(")[0]
             out.append(f"   │      → {cid}  {titles.get(cid, '')}".rstrip())
 
-    compose = next((n for n in turn.nodes if n.name == "compose"), None)
-    blocked = next((g.name for g in compose.gates if not g.passed), None) if compose else None
-    answer = len(result.get("answer") or "")
+    node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
+    blocked = next((g.name for g in node.gates if not g.passed), None) if node else None
+    if node is not None and node.delta.get("clarify"):
+        out.append("   └ 갈래가 갈려서 답 대신 되물음 (써 둔 답은 버린다)")
+        return "\n".join(out)
     verdict = (f"검증에서 걸림({blocked}) — 생성문 폐기" if blocked else
-               "근거와 대조 통과" if (compose and compose.gates) else "대조할 수치 없음")
-    out.append(f"   └ 위 재료만 보고 LLM 이 {answer}자 작성 · {verdict}")
+               "근거와 대조 통과" if (node and node.gates) else "대조할 수치 없음")
+    out.append(f"   └ 위 재료만 보고 LLM 이 {len(result.get('answer') or '')}자 작성 · {verdict}")
     return "\n".join(out)
 
 
@@ -203,13 +205,15 @@ def _width(text: str) -> int:
 def _row(no: object, sees: str, turn: TR.Turn) -> list[str]:
     """요약표 한 줄. 판정하지 않고 «무엇이 일어났나»만 적는다."""
     names = [n.name for n in turn.nodes]
-    compose = next((n for n in turn.nodes if n.name == "compose"), None)
-    blocked = next((g.name for g in compose.gates if not g.passed), None) if compose else None
+    node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
+    blocked = next((g.name for g in node.gates if not g.passed), None) if node else None
 
-    if compose is not None:
-        end = compose.note
-    elif "clarify" in names:
+    # 되묻기는 답변 작성과 **같은 노드**에서 끝난다(nodes/answer.py) — 노드 이름으로는
+    # 갈리지 않으므로 상태 차분을 본다. `_compose_note` 는 이 갈래를 따로 적지 않는다.
+    if node is not None and node.delta.get("clarify"):
         end = "되묻기로 끝남"
+    elif node is not None:
+        end = node.note
     elif "llm_down" in names:
         end = "LLM 실패 안내"
     else:
@@ -220,7 +224,7 @@ def _row(no: object, sees: str, turn: TR.Turn) -> list[str]:
         str(no),
         _tools(turn),
         (f"✗ {blocked}" if blocked else
-         "통과" if (compose and compose.gates) else "안 걸림"),
+         "통과" if (node and node.gates) else "안 걸림"),
         "제안" if (offer and offer.delta) else "",
         end,
         sees,
