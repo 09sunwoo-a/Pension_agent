@@ -94,6 +94,11 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 - **상담이력 선별.** 도구가 계획의 `query` 를 읽어 걸리는 기록을 앞세우되 걸러내지는 않고,
   과거 상담과 오늘 대화를 예산·구획으로 가른다. `suggest.history_chips` 는 기록 있는
   고객에게만, 고정 템플릿 + 계산값으로만 칩을 띄운다.
+- **답변 끝 추천질문**(`suggest.followup_questions`). 이번 턴에 쓴 재료마다 다음 질문
+  후보를 세우되, **띄우기 전에 그 질문에 답할 재료가 있는지 LLM 없이 확인**하고 없으면
+  안 띄운다 — 눌렀을 때 '근거 없음'이 나오는 추천질문은 안 띄우느니만 못하다. 되묻기·
+  확인대기·LLM실패·근거0건 턴에는 붙지 않는다. `graph.FOLLOWUP_HEADER` 블록으로 답변
+  끝에 실리고, `ask()` 반환의 `followups` 로도 따로 준다(프론트가 칩 UI 로 쓸 자리).
 - **타겟 룰베이스.** 임계값의 기준은 기획자 확인표(`strategy_agent/targets.json`)다 —
   어긋나면 코드가 틀린 것. 근거등급은 [../docs/DEMO_STATUS.md](../docs/DEMO_STATUS.md) §7.
 
