@@ -41,6 +41,7 @@ from pension_agent.strategy_agent.engine.render import (
     _action,
     _briefing,
     _build_ctx,
+    _account_state,
     _customer_header,
     _eval_condition,
     _trim_target,
@@ -315,6 +316,9 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     return {
         "customer": _customer_header(p),
         "briefing": _briefing(p),
+        # 계좌 상태 — 화면(briefing)이 아니라 **대화형이 읽는 재료**다. 화면은 문제인 항목만
+        # 싣지만 직원은 정상인 항목도 묻는다(render._account_state 주석).
+        "account_state": _account_state(p),
         "conditions": [f"{c}:{CONDS[c]}" for c in conds],
         # 왜 이 고객님인가요 — 최대 3개, 정량 중심(REQUIREMENTS.md ②). 코드가 수치를 산출하고,
         # agent._write_why_this_customer() 가 LLM 해석 문장으로 교체를 시도한다(REQUIREMENTS.md §15).
