@@ -32,7 +32,7 @@ from langgraph.graph import END, START, StateGraph
 
 from pension_agent.session_store import append_turn
 
-from pension_agent.consult_agent import progress
+from pension_agent.consult_agent import progress, suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -42,9 +42,15 @@ from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
 from pension_agent.consult_agent.routing import (
-    LLM_DOWN, route_answer, route_intent, route_plan,
+    LLM_DOWN, route_answer, route_confirm, route_intent, route_plan,
 )
 from pension_agent.consult_agent.state import HISTORY_LIMIT, AgentState
+
+#: 답변 끝 추천질문 블록의 머리말. `plan.MISSING_NOTICES`·`MATERIAL_MARKS` 와 같은 꼴로,
+#: **프론트가 이 블록만 떼어낼 수 있게** 고정 문자열로 둔다(반환값의 "followups" 를 쓰면
+#: 떼어낼 필요도 없다). 지금은 텍스트로 붙이고, 실서비스 프론트가 칩 UI 를 따로 만든다.
+FOLLOWUP_HEADER = "── 이어서 물어보실 수 있어요"
+
 
 
 def build_agent():
@@ -71,8 +77,13 @@ def build_agent():
     # 끝난 턴에는 화면 연계 제안이 붙지 않는다 — 제안이 붙을 수 있는 자리는 여기뿐이고,
     # 붙일지는 offer 안의 규칙이 정한다(§10).
     g.add_conditional_edges("answer", route_answer, {"offer": "offer", "__end__": END})
+    # 승낙 턴 — 화면 연계는 URL 하나로 끝나고, 화법 제시는 근거만 실린 채 answer 로 간다.
+    # 답변을 만드는 경로를 둘로 늘리지 않기 위해서다(routing.route_confirm). 그 턴에는
+    # 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자다(clarify.applicable).
+    g.add_conditional_edges("confirm_action", route_confirm,
+                            {"answer": "answer", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_send", "correction", "confirm_action", LLM_DOWN):
+    for node in ("agent_help", "lms_send", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 
@@ -107,6 +118,13 @@ def ask(
     with progress.reporting(on_progress):
         out = _AGENT.invoke(
             {"question": question, "history": history or [], "customer_id": customer_id})
+    answer = out["answer"]
+    # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
+    # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가
+    # 추가될 때 빠지고, 빠진 것이 눈에 안 띈다(상담이력 기록을 여기서 하는 것과 같은 이유).
+    followups = suggest.followup_questions(out)
+    if followups:
+        answer += "\n\n" + FOLLOWUP_HEADER + "\n" + "\n".join(f"· {q}" for q in followups)
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),
@@ -127,11 +145,17 @@ def ask(
             "role": "user", "text": question, "intent": out.get("intent"),
         })
         append_turn(customer_id, session_id, {
+            # 기록에는 **추천질문을 붙이기 전의 답변**을 남긴다. 추천질문은 화면 장치이지
+            # 고객에게 한 안내가 아니고, 이 기록은 `history` 도구가 다음 상담에서 재료로
+            # 되읽는 텍스트다 — 거기에 UI 문구가 섞이면 그게 지난 상담 내용이 된다.
             "role": "agent", "text": out.get("answer", ""), "intent": out.get("intent"),
         })
 
     return {
-        "answer": out["answer"], "sources": out.get("sources", []), "history": new_history,
+        "answer": answer, "sources": out.get("sources", []), "history": new_history,
+        # 추천질문만 따로 쓰고 싶은 프론트를 위해 리스트로도 준다 — answer 끝의 블록과
+        # 같은 내용이다(프론트가 붙이면 answer 쪽 블록은 떼면 된다).
+        "followups": followups,
         "intent": out.get("intent"),  # 프론트가 correction 처럼 미완성 기능을 표시할 때 씀
         # 확인을 기다리는 도구 제안. 화면이 버튼으로 실행하고 싶을 때 이걸 그대로 쓰면 된다
         # (대화로 "네" 라고 답해도 같은 경로로 실행된다).

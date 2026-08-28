@@ -133,7 +133,7 @@ def stub_slots(state):
 
     **단계(stage)는 지정한 케이스에만 채운다.** 예전에는 모든 질문에 "신규"를 넣었는데,
     지식베이스가 사후관리 범위로 정리되면서 그 단계가 없어졌다. 없는 단계를 채우면
-    `_matches_scope` 가 후보를 전부 걸러내 모든 질문이 FALLBACK 이 된다 — 검색이 아니라
+    `matches_scope` 가 후보를 전부 걸러내 모든 질문이 FALLBACK 이 된다 — 검색이 아니라
     스텁이 만든 결과라 원인이 안 보인다. 모르면 비운다.
     """
     q = state["question"]
@@ -815,6 +815,189 @@ def check_customer_material() -> int:
     finally:
         P.generate = orig_gen
     print(f"{'✓' if hit else '✗'} 원장에 고객 재료가 없어도 가드가 붙는다(고객 화면이 열려 있으면)")
+    ok += hit
+    return ok
+
+
+def check_playbook_material() -> int:
+    """고객 상태에 걸린 화법 — 화면 ⑥⑦⑧ 과 **같은 후보군**에서 나오는가(§3 · §10).
+
+    회귀 대상 넷.
+    ① `customer` 도구가 화면 ⑥⑦⑧ 이 고른 것을 재료에 안 실었다. `allow` 에는 있어 인용은
+       허용됐지만 재료 텍스트에 없어 LLM 이 본 적이 없었고, 그래서 "이 고객한테 뭐라고
+       말하지"를 `pitch` 가 지식베이스 전체에서 고객과 무관하게 답했다 — 화면과 대화가
+       같은 질문에 다른 카드를 말하는 상태다(§3).
+    ② 선제 제안이 매 턴 붙으면 안 된다(§10). 지워진 LMS 갈래가 그렇게 죽었다.
+    ③ 승낙 턴이 지식 카드를 **손으로 렌더하면** §5 형태·§6 점검·§7 표시가 그 경로만
+       빠진다 — 근거만 싣고 답변은 compose 가 쓴다.
+    ④ 화면이 막은 것을 대화형이 권하면 안 된다. 목업 9케이스는 전원 `pension_started=False`
+       라 이 경로가 한 번도 발동한 적이 없다 — 합성 프로필로 고정한다.
+    """
+    import dataclasses
+
+    from pension_agent.consult_agent.nodes import act as ACT
+    from pension_agent.consult_agent import routing as R
+    from pension_agent.strategy_agent import customer as SC
+    from pension_agent.strategy_agent.situations import problem_situations
+
+    ok = 0
+    SONG = "188406-7352194"   # 송도윤 — 요건 6건이라 문제상황도 화법 후보도 넉넉하다
+
+    # ① 화면 ⑥⑦⑧ 이 고른 것이 재료와 출처에 함께 실리는가.
+    ev = tools.run("customer", {"customer_id": SONG}, "이 고객한테 뭐라고 말하지")
+    text = ev["text"]
+    hit = all(k in text for k in ("· 이렇게 말해보세요:", "· 예상 반론:", "· 상담 참고:"))
+    print(f"{'✓' if hit else '✗'} customer 재료에 화면 ⑥⑦⑧ 이 고른 화법·반론·참고자료가 실린다")
+    ok += hit
+
+    card_ids = {s["id"] for s in ev["sources"] if s["id"].startswith(("pitch.", "m.", "proc."))}
+    hit = bool(card_ids)
+    print(f"{'✓' if hit else '✗'} 그 카드가 **출처**에도 실린다(§3) — {len(card_ids)}건")
+    ok += hit
+
+    # 검색으로 온 재료가 아니므로 관련도를 지어내지 않는다(§3).
+    hit = all(s.get("score") is None for s in ev["sources"])
+    print(f"{'✓' if hit else '✗'} 고객 재료의 출처에는 관련도를 붙이지 않는다")
+    ok += hit
+
+    # ② 후보는 strategy_agent 매칭에서만 나온다 — 대화형이 자기 매칭을 만들지 않는다.
+    hits = tools.playbook_hits({"customer_id": SONG, "question": "증권사 얘기를 꺼내네요"})
+    from pension_agent.strategy_agent.support import matching as M
+    sits = problem_situations(SC.get_profile(SONG), SC.conditions(SC.get_profile(SONG)))
+    pool = ({c["id"] for t in ("proposal", "objection", "guide")
+             for _s, c, _seg in M.scored_situation_cards(sits, t, 50)}
+            | {c["id"] for _s, c, _seg in M.scored_situation_procedures(sits, 50)}
+            | {c["id"] for _s, c, _seg in M.scored_situation_methods(sits, 50)})
+    hit = bool(hits) and all(c["id"] in pool for _s, c in hits)
+    print(f"{'✓' if hit else '✗'} situation 후보가 화면 ⑥⑦⑧ 과 같은 매칭 결과 안에 있다")
+    ok += hit
+
+    hit = tools.playbook_hits({"customer_id": None, "question": "뭐라고 말하지"}) == []
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 상태 화법을 만들지 않는다")
+    ok += hit
+
+    hit = "playbook" not in tools.usable({}) and "playbook" in tools.usable({"customer_id": SONG})
+    print(f"{'✓' if hit else '✗'} 고객이 닫혀 있으면 도구 목록에서도 빠진다")
+    ok += hit
+
+    # ③ 제안 트리거 — 네 조건 중 하나라도 어긋나면 안 붙는다(§10).
+    pitch_ev = [{"tool": "pitch", "query": "q", "text": "이렇게 말해보세요.", "atomic": [],
+                 "notices": [], "notice_scopes": [], "allow": ["이렇게 말해보세요."],
+                 "sources": [], "meta": {}}]
+    fact_ev = [{**pitch_ev[0], "tool": "fact"}]
+    hit = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": fact_ev}) is None
+    print(f"{'✓' if hit else '✗'} 화법을 다루지 않은 턴(값 질의)에는 상태 화법 제안이 안 붙는다")
+    ok += hit
+
+    hit = ACT._propose({"answer": "a", "evidence": pitch_ev}) is None
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 제안이 안 붙는다")
+    ok += hit
+
+    action = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": pitch_ev})
+    hit = bool(action) and action["kind"] == "pitch" and bool(action.get("cards"))
+    print(f"{'✓' if hit else '✗'} 화법 턴 + 고객 열림 + 남은 카드 → 제안이 붙는다")
+    ok += hit
+
+    # 무엇에 걸렸는지 밝힌다 — 열어보지 않고도 왜 떴는지 알 수 있어야 한다.
+    hit = bool(action) and any(n in action["label"] for n in SC.CONDS.values())
+    print(f"{'✓' if hit else '✗'} 제안 문구가 걸린 요건 이름을 밝힌다 — {action and action['label']}")
+    ok += hit
+
+    # 이미 이번 턴 원장에 실린 카드는 다시 제안하지 않는다.
+    used = dict(pitch_ev[0], sources=[{"id": c["id"], "title": "", "doc": "", "score": None,
+                                       "page": None} for c in
+                                      [SITU for _s, SITU in tools.playbook_hits(
+                                          {"customer_id": SONG, "question": "q"})]])
+    again = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": [used]})
+    hit = again is None or not ({c["id"] for c in again["cards"]}
+                                & {s["id"] for s in used["sources"]})
+    print(f"{'✓' if hit else '✗'} 이번 턴이 이미 쓴 카드를 다시 보여드릴까요 하고 묻지 않는다")
+    ok += hit
+
+    # ③-b 갈래 일치 — 제안은 이번 턴이 다룬 갈래의 나머지 후보만이다. 절차를 물은 턴에
+    #     화법을 제안하면 §3 「묻지 않은 값」의 제안 버전이 된다.
+    hit = all(c["_kind"] == "pitch" for c in
+              (lambda a: [next(x for x in tools.KB.cards if x["id"] == cc["id"])
+                          for cc in a["cards"]])(action))
+    print(f"{'✓' if hit else '✗'} 화법 턴의 제안은 화법 카드만 담는다")
+    ok += hit
+
+    proc_ev = [{**pitch_ev[0], "tool": "procedure"}]
+    p_action = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": proc_ev})
+    by_id = {c["id"]: c for c in tools.KB.cards}
+    hit = bool(p_action) and all(by_id[c["id"]]["_kind"] == "procedure"
+                                 for c in p_action["cards"])
+    print(f"{'✓' if hit else '✗'} 절차 턴의 제안은 절차 카드만 담는다 — {p_action and p_action['label']}")
+    ok += hit
+
+    m_action = ACT._propose({"answer": "a", "customer_id": SONG,
+                             "evidence": [{**pitch_ev[0], "tool": "method"}]})
+    hit = bool(m_action) and all(by_id[c["id"]]["_kind"] == "method" for c in m_action["cards"])
+    print(f"{'✓' if hit else '✗'} 방법론 턴의 제안은 방법론 카드만 담는다")
+    ok += hit
+
+    # ③-c 종류별 렌더러·선언 — 화법 렌더러에 절차를 태우면 저작 메모(authoring)가 새고
+    #     화면번호가 원문 강제(atomic)를 안 받는다(지워진 gap 17 이 고친 실패의 재발 경로).
+    mixed = tools.playbook_hits({"customer_id": SONG, "question": "q"},
+                                lanes=("procedure", "method"))
+    pev = tools.playbook_evidence("점검", mixed)
+    proc_cards = [c for _s, c in mixed if c["_kind"] == "procedure"]
+    hit = (bool(pev) and "필자 해석" not in pev["text"] and "'role'" not in pev["text"]
+           and all(sc in pev["atomic"] for c in proc_cards for sc in (c.get("screens") or [])))
+    print(f"{'✓' if hit else '✗'} playbook 근거가 절차·방법론에 그 종류의 렌더러·선언을 쓴다"
+          f" (화면번호 atomic {len(pev['atomic'])}건 · 저작 메모 미유출)")
+    ok += hit
+
+    # ④ 승낙 턴은 근거만 싣고 답변은 작성 단계가 쓴다.
+    out = ACT.confirm_action({"question": "네", "customer_id": SONG,
+                              "history": [{"pending_action": action}]})
+    hit = bool(out.get("evidence")) and not out.get("answer")
+    print(f"{'✓' if hit else '✗'} 승낙 턴이 근거만 싣고 답변 문장을 손으로 만들지 않는다")
+    ok += hit
+
+    # 도착지는 `answer` 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께 끝난다.
+    hit = R.route_confirm(out) == "answer" and R.route_confirm(
+        {"answer": "화면을 열었어요"}) == "__end__"
+    print(f"{'✓' if hit else '✗'} 분기표가 그 턴을 답변 작성으로 보낸다(화면 연계는 그대로 끝)")
+    ok += hit
+
+    # 그 턴에는 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자라 판정할 질문이 없다(§10).
+    from pension_agent.consult_agent.nodes import clarify as _CL
+    hit = not _CL.applicable({**out, "intent": "confirm_action"}) \
+        and _CL.applicable({**out, "intent": "situation", "question": "실물이전 절차"})
+    print(f"{'✓' if hit else '✗'} 승낙 턴은 되묻기 판정을 돌리지 않는다")
+    ok += hit
+
+    # 제안한 턴이 남긴 카드만 싣는다 — 이번 턴의 "네" 에서 다시 고르지 않는다(§10).
+    hit = bool(out.get("evidence")) and {s["id"] for s in out["evidence"][0]["sources"]} == {
+        c["id"] for c in action["cards"]}
+    print(f"{'✓' if hit else '✗'} 승낙 턴이 제안한 턴의 카드를 그대로 싣는다")
+    ok += hit
+
+    # ⑤ 연금수령 개시 계좌 — 납입·세액공제 세그먼트가 후보에서 빠진다(§8 관리대장).
+    #    9케이스 전원 pension_started=False 라 합성 프로필로만 재현된다.
+    base = SC.get_profile("176903-5528417")       # 한지우 — isa·tax·add
+    started = dataclasses.replace(base, pension_started=True)
+    before = {s["id"] for s in problem_situations(base, SC.conditions(base))}
+    after = {s["id"] for s in problem_situations(started, SC.conditions(started))}
+    hit = {"seg.13", "seg.15", "seg.16"} <= before and not ({"seg.13", "seg.15", "seg.16"} & after)
+    print(f"{'✓' if hit else '✗'} 연금개시 계좌에서 납입·세액공제 세그먼트가 빠진다(exclusions)")
+    ok += hit
+
+    orig = SC.get_profile
+    SC.get_profile = lambda cid: started if cid == "PENSION-STARTED" else orig(cid)
+    try:
+        blocked = tools.playbook_hits({"customer_id": "PENSION-STARTED", "question": "뭐라고 말하지"})
+        allowed_sits = {s["id"] for s in problem_situations(started, SC.conditions(started))}
+        sits2 = problem_situations(started, SC.conditions(started))
+        pool2 = ({c["id"] for t in ("proposal", "objection", "guide")
+                  for _s, c, _seg in M.scored_situation_cards(sits2, t, 50)}
+                 | {c["id"] for _s, c, _seg in M.scored_situation_procedures(sits2, 50)}
+                 | {c["id"] for _s, c, _seg in M.scored_situation_methods(sits2, 50)})
+        hit = all(c["id"] in pool2 for _s, c in blocked) and "seg.13" not in allowed_sits
+    finally:
+        SC.get_profile = orig
+    print(f"{'✓' if hit else '✗'} 그 차단이 대화형 후보에도 그대로 상속된다(따로 막지 않는다)")
     ok += hit
     return ok
 
@@ -2736,6 +2919,146 @@ def check_history_selection() -> int:
     return ok
 
 
+def check_followups() -> int:
+    """답변 끝 추천질문 — **재료가 있는 것만 띄운다**가 이 기능의 알맹이다.
+
+    추천질문을 눌렀는데 "근거를 찾지 못했습니다"가 나오면 안 띄우느니만 못하다. 그래서
+    suggest 는 후보마다 그 질문에 답할 재료가 실제로 있는지 LLM 없이 먼저 찾아본다.
+    없으면 안 뜬다 — 아래 첫 두 검사가 그 계약을 고정한다.
+
+    나머지는 «매 턴 붙지 않는다»(게이트 넷)와 «고객 화면이 닫히면 고객 질문은 없다»,
+    그리고 문구가 매번 같지 않다는 것(회전·슬롯)이다.
+    """
+    from pension_agent.consult_agent import kb as KBMOD
+    from pension_agent.consult_agent import suggest
+    from pension_agent.consult_agent.nodes import facts_qa
+    from pension_agent.strategy_agent.customer import PERSONAS
+
+    def ev(tool: str, title: str | None = None) -> dict:
+        return {"tool": tool, "query": "q", "text": "t", "atomic": [], "notices": [],
+                "notice_scopes": [], "allow": [], "related": [], "marks": [],
+                "sources": ([{"id": "x", "title": title}] if title else []), "meta": {}}
+
+    ok = 0
+
+    # ① 재료가 하나도 없으면 아무것도 띄우지 않는다. 이 검사가 이 기능의 존재 이유다 —
+    #    빠지면 "누르면 근거 없음"인 질문이 답변마다 세 줄씩 붙는다.
+    orig_retrieve, orig_facts = KBMOD.retrieve, facts_qa.search
+    try:
+        KBMOD.retrieve = lambda *a, **k: []
+        facts_qa.search = lambda q: []
+        dead = suggest.followup_questions(
+            {"evidence": [ev("fact", "세액공제 한도"), ev("procedure", "계약이전")], "history": []})
+    finally:
+        KBMOD.retrieve, facts_qa.search = orig_retrieve, orig_facts
+    hit = dead == []
+    print(f"{'✓' if hit else '✗'} 재료가 없으면 추천질문을 띄우지 않는다({dead})")
+    ok += hit
+
+    # ② 한 종류만 재료가 있으면 그 칩만 뜬다 — 있는 것과 없는 것을 실제로 가른다.
+    try:
+        KBMOD.retrieve = lambda kb, **k: [(1.0, {"id": "c"})] if k.get("kinds") == ["screen"] else []
+        facts_qa.search = lambda q: []
+        only = suggest.followup_questions({"evidence": [ev("procedure", "계약이전")], "history": []})
+    finally:
+        KBMOD.retrieve, facts_qa.search = orig_retrieve, orig_facts
+    hit = only == ["이 업무는 단말 어느 화면에서 처리해?"]
+    print(f"{'✓' if hit else '✗'} 재료가 있는 후보만 남는다(screen 만 열어둠 → {len(only)}건)")
+    ok += hit
+
+    # ③ 게이트 넷 — 되묻기·확인대기·LLM실패·근거0건 턴에는 붙지 않는다.
+    base = {"evidence": [ev("fact", "세액공제 한도")], "history": []}
+    gates = {"되묻기": {**base, "clarify": {"question": "어느 쪽이요?"}},
+             "확인대기": {**base, "pending_action": {"label": "화면 열기"}},
+             "LLM실패": {**base, "llm_error": "LLMError: down"},
+             "근거0건": {**base, "evidence": []}}
+    blocked = [name for name, st in gates.items() if suggest.followup_questions(st)]
+    hit = not blocked
+    print(f"{'✓' if hit else '✗'} 되묻기·확인대기·LLM실패·근거0건 턴에는 붙지 않는다"
+          + (f" (샌 것: {blocked})" if blocked else ""))
+    ok += hit
+
+    # ④ 고객 화면이 닫혀 있으면 "이 고객 ~" 질문은 성립하지 않는다(§3).
+    closed = suggest.followup_questions({"evidence": [ev("customer")], "history": []})
+    opened = suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id})
+    hit = closed == [] and opened and all("이 고객" in q for q in opened)
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫히면 고객 질문은 안 뜬다(닫힘 {len(closed)} · 열림 {len(opened)})")
+    ok += hit
+
+    # ⑤ 이번 턴에 이미 쓴 재료로 다시 보내지 않는다 — 방금 답한 것을 또 묻게 된다.
+    both = suggest.followup_questions(
+        {"evidence": [ev("procedure", "계약이전"), ev("screen", "계약이전")], "history": []})
+    hit = not any(q in ("이 업무는 단말 어느 화면에서 처리해?",
+                        "이 화면에서 처리하는 절차가 어떻게 돼?") for q in both)
+    print(f"{'✓' if hit else '✗'} 이미 쓴 재료로 이끄는 질문은 빠진다({both})")
+    ok += hit
+
+    # pitch → pitch(반론 후속)만 예외다. 같은 재료의 **다른 카드**가 답하기 때문이다.
+    again = suggest.followup_questions({"evidence": [ev("pitch", "수수료 부담 반론")], "history": []})
+    hit = len(again) == 1 and "고객이" in again[0]
+    print(f"{'✓' if hit else '✗'} 화법의 반론 후속만은 같은 재료로 다시 보낸다({again})")
+    ok += hit
+
+    # ⑥ 슬롯 — 근거 카드 제목이 문구에 박힌다. 없으면 슬롯 없는 변형으로 물러선다.
+    slotted = suggest.followup_questions({"evidence": [ev("fact", "세액공제 한도")], "history": []})
+    hit = bool(slotted) and "「세액공제 한도」" in slotted[0]
+    print(f"{'✓' if hit else '✗'} 근거 카드 제목이 추천질문에 실린다")
+    ok += hit
+    # 슬롯을 못 채우면 그 변형은 건너뛴다 — 빈칸으로 두면 「「」 이 내용」 이 나간다.
+    long_title = "가" * (suggest.TOPIC_MAX + 1)
+    hit = suggest._topic({"sources": [{"title": long_title}]}) == "" \
+        and suggest._phrase(("「{topic}」 앞", "뒤"), "", 0) == "뒤" \
+        and suggest._phrase(("「{topic}」 앞", "뒤"), "제목", 0) == "「제목」 앞"
+    print(f"{'✓' if hit else '✗'} 제목이 길거나 없으면 슬롯 없는 변형으로 물러선다")
+    ok += hit
+
+    # ⑦ 회전 — 대화가 이어지면 같은 재료에서도 문구가 바뀐다(매번 같으면 안 읽힌다).
+    turns = {suggest._phrase(("A{topic}", "B", "C"), "T", n) for n in range(3)}
+    hit = len(turns) == 3
+    print(f"{'✓' if hit else '✗'} 대화 턴에 따라 문구 변형이 회전한다({sorted(turns)})")
+    ok += hit
+
+    # ⑧ 직원이 이미 물어본 질문을 다시 제안하지 않는다.
+    asked = suggest.followup_questions(
+        {"evidence": [ev("fact", "세액공제 한도")], "history": [], "customer_id": None})
+    repeat = suggest.followup_questions(
+        {"evidence": [ev("fact", "세액공제 한도")], "history": [{"question": asked[0]}]})
+    hit = asked[0] not in repeat
+    print(f"{'✓' if hit else '✗'} 직원이 이미 물은 질문은 다시 제안하지 않는다")
+    ok += hit
+
+    # ⑨ ask() 배선 — 답변 끝에 머리말과 함께 붙고, 반환에 followups 가 따로 실린다.
+    #    상담이력에는 **붙이기 전 원 답변**이 남는다(history 도구가 재료로 되읽는 텍스트다).
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "답변 본문", "sources": [],
+            "evidence": [ev("fact", "세액공제 한도")],
+            "customer_id": st.get("customer_id"), "history": st.get("history") or []})})()
+        wired = G.ask("세액공제 한도 얼마야?")
+    finally:
+        G._AGENT = orig_agent
+    hit = wired["followups"] and G.FOLLOWUP_HEADER in wired["answer"] \
+        and wired["answer"].startswith("답변 본문") \
+        and all(q in wired["answer"] for q in wired["followups"])
+    print(f"{'✓' if hit else '✗'} ask() 가 답변 끝에 추천질문을 붙이고 followups 로도 준다")
+    ok += hit
+
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "어느 쪽인가요?", "sources": [], "clarify": {"question": "어느 쪽?"},
+            "evidence": [ev("fact", "세액공제 한도")]})})()
+        asking = G.ask("실물이전 어떻게 해?")
+    finally:
+        G._AGENT = orig_agent
+    hit = asking["followups"] == [] and G.FOLLOWUP_HEADER not in asking["answer"]
+    print(f"{'✓' if hit else '✗'} 되묻기 턴의 답변에는 추천질문 블록이 붙지 않는다")
+    ok += hit
+    return ok
+
+
 def check_hier_index() -> int:
     """계층 인덱스 — 버킷 카탈로그(L0) → 카드 슬라이스(L1).
 
@@ -3799,6 +4122,7 @@ def main() -> int:
         check_screen_link()
         check_briefing_shared()
         check_customer_material()
+        check_playbook_material()
         check_context_and_clarify()
         check_adequacy_and_shape()
         check_material_marks()
@@ -3819,6 +4143,7 @@ def main() -> int:
         check_tax_credit_calc()
         check_fact_in_index()
         check_history_selection()
+        check_followups()
         check_hier_index()
         check_l0_skip()
         check_progress()

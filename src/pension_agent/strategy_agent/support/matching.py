@@ -104,11 +104,16 @@ def _pitch_cards(kb, card_type: str) -> list[dict]:
 
 def _match_situations(situations: list[dict], cards: list[dict],
                       group_map: dict[str, tuple[str, ...]], general_group: str,
-                      limit: int) -> list[tuple[dict, dict]]:
-    """카드를 문제상황에 붙여 (카드, 근거 세그먼트) 쌍으로 돌려준다. 관련도 내림차순.
+                      limit: int) -> list[tuple[float, dict, dict]]:
+    """카드를 문제상황에 붙여 (관련도, 카드, 근거 세그먼트) 로 돌려준다. 관련도 내림차순.
 
     상황이 없으면 빈 목록이다 — 이 고객에게 해당하는 관리 사유가 없다는 뜻이므로, 아무 카드나
     채워 넣지 않는다(그 판단은 호출부의 폴백 몫).
+
+    관련도를 **버리지 않고 함께 돌려준다.** 화면 ⑥⑦⑧ 은 정해진 개수를 채우면 그만이라
+    필요가 없었지만, 대화형은 같은 후보를 근거 원장에 올리면서 "이게 얼마나 걸린 것인지"를
+    함께 밝혀야 한다(consult_agent/CLAUDE.md §3 — 검색으로 온 재료는 관련도를 싣는다).
+    개수만 쓰는 쪽은 `situation_cards()` 처럼 앞을 버리면 된다.
     """
     scored: dict[str, tuple[float, dict, dict]] = {}
     for s in situations:
@@ -125,11 +130,12 @@ def _match_situations(situations: list[dict], cards: list[dict],
                 scored[c["id"]] = (score, c, s)
 
     ranked = sorted(scored.values(), key=lambda x: (-x[0], x[1]["id"]))
-    return [(c, s) for _, c, s in ranked[:limit]]
+    return ranked[:limit]
 
 
-def situation_cards(situations: list[dict], card_type: str, limit: int) -> list[tuple[dict, dict]]:
-    """문제상황에 쓸 화법 카드(06/03 변환분)."""
+def scored_situation_cards(situations: list[dict], card_type: str,
+                           limit: int) -> list[tuple[float, dict, dict]]:
+    """문제상황에 쓸 화법 카드 — 관련도까지. 대화형이 근거 원장에 올릴 때 쓴다."""
     kb = pitch_kb()
     if kb is None or not situations:
         return []
@@ -137,28 +143,45 @@ def situation_cards(situations: list[dict], card_type: str, limit: int) -> list[
                              SEGMENT_TO_PITCH_GROUPS, GENERAL_PITCH_GROUP, limit)
 
 
+def situation_cards(situations: list[dict], card_type: str, limit: int) -> list[tuple[dict, dict]]:
+    """문제상황에 쓸 화법 카드(06/03 변환분)."""
+    return [(c, s) for _score, c, s in scored_situation_cards(situations, card_type, limit)]
+
+
 def _cards_of(kind: str) -> list[dict]:
     kb = pitch_kb()
     return [c for c in kb.cards if c["_kind"] == kind] if kb else []
 
 
-def situation_procedures(situations: list[dict], limit: int) -> list[tuple[dict, dict]]:
-    """문제상황에 쓸 업무 처리 절차(06/05 변환분). 화면번호가 있는 것을 먼저 본다."""
+def scored_situation_procedures(situations: list[dict],
+                                limit: int) -> list[tuple[float, dict, dict]]:
+    """문제상황에 쓸 업무 처리 절차 — 관련도까지. 화면번호가 있는 것을 먼저 본다."""
     if not situations:
         return []
-    matched = _match_situations(situations, _cards_of("procedure"),
-                                SEGMENT_TO_PROCEDURE_GROUPS, GENERAL_PROCEDURE_GROUP, limit * 2)
-    with_screens = [pair for pair in matched if pair[0].get("screens")]
-    return (with_screens or matched)[:limit]
+    ranked = _match_situations(situations, _cards_of("procedure"),
+                               SEGMENT_TO_PROCEDURE_GROUPS, GENERAL_PROCEDURE_GROUP, limit * 2)
+    with_screens = [t for t in ranked if t[1].get("screens")]
+    return (with_screens or ranked)[:limit]
 
 
-def situation_methods(situations: list[dict], limit: int) -> list[tuple[dict, dict]]:
-    """문제상황에 쓸 관리 방법론(06/02 변환분) — '이런 상황이면 이렇게 판단·제안한다'."""
+def situation_procedures(situations: list[dict], limit: int) -> list[tuple[dict, dict]]:
+    """문제상황에 쓸 업무 처리 절차(06/05 변환분). 화면번호가 있는 것을 먼저 본다."""
+    return [(c, s) for _score, c, s in scored_situation_procedures(situations, limit)]
+
+
+def scored_situation_methods(situations: list[dict],
+                             limit: int) -> list[tuple[float, dict, dict]]:
+    """문제상황에 쓸 관리 방법론 — 관련도까지."""
     if not situations:
         return []
     cards = [c for c in _cards_of("method") if c.get("scope") == "사후관리"]
     return _match_situations(situations, cards,
                              SEGMENT_TO_METHOD_GROUPS, GENERAL_METHOD_GROUP, limit)
+
+
+def situation_methods(situations: list[dict], limit: int) -> list[tuple[dict, dict]]:
+    """문제상황에 쓸 관리 방법론(06/02 변환분) — '이런 상황이면 이렇게 판단·제안한다'."""
+    return [(c, s) for _score, c, s in scored_situation_methods(situations, limit)]
 
 
 def card_source(card: dict) -> str | None:
