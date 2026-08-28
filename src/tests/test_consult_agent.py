@@ -2625,6 +2625,146 @@ def check_history_selection() -> int:
     return ok
 
 
+def check_followups() -> int:
+    """답변 끝 추천질문 — **재료가 있는 것만 띄운다**가 이 기능의 알맹이다.
+
+    추천질문을 눌렀는데 "근거를 찾지 못했습니다"가 나오면 안 띄우느니만 못하다. 그래서
+    suggest 는 후보마다 그 질문에 답할 재료가 실제로 있는지 LLM 없이 먼저 찾아본다.
+    없으면 안 뜬다 — 아래 첫 두 검사가 그 계약을 고정한다.
+
+    나머지는 «매 턴 붙지 않는다»(게이트 넷)와 «고객 화면이 닫히면 고객 질문은 없다»,
+    그리고 문구가 매번 같지 않다는 것(회전·슬롯)이다.
+    """
+    from pension_agent.consult_agent import kb as KBMOD
+    from pension_agent.consult_agent import suggest
+    from pension_agent.consult_agent.nodes import facts_qa
+    from pension_agent.strategy_agent.customer import PERSONAS
+
+    def ev(tool: str, title: str | None = None) -> dict:
+        return {"tool": tool, "query": "q", "text": "t", "atomic": [], "notices": [],
+                "notice_scopes": [], "allow": [], "related": [], "marks": [],
+                "sources": ([{"id": "x", "title": title}] if title else []), "meta": {}}
+
+    ok = 0
+
+    # ① 재료가 하나도 없으면 아무것도 띄우지 않는다. 이 검사가 이 기능의 존재 이유다 —
+    #    빠지면 "누르면 근거 없음"인 질문이 답변마다 세 줄씩 붙는다.
+    orig_retrieve, orig_facts = KBMOD.retrieve, facts_qa.search
+    try:
+        KBMOD.retrieve = lambda *a, **k: []
+        facts_qa.search = lambda q: []
+        dead = suggest.followup_questions(
+            {"evidence": [ev("fact", "세액공제 한도"), ev("procedure", "계약이전")], "history": []})
+    finally:
+        KBMOD.retrieve, facts_qa.search = orig_retrieve, orig_facts
+    hit = dead == []
+    print(f"{'✓' if hit else '✗'} 재료가 없으면 추천질문을 띄우지 않는다({dead})")
+    ok += hit
+
+    # ② 한 종류만 재료가 있으면 그 칩만 뜬다 — 있는 것과 없는 것을 실제로 가른다.
+    try:
+        KBMOD.retrieve = lambda kb, **k: [(1.0, {"id": "c"})] if k.get("kinds") == ["screen"] else []
+        facts_qa.search = lambda q: []
+        only = suggest.followup_questions({"evidence": [ev("procedure", "계약이전")], "history": []})
+    finally:
+        KBMOD.retrieve, facts_qa.search = orig_retrieve, orig_facts
+    hit = only == ["이 업무는 단말 어느 화면에서 처리해?"]
+    print(f"{'✓' if hit else '✗'} 재료가 있는 후보만 남는다(screen 만 열어둠 → {len(only)}건)")
+    ok += hit
+
+    # ③ 게이트 넷 — 되묻기·확인대기·LLM실패·근거0건 턴에는 붙지 않는다.
+    base = {"evidence": [ev("fact", "세액공제 한도")], "history": []}
+    gates = {"되묻기": {**base, "clarify": {"question": "어느 쪽이요?"}},
+             "확인대기": {**base, "pending_action": {"label": "화면 열기"}},
+             "LLM실패": {**base, "llm_error": "LLMError: down"},
+             "근거0건": {**base, "evidence": []}}
+    blocked = [name for name, st in gates.items() if suggest.followup_questions(st)]
+    hit = not blocked
+    print(f"{'✓' if hit else '✗'} 되묻기·확인대기·LLM실패·근거0건 턴에는 붙지 않는다"
+          + (f" (샌 것: {blocked})" if blocked else ""))
+    ok += hit
+
+    # ④ 고객 화면이 닫혀 있으면 "이 고객 ~" 질문은 성립하지 않는다(§3).
+    closed = suggest.followup_questions({"evidence": [ev("customer")], "history": []})
+    opened = suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id})
+    hit = closed == [] and opened and all("이 고객" in q for q in opened)
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫히면 고객 질문은 안 뜬다(닫힘 {len(closed)} · 열림 {len(opened)})")
+    ok += hit
+
+    # ⑤ 이번 턴에 이미 쓴 재료로 다시 보내지 않는다 — 방금 답한 것을 또 묻게 된다.
+    both = suggest.followup_questions(
+        {"evidence": [ev("procedure", "계약이전"), ev("screen", "계약이전")], "history": []})
+    hit = not any(q in ("이 업무는 단말 어느 화면에서 처리해?",
+                        "이 화면에서 처리하는 절차가 어떻게 돼?") for q in both)
+    print(f"{'✓' if hit else '✗'} 이미 쓴 재료로 이끄는 질문은 빠진다({both})")
+    ok += hit
+
+    # pitch → pitch(반론 후속)만 예외다. 같은 재료의 **다른 카드**가 답하기 때문이다.
+    again = suggest.followup_questions({"evidence": [ev("pitch", "수수료 부담 반론")], "history": []})
+    hit = len(again) == 1 and "고객이" in again[0]
+    print(f"{'✓' if hit else '✗'} 화법의 반론 후속만은 같은 재료로 다시 보낸다({again})")
+    ok += hit
+
+    # ⑥ 슬롯 — 근거 카드 제목이 문구에 박힌다. 없으면 슬롯 없는 변형으로 물러선다.
+    slotted = suggest.followup_questions({"evidence": [ev("fact", "세액공제 한도")], "history": []})
+    hit = bool(slotted) and "「세액공제 한도」" in slotted[0]
+    print(f"{'✓' if hit else '✗'} 근거 카드 제목이 추천질문에 실린다")
+    ok += hit
+    # 슬롯을 못 채우면 그 변형은 건너뛴다 — 빈칸으로 두면 「「」 이 내용」 이 나간다.
+    long_title = "가" * (suggest.TOPIC_MAX + 1)
+    hit = suggest._topic({"sources": [{"title": long_title}]}) == "" \
+        and suggest._phrase(("「{topic}」 앞", "뒤"), "", 0) == "뒤" \
+        and suggest._phrase(("「{topic}」 앞", "뒤"), "제목", 0) == "「제목」 앞"
+    print(f"{'✓' if hit else '✗'} 제목이 길거나 없으면 슬롯 없는 변형으로 물러선다")
+    ok += hit
+
+    # ⑦ 회전 — 대화가 이어지면 같은 재료에서도 문구가 바뀐다(매번 같으면 안 읽힌다).
+    turns = {suggest._phrase(("A{topic}", "B", "C"), "T", n) for n in range(3)}
+    hit = len(turns) == 3
+    print(f"{'✓' if hit else '✗'} 대화 턴에 따라 문구 변형이 회전한다({sorted(turns)})")
+    ok += hit
+
+    # ⑧ 직원이 이미 물어본 질문을 다시 제안하지 않는다.
+    asked = suggest.followup_questions(
+        {"evidence": [ev("fact", "세액공제 한도")], "history": [], "customer_id": None})
+    repeat = suggest.followup_questions(
+        {"evidence": [ev("fact", "세액공제 한도")], "history": [{"question": asked[0]}]})
+    hit = asked[0] not in repeat
+    print(f"{'✓' if hit else '✗'} 직원이 이미 물은 질문은 다시 제안하지 않는다")
+    ok += hit
+
+    # ⑨ ask() 배선 — 답변 끝에 머리말과 함께 붙고, 반환에 followups 가 따로 실린다.
+    #    상담이력에는 **붙이기 전 원 답변**이 남는다(history 도구가 재료로 되읽는 텍스트다).
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "답변 본문", "sources": [],
+            "evidence": [ev("fact", "세액공제 한도")],
+            "customer_id": st.get("customer_id"), "history": st.get("history") or []})})()
+        wired = G.ask("세액공제 한도 얼마야?")
+    finally:
+        G._AGENT = orig_agent
+    hit = wired["followups"] and G.FOLLOWUP_HEADER in wired["answer"] \
+        and wired["answer"].startswith("답변 본문") \
+        and all(q in wired["answer"] for q in wired["followups"])
+    print(f"{'✓' if hit else '✗'} ask() 가 답변 끝에 추천질문을 붙이고 followups 로도 준다")
+    ok += hit
+
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "어느 쪽인가요?", "sources": [], "clarify": {"question": "어느 쪽?"},
+            "evidence": [ev("fact", "세액공제 한도")]})})()
+        asking = G.ask("실물이전 어떻게 해?")
+    finally:
+        G._AGENT = orig_agent
+    hit = asking["followups"] == [] and G.FOLLOWUP_HEADER not in asking["answer"]
+    print(f"{'✓' if hit else '✗'} 되묻기 턴의 답변에는 추천질문 블록이 붙지 않는다")
+    ok += hit
+    return ok
+
+
 def check_hier_index() -> int:
     """계층 인덱스 — 버킷 카탈로그(L0) → 카드 슬라이스(L1).
 
@@ -3603,6 +3743,7 @@ def main() -> int:
         check_tax_credit_calc()
         check_fact_in_index()
         check_history_selection()
+        check_followups()
         check_hier_index()
         check_order_flipped()
         check_tool_loop()

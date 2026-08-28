@@ -395,7 +395,11 @@ def compose(state: AgentState) -> dict[str, Any]:
         # 재료는 모았는데 문장을 못 쓴 것이다. 아래 폴백(근거 원문 그대로 싣기)으로 흘려보내면
         # 완성된 답변처럼 보이는 카드 덩어리가 나간다 — LLM 이 죽었을 때 다른 단계가 내는
         # 안내와 결과가 달라진다(§11). 여기서 끊고 같은 안내로 답한다.
+        # 실패 원인을 상태에도 남긴다 — plan_step 이 앞 단계의 원인을 지우고 들어오므로
+        # (`alive`), 여기서 안 남기면 «LLM 이 죽은 턴»이 상태만 보면 정상 턴과 구별되지
+        # 않는다. 뒤에 붙는 것들(추천질문 등)이 실패 안내를 정상 답변으로 오인한다.
         return {"answer": LLM_FAILED.format(reason=f"{type(exc).__name__}: {exc}"),
+                "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}
 
     if answer:
