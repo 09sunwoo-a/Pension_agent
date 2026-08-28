@@ -400,22 +400,30 @@ check(not conditions(_calm), "합성 무요건 고객: 요건 0건", str(conditi
 _r = agent.propose(_calm, use_llm=False)
 check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 실행 항목이 없습니다"),
       "미매칭 시 '제안 항목 없음' 규칙 문장", _r["tier"])
+# 같은 프로파일에 LLM 스텁을 갈아끼워 두 산출을 비교한다. 브리핑은 프로세스당 한 번만
+# 만들어지므로(agent.propose 캐시 — 화면과 대화형이 같은 문장을 보게 하는 장치),
+# **입력이 바뀐 셈인 스텁 교체 때마다 캐시를 비운다.** 실행 중에 LLM 이 바뀌는 것은
+# 테스트에서만 있는 일이라, 이 호출이 필요한 것도 여기뿐이다.
 _saved = (agent.llm.available, agent.llm.generate)
 try:
     agent.llm.available = lambda: True
     agent.llm.generate = lambda prompt, system="": (
         '{"insight": "현 구성 양호", '
         '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
+    agent.clear_briefing_cache()
     _r2 = agent.propose(_calm, use_llm=True)
     check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
           "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
     agent.llm.generate = lambda prompt, system="": (
         '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
+    agent.clear_briefing_cache()
     _r3 = agent.propose(_calm, use_llm=True)
     check(_r3["tier"] == "미매칭" and bool(_r3["rejected"]),
           "재료 이탈 산출은 폴백(tier=미매칭)", str(_r3["rejected"])[:40])
 finally:
     agent.llm.available, agent.llm.generate = _saved
+    # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
+    agent.clear_briefing_cache()
 
 # dorm=None 이어도 브리핑이 죽지 않는다 (김현수는 실제로 상담이력이 없어 dorm=None 이다).
 check(BY_NAME["김현수"].dorm is None, "김현수: 상담이력 없음 → dorm=None")

@@ -17,6 +17,7 @@ import json
 import re
 from typing import Any
 
+from pension_agent.consult_agent import progress
 from pension_agent.consult_agent.prompts import ROUTE_PROMPT
 from pension_agent.consult_agent.routing import DEFAULT_INTENT, INTENTS, LLM_DOWN
 from pension_agent.consult_agent.state import AgentState, format_history
@@ -24,6 +25,7 @@ from pension_agent.llm import LLMError, generate
 
 
 def understand(state: AgentState) -> dict[str, Any]:
+    progress.emit("질문 내용을 파악하고 있어요")
     prompt = ROUTE_PROMPT.format(
         history_block=format_history(state.get("history")),
         question=state["question"],

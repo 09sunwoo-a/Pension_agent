@@ -38,6 +38,11 @@ def _print_source(s: dict) -> None:
     print(f"     — {s.get('title') or ''} [{s['id']}{tail}]")
 
 
+def _progress(text: str) -> None:
+    # 진행 표시(graph.ask on_progress). 답변과 구분되게 들여서 찍는다.
+    print(f"  ⋯ {text}")
+
+
 def _print_answer(r: dict) -> None:
     print(r["answer"])
     # 답이 나온 재료(근거)와 표현을 제한한 재료(주의)를 갈라 보여준다 — 한 목록에 섞으면
@@ -59,11 +64,11 @@ if len(argv) > 1:
     history: list[dict] = []
     for q in argv:
         print(f"\n> {q}")
-        r = ask(q, history=history, customer_id=customer_id)
+        r = ask(q, history=history, customer_id=customer_id, on_progress=_progress)
         history = r["history"]
         _print_answer(r)
 elif argv:
-    r = ask(argv[0], customer_id=customer_id)
+    r = ask(argv[0], customer_id=customer_id, on_progress=_progress)
     _print_answer(r)
 else:
     print("질문을 입력하세요 (빈 줄 입력 시 종료). 후속 질문은 이전 맥락을 이어서 물어보면 됩니다.")
@@ -77,6 +82,6 @@ else:
             break
         if not q:
             break
-        r = ask(q, history=history, customer_id=customer_id)
+        r = ask(q, history=history, customer_id=customer_id, on_progress=_progress)
         history = r["history"]
         _print_answer(r)

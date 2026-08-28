@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import time
 import types
 import unicodedata
 from contextlib import contextmanager
@@ -39,8 +40,14 @@ from pension_agent.consult_agent.nodes import plan as P
 from pension_agent.consult_agent.nodes import understand as U
 
 #: 그래프에 실리는 노드 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는 전역들.
-NODE_NAMES = ("understand", "plan_step", "compose", "clarify", "agent_help",
+#: 되묻기 판정과 답변 작성은 노드 하나(`answer`)에서 **동시에** 끝난다(nodes/answer.py) —
+#: 예전의 `clarify`·`compose` 두 노드 자리다. 두 LLM 호출이 서로 다른 스레드에서 나므로
+#: 한 노드의 호출 목록에 함께 실리는데, 정체는 프롬프트로 갈리므로(_stage) 구분은 남는다.
+NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
               "lms_send", "correction", "llm_down", "confirm_action", "offer")
+
+#: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
+ANSWER_NODE = "answer"
 
 #: compose 가 순서대로 거는 검사. 이 순서를 여기 적어두는 이유는 **실행되지 않은 게이트**를
 #: 말하기 위해서다 — 앞에서 끊기면 뒤는 아예 안 불리고, 그 사실이 진단의 핵심이다.
@@ -90,6 +97,7 @@ class Call:
     stage: str
     text: str = ""          # 응답 원문. compose 면 이것이 '폐기됐을지도 모르는 생성문'이다
     error: str = ""
+    seconds: float = 0.0    # 소요 시간. 어느 호출을 줄일지는 추측이 아니라 이 값으로 정한다
 
 
 @dataclass
@@ -108,6 +116,7 @@ class Node:
     calls: list[Call] = field(default_factory=list)
     gates: list[Gate] = field(default_factory=list)
     note: str = ""                                 # 사람이 읽을 한 줄
+    seconds: float = 0.0                           # 노드 전체 소요 시간(LLM 대기 포함)
 
 
 @dataclass
@@ -164,7 +173,7 @@ class Trace:
         return None
 
     def gates(self, turn: int = -1) -> dict[str, Gate]:
-        node = self.node("compose", turn)
+        node = self.node(ANSWER_NODE, turn)
         return {g.name: g for g in (node.gates if node else [])}
 
     def blocked_by(self, turn: int = -1) -> str | None:
@@ -176,7 +185,7 @@ class Trace:
 
     def draft(self, turn: int = -1) -> str:
         """compose 가 LLM 에게 받은 문장. 폐기됐어도 여기 남는다."""
-        node = self.node("compose", turn)
+        node = self.node(ANSWER_NODE, turn)
         for call in (node.calls if node else []):
             if call.stage == "compose":
                 return call.text
@@ -266,32 +275,39 @@ def instrument(trace: Trace):
 
     def node_wrapper(name, fn):
         def wrapped(state):
+            started = time.perf_counter()
             delta = fn(state) or {}
+            elapsed = time.perf_counter() - started
             note = ""
             if name == "plan_step":
                 note = _plan_note(state, delta)
-            elif name == "compose":
+            elif name == ANSWER_NODE:
                 note = _compose_note(state, delta)
-            trace.add_node(Node(name=name, delta=_summary(delta), note=note))
+            trace.add_node(Node(name=name, delta=_summary(delta), note=note, seconds=elapsed))
             return delta
         return wrapped
 
     def llm_wrapper(fn):
         def wrapped(prompt, **kw):
             stage = _stage(prompt)
+            started = time.perf_counter()
             try:
                 text = fn(prompt, **kw)
             except Exception as exc:                     # noqa: BLE001 — 기록하고 그대로 올린다
-                trace.add_call(Call(stage=stage, error=f"{type(exc).__name__}: {exc}"))
+                trace.add_call(Call(stage=stage, error=f"{type(exc).__name__}: {exc}",
+                                    seconds=time.perf_counter() - started))
                 raise
-            trace.add_call(Call(stage=stage, text=text))
+            trace.add_call(Call(stage=stage, text=text,
+                                seconds=time.perf_counter() - started))
             return text
         return wrapped
 
     def pick_wrapper(fn):
         def wrapped(kinds, query):
+            started = time.perf_counter()
             hits = fn(kinds, query)
-            trace.add_call(Call(stage="pick", text=f"{list(kinds)} → {len(hits)}건"))
+            trace.add_call(Call(stage="pick", text=f"{list(kinds)} → {len(hits)}건",
+                                seconds=time.perf_counter() - started))
             return hits
         return wrapped
 
@@ -347,6 +363,11 @@ def instrument(trace: Trace):
 _TREE = ("├", "└")
 
 
+def _secs(seconds: float) -> str:
+    """소요 시간 한 조각. 계측이 없던 기록(0.0)도 그대로 찍는다 — 빈칸과 0 은 다르다."""
+    return f"{seconds:.2f}s"
+
+
 def _pad(text: str, width: int) -> str:
     """한글은 두 칸을 차지한다. `str.ljust` 로 맞추면 트리가 어긋난다."""
     used = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
@@ -392,15 +413,20 @@ def render(trace: Trace, show_llm: bool = False, last_only: bool = False) -> str
                 plan_step += 1
                 label = f"plan #{plan_step}"
             calls = " · ".join(
-                f"LLM {c.stage}" + (f" 실패({c.error})" if c.error else f" {len(c.text)}자")
+                f"LLM {c.stage}"
+                + (f" 실패({c.error})" if c.error else f" {len(c.text)}자")
+                + f" {_secs(c.seconds)}"
                 for c in node.calls)
             fields = " ".join(f"{k}={v}" for k, v in node.delta.items())
             # compose 의 한 줄 요약(처분)은 아래 게이트 트리의 마지막 줄에 있다 — 같은 말을
             # 두 번 세우지 않는다.
-            note = fields if node.name == "compose" else (node.note or fields or "변화 없음")
-            out.append(f"  {step} {_pad(label, 13)}{note}" + (f"   ({calls})" if calls else ""))
-            if node.name == "compose":
+            note = fields if node.name == ANSWER_NODE else (node.note or fields or "변화 없음")
+            out.append(f"  {step} {_pad(label, 13)}[{_secs(node.seconds)}] {note}"
+                       + (f"   ({calls})" if calls else ""))
+            if node.name == ANSWER_NODE:
                 out += _gate_lines(node)
+        out.append(f"  ⏱ 턴 합계 {_secs(sum(n.seconds for n in turn.nodes))}"
+                   f" (LLM {sum(c.seconds for n in turn.nodes for c in n.calls):.2f}s)")
         if show_llm:
             draft = trace.draft(index)
             if draft:

@@ -46,6 +46,7 @@ from typing import TypedDict
 
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent import marks as MARKS
+from pension_agent.consult_agent import progress
 from pension_agent.consult_agent import relations as REL
 from pension_agent.consult_agent.nodes import facts_qa, pitch as PITCHMOD, procedure_qa, segment_qa
 from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
@@ -83,6 +84,10 @@ class Tool:
     name: str
     desc: str            # 계획 프롬프트에 실리는 한 줄 설명
     run: Callable[[AgentState, str], Evidence | None]
+    # 진행 표시에 찍히는 재료 이름("단말 화면번호"…). 문구는 코드가 정한다는 규칙
+    # (progress.py ①)이 도구에 적용된 자리다 — LLM 이 만든 질의는 진행 표시에 싣지
+    # 않는다(질의가 곧 지어낸 문장일 수 있다). 비어 있으면 그 도구는 진행을 알리지 않는다.
+    progress: str = ""
 
 
 def _clean(spans: list[str] | None) -> list[str]:
@@ -884,6 +889,7 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     쓴다. 왜 필요한지는 ADEQUACY_PROMPT 머리말에 적어뒀다 — 고객 특정 질문에서 일반
     자료가 전멸하던 자리다.
     """
+    progress.emit("찾은 자료가 질문에 맞는지 확인하고 있어요")
     cards = "\n".join(_headline(c) for _, c in hits)
     raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
                                           query=query or question,
@@ -1272,22 +1278,29 @@ def cited_cards(state: AgentState) -> set[str]:
 
 TOOLS: dict[str, Tool] = {
     t.name: t for t in (
-        Tool("pitch", "고객에게 실제로 할 말(대사·반론 대응·논거)을 만든다", _pitch),
-        Tool("fact", "제도·상품의 확정된 수치를 기준시점·출처와 함께 돌려준다", _fact),
-        Tool("procedure", "업무를 어떤 순서·채널로 처리하는지와 걸리는 주의를 돌려준다", _procedure),
-        Tool("screen", "단말 화면번호를 찾는다 — '무슨무슨 조회/등록은 몇 번 화면인가'", _screen),
+        Tool("pitch", "고객에게 실제로 할 말(대사·반론 대응·논거)을 만든다", _pitch,
+             progress="상담 화법"),
+        Tool("fact", "제도·상품의 확정된 수치를 기준시점·출처와 함께 돌려준다", _fact,
+             progress="제도·상품 수치"),
+        Tool("procedure", "업무를 어떤 순서·채널로 처리하는지와 걸리는 주의를 돌려준다", _procedure,
+             progress="업무 처리 절차"),
+        Tool("screen", "단말 화면번호를 찾는다 — '무슨무슨 조회/등록은 몇 번 화면인가'", _screen,
+             progress="단말 화면번호"),
         Tool("channel", "고객이 스타뱅킹·인터넷뱅킹에서 직접 처리하는 메뉴 경로를 돌려준다",
-             _channel),
-        Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment),
-        Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method),
-        Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip),
+             _channel, progress="비대면 채널 경로"),
+        Tool("segment", "관리 대상 고객군의 정의와 선정 조건을 설명한다", _segment,
+             progress="고객군 정의"),
+        Tool("method", "무엇을 어떤 기준으로 판단하는지(관리 방법론)를 돌려준다", _method,
+             progress="관리 방법론"),
+        Tool("fieldtip", "영업점 현장 관찰(본부 지침 아님)을 돌려준다", _fieldtip,
+             progress="영업점 현장 관찰"),
         Tool("market", "시장이 어떻게 돌아가나 — 시황·증시·환율·금리·경제 이벤트와 "
                        "투자전략을 기준시점과 함께 돌려준다",
-             _market_like("market", "시황")),
+             _market_like("market", "시황"), progress="시황 자료"),
         Tool("lineup", "우리가 뭘 파나 — 이달의 추천펀드, 디폴트옵션 포트폴리오 구성상품·"
                        "비중·금리, 투자성향별 포트폴리오, TDF 빈티지별 비중을 기준시점과 "
                        "함께 돌려준다",
-             _market_like("lineup", "운용 상품")),
+             _market_like("lineup", "운용 상품"), progress="운용 상품 자료"),
         # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
         # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
         # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.
@@ -1299,9 +1312,10 @@ TOOLS: dict[str, Tool] = {
              "그 사유를 돌려준다. 「이 고객한테 뭘 추천하지」·「무슨 상품 있어」가 여기다",
              _suitable),
         Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·성립 요건, 그리고 이 고객이 "
-             "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer),
+             "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer,
+             progress="고객 브리핑 재료"),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
-             _history),
+             _history, progress="지난 상담 기록"),
         # 시점·기한이 걸린 질문은 재료가 없으면 답이 안 나온다(§8 "지어내지 않는다"가 그대로
         # «말하지 못한다»가 된다). 도구 설명이 곧 계획의 판단 재료이므로, 언제 부르는지를
         # 예시로 박아 둔다 — "얼마 안 남았다"류 문장을 쓰려는 턴이 전부 여기 걸려야 한다.
@@ -1313,13 +1327,14 @@ TOOLS: dict[str, Tool] = {
              _tax_credit),
         Tool("date", "오늘이 며칠인지와 연말까지 남은 일수를 돌려준다 — '오늘 며칠이야', "
              "'연말까지 얼마 남았어', '언제까지 납입해야 해'처럼 **시점·기한**이 걸린 질문, "
-             "그리고 답변에 '며칠 남았다·올해 안에'를 쓰려는 모든 경우에 먼저 부른다", _date),
+             "그리고 답변에 '며칠 남았다·올해 안에'를 쓰려는 모든 경우에 먼저 부른다", _date,
+             progress="오늘 날짜·기한"),
         # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
         # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
         # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.
         Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·"
              "관리방법론·업무절차 참고자료를 브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다",
-             _playbook),
+             _playbook, progress="이 고객 상태에 걸린 참고자료"),
     )
 }
 
@@ -1355,6 +1370,10 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
     tool = TOOLS.get(name)
     if tool is None:
         return None
+    if tool.progress:
+        # 실제로 이 도구를 돌리기 직전에만 찍는다(progress.py ②). 문구는 도구 선언에서
+        # 온다 — LLM 이 만든 질의(query)는 싣지 않는다.
+        progress.emit(f"{progress.object_of(tool.progress)} 찾고 있어요")
     question = (state.get("question") or "").strip()
     attempts = [query] + ([question] if question and question != query else [])
     for attempt in attempts:

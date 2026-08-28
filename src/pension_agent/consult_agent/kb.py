@@ -589,6 +589,35 @@ def _card_line(card: dict, examples: int) -> str:
     return " | ".join(parts)
 
 
+def whole_index(kb: KnowledgeBase, kinds: tuple[str, ...] | None = None,
+                *, budget_chars: int = INDEX_BUDGET_CHARS) -> str | None:
+    """이 종류 **전체** 카드의 L1 인덱스가 예산에 들어가면 그 텍스트를, 아니면 None.
+
+    버킷 선택(L0) 호출을 생략할 수 있는지의 판정이다. 2단(버킷 → 카드)이 필요한 이유는
+    "카드 429장 평면 목록 ≈ 30k 토큰"인데, 종류별로 재보면 그 전제가 안 서는 종류가
+    있다 — channel(56장 3,492자)·market·lineup·fieldtip 은 전 카드를 한 번에 보여줘도
+    예산 안이다. 그런 종류에서 버킷을 고르게 하는 것은 후보를 좁히는 게 아니라 LLM
+    왕복 하나를 그냥 쓰는 것이고, 버킷 오선택으로 답이 든 카드가 후보에서 빠지는 자리만
+    하나 늘린다.
+
+    판정은 데이터가 한다 — 카드가 늘어 예산을 넘으면 None 이 되고 호출부는 저절로
+    2단으로 돌아간다. 제목만 남기는 압축(examples=0)까지는 내려가지 않는다: 예상질문이
+    없는 제목 나열은 2단에서 보던 것보다 후보 정보가 얇아져, 왕복 하나를 아끼려고
+    선택 품질을 파는 것이 된다(그 자리는 그대로 2단이 맞다 — screen 이 이 경우다).
+    """
+    bk = buckets(kb, kinds)
+    if not bk:
+        return None
+    for examples in (2, 1):
+        blocks = ["\n".join([f"── {b['kind']} / {b['group']}"] +
+                            [_card_line(c, examples) for c in b["cards"]])
+                  for b in bk.values()]
+        text = "\n".join(blocks)
+        if len(text) <= budget_chars:
+            return text
+    return None
+
+
 def index_slice(kb: KnowledgeBase, codes: list[str] | tuple[str, ...],
                 *, kinds: tuple[str, ...] | None = None,
                 budget_chars: int = INDEX_BUDGET_CHARS) -> str:
