@@ -132,7 +132,7 @@ def stub_slots(state):
 
     **단계(stage)는 지정한 케이스에만 채운다.** 예전에는 모든 질문에 "신규"를 넣었는데,
     지식베이스가 사후관리 범위로 정리되면서 그 단계가 없어졌다. 없는 단계를 채우면
-    `_matches_scope` 가 후보를 전부 걸러내 모든 질문이 FALLBACK 이 된다 — 검색이 아니라
+    `matches_scope` 가 후보를 전부 걸러내 모든 질문이 FALLBACK 이 된다 — 검색이 아니라
     스텁이 만든 결과라 원인이 안 보인다. 모르면 비운다.
     """
     q = state["question"]
@@ -726,6 +726,181 @@ def check_customer_material() -> int:
     finally:
         P.generate = orig_gen
     print(f"{'✓' if hit else '✗'} 원장에 고객 재료가 없어도 가드가 붙는다(고객 화면이 열려 있으면)")
+    ok += hit
+    return ok
+
+
+def check_playbook_material() -> int:
+    """고객 상태에 걸린 화법 — 화면 ⑥⑦⑧ 과 **같은 후보군**에서 나오는가(§3 · §10).
+
+    회귀 대상 넷.
+    ① `customer` 도구가 화면 ⑥⑦⑧ 이 고른 것을 재료에 안 실었다. `allow` 에는 있어 인용은
+       허용됐지만 재료 텍스트에 없어 LLM 이 본 적이 없었고, 그래서 "이 고객한테 뭐라고
+       말하지"를 `pitch` 가 지식베이스 전체에서 고객과 무관하게 답했다 — 화면과 대화가
+       같은 질문에 다른 카드를 말하는 상태다(§3).
+    ② 선제 제안이 매 턴 붙으면 안 된다(§10). 지워진 LMS 갈래가 그렇게 죽었다.
+    ③ 승낙 턴이 지식 카드를 **손으로 렌더하면** §5 형태·§6 점검·§7 표시가 그 경로만
+       빠진다 — 근거만 싣고 답변은 compose 가 쓴다.
+    ④ 화면이 막은 것을 대화형이 권하면 안 된다. 목업 9케이스는 전원 `pension_started=False`
+       라 이 경로가 한 번도 발동한 적이 없다 — 합성 프로필로 고정한다.
+    """
+    import dataclasses
+
+    from pension_agent.consult_agent.nodes import act as ACT
+    from pension_agent.consult_agent import routing as R
+    from pension_agent.strategy_agent import customer as SC
+    from pension_agent.strategy_agent.situations import problem_situations
+
+    ok = 0
+    SONG = "188406-7352194"   # 송도윤 — 요건 6건이라 문제상황도 화법 후보도 넉넉하다
+
+    # ① 화면 ⑥⑦⑧ 이 고른 것이 재료와 출처에 함께 실리는가.
+    ev = tools.run("customer", {"customer_id": SONG}, "이 고객한테 뭐라고 말하지")
+    text = ev["text"]
+    hit = all(k in text for k in ("· 이렇게 말해보세요:", "· 예상 반론:", "· 상담 참고:"))
+    print(f"{'✓' if hit else '✗'} customer 재료에 화면 ⑥⑦⑧ 이 고른 화법·반론·참고자료가 실린다")
+    ok += hit
+
+    card_ids = {s["id"] for s in ev["sources"] if s["id"].startswith(("pitch.", "m.", "proc."))}
+    hit = bool(card_ids)
+    print(f"{'✓' if hit else '✗'} 그 카드가 **출처**에도 실린다(§3) — {len(card_ids)}건")
+    ok += hit
+
+    # 검색으로 온 재료가 아니므로 관련도를 지어내지 않는다(§3).
+    hit = all(s.get("score") is None for s in ev["sources"])
+    print(f"{'✓' if hit else '✗'} 고객 재료의 출처에는 관련도를 붙이지 않는다")
+    ok += hit
+
+    # ② 후보는 strategy_agent 매칭에서만 나온다 — 대화형이 자기 매칭을 만들지 않는다.
+    hits = tools.playbook_hits({"customer_id": SONG, "question": "증권사 얘기를 꺼내네요"})
+    from pension_agent.strategy_agent.support import matching as M
+    sits = problem_situations(SC.get_profile(SONG), SC.conditions(SC.get_profile(SONG)))
+    pool = ({c["id"] for t in ("proposal", "objection", "guide")
+             for _s, c, _seg in M.scored_situation_cards(sits, t, 50)}
+            | {c["id"] for _s, c, _seg in M.scored_situation_procedures(sits, 50)}
+            | {c["id"] for _s, c, _seg in M.scored_situation_methods(sits, 50)})
+    hit = bool(hits) and all(c["id"] in pool for _s, c in hits)
+    print(f"{'✓' if hit else '✗'} situation 후보가 화면 ⑥⑦⑧ 과 같은 매칭 결과 안에 있다")
+    ok += hit
+
+    hit = tools.playbook_hits({"customer_id": None, "question": "뭐라고 말하지"}) == []
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 상태 화법을 만들지 않는다")
+    ok += hit
+
+    hit = "playbook" not in tools.usable({}) and "playbook" in tools.usable({"customer_id": SONG})
+    print(f"{'✓' if hit else '✗'} 고객이 닫혀 있으면 도구 목록에서도 빠진다")
+    ok += hit
+
+    # ③ 제안 트리거 — 네 조건 중 하나라도 어긋나면 안 붙는다(§10).
+    pitch_ev = [{"tool": "pitch", "query": "q", "text": "이렇게 말해보세요.", "atomic": [],
+                 "notices": [], "notice_scopes": [], "allow": ["이렇게 말해보세요."],
+                 "sources": [], "meta": {}}]
+    fact_ev = [{**pitch_ev[0], "tool": "fact"}]
+    hit = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": fact_ev}) is None
+    print(f"{'✓' if hit else '✗'} 화법을 다루지 않은 턴(값 질의)에는 상태 화법 제안이 안 붙는다")
+    ok += hit
+
+    hit = ACT._propose({"answer": "a", "evidence": pitch_ev}) is None
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있으면 제안이 안 붙는다")
+    ok += hit
+
+    action = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": pitch_ev})
+    hit = bool(action) and action["kind"] == "pitch" and bool(action.get("cards"))
+    print(f"{'✓' if hit else '✗'} 화법 턴 + 고객 열림 + 남은 카드 → 제안이 붙는다")
+    ok += hit
+
+    # 무엇에 걸렸는지 밝힌다 — 열어보지 않고도 왜 떴는지 알 수 있어야 한다.
+    hit = bool(action) and any(n in action["label"] for n in SC.CONDS.values())
+    print(f"{'✓' if hit else '✗'} 제안 문구가 걸린 요건 이름을 밝힌다 — {action and action['label']}")
+    ok += hit
+
+    # 이미 이번 턴 원장에 실린 카드는 다시 제안하지 않는다.
+    used = dict(pitch_ev[0], sources=[{"id": c["id"], "title": "", "doc": "", "score": None,
+                                       "page": None} for c in
+                                      [SITU for _s, SITU in tools.playbook_hits(
+                                          {"customer_id": SONG, "question": "q"})]])
+    again = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": [used]})
+    hit = again is None or not ({c["id"] for c in again["cards"]}
+                                & {s["id"] for s in used["sources"]})
+    print(f"{'✓' if hit else '✗'} 이번 턴이 이미 쓴 카드를 다시 보여드릴까요 하고 묻지 않는다")
+    ok += hit
+
+    # ③-b 갈래 일치 — 제안은 이번 턴이 다룬 갈래의 나머지 후보만이다. 절차를 물은 턴에
+    #     화법을 제안하면 §3 「묻지 않은 값」의 제안 버전이 된다.
+    hit = all(c["_kind"] == "pitch" for c in
+              (lambda a: [next(x for x in tools.KB.cards if x["id"] == cc["id"])
+                          for cc in a["cards"]])(action))
+    print(f"{'✓' if hit else '✗'} 화법 턴의 제안은 화법 카드만 담는다")
+    ok += hit
+
+    proc_ev = [{**pitch_ev[0], "tool": "procedure"}]
+    p_action = ACT._propose({"answer": "a", "customer_id": SONG, "evidence": proc_ev})
+    by_id = {c["id"]: c for c in tools.KB.cards}
+    hit = bool(p_action) and all(by_id[c["id"]]["_kind"] == "procedure"
+                                 for c in p_action["cards"])
+    print(f"{'✓' if hit else '✗'} 절차 턴의 제안은 절차 카드만 담는다 — {p_action and p_action['label']}")
+    ok += hit
+
+    m_action = ACT._propose({"answer": "a", "customer_id": SONG,
+                             "evidence": [{**pitch_ev[0], "tool": "method"}]})
+    hit = bool(m_action) and all(by_id[c["id"]]["_kind"] == "method" for c in m_action["cards"])
+    print(f"{'✓' if hit else '✗'} 방법론 턴의 제안은 방법론 카드만 담는다")
+    ok += hit
+
+    # ③-c 종류별 렌더러·선언 — 화법 렌더러에 절차를 태우면 저작 메모(authoring)가 새고
+    #     화면번호가 원문 강제(atomic)를 안 받는다(지워진 gap 17 이 고친 실패의 재발 경로).
+    mixed = tools.playbook_hits({"customer_id": SONG, "question": "q"},
+                                lanes=("procedure", "method"))
+    pev = tools.playbook_evidence("점검", mixed)
+    proc_cards = [c for _s, c in mixed if c["_kind"] == "procedure"]
+    hit = (bool(pev) and "필자 해석" not in pev["text"] and "'role'" not in pev["text"]
+           and all(sc in pev["atomic"] for c in proc_cards for sc in (c.get("screens") or [])))
+    print(f"{'✓' if hit else '✗'} playbook 근거가 절차·방법론에 그 종류의 렌더러·선언을 쓴다"
+          f" (화면번호 atomic {len(pev['atomic'])}건 · 저작 메모 미유출)")
+    ok += hit
+
+    # ④ 승낙 턴은 근거만 싣고 답변은 compose 가 쓴다.
+    out = ACT.confirm_action({"question": "네", "customer_id": SONG,
+                              "history": [{"pending_action": action}]})
+    hit = bool(out.get("evidence")) and not out.get("answer")
+    print(f"{'✓' if hit else '✗'} 승낙 턴이 근거만 싣고 답변 문장을 손으로 만들지 않는다")
+    ok += hit
+
+    hit = R.route_confirm(out) == "compose" and R.route_confirm(
+        {"answer": "화면을 열었어요"}) == "__end__"
+    print(f"{'✓' if hit else '✗'} 분기표가 그 턴을 compose 로 보낸다(화면 연계는 그대로 끝)")
+    ok += hit
+
+    # 제안한 턴이 남긴 카드만 싣는다 — 이번 턴의 "네" 에서 다시 고르지 않는다(§10).
+    hit = bool(out.get("evidence")) and {s["id"] for s in out["evidence"][0]["sources"]} == {
+        c["id"] for c in action["cards"]}
+    print(f"{'✓' if hit else '✗'} 승낙 턴이 제안한 턴의 카드를 그대로 싣는다")
+    ok += hit
+
+    # ⑤ 연금수령 개시 계좌 — 납입·세액공제 세그먼트가 후보에서 빠진다(§8 관리대장).
+    #    9케이스 전원 pension_started=False 라 합성 프로필로만 재현된다.
+    base = SC.get_profile("176903-5528417")       # 한지우 — isa·tax·add
+    started = dataclasses.replace(base, pension_started=True)
+    before = {s["id"] for s in problem_situations(base, SC.conditions(base))}
+    after = {s["id"] for s in problem_situations(started, SC.conditions(started))}
+    hit = {"seg.13", "seg.15", "seg.16"} <= before and not ({"seg.13", "seg.15", "seg.16"} & after)
+    print(f"{'✓' if hit else '✗'} 연금개시 계좌에서 납입·세액공제 세그먼트가 빠진다(exclusions)")
+    ok += hit
+
+    orig = SC.get_profile
+    SC.get_profile = lambda cid: started if cid == "PENSION-STARTED" else orig(cid)
+    try:
+        blocked = tools.playbook_hits({"customer_id": "PENSION-STARTED", "question": "뭐라고 말하지"})
+        allowed_sits = {s["id"] for s in problem_situations(started, SC.conditions(started))}
+        sits2 = problem_situations(started, SC.conditions(started))
+        pool2 = ({c["id"] for t in ("proposal", "objection", "guide")
+                  for _s, c, _seg in M.scored_situation_cards(sits2, t, 50)}
+                 | {c["id"] for _s, c, _seg in M.scored_situation_procedures(sits2, 50)}
+                 | {c["id"] for _s, c, _seg in M.scored_situation_methods(sits2, 50)})
+        hit = all(c["id"] in pool2 for _s, c in blocked) and "seg.13" not in allowed_sits
+    finally:
+        SC.get_profile = orig
+    print(f"{'✓' if hit else '✗'} 그 차단이 대화형 후보에도 그대로 상속된다(따로 막지 않는다)")
     ok += hit
     return ok
 
@@ -3409,6 +3584,7 @@ def main() -> int:
         check_knowledge_intents()
         check_screen_link()
         check_customer_material()
+        check_playbook_material()
         check_context_and_clarify()
         check_adequacy_and_shape()
         check_material_marks()

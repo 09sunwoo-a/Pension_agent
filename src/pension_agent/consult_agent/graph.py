@@ -38,7 +38,7 @@ from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import compose, llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
 from pension_agent.consult_agent.routing import (
-    LLM_DOWN, route_clarify, route_intent, route_plan,
+    LLM_DOWN, route_clarify, route_confirm, route_intent, route_plan,
 )
 from pension_agent.consult_agent.state import HISTORY_LIMIT, AgentState
 
@@ -70,10 +70,14 @@ def build_agent():
     g.add_conditional_edges("plan", route_plan, ["plan", "clarify"])
     # 되묻기 턴은 여기서 끝난다 — 답변도 화면 연계 제안도 붙지 않는다(§5).
     g.add_conditional_edges("clarify", route_clarify, {"compose": "compose", "__end__": END})
+    # 승낙 턴 — 화면 연계는 URL 하나로 끝나고, 화법 제시는 근거만 실린 채 compose 로 간다.
+    # 답변을 만드는 경로를 둘로 늘리지 않기 위해서다(routing.route_confirm).
+    g.add_conditional_edges("confirm_action", route_confirm,
+                            {"compose": "compose", "__end__": END})
     for node in _OFFERING_NODES:
         g.add_edge(node, "offer")
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_send", "correction", "confirm_action", LLM_DOWN):
+    for node in ("agent_help", "lms_send", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 

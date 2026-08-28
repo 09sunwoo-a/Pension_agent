@@ -395,7 +395,7 @@ def score_parts(
 MIN_TOPICAL = 0.5
 
 
-def _matches_scope(pitch: dict, customer_type=None, stage=None, **_ignored) -> bool:
+def matches_scope(pitch: dict, customer_type=None, stage=None, **_ignored) -> bool:
     """stage/customer_type 이 주어지면, 그 값(또는 '공통')과 안 맞는 카드는 후보에서 제외한다.
 
     챕터가 늘어나면서 거절유형 라벨이 챕터를 넘어 같은 문자열을 쓰는 경우가 생겼다
@@ -430,7 +430,7 @@ def retrieve(kb: KnowledgeBase, *, top_k=3, kinds=None, segments=None,
 
     hits = []
     for p in pool:
-        if not _matches_scope(p, **criteria):
+        if not matches_scope(p, **criteria):
             continue
         tag_s, top_s = score_parts(p, **criteria)
         if top_s < MIN_TOPICAL:
