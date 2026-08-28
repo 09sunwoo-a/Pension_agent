@@ -65,6 +65,18 @@ COND_THRESHOLDS = [
 ]
 
 
+def _outreach_runway() -> str:
+    """⑨ 이벤트·세미나 후보가 언제 마르는지. 더미 캘린더가 오늘을 앞지르면 섹션이 빈다."""
+    from pension_agent.strategy_agent import support  # noqa: PLC0415
+
+    out = []
+    for key, label in (("event", "이벤트"), ("seminar", "세미나")):
+        rows = support.outreach_candidates().get(key) or []
+        last = max((r["end_date"] for r in rows), default=None)
+        out.append(f"{label} {len(rows)}건" + (f" (마지막 종료 {last})" if last else " — 후보 없음"))
+    return " · ".join(out)
+
+
 def _rows(lines: list[str], header: list[str], rows: list[list[str]]) -> None:
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "|".join("---" for _ in header) + "|")
@@ -146,14 +158,25 @@ def build() -> tuple[str, dict[str, int]]:
 
     # 5. 하드코딩된 데모 상수
     consts = [
-        ("customer.TODAY", str(customer.TODAY),
-         "데모 고정 기준일. 실배포 시 date.today() 로 바꾸고 assets.json 날짜도 함께 교체"),
+        ("customer.AS_OF", str(customer.AS_OF),
+         "목업 원장 스냅샷 기준일(잔액·수익률이 찍힌 날). customers.json meta.as_of 와 "
+         "묶여 있어 실데이터 조인 전까지는 안 움직인다"),
+        ("customer.today()", f"{customer.today()} (원장보다 {customer.ledger_age_days()}일 뒤)",
+         "상담 시점의 오늘 — 잔여일수·경과일의 기준. 기본은 실제 날짜이고 "
+         "PENSION_TODAY=YYYY-MM-DD 로 고정한다(테스트는 AS_OF 로 고정한 채 돈다)"),
+        ("data/assets.json 이벤트·세미나 창", _outreach_runway(),
+         "⑨ 후보는 종료되지 않은 콘텐츠만 남는다. 더미 캘린더라 오늘이 창을 지나가면 "
+         "후보가 마른다 — 실제 콘텐츠 캘린더 연동으로 교체"),
         ("customer.PERSONAS",
          f"{len(customer.PERSONAS)}명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)"
          if customer.PERSONAS else "0명 (비어 있음 — customers.json 미생성)",
          "시연용 목업 9케이스. scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체"),
         ("data/portfolios.json", f"{len(engine.PORTFOLIOS)}건",
-         "채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체"),
+         "채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체. "
+         "교체할 원문은 05_시황_상품_기반지식/02_상품/01_퇴직연금펀드_포트폴리오 다(대화형에는 "
+         "market 카드로 이미 적재돼 있다). 옮기려면 그 문서의 펀드 40여 종을 먼저 product "
+         "레코드로 저작해야 한다 — allocation[].product_id 가 그것을 참조하고, 적합성 게이트가 "
+         "타입드 필드로 비교하기 때문이다"),
         ("engine.TOP_N / ALT_N", f"{engine.TOP_N} / {engine.ALT_N}",
          "제안 1개 + 예비 1개 (07_에이전트_기능정의/01 ① 4)"),
         ("consult_agent.screens.MODE", f"{screens.MODE} ({screens.MODES[screens.MODE]})",

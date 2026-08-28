@@ -15,6 +15,7 @@ from pension_agent.strategy_agent.customer import (
     Profile,
     churn,
     days_to_year_end,
+    tax_credit,
 )
 from pension_agent.strategy_agent.engine.catalog import (
     ASSETS,
@@ -22,7 +23,7 @@ from pension_agent.strategy_agent.engine.catalog import (
     PORT_LABELS,
 )
 from pension_agent.strategy_agent.engine.products import _branch_defs
-from pension_agent.strategy_agent.engine.text import _Ctx, _eul, _pname, _ro, won
+from pension_agent.strategy_agent.engine.text import _Ctx, _eul, _pname, _ro, dday, won
 
 
 # ─────────────────────────────────────────────────────────────
@@ -167,6 +168,46 @@ def _customer_header(p: Profile) -> dict[str, Any]:
     return header
 
 
+def _account_state(p: Profile) -> dict[str, Any]:
+    """facts["account_state"] — 계좌 상태를 **상태가 정상일 때도** 싣는다.
+
+    화면(①~⑨)은 «왜 이 고객이 관리 대상인가»를 보여주는 자리라, 요건이 성립한 항목만
+    렌더한다. 그게 맞다 — 문제없는 항목까지 늘어놓으면 30초 안에 읽는 한 장이 안 된다.
+
+    그런데 **대화형은 같은 재료로 직원이 묻는 아무 질문에나 답한다.** 그래서 이 필터가
+    그대로 넘어오면 "디폴트옵션 설정돼 있어?" 가 **미설정 고객에게만** 답해지고, 설정된
+    고객에게는 "자료가 없어요" 가 나갔다 — 정확히 "네, 돼 있습니다" 라고 답해야 하는
+    자리에서. 값이 없어서가 아니라 «문제일 때만» 실려서다. 세액공제 잔여한도·연금개시
+    요건·판매중단 보유·ISA·가입일이 전부 같은 모양이었다(9명 중 답할 수 있는 고객이
+    0~3명).
+
+    그래서 여기 있는 것은 **정상도 값으로 말하는** 항목들이다 — "없음"·"미설정"·"설정"이
+    전부 답이다. 판정을 새로 만들지 않는다: 전부 원장 값이거나 이미 계산된 것을 옮겨 적을
+    뿐이고, 그래서 화면과 다른 값을 말할 수 없다(§3).
+
+    **화면에는 싣지 않는다.** `briefing` 이 아니라 별도 키인 이유가 그것이다 — 화면 요건은
+    REQUIREMENTS.md ①~⑨ 가 정하고, 이건 대화형이 읽는 재료다.
+    """
+    blocked = [h["name"] for h in p.holdings if h.get("discontinued")]
+    state: dict[str, Any] = {
+        "디폴트옵션": p.dopt,
+        "연금개시": "개시" if p.pension_started else "미개시",
+        "연금개시요건": "충족" if p.pension_eligible else "미충족",
+        # 값만 적는다. "한도를 다 채웠다" 같은 해석은 붙이지 않는다 — 잔여한도 0 의 사유는
+        # 원장이 말해주지 않고(연금개시 계좌라 납입 자체가 불가한 경우도 0 이다), 사유를
+        # 지어 붙이면 «출처는 진짜인데 뜻은 가짜인» 문장이 된다.
+        "세액공제_잔여한도": f"{p.room:,}만원",
+        "판매중단_보유상품": " · ".join(blocked) if blocked else "없음",
+        "ISA_만기자금": "보유" if p.isa else "없음",
+    }
+    # 가입일은 날짜로 싣는다. 경과연수만 주면 LLM 이 오늘에서 빼서 날짜를 «만들어» 말한다
+    # (matDate 가 이미 같은 이유로 있다).
+    if p.joined:
+        years = f" (가입 후 {p.invest_period_years}년)" if p.invest_period_years else ""
+        state["IRP_가입일"] = f"{p.joined}{years}"
+    return state
+
+
 def customer_header_line(customer: dict) -> str:
     """화면 상단 한 줄(REQUIREMENTS.md §3.1). 항목 순서는 07/01 ① 양식 "만 57세 · VIP" 를 따라
     연령 다음에 등급을 둔다. CLI·Streamlit 이 공유한다."""
@@ -229,10 +270,10 @@ def _briefing(p: Profile) -> dict:
         # 날짜를 함께 싣는 이유도 같다 — 재료에 없으면 대화형이 기준일에서 계산해 말한다.
         if p.maturities:
             snap["만기도래"] = " · ".join(
-                f"{m['date']} (D-{m['dd']}) {m['type']} {won(m['amount'])}"
+                f"{m['date']} ({dday(m['dd'])}) {m['type']} {won(m['amount'])}"
                 for m in p.maturities)
         else:  # 만기 목록 없이 조립된 프로파일(합성 케이스) — 가장 가까운 건만 표기한다
-            when = f"{p.matDate} (D-{p.matDD})" if p.matDate else f"D-{p.matDD}"
+            when = f"{p.matDate} ({dday(p.matDD)})" if p.matDate else dday(p.matDD)
             snap["만기도래"] = f"{when} · {won(p.matAmt)}"
     # 추가납입 여력은 별도 전략(과거 st.add_invest)이 아니라 briefing 사실로 남긴다.
     # 근거 수치는 여기서 확정하고, 실제 제안 여부는 LLM 이 맥락상 판단한다(prompts.py).
@@ -285,7 +326,7 @@ def _briefing(p: Profile) -> dict:
     # ISA 만기자금 — **IRP 계좌 밖의 돈**이라 보유 현황과 갈라 적는다. 추가납입 상담의
     # 재원 후보이고, 만기가 임박하면 그 시점이 상담 창구가 된다(시연 케이스 2건).
     if p.isa:
-        dd = f" (D-{p.isa['dd']})" if p.isa.get("dd") is not None else ""
+        dd = f" ({dday(p.isa['dd'])})" if p.isa.get("dd") is not None else ""
         snap["ISA만기자금(IRP 외부)"] = (
             f"{won(p.isa['amount'])} · 만기 {p.isa['date']}{dd} · {p.isa['org']}")
     # 연도별 납입 이력 — "작년엔 얼마 넣었어" 는 당해 납입액만으로 답할 수 없다.
@@ -298,7 +339,7 @@ def _briefing(p: Profile) -> dict:
     # 재료에 없으면 consult_agent 가 답을 써도 verify() 가 "재료 밖 수치"로
     # 거부한다 — 값은 Profile 에 있는데 답을 못 하던 상태가 정확히 그것이었다.
     snap["당해_납입액"] = won(p.pension_paid_ytd)
-    credit = int(min(p.pension_paid_ytd, TAX_CREDIT_CAP_WON) * p.tax_credit_rate)
+    credit = tax_credit(p.pension_paid_ytd, p.tax_credit_rate)
     snap["예상_세액공제액"] = (
         f"{won(credit)} (공제대상 {won(min(p.pension_paid_ytd, TAX_CREDIT_CAP_WON))}"
         f" × {p.tax_credit_rate * 100:.1f}%)"

@@ -44,9 +44,23 @@
 | `segment` | 검색(고객군 정의 = 문제상황) | `knowledge/data/kb_segments.json` |
 | `method` | 검색(관리 방법론 — 상황→액션 판단 규칙) | `knowledge/data/kb_methods.json` |
 | `procedure` | 검색(업무 처리 절차·화면번호) | `knowledge/data/kb_procedures.json` |
+| `screen` | 검색(단말 화면 레지스트리 — 어느 화면인가) | `knowledge/data/kb_screens.json` |
+| `channel` | 검색(비대면 채널 경로 — 고객이 앱·웹에서 어디로 가나) | `knowledge/data/kb_channels.json` |
 | `fieldtip` | 검색(현장의 목소리 — 영업점 관찰) | `knowledge/data/kb_fieldtips.json` |
+| `market` | 검색(시황 — 시장이 어떻게 돌아가나) | `knowledge/data/kb_market.json` |
+| `lineup` | 검색(운용 상품 — 우리가 뭘 파나. `product` 와 다르다: 그쪽은 게이트용 관계형 카탈로그) | `knowledge/data/kb_lineup.json` |
 
 `python -m pension_agent.knowledge.schema kinds` 로 최신 목록을 본다.
+
+**`market`·`lineup` 은 05 폴더가 자기 규칙을 선언한다.** 카드마다 손으로 적는 것이 아니라
+`05_시황_상품_기반지식/README.md` 의 표지 줄 두 개에서 변환기가 읽어 모든 카드에 싣는다 —
+`※` 줄은 시효 경고(`volatile`), `⚖` 줄은 인용 고지(`advisory`, "정보 제공 목적 · 투자권유
+시 자본시장법·당행 규정 준수 의무")다. 문구를 코드나 카드에 베껴 쓰면 README 가 바뀔 때
+갈리고, 갈리면 답변이 틀린 표시를 단다. **표시를 새로 만들 때도 여기에 줄을 추가한다.**
+
+`product_names`(답변이 말해도 되는 상품 이름의 등록부)도 저작자가 따로 적지 않는다 —
+문서 표의 «상품명»·«편입상품»·«디폴트옵션 상품» 칸을 변환기가 걷는다. 상품명을 산문에만
+적고 표에 안 넣으면 그 상품은 등록부에 없고, 그 이름을 말한 답변은 거부된다.
 
 **`doc` 은 다른 종류와 역할이 다르다** — 그 자체가 지식이 아니라 "이 카드가 어느 원본 문서에서
 왔는가"를 한 곳에서 관리하는 레지스트리다. 모든 카드가 `source.doc` 으로 여길 가리키고, 화면과

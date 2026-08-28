@@ -32,14 +32,40 @@ import json
 from dataclasses import dataclass, field
 from datetime import date
 
-# 데모 고정 기준일. date.today() 를 쓰지 않는 이유는 산출 재현성이다 — 만기 잔여일수(matDD)·
-# 연말까지 남은 일수·이벤트/세미나 임박 순서가 모두 이 값에 상대적이라, 오늘 날짜를 쓰면 같은
-# 페르소나가 실행일마다 다른 브리핑을 낸다(test_engine.py 의 단언도 이 값을 전제한다).
-# 값은 시연 데이터 원장(customers.json meta.as_of ← 원본 xlsx 09_데이터사전 "기준일")과
-# 일치해야 한다 — 아래 로더가 불일치를 검출한다. data/assets.json 의 이벤트·세미나 날짜도
-# 이 기준일에 유효하도록 배치돼 있다. 실제 배포 시 date.today() 로 바꾸고 assets.json 의
-# 날짜도 함께 실데이터로 교체한다.
-TODAY = date(2026, 8, 24)
+from pension_agent.clock import TODAY_ENV, today  # noqa: F401 — 오늘은 공용이다
+
+# ─────────────────────────────────────────────────────────────
+# 시간축은 **둘**이다. 하나로 붙여 놓으면 원장이 사흘만 묵어도 고객에게 사흘 틀린 말이 나간다.
+#
+#   AS_OF    원장 스냅샷 기준일 — 잔액·수익률·납입액이 «언제 찍힌 값»인가.
+#            시연 데이터 원장(customers.json meta.as_of ← 원본 xlsx 09_데이터사전 "기준일")과
+#            일치해야 하고, 아래 로더가 불일치를 검출한다. 목업을 바꾸지 않는 한 안 움직인다.
+#   today()  상담이 이뤄지는 «오늘» — 잔여일수·경과일의 기준. 만기까지 며칠, 연말까지 며칠,
+#            마지막 접촉 이후 며칠은 원장이 찍힌 날이 아니라 **오늘** 묻는 것이다.
+#
+# 예전에는 이 둘이 `TODAY` 하나였다. 그래서 원장 기준일(2026-08-24)에 고정된 채 사흘이
+# 지나자 화면이 "만기 D-17"(실제 D-14) · "연말까지 129일"(실제 126일)을 말했다 — 둘 다
+# 발송문·상담 대사로 그대로 나가는 수치다. 스냅샷 값(잔액)은 옮길 수 없지만 **날짜 산술은
+# 옮길 수 있다**: 원장에 절대 날짜(약정만기년월일·최근상담일)가 그대로 있기 때문이다.
+#
+# 재현성은 `PENSION_TODAY=YYYY-MM-DD` 로 확보한다. 테스트는 `tests/__init__.py` 가 이 값을
+# AS_OF 로 고정한 채 돌고(그래서 단언이 실행일에 흔들리지 않는다), 데모를 특정 날짜로
+# 얼려 보고 싶을 때도 같은 스위치를 쓴다. 고정하지 않으면 실제 오늘이다.
+#
+# data/assets.json 의 이벤트·세미나 날짜는 아직 이 기준일 언저리에 배치된 더미다 — 실제
+# 오늘이 그 창을 지나가면 ⑨ 후보가 마른다. 남은 여유는 `python -m scripts.demo_status` 가
+# 보고한다(§5).
+# ─────────────────────────────────────────────────────────────
+AS_OF = date(2026, 8, 24)
+
+#: 오늘은 여기 살지 않는다. 두 에이전트와 검증기가 함께 쓰는 값이라 공용(`pension_agent.clock`)
+#: 으로 올렸다 — 읽는 곳이 둘이면 한쪽만 고정된 채 갈라진다. 여기서는 도메인 쪽 이름으로
+#: 그대로 쓸 수 있게 재수출만 한다.
+
+
+def ledger_age_days() -> int:
+    """원장 스냅샷이 오늘 기준 며칠 묵었는가. 0 이면 원장과 오늘이 같은 날이다."""
+    return (today() - AS_OF).days
 
 # 위험등급. 오름차순으로 정의하며, 인덱스 비교로 상한 초과 여부를 판정한다.
 RISK = ["매우낮은위험", "낮은위험", "보통위험", "다소높은위험", "높은위험", "매우높은위험"]
@@ -64,6 +90,20 @@ TAX_CREDIT_RATE = {"5500이하": 0.165, "5500초과": 0.132}
 # 있고, test_engine.py 가 둘이 어긋나지 않는지 확인한다 — 세법 개정 시 한쪽만 고치면 화면과
 # 대화형 답변이 서로 다른 금액을 말하게 된다.
 TAX_CREDIT_CAP_WON = 9_000_000
+
+
+def tax_credit(paid_won: int, rate: float) -> int:
+    """납입액에 대한 세액공제 환급액(원). 공제 대상은 한도(TAX_CREDIT_CAP_WON)까지만이다.
+
+    브리핑 화면(⑤ 예상_세액공제액)과 대화형 계산기가 **같은 함수**를 쓴다. 두 곳이 각자
+    곱하면 세법이 바뀔 때 한쪽만 고쳐지고, 그때 화면과 답변이 서로 다른 금액을 말한다
+    (§3 "같은 판정을 두 번 구현하지 않는다").
+
+    여기서 나오는 것은 **공제 한도까지의 상한**이지 실제 환급액이 아니다 — 세액공제 전
+    결정세액이 공제액보다 적으면 그만큼 못 받는다(fact.k04.f2). 그 단서는 값을 내놓는
+    쪽이 함께 말해야 한다.
+    """
+    return int(min(paid_won, TAX_CREDIT_CAP_WON) * rate)
 
 #: 운용변경 없음 판정 — 최종 운용지시 이후 경과 개월수 임계값.
 #: 타겟 룰베이스 TG-201 「리밸런싱 장기 미실시 고객」 = 12개월(근거등급 D, 기획자 설계
@@ -105,7 +145,7 @@ class Profile:
     # 하나만 답하면 나머지는 없는 것이 되므로, 전체 목록은 `maturities` 가 따로 들고 있다.
     matDD: int | None = None  # 가장 가까운 만기까지의 잔여일수
     matDate: str | None = None  # 가장 가까운 만기일(ISO). 잔여일수만으로는 "언제야?"에 날짜로
-    # 답할 수 없다 — 재료에 없으면 LLM 이 TODAY 에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
+    # 답할 수 없다 — 재료에 없으면 LLM 이 오늘 날짜에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
     matAmt: int = 0  # 그 만기일에 도래하는 금액(원)
     holdings: list[dict] = field(default_factory=list)  # 보유상품 개별 종목 — 원장 그대로.
     # [{"name","type","amount","principal","ret_1y","ret_own","pct","grade","rate",
@@ -149,6 +189,8 @@ class Profile:
     # — 위험자산 한도 등 기존 게이팅 로직은 계속 port 4분류만 본다). 없으면 3분류 운용현황
     # 표시를 생략한다(engine._three_way_breakdown 참고).
     invest_period_years: float | None = None  # 투자기간(가입 후 경과연수). 상품추천 LLM 입력.
+    joined: str | None = None  # IRP 가입일(ISO). 경과연수만으로는 "언제 가입했어?" 에 날짜로
+    # 답할 수 없다 — matDate 와 같은 이유다(재료에 없으면 LLM 이 오늘에서 빼서 말한다).
     pension_started: bool = False  # 연금수령 개시 여부. 참이면 추가납 요건(add·tax)이 성립하지 않는다
     # (conditions() — 07_에이전트_기능정의/01 ① "연금개시 계좌 → 추가납 권유 금지", 방법론 59 "연금개시 →
     # 추가입금 불가"; REQUIREMENTS.md §7). 상품추천 LLM 입력(§9)에도 쓴다.
@@ -277,7 +319,9 @@ def conditions(p: Profile) -> list[str]:
         a.add("dor")
     if p.nchM >= NO_CHANGE_MONTHS:
         a.add("nch")
-    if p.matDD is not None and p.matDD <= MAT_WINDOW_DAYS:
+    # 아래끝 0 이 있어야 «만기 1개월 전 안내»가 성립한다 — 오늘이 만기를 지나가면 matDD 는
+    # 음수가 되는데, 상한만 보면 지난 만기가 영원히 요건에 남아 «곧 만기»라고 안내하게 된다.
+    if p.matDD is not None and 0 <= p.matDD <= MAT_WINDOW_DAYS:
         a.add("mat")
     if p.port[3] >= 50:
         a.add("sec")
@@ -336,9 +380,15 @@ def conditions(p: Profile) -> list[str]:
     return [k for k in PRIO if k in a]
 
 
-def days_to_year_end() -> int:
-    """연말까지의 잔여일수. 세액공제 전략의 시급성 산출에 사용한다."""
-    return (date(TODAY.year, 12, 31) - TODAY).days
+def days_to_year_end(base: date | None = None) -> int:
+    """연말(12/31)까지의 잔여일수. 세액공제 전략의 시급성 산출에 사용한다.
+
+    **오늘은 세지 않는다** — 12/31 당일이면 0 이다. "오늘 포함 며칠"은 이 값 +1 이라
+    같은 날에 대해 두 숫자가 다 성립한다. 어느 쪽인지 말하지 않고 하나만 던지면 하루짜리
+    오안내가 되므로, 상담에 싣는 쪽(consult_agent 의 `date` 도구)은 둘을 함께 밝힌다.
+    """
+    base = base or today()
+    return (date(base.year, 12, 31) - base).days
 
 
 # ─────────────────────────────────────────────────────────────
@@ -369,7 +419,9 @@ _BOND_GRADES = ("매우낮은위험", "낮은위험")  # 수익증권 중 채권
 
 
 def _days_since(iso: str | None) -> int | None:
-    return (TODAY - date.fromisoformat(iso)).days if iso else None
+    """그 날짜 이후 **오늘까지** 경과한 일수. 기준은 AS_OF 가 아니다 — 마지막 접촉이
+    언제였는지는 원장이 찍힌 날이 아니라 지금 묻는 것이기 때문이다."""
+    return (today() - date.fromisoformat(iso)).days if iso else None
 
 
 def _port(rec: dict) -> tuple[list[int], int]:
@@ -454,7 +506,7 @@ def _isa(rec: dict) -> dict | None:
         return None
     when = t.get("ISA만기일")
     return {"amount": amt, "date": when,
-            "dd": (date.fromisoformat(when) - TODAY).days if when else None,
+            "dd": (date.fromisoformat(when) - today()).days if when else None,
             "org": t.get("ISA기관구분"), "within_1m": t.get("ISA만기1개월이내보유여부") == "Y"}
 
 
@@ -465,11 +517,28 @@ def _paid_by_year(rec: dict) -> dict[str, int]:
             if k.endswith("IRP납입액") and not k.startswith("당해") and v}
 
 
+def next_maturity(mats: list[dict]) -> dict | None:
+    """만기 목록에서 «지금 이야기할 만기» 한 건. 만기일 오름차순 목록을 받는다.
+
+    아직 오지 않은 것 중 가장 가까운 것이다. 오늘이 움직이므로 목록 맨 앞이 이미 지난
+    만기일 수 있는데, 그걸 그대로 집으면 그 뒤에 있는 **진짜 다음 만기가 통째로 가려져**
+    30일 안에 만기가 오는 고객이 요건에서 빠진다.
+
+    전부 지났으면 **가장 최근에 지난 것**을 집는다(맨 앞은 제일 오래 전 것이라 쓸모가 없다).
+    그때 화면은 "만기 경과 N일"로 읽고(engine/text.py::dday) 요건은 서지 않는다 —
+    지난 돈이 어떻게 됐는지는 원장 스냅샷이 모르므로 사실만 적고 판단은 직원에게 남긴다.
+    """
+    if not mats:
+        return None
+    upcoming = [m for m in mats if m["dd"] >= 0]
+    return upcoming[0] if upcoming else mats[-1]
+
+
 def _maturities(rec: dict) -> list[dict]:
     """만기일이 있는 보유상품 전체를 만기일 오름차순으로. 예금만이 아니다 — GIC 처럼
     만기가 있는 다른 상품도 함께 담는다(상품 유형을 같이 실어야 어느 만기인지 분간된다)."""
     rows = [{"date": p["약정만기년월일"],
-             "dd": (date.fromisoformat(p["약정만기년월일"]) - TODAY).days,
+             "dd": (date.fromisoformat(p["약정만기년월일"]) - today()).days,
              "type": p["상품유형"], "name": p["상품명"], "amount": p["평가금액"]}
             for p in rec["products"] if p.get("약정만기년월일")]
     return sorted(rows, key=lambda r: (r["date"], r["name"]))
@@ -481,9 +550,10 @@ def _to_profile(rec: dict) -> Profile:
     mats = _maturities(rec)
     assets = _assets(rec)
     isa = _isa(rec)
-    # 가장 가까운 만기 = 요건 판정·재예치 전략의 입력. 같은 날짜에 여러 건이면 합산한다.
-    nearest = mats[0]["date"] if mats else None
-    mat_dd = mats[0]["dd"] if mats else None
+    # 요건 판정·재예치 전략의 입력이 되는 만기 한 건. 같은 날짜에 여러 건이면 합산한다.
+    focus = next_maturity(mats)
+    nearest = focus["date"] if focus else None
+    mat_dd = focus["dd"] if focus else None
     mat_amt = sum(m["amount"] for m in mats if m["date"] == nearest)
     rk = basic["투자성향"]
     return Profile(
@@ -503,6 +573,7 @@ def _to_profile(rec: dict) -> Profile:
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
+        joined=rec["pension"].get("IRP가입일"),
         pension_started=rec["pension"]["연금개시여부"] == "Y",
         pension_eligible=rec["pension"]["연금개시요건충족여부"] == "Y",
         club_grade=basic["KB스타클럽등급"],
@@ -516,11 +587,12 @@ def _load_personas() -> list[Profile]:
         return []
     doc = json.loads(config.CUSTOMERS_JSON.read_text(encoding="utf-8"))
     as_of = doc.get("meta", {}).get("as_of")
-    if as_of != TODAY.isoformat():
-        # 기준일이 어긋나면 만기 잔여일수·미접촉 일수가 전부 밀린다. 조용히 계속하지 않는다.
+    if as_of != AS_OF.isoformat():
+        # 스냅샷 값(잔액·수익률)이 어느 시점 것인지가 어긋나면 화면 전체가 거짓이 된다.
+        # 조용히 계속하지 않는다. 오늘(today())과 어긋나는 것은 정상이다 — 원장은 묵는다.
         raise ValueError(
-            f"customers.json 기준일({as_of})이 customer.TODAY({TODAY})와 다릅니다 — "
-            "원본 xlsx 교체 시 TODAY 를 함께 맞추세요.")
+            f"customers.json 기준일({as_of})이 customer.AS_OF({AS_OF})와 다릅니다 — "
+            "원본 xlsx 교체 시 AS_OF 를 함께 맞추세요.")
     return [_to_profile(r) for r in doc["records"]]
 
 
