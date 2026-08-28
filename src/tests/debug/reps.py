@@ -133,7 +133,7 @@ def _tools(turn: TR.Turn) -> str:
     return " → ".join(out) or "(없음)"
 
 
-def _log(turn: TR.Turn, result: dict) -> str:
+def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
     """시연용 한 줄 로그 — **어떤 재료가 들어가서 LLM 이 뭐라고 썼나**, 그것만.
 
     트레이스 전체(`TR.render`)는 노드 순서와 게이트 트리까지 그리는 진단 도구다. 시연에서
@@ -161,13 +161,26 @@ def _log(turn: TR.Turn, result: dict) -> str:
             out.append(f"   │      → {cid}  {titles.get(cid, '')}".rstrip())
 
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
-    blocked = next((g.name for g in node.gates if not g.passed), None) if node else None
+    stopped = next((g for g in node.gates if not g.passed), None) if node else None
     if node is not None and node.delta.get("clarify"):
         out.append("   └ 갈래가 갈려서 답 대신 되물음 (써 둔 답은 버린다)")
         return "\n".join(out)
-    verdict = (f"검증에서 걸림({blocked}) — 생성문 폐기" if blocked else
+    verdict = (f"검증에서 걸림({stopped.name}) — 생성문 폐기" if stopped else
                "근거와 대조 통과" if (node and node.gates) else "대조할 수치 없음")
     out.append(f"   └ 위 재료만 보고 LLM 이 {len(result.get('answer') or '')}자 작성 · {verdict}")
+    # 폐기된 턴에서 **무엇이 걸렸는지**까지 적는다. 이름만 남기면 화면에 떨어진 원문
+    # 덤프를 보고도 «왜 잘렸나»를 알 수 없어, 고칠 것이 질문인지 재료인지 검증기인지
+    # 가려지지 않는다 — 리허설에서 제일 먼저 알아야 하는 값이다.
+    if stopped is not None and stopped.detail:
+        shown = [str(d) for d in stopped.detail[:6]]
+        more = f" 외 {len(stopped.detail) - len(shown)}건" if len(stopped.detail) > len(shown) else ""
+        out.append(f"     ↳ 재료에 없다고 본 것: {' · '.join(shown)}{more}")
+    if show_llm and stopped is not None:
+        draft = next((c.text for n in turn.nodes for c in n.calls
+                      if c.stage == "compose" and c.text), "")
+        if draft:
+            out.append("     ↳ 버려진 생성문:")
+            out += [f"       {line}" for line in draft.splitlines()]
     return "\n".join(out)
 
 
@@ -250,7 +263,15 @@ def main(argv: list[str]) -> int:
     demo = "--demo" in argv
     brief = "--brief" in argv
     debug = "--debug" in argv
+    show_llm = "--show-llm" in argv
     picked = {a for a in argv if a[0].isdigit()}
+
+    unknown = [a for a in argv if a.startswith("--")
+               and a not in ("--demo", "--brief", "--debug", "--show-llm")]
+    if unknown:
+        print(f"모르는 옵션입니다: {' '.join(unknown)}")
+        print("  옵션: --demo · --brief · --debug · --show-llm · 케이스 번호")
+        return 1
 
     if not LLM.available():
         print("LLM 이 설정돼 있지 않습니다 — 이 스크립트는 실 LLM 으로 도는 것이 목적입니다.")
@@ -293,7 +314,7 @@ def main(argv: list[str]) -> int:
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
                     if demo and debug and not brief:
                         print()
-                        print(_log(tr.turns[-1], result))
+                        print(_log(tr.turns[-1], result, show_llm=show_llm))
                 else:
                     if trace_by_default and not brief:
                         print()

@@ -38,6 +38,7 @@ $CADR                                                 # 검토 10케이스 + 요
 $CADR --brief                                         # 요약표만
 $CADR --demo                                          # 시연 대본 13턴 (청중이 보는 화면)
 $CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
+$CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
 
 # ── 테스트 · 점검 (LLM 키 없이 돈다)
 python -m tests.test_engine            # ①~⑤ 결정론 로직
