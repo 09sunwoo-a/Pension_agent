@@ -154,7 +154,7 @@ def installed(scn: Scenario):
         P.generate = plan_generate
         CL.generate = lambda prompt, **kw: '{"ask": null}'
         # 적합성 게이트는 이 스위트의 관심사가 아니다 — 시나리오가 지정한 카드만 남긴다.
-        T.fits_question = lambda q, hits, kind="지식", history=None: (
+        T.fits_question = lambda q, hits, kind="지식", history=None, query=None: (
             [(s, c) for s, c in hits if c.get("id") in scn.keep] if scn.keep else hits)
         T.llm_pick = S.llm_pick = lambda kinds, query: []
         yield scn

@@ -91,6 +91,20 @@ TAX_CREDIT_RATE = {"5500이하": 0.165, "5500초과": 0.132}
 # 대화형 답변이 서로 다른 금액을 말하게 된다.
 TAX_CREDIT_CAP_WON = 9_000_000
 
+
+def tax_credit(paid_won: int, rate: float) -> int:
+    """납입액에 대한 세액공제 환급액(원). 공제 대상은 한도(TAX_CREDIT_CAP_WON)까지만이다.
+
+    브리핑 화면(⑤ 예상_세액공제액)과 대화형 계산기가 **같은 함수**를 쓴다. 두 곳이 각자
+    곱하면 세법이 바뀔 때 한쪽만 고쳐지고, 그때 화면과 답변이 서로 다른 금액을 말한다
+    (§3 "같은 판정을 두 번 구현하지 않는다").
+
+    여기서 나오는 것은 **공제 한도까지의 상한**이지 실제 환급액이 아니다 — 세액공제 전
+    결정세액이 공제액보다 적으면 그만큼 못 받는다(fact.k04.f2). 그 단서는 값을 내놓는
+    쪽이 함께 말해야 한다.
+    """
+    return int(min(paid_won, TAX_CREDIT_CAP_WON) * rate)
+
 #: 운용변경 없음 판정 — 최종 운용지시 이후 경과 개월수 임계값.
 #: 타겟 룰베이스 TG-201 「리밸런싱 장기 미실시 고객」 = 12개월(근거등급 D, 기획자 설계
 #: 제안값 — 원문은 "리밸런싱이 필요한 고객"이라고만 하고 기간을 말하지 않는다).
@@ -175,6 +189,8 @@ class Profile:
     # — 위험자산 한도 등 기존 게이팅 로직은 계속 port 4분류만 본다). 없으면 3분류 운용현황
     # 표시를 생략한다(engine._three_way_breakdown 참고).
     invest_period_years: float | None = None  # 투자기간(가입 후 경과연수). 상품추천 LLM 입력.
+    joined: str | None = None  # IRP 가입일(ISO). 경과연수만으로는 "언제 가입했어?" 에 날짜로
+    # 답할 수 없다 — matDate 와 같은 이유다(재료에 없으면 LLM 이 오늘에서 빼서 말한다).
     pension_started: bool = False  # 연금수령 개시 여부. 참이면 추가납 요건(add·tax)이 성립하지 않는다
     # (conditions() — 07_에이전트_기능정의/01 ① "연금개시 계좌 → 추가납 권유 금지", 방법론 59 "연금개시 →
     # 추가입금 불가"; REQUIREMENTS.md §7). 상품추천 LLM 입력(§9)에도 쓴다.
@@ -557,6 +573,7 @@ def _to_profile(rec: dict) -> Profile:
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
+        joined=rec["pension"].get("IRP가입일"),
         pension_started=rec["pension"]["연금개시여부"] == "Y",
         pension_eligible=rec["pension"]["연금개시요건충족여부"] == "Y",
         club_grade=basic["KB스타클럽등급"],

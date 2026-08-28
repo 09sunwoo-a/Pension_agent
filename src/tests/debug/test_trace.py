@@ -153,8 +153,12 @@ check(tr6.blocked_by() == "verify_texts" and r6["answer"].startswith("■"),
       str(tr6.gates().get("verify_texts")))
 
 # 버려진 값이 실제로는 원장 안에 있다 — 표기만 달랐다는 것을 못박는다.
+#
+# 연월은 **날짜 정규형**으로 찾는다. 원장은 "2026.06" 이라 적지만, 날짜를 통짜로 대조하게
+# 되면서(verify._CHUNK) 그 표기는 맨 토큰 "2026.06" 이 아니라 `날짜:2026-06` 으로 나온다 —
+# 여기서 옛 표기를 찾으면 «표기가 판정을 뒤집으면 안 된다»는 이 검사 자체가 표기에 걸린다.
 _ledger = " ".join(_evidence_texts("korean_units"))
-check({"1485000", "148.5", "1188000", "2026.06"} <= V.numbers(_ledger),
+check({"1485000", "148.5", "1188000", V._dform("2026", "06")} <= V.numbers(_ledger),
       "korean_units: 같은 값이 원장에 다른 표기로 들어 있다(오답이 아니었다)",
       str(sorted(V.numbers(_ledger))))
 

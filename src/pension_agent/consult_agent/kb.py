@@ -266,8 +266,6 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
     """
     st = Store([data_dir])
     kb = KnowledgeBase()
-    for r in st.records("fact"):
-        kb.facts[r["id"]] = _flat(r, "fact")
     for r in st.records("resource"):
         kb.resources[r["id"]] = {"id": r["id"], **(r.get("fields") or {})}
     for r in st.records("doc"):
@@ -281,6 +279,12 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
             kb.cards.append(card)
             if kind == "pitch":
                 kb.pitches.append(card)   # 같은 객체를 공유한다(사본 아님)
+            elif kind == "fact":
+                # 팩트는 **두 자리에 같은 객체로** 산다 — `facts` 는 id 로 참조하는 자리
+                # (화법의 supporting_facts·전략 근거), `cards` 는 검색 색인이다. 예전에는
+                # 앞엣것만 있어서 팩트가 LLM 카드 선택의 후보가 못 됐다(9종 중 유일).
+                # 사본을 만들면 한쪽만 고쳐지는 자리가 생기므로 화법과 같은 규약으로 둔다.
+                kb.facts[card["id"]] = card
 
     seen: dict[str, dict] = {}
     for r in st.records():
@@ -472,6 +476,7 @@ _BUCKET_LETTER = {"pitch": "P", "procedure": "R", "segment": "S", "method": "M",
 #: 그 상태였다(설명 없이 "■ screen — (총 87장)"으로만 떴다).
 _KIND_DESC = {
     "pitch": "고객에게 실제로 하는 말 — 대사·논거·반론 대응",
+    "fact": "제도·상품의 확정 수치 — 한도·세율·수수료",
     "procedure": "시스템에서 처리하는 절차 — 조회 경로·화면·처리 순서",
     "screen": "직원이 단말에서 여는 화면 — 화면번호·화면명",
     "channel": "고객이 앱·웹에서 직접 하는 경로 — 스타뱅킹·인터넷뱅킹 메뉴",
@@ -486,8 +491,8 @@ _KIND_DESC = {
 #: 버킷 카탈로그에 싣는 종류와 그 순서. **적재되는 종류는 전부 여기 있어야 한다** —
 #: 빠지면 그 종류의 카드가 버킷에 안 들어가고, LLM 이 고를 후보 목록에서 통째로 사라진다
 #: (n-gram 폴백으로만 닿게 되어, 사실상 "있는데 못 찾는" 상태가 된다).
-_KIND_ORDER = ("pitch", "procedure", "screen", "channel", "segment", "method", "fieldtip",
-               "market", "lineup")
+_KIND_ORDER = ("pitch", "fact", "procedure", "screen", "channel", "segment", "method",
+               "fieldtip", "market", "lineup")
 
 #: index_slice 의 기본 문자 예산. 한글은 대략 2자/토큰이라 4000자 ≈ 2k 토큰이고,
 #: 가장 큰 버킷(3,652자) 하나가 통째로 들어간다.
@@ -502,6 +507,34 @@ def sources_of(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> list[dict]:
     return [{"id": c["id"], "title": c.get("title") or c.get("label"),
              "doc": origin_of(kb, c),
              "score": round(s, 2), "page": c.get("page")} for s, c in hits]
+
+
+def product_names(kb: KnowledgeBase) -> set[str]:
+    """지식베이스가 **선언한** 상품 이름 전부(카드의 `product_names`).
+
+    답변이 상품명을 말했을 때 「실재하는 상품인가」를 대조하는 등록부의 한쪽이다
+    (다른 쪽은 strategy_agent 의 상품 카탈로그 — `nodes/plan.py::_known_products`).
+
+    이게 없던 동안 등록부는 데모 카탈로그 12종뿐이었고, **행내 원문 표에 버젓이 있는
+    상품**(「KB 온국민 TDF 시리즈」·「KB RISE 미국ETF 모아드림」…)을 말한 답변이 전부
+    '미등록'으로 판정돼 통째로 버려졌다 — 그 자리에 근거 원문이 덤프됐다.
+
+    이름을 여기서 **추론하지 않는다.** 카드가 선언한 것만 읽는다 — 어느 칸을 상품명으로
+    볼지는 변환기가 정한다(`build_kb._PRODUCT_COLUMNS`).
+    """
+    return {n for c in kb.cards for n in (c.get("product_names") or []) if n}
+
+
+def advisory_note(kb: KnowledgeBase) -> str | None:
+    """지식베이스가 선언한 **인용 고지** — "정보 제공 목적 · 투자권유 시 자본시장법·당행
+    규정 준수 의무"(05 폴더 README 가 선언하고 변환기가 카드마다 싣는다).
+
+    카드가 아닌 재료(코드가 계산한 적합성 판정)에도 이 표시가 필요한데, 문구를 코드
+    상수로 두면 §12 gap 20 이 경계하는 모양이 된다 — 재료 종류마다 코드 상수가 하나씩
+    생기면 「표시는 데이터 선언이 정한다」(§7)가 사실상 없어진다. 그래서 선언된 문구를
+    한 곳에서 읽어 쓴다. 선언이 없으면 None 이고, 그러면 표시도 붙지 않는다.
+    """
+    return next((c["advisory"] for c in kb.cards if c.get("advisory")), None)
 
 
 _NO_GROUP = "(미분류)"

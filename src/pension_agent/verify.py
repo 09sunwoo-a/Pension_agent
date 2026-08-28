@@ -25,7 +25,28 @@ from pension_agent.clock import today
 # 어긋났고, 그래서 **맞는 답변이 '원장 밖 수치'로 버려졌다**(compose 가 근거 원문을 그대로
 # 덤프하던 자리). 마지막 글자는 반드시 숫자여야 한다.
 _NUM = re.compile(r"\d(?:[\d,]*\d)?(?:\.\d+)?%?")
-_PROD = re.compile(r"KB\s[^\s,·)]+(?:\s[^\s,·)]+)*")
+
+# 상품명 후보. **경계가 판정을 뒤집는다** — 예전 패턴(`KB\s[^\s,·)]+(?:\s[^\s,·)]+)*`)은
+# 쉼표·`·`·`)` 를 만날 때까지 문장을 통째로 삼켰다. 그래서
+#
+#   "**KB 온국민 TDF 시리즈**나 **KBSTAR 미국나스닥100**"
+#     → 'KB 온국민 TDF 시리즈**나 **KBSTAR 미국나스닥100'  (한 이름으로 붙음)
+#
+# 처럼 **실재 상품과 지어낸 상품이 한 토큰으로 붙어**, 등록부에 있는 쪽까지 미등록으로
+# 판정됐다 — 답변이 통째로 버려지고 compose 가 근거 원문을 덤프한 실제 사고다. 마크다운
+# 강조·따옴표·괄호를 경계에 넣고 어절 수를 묶어, 두 이름이 따로 잡히게 한다(실재 상품은
+# 통과하고 지어낸 이름만 신고된다).
+#
+# `KB` 뒤의 공백은 그대로 요구한다. 없애면 "KB국민은행"·"KB자산운용" 같은 기관명이
+# 상품명 후보가 되고, 그건 맞는 문장을 거부하는 쪽의 사고다.
+_PROD_STOP = r"[^\s,·()\[\]{}<>*`\"'“”‘’\n]"
+_PROD = re.compile(rf"KB\s{_PROD_STOP}+(?:\s{_PROD_STOP}+){{0,3}}")
+
+#: 상품명 대조용 정규형. **표기의 공백이 판정을 뒤집으면 안 된다** — 지식베이스는
+#: "KB 온국민 TDF 시리즈"와 "KB온국민적격TDF2035(H)" 두 표기를 다 쓰고, LLM 은 그 사이
+#: 어디로도 쓴다. 뒤에 붙는 조사("…C-P의")는 접두 대조가 알아서 흡수한다.
+def _prod_key(name: str) -> str:
+    return re.sub(r"\s+", "", name)
 
 # 같은 값의 다른 표기 — 단위로 끊어 쓴 금액과 풀어 쓴 연월.
 #
@@ -276,6 +297,39 @@ def numbers(text: str, this_year: int | None = None) -> set[str]:
     return out | _date_forms(text, this_year if this_year is not None else today().year)
 
 
+def first_measure(text: str) -> tuple[str, set[str]] | None:
+    """텍스트에 **처음 나오는** 수치 한 덩이 — (원표기, 허용 형태). 수치가 없으면 None.
+
+    "이 항목이 말하는 값"을 가리려는 호출부(relations.labeled_mispaired)를 위해 있다.
+    창 안의 수치를 전부 보면 뒤따르는 무관한 수치까지 그 항목의 값으로 오해하게 된다 —
+    "잔여한도는 0만원이라 900만원 한도를 다 채우셨어요" 의 900 이 그것이다.
+    """
+    for toks, forms, date in _measures(text):
+        return (date or " ".join(toks)), forms
+    return None
+
+
+def first_amount(text: str) -> tuple[str, int] | None:
+    """텍스트에 처음 나오는 **금액**과 그 값(원). 금액이 없으면 None.
+
+    «금액»은 **단위가 붙은 수치**만이다("300만원"·"1억"·"148만 5천원"). 단위 없는 맨숫자
+    ("300 더 넣으면")는 금액으로 보지 않는다 — 상담 맥락에서 300원인지 300만원인지 가릴
+    근거가 없고, 그 추측이 계산기의 입력이 되면 **틀린 입력이 승인된 출력**이 되기 때문이다
+    (계산 결과는 원장에 실려 인용이 허가된다). 못 가리면 그냥 없는 것으로 둔다.
+
+    단위를 접는 일은 `_measures` 가 이미 한다 — 접은 값이 원표기 토큰과 함께 형태 집합에
+    들어 있으므로, 형태가 둘 이상이면 그중 가장 큰 수가 접은 값이다.
+    """
+    for toks, forms, date in _measures(text):
+        if date is not None:
+            continue                       # 날짜는 금액이 아니다
+        plain = [f for f in forms if re.fullmatch(r"\d+(?:\.\d+)?", f)]
+        if len(plain) < 2:
+            continue                       # 단위가 없어 접히지 않은 수 → 금액으로 보지 않는다
+        return " ".join(toks), int(float(max(plain, key=lambda f: float(f))))
+    return None
+
+
 def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
     """텍스트 묶음에서 인용 가능한 숫자를 걷는다. 상품명은 텍스트만으로는 판별할 수 없어
     비워 둔다 — 상품 목록을 아는 호출부가 known_products 로 넘긴다.
@@ -322,12 +376,25 @@ def verify_texts(
 ) -> tuple[bool, list[str]]:
     """근거 원장(텍스트 묶음) 대조판. 원장에 없는 수치·상품명이 있으면 거부한다.
 
-    상품명은 원장 텍스트에서 뽑지 않고 known_products 만 허용한다 — 텍스트에서 "KB ○○"
-    패턴을 긁어 허용 집합에 넣으면, LLM 이 지어낸 상품명이 답변과 원장에 함께 실려 있을 때
-    서로를 근거로 통과해버린다.
+    상품명은 **등록부 ∩ 이번 턴 원장**이다. 두 겹인 이유가 각각 있다.
+
+    · 등록부(`known_products`) — 실재하는 상품인가. 원장 텍스트에서 "KB ○○" 패턴을 긁어
+      허용 집합을 만들면, LLM 이 지어낸 이름이 답변과 원장에 함께 실려 있을 때 서로를
+      근거로 통과한다. 그래서 이름의 상한은 **닫힌 목록**이 쥔다.
+    · 원장 — 이번 답의 재료였는가. 등록부만 보면 이번 턴에 부르지도 않은 문서의 상품을
+      끌어다 말할 수 있다. 등록부가 데모 12종이던 동안은 이 구멍이 좁았지만, 지식베이스가
+      선언한 이름까지 합쳐 80여 종이 되면서 넓어졌다.
+
+    닫힌 목록이 바깥에 있으므로 원장을 함께 보는 것이 위 순환을 되살리지 않는다 — 지어낸
+    이름은 등록부에 없어 어느 쪽이든 막힌다.
+
+    대조는 공백을 무시한다. 원장은 줄을 바꿔 적고 LLM 은 붙여 쓰는데, 그 차이로 맞는
+    답변이 막히면 안 된다(`_prod_key` 머리말).
     """
     nums, _ = allowed_from_texts(texts)
-    return _judge(sentence, nums, known_products, known_products)
+    blob = _prod_key("\n".join(texts))
+    cited = {p for p in known_products if p and _prod_key(p) in blob}
+    return _judge(sentence, nums, cited, known_products)
 
 
 def _judge(
@@ -348,8 +415,16 @@ def _judge(
             bad.append(f"날짜 '{date}'")
             continue
         bad += [f"수치 '{t}'" for t in toks if _canon(t) not in nums]
-    for m in (x.strip() for x in _PROD.findall(sentence)):
-        if any(m.startswith(x) or x.startswith(m) for x in prods):
+    allowed = [_prod_key(x) for x in prods if x]
+    registered = [_prod_key(x) for x in known_products if x]
+    # 문장 끝 구두점은 이름의 일부가 아니다 — 거부 사유가 "'KB 무지개 펀드를 권합니다.'"
+    # 처럼 문장째로 찍히면 사람이 답변 어디를 봐야 할지 모른다.
+    for m in (x.strip().rstrip(".!?。") for x in _PROD.findall(sentence)):
+        key = _prod_key(m)
+        if any(key.startswith(x) or x.startswith(key) for x in allowed):
             continue
-        bad.append(f"상품명 '{m}' ({'게이트 미통과' if m in known_products else '미등록'})")
+        # 시스템에 등록은 됐지만 이번 재료에 없는 것("게이트 미통과")과 어디에도 없는 것
+        # ("미등록")은 대응이 다르다. 접두로 판정한다 — 조사가 붙은 표기까지 같이 본다.
+        seen = any(key.startswith(x) or x.startswith(key) for x in registered)
+        bad.append(f"상품명 '{m}' ({'게이트 미통과' if seen else '미등록'})")
     return (not bad), bad

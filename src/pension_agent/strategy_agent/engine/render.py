@@ -15,6 +15,7 @@ from pension_agent.strategy_agent.customer import (
     Profile,
     churn,
     days_to_year_end,
+    tax_credit,
 )
 from pension_agent.strategy_agent.engine.catalog import (
     ASSETS,
@@ -167,6 +168,46 @@ def _customer_header(p: Profile) -> dict[str, Any]:
     return header
 
 
+def _account_state(p: Profile) -> dict[str, Any]:
+    """facts["account_state"] — 계좌 상태를 **상태가 정상일 때도** 싣는다.
+
+    화면(①~⑨)은 «왜 이 고객이 관리 대상인가»를 보여주는 자리라, 요건이 성립한 항목만
+    렌더한다. 그게 맞다 — 문제없는 항목까지 늘어놓으면 30초 안에 읽는 한 장이 안 된다.
+
+    그런데 **대화형은 같은 재료로 직원이 묻는 아무 질문에나 답한다.** 그래서 이 필터가
+    그대로 넘어오면 "디폴트옵션 설정돼 있어?" 가 **미설정 고객에게만** 답해지고, 설정된
+    고객에게는 "자료가 없어요" 가 나갔다 — 정확히 "네, 돼 있습니다" 라고 답해야 하는
+    자리에서. 값이 없어서가 아니라 «문제일 때만» 실려서다. 세액공제 잔여한도·연금개시
+    요건·판매중단 보유·ISA·가입일이 전부 같은 모양이었다(9명 중 답할 수 있는 고객이
+    0~3명).
+
+    그래서 여기 있는 것은 **정상도 값으로 말하는** 항목들이다 — "없음"·"미설정"·"설정"이
+    전부 답이다. 판정을 새로 만들지 않는다: 전부 원장 값이거나 이미 계산된 것을 옮겨 적을
+    뿐이고, 그래서 화면과 다른 값을 말할 수 없다(§3).
+
+    **화면에는 싣지 않는다.** `briefing` 이 아니라 별도 키인 이유가 그것이다 — 화면 요건은
+    REQUIREMENTS.md ①~⑨ 가 정하고, 이건 대화형이 읽는 재료다.
+    """
+    blocked = [h["name"] for h in p.holdings if h.get("discontinued")]
+    state: dict[str, Any] = {
+        "디폴트옵션": p.dopt,
+        "연금개시": "개시" if p.pension_started else "미개시",
+        "연금개시요건": "충족" if p.pension_eligible else "미충족",
+        # 값만 적는다. "한도를 다 채웠다" 같은 해석은 붙이지 않는다 — 잔여한도 0 의 사유는
+        # 원장이 말해주지 않고(연금개시 계좌라 납입 자체가 불가한 경우도 0 이다), 사유를
+        # 지어 붙이면 «출처는 진짜인데 뜻은 가짜인» 문장이 된다.
+        "세액공제_잔여한도": f"{p.room:,}만원",
+        "판매중단_보유상품": " · ".join(blocked) if blocked else "없음",
+        "ISA_만기자금": "보유" if p.isa else "없음",
+    }
+    # 가입일은 날짜로 싣는다. 경과연수만 주면 LLM 이 오늘에서 빼서 날짜를 «만들어» 말한다
+    # (matDate 가 이미 같은 이유로 있다).
+    if p.joined:
+        years = f" (가입 후 {p.invest_period_years}년)" if p.invest_period_years else ""
+        state["IRP_가입일"] = f"{p.joined}{years}"
+    return state
+
+
 def customer_header_line(customer: dict) -> str:
     """화면 상단 한 줄(REQUIREMENTS.md §3.1). 항목 순서는 07/01 ① 양식 "만 57세 · VIP" 를 따라
     연령 다음에 등급을 둔다. CLI·Streamlit 이 공유한다."""
@@ -298,7 +339,7 @@ def _briefing(p: Profile) -> dict:
     # 재료에 없으면 consult_agent 가 답을 써도 verify() 가 "재료 밖 수치"로
     # 거부한다 — 값은 Profile 에 있는데 답을 못 하던 상태가 정확히 그것이었다.
     snap["당해_납입액"] = won(p.pension_paid_ytd)
-    credit = int(min(p.pension_paid_ytd, TAX_CREDIT_CAP_WON) * p.tax_credit_rate)
+    credit = tax_credit(p.pension_paid_ytd, p.tax_credit_rate)
     snap["예상_세액공제액"] = (
         f"{won(credit)} (공제대상 {won(min(p.pension_paid_ytd, TAX_CREDIT_CAP_WON))}"
         f" × {p.tax_credit_rate * 100:.1f}%)"

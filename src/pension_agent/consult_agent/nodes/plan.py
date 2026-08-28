@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 from pension_agent.consult_agent import guard, progress, relations, tools
+from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
     ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_SYSTEM, MUST_BLOCK, PLAN_MISSES_BLOCK,
@@ -242,11 +243,23 @@ def llm_down(state: AgentState) -> dict[str, Any]:
 DISCARD, APPEND, OK = "discard", "append", "ok"
 
 
-def _products() -> list[dict]:
-    """등록 상품명 — 답변에 재료 밖 상품명이 섞였는지 판정할 때 쓴다.
-    임포트 비용을 지연시킨다(strategy_agent 는 무겁다)."""
+def _known_products() -> set[str]:
+    """실재하는 상품 이름 전부 — 답변이 상품명을 지어냈는지 판정하는 **등록부**다.
+
+    출처가 둘이고 둘 다 필요하다.
+
+    · `strategy_agent` 의 상품 카탈로그 — 적합성 게이트가 타입드 필드로 비교하는 관계형
+      데이터. 지금은 데모 12종이다.
+    · **지식베이스가 선언한 상품명** — 행내 배포자료(05 시황·상품) 표의 상품명 칸.
+
+    뒤쪽이 빠져 있던 동안 「KB 온국민 TDF 시리즈」처럼 원문 표에 그대로 적힌 상품을 말한
+    답변이 '미등록'으로 버려졌다. 등록부가 좁은 것은 안전이 아니라 **오판**이다 — 맞는
+    문장을 거부하면 그 자리에 근거 원문 덤프가 나간다.
+
+    임포트 비용을 지연시킨다(strategy_agent 는 무겁다).
+    """
     from pension_agent.strategy_agent import engine  # noqa: PLC0415
-    return engine.PRODUCTS
+    return {r["name"] for r in engine.PRODUCTS} | KBMOD.product_names(KB)
 
 
 def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
@@ -395,7 +408,7 @@ def compose(state: AgentState) -> dict[str, Any]:
         # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
         progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
         ok, _bad = verify_texts(answer, tools.ledger_texts(evidence),
-                                known_products={r["name"] for r in _products()})
+                                known_products=_known_products())
         if not ok:
             answer = ""
 
