@@ -1,0 +1,181 @@
+"""대표 질문 10개 — 실 LLM 으로 한 번 돌려 **답변과 트레이스를 나란히** 본다.
+
+    cd src
+    python -m tests.debug.reps              # 전체 (답변 + 근거 + 트레이스)
+    python -m tests.debug.reps --brief      # 요약표만 — 이것만 붙여넣어도 진단이 된다
+    python -m tests.debug.reps 4 7          # 케이스 골라서
+
+왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
+이어진다(멀티턴 재현이 목적이다). 대표 질문 10개는 서로 독립이어야 하므로 케이스마다
+세션을 새로 연다 — 8번(모호 → 되묻기)이 앞 케이스의 맥락을 물려받으면 되물을 이유가
+사라져 그 케이스가 무의미해진다. 후속 질문을 보는 7번만 한 케이스 안에 두 턴이다.
+
+무엇을 재나 — 케이스마다 `sees` 에 적어둔 한 줄이 그 케이스의 존재 이유다. 축은 다섯이다:
+**단일 도구**(1·2·3) · **복합**(4·5·6) · **후속 질문**(7) · **모호 → 되묻기**(8) ·
+**지식베이스에 없는 것**(9) · **가드·반론**(10). 답변 품질만 보면 1번도 10번도 그냥
+"괜찮네"로 읽히지만, 에이전틱한지는 **도구를 몇 개 어떤 순서로 골랐는가**에서만 갈린다.
+
+**채점하지 않는다.** 통과·실패를 코드가 정하면 그건 회귀 테스트지 검토가 아니다
+(회귀는 `tests/test_consult_agent.py` 가 이미 315건 재고 있다). 여기는 사람이 읽고
+판단하는 자리라, 요약표는 «무엇이 일어났나»만 찍는다.
+
+**오늘은 2026-08-24 로 고정된다**(`tests/__init__.py` — 원장 스냅샷 기준일). 만기
+잔여일수·미접촉 일수가 실행일마다 달라지면 두 번의 실행을 비교할 수 없다.
+"""
+
+from __future__ import annotations
+
+import sys
+import unicodedata
+
+from pension_agent import llm as LLM
+from tests.debug import trace as TR
+from tests.debug.runner import session
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+
+#: (번호, 무엇을 보나, 고객, 질문들). 고객 id 는 `strategy_agent/customers.json` 의 9케이스.
+CASES: tuple[tuple[int, str, str | None, tuple[str, ...]], ...] = (
+    (1, "단일 도구 — fact 한 번으로 끝나나 (기준선)",
+     None, ("IRP 세액공제 한도가 얼마야?",)),
+
+    (2, "단일 도구 — screen 을 고르나 · 화면 연계 제안이 붙나",
+     None, ("IRP 계좌 해지는 몇 번 화면에서 하지?",)),
+
+    (3, "단일 도구 — channel(비대면) 과 screen(단말) 을 갈라 보나",
+     None, ("고객이 스타뱅킹에서 직접 추가납입 하려면 어디로 들어가?",)),
+
+    (4, "복합 — 고객 재료 + 화법. 성향-운용 불일치(공격투자형인데 예금 92%)",
+     "181245-3097614", ("이 고객 예금만 들고 있는데 뭐라고 말해야 하지?",)),
+
+    (5, "복합 — suitable(적합성 범위) 을 부르나. 권유가 아니라 범위로 답하나 (gap 27)",
+     "165932-8741205", ("이 고객한테 뭘 추천해주면 좋을까?",)),
+
+    (6, "복합 — 빗나가도 다른 도구로 갈아타나 (gap 23 · plan_misses/plan_retry)",
+     "162754-9483106", ("이 고객은 왜 관리 대상으로 뜬 거야?",)),
+
+    (7, "후속 질문 — 2턴째가 1턴 맥락을 이어받나 (gap 1·21)",
+     "198734-1205842", ("이 고객 만기 언제야?", "그냥 두면 어떻게 돼?")),
+
+    (8, "모호 — 답 대신 되묻나. 되묻기 턴에 근거가 붙나 (gap 22)",
+     None, ("수수료 얼마야?",)),
+
+    (9, "지식베이스 밖 — 지어내지 않고 없다고 하나 (재료 0건 경로)",
+     None, ("타행 IRP 수수료는 우리보다 싼가?",)),
+
+    (10, "가드·반론 — 고객 대사에 화법으로 답하고 하지 말 것이 걸리나 (§8)",
+     "188406-7352194", ("고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",)),
+)
+
+
+def _tools(turn: TR.Turn) -> str:
+    """이 턴이 부른 도구를 순서대로. 계획 노드의 한 줄에서 도구 이름만 뽑는다."""
+    out = []
+    for node in turn.nodes:
+        if node.name != "plan_step" or "→" not in node.note:
+            continue
+        signature, _, result = node.note.partition("→")
+        name = signature.split(":")[0].strip()
+        out.append(name + ("✗" if "재료 없음" in result else ""))
+    return " → ".join(out) or "(없음)"
+
+
+def _pad(text: str, width: int) -> str:
+    """한글은 두 칸을 차지한다 — `str.ljust` 로 맞추면 표가 어긋난다."""
+    used = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+    return text + " " * max(0, width - used)
+
+
+def _width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def _row(no: object, sees: str, turn: TR.Turn) -> list[str]:
+    """요약표 한 줄. 판정하지 않고 «무엇이 일어났나»만 적는다."""
+    names = [n.name for n in turn.nodes]
+    compose = next((n for n in turn.nodes if n.name == "compose"), None)
+    blocked = next((g.name for g in compose.gates if not g.passed), None) if compose else None
+
+    if compose is not None:
+        end = compose.note
+    elif "clarify" in names:
+        end = "되묻기로 끝남"
+    elif "llm_down" in names:
+        end = "LLM 실패 안내"
+    else:
+        end = names[-1] if names else "?"
+
+    offer = next((n for n in turn.nodes if n.name == "offer"), None)
+    return [
+        str(no),
+        _tools(turn),
+        (f"✗ {blocked}" if blocked else
+         "통과" if (compose and compose.gates) else "안 걸림"),
+        "제안" if (offer and offer.delta) else "",
+        end,
+        sees,
+    ]
+
+
+def _print_answer(r: dict) -> None:
+    print(r["answer"])
+    ground = [s for s in r["sources"] if s.get("role", "근거") == "근거"]
+    caution = [s for s in r["sources"] if s.get("role") == "주의"]
+    print("\n─ 근거" + ("" if ground else ": 없음"))
+    for s in ground:
+        print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+    if caution:
+        print("\n─ 이 고객 상담에서 지켜야 할 것")
+        for s in caution:
+            print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+
+
+def main(argv: list[str]) -> int:
+    brief = "--brief" in argv
+    picked = {int(a) for a in argv if a.isdigit()}
+    cases = [c for c in CASES if not picked or c[0] in picked]
+
+    if not LLM.available():
+        print("LLM 이 설정돼 있지 않습니다 — 이 스크립트는 실 LLM 으로 도는 것이 목적입니다.")
+        print("  genai:     LLM_BASE_URL · LLM_API_KEY   (src/.env 에 두면 됩니다)")
+        print("  anthropic: ANTHROPIC_API_KEY")
+        return 1
+
+    rows: list[list[str]] = []
+    for no, sees, customer, questions in cases:
+        with session(customer_id=customer) as (ask, tr):
+            for i, question in enumerate(questions):
+                if not brief:
+                    who = f"  [고객 {customer}]" if customer else ""
+                    print(f"\n{'═' * 70}\n[{no}] {sees}{who}\n> {question}\n")
+                try:
+                    result = ask(question)
+                except Exception as exc:                    # noqa: BLE001 — 한 케이스가
+                    print(f"   실행 중단 — {type(exc).__name__}: {exc}")   # 죽어도 나머지는 돈다
+                    rows.append([f"{no:>2}", "—", "—", "", f"예외 {type(exc).__name__}", sees])
+                    break
+                if not brief:
+                    _print_answer(result)
+                label = no if i == 0 else f"{no}b"
+                rows.append(_row(label, sees if i == 0 else "└ 후속 질문", tr.turns[-1]))
+            else:
+                if not brief:
+                    print()
+                    print(TR.render(tr))
+
+    print(f"\n{'═' * 70}\n요약 — 도구를 무엇을 어떤 순서로 골랐나\n")
+    head = ["#", "도구(순서)", "게이트", "연계", "처분", "무엇을 보나"]
+    table = [head, *rows]
+    widths = [max(_width(r[i]) for r in table) for i in range(len(head))]
+    for i, r in enumerate(table):
+        print(("  " + "  ".join(_pad(c, w) for c, w in zip(r, widths, strict=True))).rstrip())
+        if i == 0:
+            print("  " + "  ".join("─" * w for w in widths))
+    print("\n  도구 뒤의 ✗ 는 그 호출이 재료를 못 찾은 것 — 다음 칸에서 갈아탔는지가 요점입니다.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
