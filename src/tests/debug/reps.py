@@ -4,6 +4,8 @@
     python -m tests.debug.reps              # 전체 (답변 + 근거 + 트레이스)
     python -m tests.debug.reps --brief      # 요약표만 — 이것만 붙여넣어도 진단이 된다
     python -m tests.debug.reps 4 7          # 케이스 골라서
+    python -m tests.debug.reps --demo       # 시연 대본 순서대로 (docs/DEMO_SCENARIO.md)
+    python -m tests.debug.reps --demo --debug   # 대본 + 트레이스 (리허설용)
 
 왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
 이어진다(멀티턴 재현이 목적이다). 대표 질문 10개는 서로 독립이어야 하므로 케이스마다
@@ -18,6 +20,11 @@
 **채점하지 않는다.** 통과·실패를 코드가 정하면 그건 회귀 테스트지 검토가 아니다
 (회귀는 `tests/test_consult_agent.py` 가 이미 315건 재고 있다). 여기는 사람이 읽고
 판단하는 자리라, 요약표는 «무엇이 일어났나»만 찍는다.
+
+`--demo` 는 검토가 아니라 **리허설**이다. `docs/DEMO_SCENARIO.md` 의 대본을 그 순서로,
+고객 블록마다 한 세션으로 돌린다 — 후속 질문(T2·T3b·T8b·T11)이 앞 턴을 이어받아야
+대본대로이기 때문이다. 화면에 나가는 것만 보여주고 트레이스는 `--debug` 를 붙일 때만
+붙인다: 시연에서 청중이 보는 것과 같은 화면을 먼저 확인해야 한다.
 
 **오늘은 2026-08-24 로 고정된다**(`tests/__init__.py` — 원장 스냅샷 기준일). 만기
 잔여일수·미접촉 일수가 실행일마다 달라지면 두 번의 실행을 비교할 수 없다.
@@ -67,6 +74,36 @@ CASES: tuple[tuple[int, str, str | None, tuple[str, ...]], ...] = (
 
     (10, "가드·반론 — 고객 대사에 화법으로 답하고 하지 말 것이 걸리나 (§8)",
      "188406-7352194", ("고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",)),
+)
+
+
+#: 시연 대본 — `docs/DEMO_SCENARIO.md`. 고객 블록마다 한 세션이므로 블록 안에서는 맥락이
+#: 이어진다(T2 는 T1 을, T3b 는 T3 을 이어받는다). 블록이 갈리는 자리가 곧 시연에서
+#: 「고객 화면을 바꾸는」 자리다.
+DEMO: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
+    (0, "0막 기본기 — 출처 · 후속 질문 · 화면 연계", None, (
+        ("T1",  "IRP 세액공제 한도가 얼마야?"),                       # 근거가 있다
+        ("T2",  "총급여 6천만원이면 얼마 돌려받아?"),                  # 맥락을 이어받는다
+        ("T3",  "IRP 계좌 해지는 몇 번 화면에서 하지?"),               # 연계 제안
+        ("T3b", "응, 열어줘"),                                         # 딥링크
+    )),
+    (1, "1~2막 상담 전·중 — 송도윤(방치현금 54% · ISA 만기 · 13개월 미접촉)",
+     "188406-7352194", (
+        ("T4",  "이 고객 왜 관리 대상이야?"),                          # 타겟 근거
+        ("T5",  "지난번엔 무슨 얘기 했지?"),                            # 상담 이력
+        ("T6",  "이 고객한테 하면 안 되는 게 뭐야?"),                   # 금지·주의
+        ("T7",  "고객이 '그 돈 그냥 둬도 되지 않나요' 하는데 뭐라고 하지?"),   # 반론 대응
+        ("T8",  "수수료 얼마야?"),                                     # 되묻기
+        ("T8b", "운용관리요"),                                         # 되물은 갈래로
+        ("T9",  "우리 수수료가 얼마고, 증권사는 무료라는데 뭐라고 답하지?"),   # 복합 — 핵심
+        ("T10", "그럼 이 고객한테 뭘 권할 수 있어?"),                   # 적합성 «범위»
+        ("T11", "그 중에 ISA 만기자금이랑 같이 가져갈 만한 건?"),        # 후속
+        ("T12", "타행 IRP 수수료는 우리보다 싼가?"),                    # 없다고 말한다
+    )),
+    (2, "3막 대조 — 정민석(공격투자형인데 원리금보장 100%)",
+     "181245-3097614", (
+        ("T13", "이 고객한테는 뭘 권할 수 있어?"),                      # 같은 질문, 다른 답
+    )),
 )
 
 
@@ -133,9 +170,12 @@ def _print_answer(r: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
+    """검토(`CASES`)와 리허설(`--demo`)이 **같은 실행 경로**를 쓰고 화면만 갈린다 —
+    리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
+    demo = "--demo" in argv
     brief = "--brief" in argv
-    picked = {int(a) for a in argv if a.isdigit()}
-    cases = [c for c in CASES if not picked or c[0] in picked]
+    debug = "--debug" in argv
+    picked = {a for a in argv if a[0].isdigit()}
 
     if not LLM.available():
         print("LLM 이 설정돼 있지 않습니다 — 이 스크립트는 실 LLM 으로 도는 것이 목적입니다.")
@@ -143,25 +183,43 @@ def main(argv: list[str]) -> int:
         print("  anthropic: ANTHROPIC_API_KEY")
         return 1
 
+    # 두 모드의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
+    # 트레이스를 기본으로 붙이는가.
+    blocks = DEMO if demo else CASES
+    trace_by_default = not demo
+
     rows: list[list[str]] = []
-    for no, sees, customer, questions in cases:
+    for no, sees, customer, turns in blocks:
+        if picked and not demo and str(no) not in picked:
+            continue
+        labelled = (turns if demo else
+                    tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
+        if demo and not brief:
+            print(f"\n{'━' * 70}\n{sees}"
+                  + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))
+
         with session(customer_id=customer) as (ask, tr):
-            for i, question in enumerate(questions):
+            for i, (label, question) in enumerate(labelled):
                 if not brief:
-                    who = f"  [고객 {customer}]" if customer else ""
-                    print(f"\n{'═' * 70}\n[{no}] {sees}{who}\n> {question}\n")
+                    if demo:
+                        print(f"\n{'─' * 70}\n[{label}] > {question}\n")
+                    else:
+                        who = f"  [고객 {customer}]" if customer else ""
+                        print(f"\n{'═' * 70}\n[{label}] {sees}{who}\n> {question}\n")
                 try:
                     result = ask(question)
-                except Exception as exc:                    # noqa: BLE001 — 한 케이스가
-                    print(f"   실행 중단 — {type(exc).__name__}: {exc}")   # 죽어도 나머지는 돈다
-                    rows.append([f"{no:>2}", "—", "—", "", f"예외 {type(exc).__name__}", sees])
+                except Exception as exc:                       # noqa: BLE001 — 한 턴이 죽어도
+                    print(f"   실행 중단 — {type(exc).__name__}: {exc}")    # 나머지는 돈다
+                    rows.append([label, "—", "—", "", f"예외 {type(exc).__name__}", sees])
                     break
                 if not brief:
                     _print_answer(result)
-                label = no if i == 0 else f"{no}b"
-                rows.append(_row(label, sees if i == 0 else "└ 후속 질문", tr.turns[-1]))
+                rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
+                if demo and debug and not brief:
+                    print()
+                    print(TR.render(tr, last_only=True))
             else:
-                if not brief:
+                if trace_by_default and not brief:
                     print()
                     print(TR.render(tr))
 
@@ -174,6 +232,9 @@ def main(argv: list[str]) -> int:
         if i == 0:
             print("  " + "  ".join("─" * w for w in widths))
     print("\n  도구 뒤의 ✗ 는 그 호출이 재료를 못 찾은 것 — 다음 칸에서 갈아탔는지가 요점입니다.")
+    if demo:
+        print("  리허설에서 볼 것: T9 가 도구를 여러 개 부르는가 · T10 이 suitable 을 부르는가 ·")
+        print("                    T3 에 연계가 붙는가 · T12 가 «없다»로 끝나는가.")
     return 0
 
 
