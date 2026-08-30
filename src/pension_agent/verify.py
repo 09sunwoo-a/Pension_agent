@@ -372,9 +372,26 @@ def verify(
 
 
 def verify_texts(
-    sentence: str, texts: Iterable[str], known_products: set[str] = frozenset()
+    sentence: str, texts: Iterable[str], known_products: set[str] = frozenset(),
+    *, echoable: Iterable[str] = (),
 ) -> tuple[bool, list[str]]:
     """근거 원장(텍스트 묶음) 대조판. 원장에 없는 수치·상품명이 있으면 거부한다.
+
+    ━━ `echoable` — 되받아 말해도 되는 텍스트(질문) ━━
+    원장은 **턴 단위**인데 대화는 이어진다. 직원이 "총급여 6천만원이면 얼마 돌려받아?"
+    라고 물으면 답변은 그 전제를 되받아 적는데("총급여 6,000만원이면 13.2% 가 적용돼…"),
+    6,000 은 원장 어디에도 없다 — 카드가 아는 경계값은 5,500 이다. 그래서 **맞는 답변이
+    통째로 버려지고** 근거 원문이 덤프됐다(재현: 아래 주석의 사고들과 같은 부류이고,
+    기준서 §6 이 "검증기가 옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다
+    나쁘다"고 적어 둔 바로 그 자리다).
+
+    직원이 방금 말한 값을 옮겨 적는 것은 지어낸 것이 아니다. 그래서 질문의 수치를
+    허용 집합에 더한다. **넓히는 폭은 «되받기» 하나뿐이다** — 질문의 수치로 계산한 값
+    (6,000만원의 13.2% = 792만원)은 질문에도 원장에도 없으므로 여전히 거부된다.
+
+    상품명은 넓히지 않는다. 질문이 이름을 부르는 것만으로 인용이 허가되면, 적합성
+    게이트를 통과하지 못한 상품을 직원이 이름만 대서 답변에 올릴 수 있다 — 그건
+    «되받기»가 아니라 게이트를 뚫는 것이다.
 
     상품명은 **등록부 ∩ 이번 턴 원장**이다. 두 겹인 이유가 각각 있다.
 
@@ -392,7 +409,9 @@ def verify_texts(
     답변이 막히면 안 된다(`_prod_key` 머리말).
     """
     nums, _ = allowed_from_texts(texts)
-    blob = _prod_key("\n".join(texts))
+    for text in echoable:
+        nums |= numbers(text)
+    blob = _prod_key("\n".join(texts))      # 상품명의 재료는 원장뿐이다(위 머리말)
     cited = {p for p in known_products if p and _prod_key(p) in blob}
     return _judge(sentence, nums, cited, known_products)
 

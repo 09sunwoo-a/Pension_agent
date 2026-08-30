@@ -411,8 +411,11 @@ def compose(state: AgentState) -> dict[str, Any]:
         # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
         # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
         progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
+        # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을
+        # 지어낸 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
         ok, _bad = verify_texts(answer, tools.ledger_texts(evidence),
-                                known_products=_known_products())
+                                known_products=_known_products(),
+                                echoable=[state["question"]])
         if not ok:
             answer = ""
 

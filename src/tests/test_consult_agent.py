@@ -2291,6 +2291,67 @@ def check_product_advice() -> int:
     return ok
 
 
+def check_question_echo() -> int:
+    """직원이 질문에 넣은 수치를 **되받아 말한** 답변이 살아남는가.
+
+    회귀 대상: 원장은 턴 단위인데 대화는 이어진다. "총급여 6천만원이면 얼마 돌려받아?"
+    에 답하려면 답변이 그 전제를 옮겨 적는데(6,000), 카드가 아는 경계값은 5,500 뿐이라
+    **맞는 답변이 원장 밖 수치로 통째로 폐기되고** 근거 원문이 덤프됐다 — 실 LLM 시연
+    대본 T2 의 실제 결과다. §6 이 "검증기가 옳은 문장을 거부하는 것은 틀린 문장을
+    통과시키는 것보다 나쁘다"고 적어 둔 자리다.
+
+    넓히는 폭은 «되받기» 하나다. 질문의 수치로 **계산한** 값과 **상품명**은 그대로 막힌다.
+    """
+    ok = 0
+    VALUE = "총급여 5,500만원 이하 16.5%, 초과 13.2% (지방소득세 포함)"
+    ev = tools._ev("fact", "q", f"■ 세액공제율\n{VALUE}",
+                   [{"id": "f.1", "title": "세액공제율"}], atomic=[VALUE])
+    q = "총급여 6천만원이면 얼마 돌려받아?"
+    echoed = "총급여 6,000만원이면 초과 구간이에요."
+
+    # ① 구멍 재현 — 질문을 재료로 안 보면 되받은 문장이 폐기된다.
+    hit = not verify_texts(echoed, [ev["text"]])[0]
+    print(f"{'✓' if hit else '✗'} 질문을 빼면 되받은 답변이 폐기된다(구멍 재현)")
+    ok += hit
+
+    # ② 질문을 함께 보면 통과한다 — 직원이 방금 말한 값을 옮겨 적은 것이다.
+    hit = verify_texts(echoed, [ev["text"]], echoable=[q])[0]
+    print(f"{'✓' if hit else '✗'} 질문의 수치를 되받은 답변은 통과한다")
+    ok += hit
+
+    # ③ 되받기까지다. 질문 수치로 **계산한** 값은 질문에도 원장에도 없다.
+    derived = "총급여 6,000만원이면 792만원을 돌려받아요."
+    good, bad = verify_texts(derived, [ev["text"]], echoable=[q])
+    hit = not good and any("792" in b for b in bad)
+    print(f"{'✓' if hit else '✗'} 질문 수치로 계산한 값은 여전히 거부된다")
+    ok += hit
+
+    # ④ 상품명 게이트는 넓어지지 않는다 — 이름만 대서 적합성 밖 상품을 올릴 수 없다.
+    known = {"KB 글로벌리츠 ETF"}
+    hit = not verify_texts("KB 글로벌리츠 ETF 를 보실 수 있어요.", ["다른 재료"],
+                           known_products=known, echoable=["KB 글로벌리츠 ETF 어때?"])[0]
+    print(f"{'✓' if hit else '✗'} 질문이 부른 상품명은 인용 허가가 되지 않는다")
+    ok += hit
+
+    # ⑤ 배선 — compose 가 실제로 이번 턴 질문을 넘긴다(넘기지 않으면 ① 로 되돌아간다).
+    orig = plan.generate
+    try:
+        plan.generate = lambda p, **kw: echoed
+        out = plan.compose({"question": q, "evidence": [ev]})
+        hit = out["answer"] == echoed
+    finally:
+        plan.generate = orig
+    print(f"{'✓' if hit else '✗'} compose 가 질문을 검증 재료로 넘긴다")
+    ok += hit
+
+    # ⑥ 「없는 것은 첫 문장에서 없다고」 — 가진 재료로 다른 질문에 답하지 않게 하는 지시.
+    from pension_agent.consult_agent.prompts import COMPOSE_SYSTEM
+    hit = "핵심 대상이 재료에 없으면 그것이 결론" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 «없음»을 결론 자리에 세운다")
+    ok += hit
+    return ok
+
+
 def check_caution_roles() -> int:
     """주의·비고의 역할 선언 — 저작 메모(authoring)가 직원 답변에 새지 않는가.
 
@@ -4136,6 +4197,7 @@ def main() -> int:
         check_market_material()
         check_product_advice()
         check_caution_roles()
+        check_question_echo()
         check_history_material()
         check_today_material()
         check_account_state()
