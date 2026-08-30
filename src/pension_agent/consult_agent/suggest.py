@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 
@@ -168,6 +169,17 @@ _KB_KINDS = frozenset({"pitch", "procedure", "screen", "channel", "segment",
 _LEDGER_TOOLS = frozenset({"history", "suitable"})
 
 
+#: 질문이 같은지 볼 때 무시하는 것 — 공백과 문장부호. "이 고객 왜 관리 대상이야?" 와
+#: "이 고객 왜 관리대상이야" 는 직원에게 같은 질문이고, 한쪽만 걸러지면 표기 차이 하나로
+#: 방금 답한 질문이 다시 추천된다.
+_TRIVIAL = re.compile(r"[\s?!.,·]+")
+
+
+def _norm(question: str | None) -> str:
+    """질문 비교용 정규형. 표기 차이를 지우고 «같은 질문인가»만 남긴다."""
+    return _TRIVIAL.sub("", question or "")
+
+
 def _topic(found: dict) -> str:
     """이 재료의 근거 카드 제목 — `{topic}` 슬롯에 들어갈 값. 없으면 빈 문자열."""
     for source in found.get("sources") or []:
@@ -250,7 +262,15 @@ def followup_questions(out: dict) -> list[str]:
     usable = set(tools.usable(state))
     used = {e["tool"] for e in evidence}
     history = out.get("history") or []
-    asked = {(t.get("question") or "").strip() for t in history}
+    # **이번 질문도 «이미 물은 것»이다.** history 는 이 턴에 들어온 이력이고 이번 질문은
+    # ask() 가 invoke 를 마친 뒤에야 거기 붙는다 — 그래서 이 줄이 없으면 방금 물은 것이
+    # 그대로 추천으로 되돌아온다("이 고객 왜 관리 대상이야?" 를 묻고 답을 다 읽었는데
+    # 맨 아래에 같은 질문이 다시 서 있었다). 첫 턴이면 history 가 비어 있어 더 그렇다.
+    #
+    # 「이미 쓴 재료」 제외가 이걸 못 잡는다: 그 답은 customer 재료로 나왔는데 그 질문은
+    # segment 로 이끄는 후보라, 재료 축으로는 겹치지 않는다. 겹치는 것은 **질문**이다.
+    asked = {_norm(t.get("question")) for t in history} | {_norm(out.get("question"))}
+    asked.discard("")
 
     picked: list[str] = []
     leads: set[str] = set()
@@ -273,7 +293,7 @@ def followup_questions(out: dict) -> list[str]:
             if lead in used and not (lead == "pitch" and found["tool"] == "pitch"):
                 continue
             question = _phrase(variants, topic, len(history))
-            if not question or question in asked:
+            if not question or _norm(question) in asked:
                 continue
             # 이 칩을 눌렀을 때 답이 나올 재료가 실제로 있나 — 없으면 안 띄운다.
             probes = tuple(dict.fromkeys(x for x in (topic, question) if x))

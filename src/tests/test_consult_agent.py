@@ -2263,13 +2263,33 @@ def check_followups() -> int:
     print(f"{'✓' if hit else '✗'} 대화 턴에 따라 문구 변형이 회전한다({sorted(turns)})")
     ok += hit
 
-    # ⑧ 직원이 이미 물어본 질문을 다시 제안하지 않는다.
+    # ⑧ 직원이 이미 물어본 질문을 다시 제안하지 않는다 — **이번 질문 포함**이 핵심이다.
+    #    history 는 이 턴에 들어온 이력이라 이번 질문이 없다(ask 가 invoke 뒤에 붙인다).
+    #    그래서 이 필터가 이전 턴만 보면 방금 물은 것이 그대로 추천으로 되돌아온다
+    #    — 「이 고객 왜 관리 대상이야?」 를 묻고 답을 읽었는데 맨 아래 같은 질문이 다시
+    #    서 있던 자리다. 「이미 쓴 재료」 제외는 이걸 못 잡는다: 그 답은 customer 재료로
+    #    나왔는데 그 질문은 segment 로 이끄는 후보라 재료 축이 겹치지 않는다.
     asked = suggest.followup_questions(
         {"evidence": [ev("fact", "세액공제 한도")], "history": [], "customer_id": None})
     repeat = suggest.followup_questions(
         {"evidence": [ev("fact", "세액공제 한도")], "history": [{"question": asked[0]}]})
     hit = asked[0] not in repeat
     print(f"{'✓' if hit else '✗'} 직원이 이미 물은 질문은 다시 제안하지 않는다")
+    ok += hit
+
+    same = suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id,
+         "question": "이 고객 왜 관리 대상이야?"})
+    hit = "이 고객 왜 관리 대상이야?" not in same
+    print(f"{'✓' if hit else '✗'} 방금 물은 질문이 추천으로 되돌아오지 않는다({same})")
+    ok += hit
+
+    # 표기 차이(공백·물음표) 하나로 같은 질문이 다시 서면 안 된다.
+    loose = suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id,
+         "question": "이 고객 왜 관리대상이야"})
+    hit = "이 고객 왜 관리 대상이야?" not in loose
+    print(f"{'✓' if hit else '✗'} 공백·물음표만 다른 같은 질문도 다시 제안하지 않는다")
     ok += hit
 
     # ⑨ ask() 배선 — 답변 끝에 머리말과 함께 붙고, 반환에 followups 가 따로 실린다.
