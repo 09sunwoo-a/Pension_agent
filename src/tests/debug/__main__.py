@@ -146,6 +146,16 @@ def main(argv: list[str]) -> int:
     if not ok:
         return 2
 
+    # 남은 인자가 곧 질문이다. 그래서 **오타 난 플래그가 조용히 질문이 된다** — `--demo` 를
+    # 넘기면 그 문자열을 질문으로 물어 능력 안내 한 턴으로 끝나고, 화면만 봐서는 플래그가
+    # 없다는 사실을 알 수 없다. 알 수 없는 `--`인자는 크게 실패시킨다.
+    unknown = [a for a in argv if a.startswith("--")]
+    if unknown:
+        print(f"모르는 옵션입니다: {' '.join(unknown)}")
+        print("  이 CLI 의 옵션: --debug · --show-llm · --script N · --any-customer · -c/--customer")
+        print("  시연 대본을 돌리려면 다른 모듈입니다: python -m tests.debug.reps --demo --debug")
+        return 1
+
     questions = argv or ([scenario.question] if scenario else [])
 
     with session(customer_id=customer_id, scenario=scenario) as (ask, tr):

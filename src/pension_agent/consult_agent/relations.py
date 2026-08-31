@@ -163,12 +163,44 @@ def _called_by_name(answer: str, key: str, siblings: list[str]) -> bool:
                for start, end in _spans(answer, key))
 
 
+def _aliases(key: str) -> list[str]:
+    """이 행을 부르는 표기들 — 원문 표기 + 괄호 안팎.
+
+    행 이름이 「사용자부담금(퇴직금)」처럼 **두 이름을 괄호로 묶은** 한 덩이일 때가 있다.
+    직원도 답변도 그것을 「사용자부담금」·「퇴직금」·「퇴직금(사용자부담금)」 어느 쪽으로도
+    부른다. 원문 표기 한 덩이로만 대조하면 **그 행을 말한 줄 모르고**, 그러면 그 행이
+    «답변이 말하지 않은 행»으로 분류돼 그 값이 남의 값이 된다 — 표의 네 구간을 전부 정확히
+    옮긴 답변이 그래서 폐기됐다(실측: fact.k04.f50, 두 부담금을 함께 말하면 거부되고 한쪽만
+    말하면 통과했다. 카드의 pitfalls 는 반대로 «구간을 확인하지 않은 단일 수치 답변은 오답»
+    이라고 적혀 있다).
+
+    **이름을 못 알아본 것은 판정 불가이지 위반이 아니다**(이 파일 머리말 · 기준서 §6).
+    별칭을 늘리는 것은 «답변이 말한 행»을 늘리는 쪽이라, 판정을 넓히지 않고 좁힌다 —
+    잘못 늘어나도 맞는 답을 거부하는 방향으로는 가지 않는다.
+    """
+    out = [key]
+    m = re.match(r"^(.*?)\((.*?)\)$", key.strip())
+    if m:
+        out += [x for x in (g.strip() for g in m.groups()) if x]
+    return out
+
+
 def _said_rows(answer: str, rows: list[dict]) -> list[dict]:
     """답변이 말하고 있는 행들. 어느 행도 못 알아보면 빈 목록(판정 불가)."""
-    all_keys = {k for r in rows for k in r.get("keys") or [] if k}
-    return [r for r in rows
-            if any(_called_by_name(answer, k, [x for x in all_keys if x != k and k in x])
-                   for k in r.get("keys") or [] if k)]
+    def names_of(row: dict) -> list[str]:
+        return [a for k in row.get("keys") or [] if k for a in _aliases(k)]
+
+    all_names = {a for r in rows for a in names_of(r)}
+    said = []
+    for row in rows:
+        mine = names_of(row)
+        # 형제는 **다른 행의** 더 긴 이름만이다. 제 행의 원문 표기(「사용자부담금(퇴직금)」)가
+        # 제 별칭(「퇴직금」)을 덮으면 어느 행도 못 불린 것이 된다.
+        if any(_called_by_name(answer, a,
+                               [x for x in all_names if x != a and a in x and x not in mine])
+               for a in mine):
+            said.append(row)
+    return said
 
 
 def table_mispaired(answer: str, tables: list[dict]) -> list[str]:

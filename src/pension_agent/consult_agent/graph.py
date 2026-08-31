@@ -137,6 +137,9 @@ def ask(
         # 이 턴이 되묻기로 끝났으면 무엇을 물었는지 남긴다 — 다음 턴의 "타행에서요"는
         # 그 질문의 답이지 새 질문이 아니다(state.Turn).
         "pending_clarify": out.get("clarify"),
+        # 무슨 재료로 답했는지(이름만). 다음 턴이 «이미 나열한 것»을 알아야 좁히는 후속
+        # 질문에 앞 답을 통째로 반복하지 않는다(state.Turn 의 tools 주석).
+        "tools": sorted({e["tool"] for e in (out.get("evidence") or [])}),
     }
     new_history = [*(history or []), turn][-HISTORY_LIMIT:]
 

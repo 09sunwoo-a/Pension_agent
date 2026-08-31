@@ -34,6 +34,13 @@ class Turn(TypedDict, total=False):
       pending_clarify  이 턴이 답변 대신 판별 질문으로 끝났다면 무엇을 물었는지(§5).
                        다음 턴의 "타행에서요"는 그 질문의 답이지 새 질문이 아니다 —
                        무엇을 물었는지 모르면 되묻기가 성립하지 않는다.
+      tools            이 턴이 무슨 재료로 답했는지(도구 이름만). 답변 원문이 없으니
+                       **다음 턴은 자기가 방금 무엇을 나열했는지 볼 수 없고**, 그래서
+                       "그 중에 ~" 같은 좁히는 후속 질문에 앞 답을 통째로 다시 세웠다
+                       (실측: T11 — 목록 8종 + 제외 4종을 그대로 반복, 1,021자).
+                       수치가 아니라 **이름만** 남긴다: 답변 원문을 프롬프트에 넣으면
+                       LLM 이 그 수치를 되받고, 그 수치는 이번 턴 원장 밖이라
+                       `verify` 가 답을 통째로 버린다(§6).
 
     답변 원문을 남기는 것은 별개의 결정이다(CLAUDE.md §13 '대화 맥락 기반 답변 정정').
     """
@@ -45,6 +52,7 @@ class Turn(TypedDict, total=False):
     utterance: str | None
     pending_action: dict | None
     pending_clarify: dict | None
+    tools: list[str]
 
 
 class AgentState(TypedDict, total=False):

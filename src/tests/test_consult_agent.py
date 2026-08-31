@@ -2291,6 +2291,231 @@ def check_product_advice() -> int:
     return ok
 
 
+def check_no_repeat() -> int:
+    """좁히는 후속 질문에 앞 답을 통째로 다시 세우지 않는가.
+
+    회귀 대상: 「그 중에 ISA 만기자금이랑 같이 가져갈 만한 건?」에 「자료가 없어요」로 잘
+    시작해 놓고, 직전 턴에서 방금 말한 적합성 목록 8종 + 제외 4종을 그대로 반복했다
+    (실 LLM 시연 대본 T11, 1,021자). **지시로 못 막는다** — 프롬프트에 실리는 이전 대화는
+    직원 질문만이고 답변 원문이 없어서(state.Turn) LLM 은 자기가 무엇을 나열했는지 볼 수
+    없다. 답변 원문을 싣는 것도 답이 아니다: 그 수치를 되받으면 이번 턴 원장 밖이라
+    `verify` 가 답을 통째로 버린다(§6). 그래서 **도구 이름만** 턴에 남기고, 겹침 판정은
+    코드가 한다.
+    """
+    ok = 0
+    ev = tools._ev("suitable", "q", "■ 재료", [{"id": "s.1", "title": "적합성"}])
+    seen: dict[str, str] = {}
+    orig = plan.generate
+    plan.generate = lambda p, **kw: seen.setdefault("p", p) or "답변"
+    try:
+        plan.compose({"question": "그 중에 ISA 만기자금이랑 같이 가져갈 만한 건?",
+                      "evidence": [ev],
+                      "history": [{"question": "그럼 이 고객한테 뭘 권할 수 있어?",
+                                   "tools": ["suitable"]}]})
+        hit = "직전 답변과 겹치는 재료" in seen["p"]
+        print(f"{'✓' if hit else '✗'} 직전 턴과 재료가 겹치면 반복 금지 블록이 실린다")
+        ok += hit
+
+        seen.clear()
+        plan.compose({"question": "q", "evidence": [ev],
+                      "history": [{"question": "IRP 세액공제 한도?", "tools": ["fact"]}]})
+        hit = "직전 답변과 겹치는 재료" not in seen["p"]
+        print(f"{'✓' if hit else '✗'} 재료가 다르면 붙지 않는다")
+        ok += hit
+
+        seen.clear()
+        plan.compose({"question": "q", "evidence": [ev], "history": []})
+        hit = "직전 답변과 겹치는 재료" not in seen["p"]
+        print(f"{'✓' if hit else '✗'} 첫 턴에는 붙지 않는다")
+        ok += hit
+    finally:
+        plan.generate = orig
+
+    # 형태 요구와 모순이 되면 안 된다 — 「목록을 실어라」와 「다시 세우지 마라」가 함께
+    # 걸리면 LLM 은 어느 쪽이든 지키려다 재료를 지어낸다(§5, T13 과 같은 부류).
+    from pension_agent.consult_agent.prompts import REPEAT_BLOCK
+    hit = "이미 채운 항목은 다시 채우지 않아도 된다" in REPEAT_BLOCK
+    print(f"{'✓' if hit else '✗'} 반복 금지 블록이 형태 요구를 명시적으로 풀어준다")
+    ok += hit
+
+    # 턴 기록에 도구 이름이 남아야 판정이 성립한다 — **답변 원문은 남기지 않는다**(§6).
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "KB 중립형 MP 는 최근 1년 5.1% 예요.", "sources": [],
+            "evidence": [ev, tools._ev("customer", "q", "■ 고객", [])],
+        })})
+        out = G.ask("이 고객한테 뭘 권할 수 있어?")
+    finally:
+        G._AGENT = orig_agent
+    turn = out["history"][-1]
+    hit = turn.get("tools") == ["customer", "suitable"]
+    print(f"{'✓' if hit else '✗'} 턴 기록이 무슨 재료로 답했는지 남긴다({turn.get('tools')})")
+    ok += hit
+
+    hit = not any("5.1" in str(v) for v in turn.values())
+    print(f"{'✓' if hit else '✗'} 턴 기록에 답변 수치는 남지 않는다")
+    ok += hit
+    return ok
+
+
+def check_table_row_names() -> int:
+    """표의 행 이름을 **답변이 부르는 표기**로도 알아보는가.
+
+    회귀 대상: 행 이름이 「사용자부담금(퇴직금)」한 덩이라, 답변이 「퇴직금(사용자부담금)」·
+    「사용자부담금」으로 부르면 그 행을 말한 줄 몰랐다. 그러면 그 행이 «답변이 말하지 않은
+    행»이 되어 그 값이 남의 값으로 신고되고, **표의 네 구간을 전부 정확히 옮긴 답변이
+    폐기됐다**(실 LLM 시연 대본 T8b). 카드의 pitfalls 는 반대로 「구간을 확인하지 않은 단일
+    수치 답변은 오답」이라고 적혀 있어, 재료와 검증기가 서로 모순이었다.
+
+    이름을 못 알아본 것은 판정 불가이지 위반이 아니다(§6). 별칭은 «말한 행»을 늘리는
+    쪽이라 판정을 좁히기만 한다 — 오짝 검출은 그대로여야 한다(아래 ③④).
+    """
+    from pension_agent.consult_agent import relations
+    from pension_agent.consult_agent.state import KB as _KB
+    ok = 0
+    card = next((c for c in _KB.cards if c["id"] == "fact.k04.f50"), None)
+    if card is None:
+        print("✗ fact.k04.f50 카드를 찾지 못했다")
+        return 0
+
+    both = ("퇴직금(사용자부담금) 대면은 5천만원 미만 연 0.45%, 5천만원 이상 연 0.38%이고, "
+            "비대면은 5천만원 미만 연 0.20%, 5천만원 이상은 면제예요. 가입자부담금 대면은 "
+            "1억원 미만 연 0.28%, 1억원 이상 연 0.25%이고, 비대면은 1억원 미만 연 0.23%, "
+            "1억원 이상 연 0.21%예요.")
+    hit = not relations.check(both, [card])
+    print(f"{'✓' if hit else '✗'} 두 부담금을 함께 정확히 말한 답변이 통과한다(T8b 회귀)")
+    ok += hit
+
+    one = "가입자부담금 대면은 1억원 미만 연 0.28%, 1억원 이상 연 0.25%예요."
+    hit = not relations.check(one, [card])
+    print(f"{'✓' if hit else '✗'} 한쪽만 말한 답변도 그대로 통과한다")
+    ok += hit
+
+    wrong = "가입자부담금 대면 1억원 미만은 연 0.45%예요."
+    hit = bool(relations.check(wrong, [card]))
+    print(f"{'✓' if hit else '✗'} 가입자부담금에 사용자부담금 값을 붙이면 잡힌다")
+    ok += hit
+
+    # 예전에는 이 방향이 **판정 불가로 통과**했다 — 「사용자부담금(퇴직금)」을 아예 못
+    # 알아봐서 said 가 비었기 때문이다. 별칭이 그 구멍을 함께 막는다.
+    flipped = "퇴직금(사용자부담금) 대면 5천만원 미만은 연 0.28%예요."
+    hit = bool(relations.check(flipped, [card]))
+    print(f"{'✓' if hit else '✗'} 사용자부담금에 가입자부담금 값을 붙여도 잡힌다")
+    ok += hit
+    return ok
+
+
+def check_suitable_shape() -> int:
+    """적합성 재료와 답변 형태가 서로 모순되지 않는가 — 제외가 0건인 고객.
+
+    회귀 대상: 형태가 「제외된 상품과 사유」를 무조건 요구하는데 재료는 제외 0건일 때
+    침묵했다. LLM 은 형태를 지키려고 **통과 목록에서 하나를 골라 뺐다** — 12종을 11종이라
+    말하고 "상담 실익이 없다"는 재료에 없는 사유를 붙였다(실 LLM 시연 대본 T13, 정민석).
+    재료에 없는 것을 요구한 쪽이 원인이다.
+
+    「게이트」는 개발 용어라 재료에서 걷어낸다 — 재료에 있으면 답변이 그대로 쓴다.
+    """
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES, SHAPE_BLOCK
+    ok = 0
+    open_top = tools._suitable({"customer_id": "181245-3097614"}, "q")   # 상한 = 최고 등급
+    capped = tools._suitable({"customer_id": "188406-7352194"}, "q")     # 제외가 있는 고객
+    if not open_top or not capped:
+        print("✗ 적합성 재료를 만들지 못했다")
+        return 0
+
+    hit = "안내할 수 없는 상품 없음" in open_top["text"]
+    print(f"{'✓' if hit else '✗'} 제외 0건이면 재료가 «없음»을 말한다(침묵하지 않는다)")
+    ok += hit
+
+    hit = "안내할 수 없는 상품 4종" in capped["text"]
+    print(f"{'✓' if hit else '✗'} 제외가 있으면 종수와 사유를 그대로 싣는다")
+    ok += hit
+
+    hit = all("게이트" not in x["text"] for x in (open_top, capped))
+    print(f"{'✓' if hit else '✗'} 재료 본문에 개발 용어 «게이트»가 없다")
+    ok += hit
+
+    hit = all("게이트" not in (s.get("doc") or "")
+              for x in (open_top, capped) for s in x["sources"])
+    print(f"{'✓' if hit else '✗'} 근거 출처 이름에도 «게이트»가 없다")
+    ok += hit
+
+    hit = "안내할 수 없는 상품이 있으면" in ANSWER_SHAPES["suitable"]
+    print(f"{'✓' if hit else '✗'} 형태가 제외를 조건부로 요구한다")
+    ok += hit
+
+    hit = "재료가 적은 종수를 그대로 쓴다" in ANSWER_SHAPES["suitable"]
+    print(f"{'✓' if hit else '✗'} 형태가 통과 종수를 그대로 쓰라고 요구한다")
+    ok += hit
+
+    hit = "재료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
+    print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
+    ok += hit
+    return ok
+
+
+def check_question_echo() -> int:
+    """직원이 질문에 넣은 수치를 **되받아 말한** 답변이 살아남는가.
+
+    회귀 대상: 원장은 턴 단위인데 대화는 이어진다. "총급여 6천만원이면 얼마 돌려받아?"
+    에 답하려면 답변이 그 전제를 옮겨 적는데(6,000), 카드가 아는 경계값은 5,500 뿐이라
+    **맞는 답변이 원장 밖 수치로 통째로 폐기되고** 근거 원문이 덤프됐다 — 실 LLM 시연
+    대본 T2 의 실제 결과다. §6 이 "검증기가 옳은 문장을 거부하는 것은 틀린 문장을
+    통과시키는 것보다 나쁘다"고 적어 둔 자리다.
+
+    넓히는 폭은 «되받기» 하나다. 질문의 수치로 **계산한** 값과 **상품명**은 그대로 막힌다.
+    """
+    ok = 0
+    VALUE = "총급여 5,500만원 이하 16.5%, 초과 13.2% (지방소득세 포함)"
+    ev = tools._ev("fact", "q", f"■ 세액공제율\n{VALUE}",
+                   [{"id": "f.1", "title": "세액공제율"}], atomic=[VALUE])
+    q = "총급여 6천만원이면 얼마 돌려받아?"
+    echoed = "총급여 6,000만원이면 초과 구간이에요."
+
+    # ① 구멍 재현 — 질문을 재료로 안 보면 되받은 문장이 폐기된다.
+    hit = not verify_texts(echoed, [ev["text"]])[0]
+    print(f"{'✓' if hit else '✗'} 질문을 빼면 되받은 답변이 폐기된다(구멍 재현)")
+    ok += hit
+
+    # ② 질문을 함께 보면 통과한다 — 직원이 방금 말한 값을 옮겨 적은 것이다.
+    hit = verify_texts(echoed, [ev["text"]], echoable=[q])[0]
+    print(f"{'✓' if hit else '✗'} 질문의 수치를 되받은 답변은 통과한다")
+    ok += hit
+
+    # ③ 되받기까지다. 질문 수치로 **계산한** 값은 질문에도 원장에도 없다.
+    derived = "총급여 6,000만원이면 792만원을 돌려받아요."
+    good, bad = verify_texts(derived, [ev["text"]], echoable=[q])
+    hit = not good and any("792" in b for b in bad)
+    print(f"{'✓' if hit else '✗'} 질문 수치로 계산한 값은 여전히 거부된다")
+    ok += hit
+
+    # ④ 상품명 게이트는 넓어지지 않는다 — 이름만 대서 적합성 밖 상품을 올릴 수 없다.
+    known = {"KB 글로벌리츠 ETF"}
+    hit = not verify_texts("KB 글로벌리츠 ETF 를 보실 수 있어요.", ["다른 재료"],
+                           known_products=known, echoable=["KB 글로벌리츠 ETF 어때?"])[0]
+    print(f"{'✓' if hit else '✗'} 질문이 부른 상품명은 인용 허가가 되지 않는다")
+    ok += hit
+
+    # ⑤ 배선 — compose 가 실제로 이번 턴 질문을 넘긴다(넘기지 않으면 ① 로 되돌아간다).
+    orig = plan.generate
+    try:
+        plan.generate = lambda p, **kw: echoed
+        out = plan.compose({"question": q, "evidence": [ev]})
+        hit = out["answer"] == echoed
+    finally:
+        plan.generate = orig
+    print(f"{'✓' if hit else '✗'} compose 가 질문을 검증 재료로 넘긴다")
+    ok += hit
+
+    # ⑥ 「없는 것은 첫 문장에서 없다고」 — 가진 재료로 다른 질문에 답하지 않게 하는 지시.
+    from pension_agent.consult_agent.prompts import COMPOSE_SYSTEM
+    hit = "핵심 대상이 재료에 없으면 그것이 결론" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 «없음»을 결론 자리에 세운다")
+    ok += hit
+    return ok
+
+
 def check_caution_roles() -> int:
     """주의·비고의 역할 선언 — 저작 메모(authoring)가 직원 답변에 새지 않는가.
 
@@ -4197,6 +4422,10 @@ def main() -> int:
         check_market_material()
         check_product_advice()
         check_caution_roles()
+        check_question_echo()
+        check_table_row_names()
+        check_no_repeat()
+        check_suitable_shape()
         check_history_material()
         check_today_material()
         check_account_state()

@@ -16,6 +16,7 @@ cp .env.example .env      # 사내 게이트웨이 URL·키 (pension_agent/llm.p
 
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
+CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 · 시연 대본)
 ```
 
 ```bash
@@ -31,6 +32,13 @@ $CAD --debug "세액공제 한도가 얼마야?"
 $CAD --debug -c 198734-1205842                        # REPL — 턴마다 방금 턴만 찍는다
 $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 키 없이 재현
 $CAD --list                                           # 시나리오 목록
+
+# ── 묶음 실행: 검토(독립 케이스 10개) · 시연 대본(docs/DEMO_SCENARIO.md)
+$CADR                                                 # 검토 10케이스 + 요약표
+$CADR --brief                                         # 요약표만
+$CADR --demo                                          # 시연 대본 13턴 (청중이 보는 화면)
+$CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
+$CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
 
 # ── 테스트 · 점검 (LLM 키 없이 돈다)
 python -m tests.test_engine            # ①~⑤ 결정론 로직
