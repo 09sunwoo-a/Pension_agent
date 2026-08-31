@@ -206,7 +206,7 @@ def check_pitch_stages() -> bool:
     return ok
 
 
-_ROUTED_INTENTS = ("lms_send", "correction", "confirm_action")
+_ROUTED_INTENTS = ("lms_link", "correction", "confirm_action")
 
 # 예전에는 값·절차·고객군·브리핑 질의도 각자 intent 와 노드를 갖고 있었다. 능력 표면이
 # 도구 목록이 되면서(CLAUDE.md §3) 그 넷은 전용 노드를 잃고 계획 루프로 합쳐졌다 —
@@ -277,22 +277,22 @@ def check_intent_routing() -> bool:
     return ok
 
 
-def check_lms_send_parsing() -> bool:
-    """lms_send 는 **보내지 않는다** — 발송 화면 연계를 제안할 뿐이다(§10).
+def check_lms_link_parsing() -> bool:
+    """lms_link 는 **보내지 않는다** — 발송 화면 연계를 제안할 뿐이다(§10).
 
     인용부호 파싱·문구 누락·customer_id 없음을 직접 검증한다(LLM 을 쓰지 않는 노드다).
     """
     from pension_agent.consult_agent.nodes import lms
 
-    out = lms.lms_send({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "CX"})
+    out = lms.lms_link({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "CX"})
     pending = out.get("pending_action")
     ok1 = (bool(pending) and pending["kind"] == "lms" and pending["screen"]
            and pending["message"] == "안내 문구입니다"
            and "보낼지는 그 화면에서" in out["answer"])
-    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "CX"})["answer"]
-    ok3 = "찾을 수 없어요" in lms.lms_send({"question": '"문구" 보내줘', "customer_id": None})["answer"]
+    ok2 = "큰따옴표" in lms.lms_link({"question": "그냥 보내줘", "customer_id": "CX"})["answer"]
+    ok3 = "찾을 수 없어요" in lms.lms_link({"question": '"문구" 보내줘', "customer_id": None})["answer"]
     ok = ok1 and ok2 and ok3
-    print(f"{'✓' if ok else '✗'} lms_send: 발송이 아니라 화면 연계를 제안한다")
+    print(f"{'✓' if ok else '✗'} lms_link: 발송이 아니라 화면 연계를 제안한다")
     return ok
 
 
@@ -397,7 +397,7 @@ def check_screen_link() -> int:
 
     # 문구를 보내려는 직원은 그렇게 말한다 — 그 요청이 같은 화면 연계를 제안한다.
     from pension_agent.consult_agent.nodes import lms
-    lms_pending = lms.lms_send(
+    lms_pending = lms.lms_link(
         {"question": '"고객님, 남은 세액공제 한도가 264만원 있어요" 이 문구로 LMS 보내줘',
          "customer_id": "TEST_ACT"}).get("pending_action")
     hit = (bool(lms_pending) and lms_pending["kind"] == "lms"
@@ -955,8 +955,9 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 승낙 턴이 근거만 싣고 답변 문장을 손으로 만들지 않는다")
     ok += hit
 
-    # 도착지는 `answer` 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께 끝난다.
-    hit = R.route_confirm(out) == "answer" and R.route_confirm(
+    # 도착지는 `compose`(답변 작성) 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께
+    # 끝난다. 라벨이 상태 키 `answer` 와 다른 이유는 graph.py 의 add_node 주석 참고.
+    hit = R.route_confirm(out) == "compose" and R.route_confirm(
         {"answer": "화면을 열었어요"}) == "__end__"
     print(f"{'✓' if hit else '✗'} 분기표가 그 턴을 답변 작성으로 보낸다(화면 연계는 그대로 끝)")
     ok += hit
@@ -2229,6 +2230,16 @@ def check_product_advice() -> int:
     print(f"{'✓' if hit else '✗'} 등록 상품이어도 이번 턴 원장에 없으면 못 쓴다")
     ok += hit
 
+    # 괄호 표기가 판정을 뒤집으면 안 된다 — 등록명이 "KB 정기예금(1년)"인데 `_PROD` 가
+    # 괄호에서 이름을 끊으므로 LLM 은 "KB 정기예금 1년"으로 풀어 쓸 수밖에 없다. 공백만
+    # 지우던 동안 두 표기가 다른 키가 되어, suitable 재료의 8종을 정확히 옮긴 답변이
+    # '미등록'으로 통째로 버려지고 근거 원문이 덤프됐다(시연 대본 T10).
+    paren_ledger = ["KB 정기예금(1년) — 매우낮은위험 · 최근 1년 3.1%"]
+    paren_answer = "KB 정기예금 1년(매우낮은위험, 최근 1년 3.1%)도 범위 안에 들어요."
+    hit = verify_texts(paren_answer, paren_ledger, known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 등록명의 괄호를 풀어 쓴 표기('KB 정기예금 1년')가 통과한다")
+    ok += hit
+
     # ── ④ 적합성 범위 도구 ─────────────────────────────────────────
     cid = "176903-5528417"
     q = "이 고객 무슨 상품 추천해주지?"
@@ -2312,7 +2323,7 @@ def check_no_repeat() -> int:
                       "evidence": [ev],
                       "history": [{"question": "그럼 이 고객한테 뭘 권할 수 있어?",
                                    "tools": ["suitable"]}]})
-        hit = "직전 답변과 겹치는 재료" in seen["p"]
+        hit = "직전 답변과 겹치는 자료" in seen["p"]
         print(f"{'✓' if hit else '✗'} 직전 턴과 재료가 겹치면 반복 금지 블록이 실린다")
         ok += hit
 
@@ -2445,11 +2456,11 @@ def check_suitable_shape() -> int:
     print(f"{'✓' if hit else '✗'} 형태가 제외를 조건부로 요구한다")
     ok += hit
 
-    hit = "재료가 적은 종수를 그대로 쓴다" in ANSWER_SHAPES["suitable"]
+    hit = "자료가 적은 종수를 그대로 쓴다" in ANSWER_SHAPES["suitable"]
     print(f"{'✓' if hit else '✗'} 형태가 통과 종수를 그대로 쓰라고 요구한다")
     ok += hit
 
-    hit = "재료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
+    hit = "자료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
     print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
     ok += hit
     return ok
@@ -2510,8 +2521,44 @@ def check_question_echo() -> int:
 
     # ⑥ 「없는 것은 첫 문장에서 없다고」 — 가진 재료로 다른 질문에 답하지 않게 하는 지시.
     from pension_agent.consult_agent.prompts import COMPOSE_SYSTEM
-    hit = "핵심 대상이 재료에 없으면 그것이 결론" in COMPOSE_SYSTEM
+    hit = "핵심 대상이 자료에 없으면 그것이 결론" in COMPOSE_SYSTEM
     print(f"{'✓' if hit else '✗'} 생성 지시가 «없음»을 결론 자리에 세운다")
+    ok += hit
+
+    # ⑦ 고객 속성은 원장 값만 — 화법·방법론 카드의 상황 설명(«비대면 개설 + 권유직원
+    # 미존재…»)을 이 고객의 속성으로 굳히지 않게 하는 지시. 실 LLM 시연 대본 T4 에서
+    # m.045 카드를 근거로 "비대면 신규 계좌"라고 단정했는데, 원장에는 채널 컬럼 자체가
+    # 없다 — 숫자가 아니라 검증 게이트에도 걸리지 않는 자리라 지시로 막는다.
+    hit = "원장 값에 있는 것만" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 고객 속성 단정을 원장 값으로 한정한다 (T4 회귀)")
+    ok += hit
+
+    # ⑧ 인용이 생략한 조건은 코칭 문장이 채운다 — 실 LLM 시연 대본 T9 에서 답변이 표로는
+    # 「대면 5천만원 이상 0.38%」라 말하고, 채널 조건을 생략한 대사 원문을 근거로
+    # 「5천만원 이상이면 면제」라고 이어 말해 스스로 모순됐다. 원문은 못 고치므로(절대
+    # 규칙 1) 조건 보완은 생성 지시가 맡는다.
+    hit = "생략한 조건은 코칭 문장이 채운다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 인용 대사의 생략 조건을 채우게 한다 (T9 회귀)")
+    ok += hit
+
+    # ⑨ 상품 나열은 한 줄에 하나 — 실 LLM 시연 대본 T13 에서 12종을 쉼표로 이은 한
+    # 문단이 나왔다. 출력 형식의 «불릿 없이»가 목록까지 줄글로 밀어붙인 것이라, 3종
+    # 이상 나열에는 예외를 선언한다.
+    hit = "3종 이상 나열할 때는 줄글로 잇지 않는다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 상품 나열을 줄 단위로 세우게 한다 (T13 회귀)")
+    ok += hit
+
+    # ⑩ 스냅샷에서 이력·추세를 추정하지 않는다 — 실 LLM 시연 대본 T4 에서 카드의
+    # 「당해 납입액 0원」만 보고 "전년 납입 이력이 있었던 고객이라 납입이 끊긴 신호"라고
+    # 지어냈다. 원장의 연도별 납입액은 전부 0원인데 0원 연도는 카드 렌더에서 빠지므로
+    # (customer._paid_by_year 의 `and v` 필터) LLM 은 과거 값을 본 적이 없다. 성립 요건
+    # 6종에 없는 «납입 중단»을 일곱 번째 사유로 세운 것도 같은 문장이다 — 숫자가 없어
+    # 검증 게이트에 안 걸리는 자리라 지시로 막는다.
+    hit = "과거 이력이나 추세를 추정하지 않는다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 스냅샷 값의 이력·추세 추정을 금지한다 (T4 회귀)")
+    ok += hit
+    hit = "사유를 새로 만들어 붙이지 않는다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 관리 사유를 성립 요건 목록으로 한정한다 (T4 회귀)")
     ok += hit
     return ok
 
@@ -4370,6 +4417,44 @@ def check_origin() -> int:
     return ok
 
 
+def check_architecture_doc() -> int:
+    """README 의 아키텍처 다이어그램은 생성물이다 — 코드(그래프 노드·도구·게이트)와
+    어긋난 채 남으면 손그림 시절의 사고(lms_send 개명 뒤에도 옛 이름이 그려져 있던 것)가
+    재발한다. 재생성 결과와 README 의 마커 구간이 같은지 대조한다."""
+    from scripts import render_architecture as RA
+
+    ok = 0
+    text = RA.README.read_text(encoding="utf-8")
+    hit = RA.MARK_START in text and RA.MARK_END in text
+    print(f"{'✓' if hit else '✗'} README 에 생성 구간 마커가 있다")
+    ok += hit
+
+    block = text.partition(RA.MARK_START)[2].partition(RA.MARK_END)[0] if hit else ""
+    hit = hit and (RA.MARK_START + block + RA.MARK_END) == RA.render_block()
+    print(f"{'✓' if hit else '✗'} 다이어그램이 코드와 일치한다"
+          + ("" if hit else " — python -m scripts.render_architecture 로 갱신"))
+    ok += hit
+    return ok
+
+
+def check_node_label_collision() -> int:
+    """그래프 노드 라벨이 상태 키와 겹치지 않는가.
+
+    행내 환경의 langgraph(구버전)는 add_node 에서 라벨이 상태 키와 같으면 거부한다
+    ("'answer' is already being used as a state key"). 개발 환경(1.x)은 그 검사가 없어
+    여기서만 통과하고 행내에서 임포트가 죽었다 — answer 노드를 compose 로 개명한
+    이유다. 같은 충돌이 다시 들어오면 행내에 가서야 터지므로 여기서 잡는다."""
+    import typing
+
+    from pension_agent.consult_agent.state import AgentState
+    nodes = set(G.build_agent().get_graph().nodes) - {"__start__", "__end__"}
+    overlap = nodes & set(typing.get_type_hints(AgentState))
+    hit = not overlap
+    print(f"{'✓' if hit else '✗'} 노드 라벨이 상태 키와 겹치지 않는다 (구버전 langgraph 호환)"
+          + ("" if hit else f" — {sorted(overlap)}"))
+    return hit
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -4403,7 +4488,7 @@ def main() -> int:
         check_pitch_stages()
         check_verify_gate()
         check_intent_routing()
-        check_lms_send_parsing()
+        check_lms_link_parsing()
         check_knowledge_intents()
         check_screen_link()
         check_briefing_shared()
@@ -4446,8 +4531,10 @@ def main() -> int:
         check_llm_down()
         check_notice_scope()
         check_guard()
+        check_architecture_doc()
+        check_node_label_collision()
     finally:
-        # 위 테스트들(특히 lms_send)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
+        # 위 테스트들(특히 lms_link)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
         # 것만** 지운다. 예전에는 디렉터리를 통째로 지웠는데, 경로가 옮겨진 뒤로는 존재하지
         # 않는 곳을 지우고 있어서 실제로는 아무것도 정리되지 않았다(루트 CLAUDE.md 규칙 4의
         # 같은 사고 — 경로를 하드코딩하면 한 칸 움직였을 때 조용히 빗나간다).

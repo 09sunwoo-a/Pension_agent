@@ -39,12 +39,14 @@ from pension_agent.consult_agent.nodes import clarify as CL
 from pension_agent.consult_agent.nodes import plan as P
 from pension_agent.consult_agent.nodes import understand as U
 
-#: 그래프에 실리는 노드 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는 전역들.
+#: 그래프에 실리는 노드 **함수** 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는
+#: 전역들. 계측은 함수를 감싸므로 그래프 라벨과 달라도 된다 — answer 함수의 라벨은
+#: `compose` 다(상태 키 `answer` 와 겹치면 구버전 langgraph 가 add_node 를 거부한다).
 #: 되묻기 판정과 답변 작성은 노드 하나(`answer`)에서 **동시에** 끝난다(nodes/answer.py) —
 #: 예전의 `clarify`·`compose` 두 노드 자리다. 두 LLM 호출이 서로 다른 스레드에서 나므로
 #: 한 노드의 호출 목록에 함께 실리는데, 정체는 프롬프트로 갈리므로(_stage) 구분은 남는다.
 NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
-              "lms_send", "correction", "llm_down", "confirm_action", "offer")
+              "lms_link", "correction", "llm_down", "confirm_action", "offer")
 
 #: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
 ANSWER_NODE = "answer"
@@ -242,7 +244,7 @@ def _plan_note(state: dict, delta: dict) -> str:
     ev_before = len(state.get("evidence") or [])
     ev_after = delta.get("evidence")
     if ev_after is None or len(ev_after) <= ev_before:
-        return f"{signature} → 재료 없음"
+        return f"{signature} → 자료 없음"
     found = ev_after[-1]
     cards = " ".join(
         f"{s['id']}({s['score']})" if s.get("score") is not None else str(s["id"])
@@ -259,11 +261,11 @@ def _compose_note(state: dict, delta: dict) -> str:
     answer = delta.get("answer") or ""
     evidence = state.get("evidence") or []
     if evidence and answer.startswith(evidence[0]["text"]):
-        return f"폴백 — 근거 원문 {len(evidence)}건을 그대로 출력 (말투가 달라지는 자리)"
+        return f"폴백 — 근거 원문 {len(evidence)}건을 그대로 출력 (문체가 달라지는 자리)"
     if delta.get("llm_error") or answer.startswith("지금은 답변을 만들 수 없어요"):
         return "LLM 실패 안내 (§11 — 근거 원문을 대신 내보내지 않는다)"
     if not evidence:
-        return "재료 0건 — 없다고 답함"
+        return "자료 0건 — 없다고 답함"
     return "생성문 그대로"
 
 

@@ -13,7 +13,7 @@
 조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
 노드 함수는 기능별로 나뉘어 있다 — 상태정의는 state.py, 분기 predicate 는 routing.py,
 화법 슬롯 분해는 pitch.py, 계획 루프는 plan.py, 되묻기 판정·답변 작성은 answer.py,
-메타 질문 응답은 meta.py, LMS발송은 lms.py, 브리핑수정은 correction.py.
+메타 질문 응답은 meta.py, LMS 화면 연계는 lms.py, 브리핑수정은 correction.py.
 LLM 프롬프트는 prompts.py.
 
 **답변을 만드는 경로는 계획 루프 하나다.** 값·절차·고객군·브리핑 질의가 각자 노드를 갖고
@@ -37,7 +37,7 @@ from pension_agent.consult_agent import progress, suggest
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
 from pension_agent.consult_agent.nodes.correction import correction
-from pension_agent.consult_agent.nodes.lms import lms_send
+from pension_agent.consult_agent.nodes.lms import lms_link
 from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
@@ -58,8 +58,12 @@ def build_agent():
     g.add_node("understand", understand)
     g.add_node("agent_help", agent_help)
     g.add_node("plan", plan_step)
-    g.add_node("answer", answer)
-    g.add_node("lms_send", lms_send)
+    # 노드 라벨은 compose 다 — 상태 키에 `answer`(최종 화법)가 있는데, 행내 환경의
+    # langgraph(구버전)는 노드 이름이 상태 키와 같으면 add_node 에서 거부한다
+    # ("'answer' is already being used as a state key"). 개발 환경(1.x)은 그 검사가
+    # 없어 여기서만 통과했었다. 함수 이름(answer)은 그대로라 트레이스 계측은 안 변한다.
+    g.add_node("compose", answer)
+    g.add_node("lms_link", lms_link)
     g.add_node("correction", correction)
     g.add_node(LLM_DOWN, llm_down)
     g.add_node("confirm_action", confirm_action)
@@ -68,22 +72,22 @@ def build_agent():
     g.add_edge(START, "understand")
     g.add_conditional_edges(
         "understand", route_intent,
-        ["agent_help", "plan", "lms_send", "correction", "confirm_action", LLM_DOWN],
+        ["agent_help", "plan", "lms_link", "correction", "confirm_action", LLM_DOWN],
     )
     # 계획 루프 — LLM 이 도구를 고르고(plan), 코드가 상한에서 끊고(route_plan),
     # 모은 근거만으로 답을 낸다(answer). 능력 표면은 intent enum 이 아니라 tools.TOOLS 다.
-    g.add_conditional_edges("plan", route_plan, ["plan", "answer"])
+    g.add_conditional_edges("plan", route_plan, ["plan", "compose"])
     # answer 안에서 되묻기 판정과 답변 작성이 함께 끝난다(nodes/answer.py). 되묻기로
     # 끝난 턴에는 화면 연계 제안이 붙지 않는다 — 제안이 붙을 수 있는 자리는 여기뿐이고,
     # 붙일지는 offer 안의 규칙이 정한다(§10).
-    g.add_conditional_edges("answer", route_answer, {"offer": "offer", "__end__": END})
+    g.add_conditional_edges("compose", route_answer, {"offer": "offer", "__end__": END})
     # 승낙 턴 — 화면 연계는 URL 하나로 끝나고, 화법 제시는 근거만 실린 채 answer 로 간다.
     # 답변을 만드는 경로를 둘로 늘리지 않기 위해서다(routing.route_confirm). 그 턴에는
     # 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자다(clarify.applicable).
     g.add_conditional_edges("confirm_action", route_confirm,
-                            {"answer": "answer", "__end__": END})
+                            {"compose": "compose", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_send", "correction", LLM_DOWN):
+    for node in ("agent_help", "lms_link", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 
@@ -117,7 +121,9 @@ def ask(
         _AGENT = build_agent()
     with progress.reporting(on_progress):
         out = _AGENT.invoke(
-            {"question": question, "history": history or [], "customer_id": customer_id})
+            {"question": question, "history": history or [], "customer_id": customer_id,
+             # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
+             "session_id": session_id})
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

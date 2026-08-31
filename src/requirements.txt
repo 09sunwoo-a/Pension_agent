@@ -1,5 +1,8 @@
 # 런타임 — 에이전트 본체
-langgraph>=0.2.0          # consult_agent 대화 그래프
+langgraph>=0.2.0          # consult_agent 대화 그래프 — 행내 0.4.8 · 개발 1.2.11 양쪽에서
+                          # 테스트 전체 통과 확인(2026-08-31). 0.x 는 노드 라벨이 상태 키와
+                          # 겹치면 add_node 를 거부하므로 라벨을 상태 키와 겹치지 않게 둔다
+                          # (graph.py compose 주석 · test_consult_agent 충돌 검사)
 anthropic>=0.40.0         # 외부 테스트용 LLM 프로바이더 (사내 genai 는 표준 라이브러리만 씀)
 
 # 개발·데모 화면 (app.py)

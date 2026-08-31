@@ -46,7 +46,7 @@ PLAN_MAX_TOKENS = 300
 #: 근거를 하나도 못 모았을 때의 답. 지어내는 대신 없다고 말하고 무엇이 있는지 알려준다.
 NO_EVIDENCE = (
     "그 질문에 쓸 근거를 지식베이스에서 찾지 못했습니다. "
-    "제가 가진 재료는 화법·제도 수치·업무 절차·단말 화면번호·비대면 채널 경로·"
+    "제가 가진 자료는 화법·제도 수치·업무 절차·단말 화면번호·비대면 채널 경로·"
     "고객군 정의·관리 방법론·현장 관찰이고, 고객 개별 정보와 지난 상담 기록은 "
     "브리핑 화면이 열려 있을 때만 볼 수 있습니다."
 )
@@ -70,7 +70,7 @@ MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
 #: 재료 성격 표시 블록의 머리말(§7). 어느 자료에서 온 말인지 · 고객에게 그대로 옮겨도
 #: 되는지. 답을 읽는 사람은 직원이고, 무엇을 옮길지는 직원이 거른다 — 그 판단에 필요한
 #: 표시를 주는 데까지가 에이전트의 몫이다.
-MATERIAL_MARKS = "── 이 답의 재료"
+MATERIAL_MARKS = "── 참고한 자료"
 
 #: LLM 단계가 깨졌을 때의 답. **'근거가 없다'와 절대 같은 말을 하면 안 된다** —
 #: 찾아보고 없는 것과 찾아보지도 못한 것은 다르고, 뒤를 앞으로 말하면 지식베이스에 있는
@@ -280,7 +280,10 @@ def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     """
     for span in found["atomic"]:
         if span not in answer and (numbers(span) & numbers(answer)):
-            return DISCARD, []
+            # 걸린 스팬을 함께 돌려준다 — DISCARD 처분에는 안 쓰이지만, 계측(trace)이 이걸
+            # 실어야 리허설 로그가 «무엇을 그대로 안 실어서 잘렸나»를 말할 수 있다. 판정
+            # 상수만 남기면 화면에 "discard" 한 단어가 떨어져 아무도 진단할 수 없다.
+            return DISCARD, [(span, [])]
 
     scopes = found.get("notice_scopes") or []
     keyed = [s for s in scopes if s.get("keys")]
@@ -328,7 +331,12 @@ def _sources(evidence: list[tools.Evidence], guards: list, alts: list) -> list[d
         if not card or card in seen:
             continue
         seen.add(card)
-        out.append({"id": card, "title": item.get("title") or item.get("text", "")[:40],
+        # 제목이 없어 본문 발췌를 세울 때는 말줄임을 붙인다 — 뚝 끊긴 문장("…\"운용지시가
+        # 되지 않는")이 출처 줄에 그대로 서면 잘린 것인지 원문이 그런 것인지 분간이 안 된다.
+        excerpt = " ".join(item.get("text", "").split())
+        if len(excerpt) > 60:
+            excerpt = excerpt[:60] + "…"
+        out.append({"id": card, "title": item.get("title") or excerpt,
                     "doc": item.get("doc"), "score": None, "page": None, "role": CAUTION})
     return out
 

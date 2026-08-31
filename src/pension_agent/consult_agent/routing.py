@@ -11,7 +11,7 @@ predicate 를 여기 모았다(노드 구현은 nodes/, 조립은 graph.py).
 
   agent_help      에이전트 자신에 대한 질문이라 지식 재료가 없다
   correction      답을 만드는 게 아니라 화면의 산문을 고치는 요청이다
-  lms_send        재료 검색이 아니라 화면 연계 요청이다(§10)
+  lms_link        재료 검색이 아니라 화면 연계 요청이다(§10)
   confirm_action  직전 턴의 제안에 대한 확인이라 근거를 모으지 않는다
   llm_down        LLM 이 죽어 분류조차 못 한 턴 (§11)
 
@@ -39,7 +39,7 @@ LLM_DOWN = "llm_down"
 # "가능 여부 즉시 확인"(고객 계좌 상태 플래그로 '이 제안 지금 되나'를 보는 기능, 미구현)과
 # strategy_agent 의 `capability` kind(시스템 기능 지원 여부, cap.lms_send)와 혼동되기 때문이다.
 INTENTS = (
-    DEFAULT_INTENT, "guide", "agent_help", "correction", "lms_send",
+    DEFAULT_INTENT, "guide", "agent_help", "correction", "lms_link",
     # 직전 턴이 제안한 화면 연계에 대한 확인 응답("네"/"아니오").
     "confirm_action",
 )
@@ -51,7 +51,7 @@ INTENTS = (
 _INTENT_NODE = {
     "agent_help": "agent_help",
     "correction": "correction",
-    "lms_send": "lms_send",
+    "lms_link": "lms_link",
     "confirm_action": "confirm_action",
     LLM_DOWN: LLM_DOWN,
 }
@@ -88,7 +88,7 @@ def route_intent(state: AgentState) -> str:
 
 def route_plan(state: AgentState) -> str:
     """도구를 한 번 더 부를지, 답을 낼지. 상한은 plan.MAX_STEPS 가 정한다."""
-    return "answer" if state.get("plan_done") else "plan"
+    return "compose" if state.get("plan_done") else "plan"
 
 
 def route_answer(state: AgentState) -> str:
@@ -117,8 +117,10 @@ def route_confirm(state: AgentState) -> str:
     턴이다. 제안 종류(kind)로 가르지 않는 이유는, 앞으로 붙는 제안이 늘어도 "근거만 싣고
     답은 작성 단계가 쓴다"는 규약 하나만 지키면 되기 때문이다.
 
-    도착지는 `answer` 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께 끝나기 때문이고,
+    도착지는 `compose`(답변 작성 노드 — 함수는 nodes/answer.py::answer, 라벨이 상태 키
+    `answer` 와 겹치면 구버전 langgraph 가 거부해 라벨만 다르다)다 — 되묻기 판정과 답변
+    작성이 그 노드에서 함께 끝나기 때문이고,
     **승낙 턴에는 판정이 돌지 않는다**(clarify.applicable). 이번 턴의 입력은 "네" 한 글자라
     모호함을 판정할 질문 자체가 없고, 무엇을 보여주기로 했는지는 제안한 턴이 이미 정했다(§10).
     """
-    return "answer" if state.get("evidence") and not state.get("answer") else "__end__"
+    return "compose" if state.get("evidence") and not state.get("answer") else "__end__"

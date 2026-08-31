@@ -14,7 +14,9 @@ consult_agent 는 매 턴 `append_turn()`으로 기록만 하고, strategy_agent
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+# datetime.UTC 는 Python 3.11에서 생긴 별칭이다 — 3.10 로컬에서 임포트가 죽어
+# 상담 세션 저장이 통째로 못 올라왔다. timezone.utc 는 같은 객체다.
+from datetime import datetime, timezone
 from pathlib import Path
 
 from pension_agent import config
@@ -57,7 +59,7 @@ def append_turn(
     """세션에 턴 하나를 추가한다. session_id 가 처음 보는 값이면 세션을 새로 연다."""
     doc = _load(customer_id)
     turn = dict(turn)
-    turn.setdefault("ts", datetime.now(UTC).isoformat())
+    turn.setdefault("ts", datetime.now(timezone.utc).isoformat())
 
     session = next((s for s in doc["sessions"] if s["session_id"] == session_id), None)
     if session is None:
