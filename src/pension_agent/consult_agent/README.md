@@ -170,15 +170,15 @@ CLI·Streamlit 이 카드 id 대신 이걸 읽어준다(출처 문자열 규칙�
 ```mermaid
 flowchart TD
     __start__([START])
-    understand["질문 이해<br/>무엇을 원하는 질문인지 가려 보낸다"]
-    agent_help["기능 안내<br/>무엇을 도와줄 수 있는지 답한다"]
-    plan["근거 수집 루프<br/>질문에 필요한 자료를 도구로 찾아 모은다"]
-    answer["답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"]
-    lms_link["LMS 발송 화면 연계<br/>요청받은 문구로 발송 화면 열기를 제안한다"]
-    correction["브리핑 수정<br/>화면의 AI 작성 문구를 고친다"]
-    llm_down["장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다"]
-    confirm_action["제안 실행<br/>직전 턴에 제안한 화면 연계를 승낙받아 실행한다"]
-    offer["화면 연계 제안<br/>답변과 이어지는 업무 화면을 열지 묻는다"]
+    understand["understand — 질문 이해<br/>무엇을 원하는 질문인지 가려 보낸다"]
+    agent_help["agent_help — 기능 안내<br/>무엇을 도와줄 수 있는지 답한다"]
+    plan["plan — 근거 수집 루프<br/>질문에 필요한 자료를 도구로 찾아 모은다"]
+    answer["answer — 답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"]
+    lms_link["lms_link — LMS 발송 화면 연계<br/>요청받은 문구로 발송 화면 열기를 제안한다"]
+    correction["correction — 브리핑 수정<br/>화면의 AI 작성 문구를 고친다"]
+    llm_down["llm_down — 장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다"]
+    confirm_action["confirm_action — 제안 실행<br/>직전 턴에 제안한 화면 연계를 승낙받아 실행한다"]
+    offer["offer — 화면 연계 제안<br/>답변과 이어지는 업무 화면을 열지 묻는다"]
     __end__([END])
     __start__ --> understand
     answer -.-> __end__
