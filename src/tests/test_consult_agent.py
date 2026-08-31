@@ -2291,6 +2291,102 @@ def check_product_advice() -> int:
     return ok
 
 
+def check_table_row_names() -> int:
+    """표의 행 이름을 **답변이 부르는 표기**로도 알아보는가.
+
+    회귀 대상: 행 이름이 「사용자부담금(퇴직금)」한 덩이라, 답변이 「퇴직금(사용자부담금)」·
+    「사용자부담금」으로 부르면 그 행을 말한 줄 몰랐다. 그러면 그 행이 «답변이 말하지 않은
+    행»이 되어 그 값이 남의 값으로 신고되고, **표의 네 구간을 전부 정확히 옮긴 답변이
+    폐기됐다**(실 LLM 시연 대본 T8b). 카드의 pitfalls 는 반대로 「구간을 확인하지 않은 단일
+    수치 답변은 오답」이라고 적혀 있어, 재료와 검증기가 서로 모순이었다.
+
+    이름을 못 알아본 것은 판정 불가이지 위반이 아니다(§6). 별칭은 «말한 행»을 늘리는
+    쪽이라 판정을 좁히기만 한다 — 오짝 검출은 그대로여야 한다(아래 ③④).
+    """
+    from pension_agent.consult_agent import relations
+    from pension_agent.consult_agent.state import KB as _KB
+    ok = 0
+    card = next((c for c in _KB.cards if c["id"] == "fact.k04.f50"), None)
+    if card is None:
+        print("✗ fact.k04.f50 카드를 찾지 못했다")
+        return 0
+
+    both = ("퇴직금(사용자부담금) 대면은 5천만원 미만 연 0.45%, 5천만원 이상 연 0.38%이고, "
+            "비대면은 5천만원 미만 연 0.20%, 5천만원 이상은 면제예요. 가입자부담금 대면은 "
+            "1억원 미만 연 0.28%, 1억원 이상 연 0.25%이고, 비대면은 1억원 미만 연 0.23%, "
+            "1억원 이상 연 0.21%예요.")
+    hit = not relations.check(both, [card])
+    print(f"{'✓' if hit else '✗'} 두 부담금을 함께 정확히 말한 답변이 통과한다(T8b 회귀)")
+    ok += hit
+
+    one = "가입자부담금 대면은 1억원 미만 연 0.28%, 1억원 이상 연 0.25%예요."
+    hit = not relations.check(one, [card])
+    print(f"{'✓' if hit else '✗'} 한쪽만 말한 답변도 그대로 통과한다")
+    ok += hit
+
+    wrong = "가입자부담금 대면 1억원 미만은 연 0.45%예요."
+    hit = bool(relations.check(wrong, [card]))
+    print(f"{'✓' if hit else '✗'} 가입자부담금에 사용자부담금 값을 붙이면 잡힌다")
+    ok += hit
+
+    # 예전에는 이 방향이 **판정 불가로 통과**했다 — 「사용자부담금(퇴직금)」을 아예 못
+    # 알아봐서 said 가 비었기 때문이다. 별칭이 그 구멍을 함께 막는다.
+    flipped = "퇴직금(사용자부담금) 대면 5천만원 미만은 연 0.28%예요."
+    hit = bool(relations.check(flipped, [card]))
+    print(f"{'✓' if hit else '✗'} 사용자부담금에 가입자부담금 값을 붙여도 잡힌다")
+    ok += hit
+    return ok
+
+
+def check_suitable_shape() -> int:
+    """적합성 재료와 답변 형태가 서로 모순되지 않는가 — 제외가 0건인 고객.
+
+    회귀 대상: 형태가 「제외된 상품과 사유」를 무조건 요구하는데 재료는 제외 0건일 때
+    침묵했다. LLM 은 형태를 지키려고 **통과 목록에서 하나를 골라 뺐다** — 12종을 11종이라
+    말하고 "상담 실익이 없다"는 재료에 없는 사유를 붙였다(실 LLM 시연 대본 T13, 정민석).
+    재료에 없는 것을 요구한 쪽이 원인이다.
+
+    「게이트」는 개발 용어라 재료에서 걷어낸다 — 재료에 있으면 답변이 그대로 쓴다.
+    """
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES, SHAPE_BLOCK
+    ok = 0
+    open_top = tools._suitable({"customer_id": "181245-3097614"}, "q")   # 상한 = 최고 등급
+    capped = tools._suitable({"customer_id": "188406-7352194"}, "q")     # 제외가 있는 고객
+    if not open_top or not capped:
+        print("✗ 적합성 재료를 만들지 못했다")
+        return 0
+
+    hit = "안내할 수 없는 상품 없음" in open_top["text"]
+    print(f"{'✓' if hit else '✗'} 제외 0건이면 재료가 «없음»을 말한다(침묵하지 않는다)")
+    ok += hit
+
+    hit = "안내할 수 없는 상품 4종" in capped["text"]
+    print(f"{'✓' if hit else '✗'} 제외가 있으면 종수와 사유를 그대로 싣는다")
+    ok += hit
+
+    hit = all("게이트" not in x["text"] for x in (open_top, capped))
+    print(f"{'✓' if hit else '✗'} 재료 본문에 개발 용어 «게이트»가 없다")
+    ok += hit
+
+    hit = all("게이트" not in (s.get("doc") or "")
+              for x in (open_top, capped) for s in x["sources"])
+    print(f"{'✓' if hit else '✗'} 근거 출처 이름에도 «게이트»가 없다")
+    ok += hit
+
+    hit = "안내할 수 없는 상품이 있으면" in ANSWER_SHAPES["suitable"]
+    print(f"{'✓' if hit else '✗'} 형태가 제외를 조건부로 요구한다")
+    ok += hit
+
+    hit = "재료가 적은 종수를 그대로 쓴다" in ANSWER_SHAPES["suitable"]
+    print(f"{'✓' if hit else '✗'} 형태가 통과 종수를 그대로 쓰라고 요구한다")
+    ok += hit
+
+    hit = "재료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
+    print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
+    ok += hit
+    return ok
+
+
 def check_question_echo() -> int:
     """직원이 질문에 넣은 수치를 **되받아 말한** 답변이 살아남는가.
 
@@ -4198,6 +4294,8 @@ def main() -> int:
         check_product_advice()
         check_caution_roles()
         check_question_echo()
+        check_table_row_names()
+        check_suitable_shape()
         check_history_material()
         check_today_material()
         check_account_state()
