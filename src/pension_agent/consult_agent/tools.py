@@ -611,7 +611,7 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     except Exception:
         return None
 
-    lines = [f"■ 고객 {customer_id} — 브리핑 재료"]
+    lines = [f"■ 고객 {customer_id} — 브리핑 자료"]
     lines += [f"· {k} {v}" for k, v in facts["customer"].items()]
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
     # 계좌 상태 — **정상인 항목도 값으로** 싣는다. 화면(briefing)은 요건이 성립한 것만
@@ -797,6 +797,15 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     # (scripts/seed_sessions.py 가 목업을 심고, 실서비스에서는 CRM 이 같은 자리를 채운다).
     def _turns(session: dict) -> list[dict]:
         return [t for t in (session.get("turns") or []) if (t.get("text") or "").strip()]
+
+    # **지금 진행 중인 세션은 «지난번»이 아니다.** graph.ask 가 턴마다 기록하므로 직전
+    # 턴이 이미 이 저장소에 있는데, 그걸 재료로 실으면 30초 전 자기 답변이 «지난 상담
+    # 기록»으로 나간다(시연 대본 T5 실측 — "두 번의 상담 기록" 중 하나가 방금 한 T4 였다).
+    # 이번 세션의 직전 턴들은 대화 맥락(history)으로 이미 프롬프트에 실려 있어서 재료로
+    # 중복할 이유도 없다.
+    current = state.get("session_id")
+    if current:
+        sessions = [s for s in sessions if s.get("session_id") != current]
 
     recent = sorted(sessions, key=lambda s: s.get("started_at") or "", reverse=True)
     records = [s for s in recent if any(t.get("role") == "record" for t in _turns(s))]
@@ -1228,7 +1237,7 @@ def _playbook(state: AgentState, query: str) -> Evidence | None:
     것만 올린다.
     """
     hits = playbook_hits(state, exclude=cited_cards(state))
-    hits = _adopt(state, query, hits, "고객 상태에 걸린 재료")
+    hits = _adopt(state, query, hits, "고객 상태에 걸린 자료")
     if not hits:
         return None
     return playbook_evidence(query, hits)
@@ -1318,9 +1327,9 @@ TOOLS: dict[str, Tool] = {
              "허용하는 위험등급 상한, 그 범위를 통과한 상품·포트폴리오 목록, 제외된 상품과 "
              "그 사유를 돌려준다. 「이 고객한테 뭘 추천하지」·「무슨 상품 있어」가 여기다",
              _suitable),
-        Tool("customer", "지금 열려 있는 고객의 브리핑 재료(잔액·수익률·성립 요건, 그리고 이 고객이 "
+        Tool("customer", "지금 열려 있는 고객의 브리핑 자료(잔액·수익률·성립 요건, 그리고 이 고객이 "
              "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer,
-             progress="고객 브리핑 재료"),
+             progress="고객 브리핑 자료"),
         Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
              _history, progress="지난 상담 기록"),
         # 시점·기한이 걸린 질문은 재료가 없으면 답이 안 나온다(§8 "지어내지 않는다"가 그대로

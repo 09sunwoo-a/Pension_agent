@@ -242,7 +242,7 @@ def _plan_note(state: dict, delta: dict) -> str:
     ev_before = len(state.get("evidence") or [])
     ev_after = delta.get("evidence")
     if ev_after is None or len(ev_after) <= ev_before:
-        return f"{signature} → 재료 없음"
+        return f"{signature} → 자료 없음"
     found = ev_after[-1]
     cards = " ".join(
         f"{s['id']}({s['score']})" if s.get("score") is not None else str(s["id"])
@@ -259,11 +259,11 @@ def _compose_note(state: dict, delta: dict) -> str:
     answer = delta.get("answer") or ""
     evidence = state.get("evidence") or []
     if evidence and answer.startswith(evidence[0]["text"]):
-        return f"폴백 — 근거 원문 {len(evidence)}건을 그대로 출력 (말투가 달라지는 자리)"
+        return f"폴백 — 근거 원문 {len(evidence)}건을 그대로 출력 (문체가 달라지는 자리)"
     if delta.get("llm_error") or answer.startswith("지금은 답변을 만들 수 없어요"):
         return "LLM 실패 안내 (§11 — 근거 원문을 대신 내보내지 않는다)"
     if not evidence:
-        return "재료 0건 — 없다고 답함"
+        return "자료 0건 — 없다고 답함"
     return "생성문 그대로"
 
 

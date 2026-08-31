@@ -101,14 +101,14 @@ DEMO: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
         ("T3",  "IRP 계좌 해지는 몇 번 화면에서 하지?"),               # 연계 제안
         ("T3b", "응, 열어줘"),                                         # 딥링크
     )),
-    (1, "1~2막 상담 전·중 — 송도윤(방치현금 54% · ISA 만기 · 13개월 미접촉)",
+    (1, "1~2막 상담 전·중 — 송도윤(방치현금 54% · ISA 만기 · 322일 미접촉)",
      "188406-7352194", (
         ("T4",  "이 고객 왜 관리 대상이야?"),                          # 타겟 근거
         ("T5",  "지난번엔 무슨 얘기 했지?"),                            # 상담 이력
         ("T6",  "이 고객한테 하면 안 되는 게 뭐야?"),                   # 금지·주의
         ("T7",  "고객이 '그 돈 그냥 둬도 되지 않나요' 하는데 뭐라고 하지?"),   # 반론 대응
         ("T8",  "수수료 얼마야?"),                                     # 되묻기
-        ("T8b", "운용관리요"),                                         # 되물은 갈래로
+        ("T8b", "가입자부담금, 대면이요"),                             # 되물은 선택지를 고른다
         ("T9",  "우리 수수료가 얼마고, 증권사는 무료라는데 뭐라고 답하지?"),   # 복합 — 핵심
         ("T10", "그럼 이 고객한테 뭘 권할 수 있어?"),                   # 적합성 «범위»
         ("T11", "그 중에 ISA 만기자금이랑 같이 가져갈 만한 건?"),        # 후속
@@ -129,7 +129,7 @@ def _tools(turn: TR.Turn) -> str:
             continue
         signature, _, result = node.note.partition("→")
         name = signature.split(":")[0].strip()
-        out.append(name + ("✗" if "재료 없음" in result else ""))
+        out.append(name + ("✗" if "자료 없음" in result else ""))
     return " → ".join(out) or "(없음)"
 
 
@@ -151,7 +151,7 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
         signature, _, found = node.note.partition("→")
         tool, _, query = signature.strip().partition(":")
         out.append(f"   │ {step}. {tool.strip()} «{query.strip()}»")
-        if "재료 없음" in found:
+        if "자료 없음" in found:
             out.append("   │      → 없음 (다른 도구로 넘어감)")
             continue
         for token in found.split():
@@ -163,18 +163,22 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
     stopped = next((g for g in node.gates if not g.passed), None) if node else None
     if node is not None and node.delta.get("clarify"):
-        out.append("   └ 갈래가 갈려서 답 대신 되물음 (써 둔 답은 버린다)")
+        out.append("   └ 질문의 갈래가 나뉘어 답 대신 선택지를 되물음 (써 둔 답은 폐기)")
         return "\n".join(out)
     verdict = (f"검증에서 걸림({stopped.name}) — 생성문 폐기" if stopped else
                "근거와 대조 통과" if (node and node.gates) else "대조할 수치 없음")
-    out.append(f"   └ 위 재료만 보고 LLM 이 {len(result.get('answer') or '')}자 작성 · {verdict}")
+    out.append(f"   └ 위 자료만 보고 LLM 이 {len(result.get('answer') or '')}자 작성 · {verdict}")
     # 폐기된 턴에서 **무엇이 걸렸는지**까지 적는다. 이름만 남기면 화면에 떨어진 원문
-    # 덤프를 보고도 «왜 잘렸나»를 알 수 없어, 고칠 것이 질문인지 재료인지 검증기인지
+    # 덤프를 보고도 «왜 잘렸나»를 알 수 없어, 고칠 것이 질문인지 자료인지 검증기인지
     # 가려지지 않는다 — 리허설에서 제일 먼저 알아야 하는 값이다.
+    # span 게이트의 detail 첫 칸은 판정 상수(discard/append)라 사람이 읽을 값이 아니다 —
+    # 걸린 스팬·카드만 남긴다.
     if stopped is not None and stopped.detail:
-        shown = [str(d) for d in stopped.detail[:6]]
-        more = f" 외 {len(stopped.detail) - len(shown)}건" if len(stopped.detail) > len(shown) else ""
-        out.append(f"     ↳ 재료에 없다고 본 것: {' · '.join(shown)}{more}")
+        readable = [str(d) for d in stopped.detail if str(d) not in ("discard", "append", "ok")]
+        shown = readable[:6]
+        more = f" 외 {len(readable) - len(shown)}건" if len(readable) > len(shown) else ""
+        if shown:
+            out.append(f"     ↳ 자료에 없다고 본 것: {' · '.join(shown)}{more}")
     if show_llm and stopped is not None:
         draft = next((c.text for n in turn.nodes for c in n.calls
                       if c.stage == "compose" and c.text), "")
@@ -295,7 +299,12 @@ def main(argv: list[str]) -> int:
                 print(f"\n{'━' * 70}\n{sees}"
                       + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))
 
-            with session(customer_id=customer) as (ask, tr):
+            # 시연 리허설에서는 화면이 대기 중에 보여주는 진행 줄("⋯ ○○을 찾고 있어요")까지
+            # 대본에 나와야 한다 — 응답 대기를 UX 로 보완한 것 자체가 시연 포인트다.
+            # ask() 가 도는 동안 콜백이 그 자리에서 찍으므로 질문 줄과 답변 사이에 흐른다.
+            show_progress = demo and not brief
+            on_progress = (lambda text: print(f"   ⋯ {text}")) if show_progress else None
+            with session(customer_id=customer, on_progress=on_progress) as (ask, tr):
                 for i, (label, question) in enumerate(labelled):
                     if not brief:
                         if demo:
@@ -310,6 +319,8 @@ def main(argv: list[str]) -> int:
                         rows.append([label, "—", "—", "", f"예외 {type(exc).__name__}", sees])
                         break
                     if not brief:
+                        if show_progress:
+                            print()   # 진행 줄과 답변을 가른다
                         _print_answer(result)
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
                     if demo and debug and not brief:
@@ -328,7 +339,7 @@ def main(argv: list[str]) -> int:
         print(("  " + "  ".join(_pad(c, w) for c, w in zip(r, widths, strict=True))).rstrip())
         if i == 0:
             print("  " + "  ".join("─" * w for w in widths))
-    print("\n  도구 뒤의 ✗ 는 그 호출이 재료를 못 찾은 것 — 다음 칸에서 갈아탔는지가 요점입니다.")
+    print("\n  도구 뒤의 ✗ 는 그 호출이 자료를 못 찾은 것 — 다음 칸에서 다른 도구로 옮겨갔는지가 요점입니다.")
     if demo:
         print("  리허설에서 볼 것: T9 가 도구를 여러 개 부르는가 · T10 이 suitable 을 부르는가 ·")
         print("                    T3 에 연계가 붙는가 · T12 가 «없다»로 끝나는가.")

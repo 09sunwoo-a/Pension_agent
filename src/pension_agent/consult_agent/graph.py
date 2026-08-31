@@ -117,7 +117,9 @@ def ask(
         _AGENT = build_agent()
     with progress.reporting(on_progress):
         out = _AGENT.invoke(
-            {"question": question, "history": history or [], "customer_id": customer_id})
+            {"question": question, "history": history or [], "customer_id": customer_id,
+             # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
+             "session_id": session_id})
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

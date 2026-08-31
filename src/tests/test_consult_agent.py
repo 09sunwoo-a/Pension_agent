@@ -2229,6 +2229,16 @@ def check_product_advice() -> int:
     print(f"{'✓' if hit else '✗'} 등록 상품이어도 이번 턴 원장에 없으면 못 쓴다")
     ok += hit
 
+    # 괄호 표기가 판정을 뒤집으면 안 된다 — 등록명이 "KB 정기예금(1년)"인데 `_PROD` 가
+    # 괄호에서 이름을 끊으므로 LLM 은 "KB 정기예금 1년"으로 풀어 쓸 수밖에 없다. 공백만
+    # 지우던 동안 두 표기가 다른 키가 되어, suitable 재료의 8종을 정확히 옮긴 답변이
+    # '미등록'으로 통째로 버려지고 근거 원문이 덤프됐다(시연 대본 T10).
+    paren_ledger = ["KB 정기예금(1년) — 매우낮은위험 · 최근 1년 3.1%"]
+    paren_answer = "KB 정기예금 1년(매우낮은위험, 최근 1년 3.1%)도 범위 안에 들어요."
+    hit = verify_texts(paren_answer, paren_ledger, known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 등록명의 괄호를 풀어 쓴 표기('KB 정기예금 1년')가 통과한다")
+    ok += hit
+
     # ── ④ 적합성 범위 도구 ─────────────────────────────────────────
     cid = "176903-5528417"
     q = "이 고객 무슨 상품 추천해주지?"
@@ -2312,7 +2322,7 @@ def check_no_repeat() -> int:
                       "evidence": [ev],
                       "history": [{"question": "그럼 이 고객한테 뭘 권할 수 있어?",
                                    "tools": ["suitable"]}]})
-        hit = "직전 답변과 겹치는 재료" in seen["p"]
+        hit = "직전 답변과 겹치는 자료" in seen["p"]
         print(f"{'✓' if hit else '✗'} 직전 턴과 재료가 겹치면 반복 금지 블록이 실린다")
         ok += hit
 
@@ -2445,11 +2455,11 @@ def check_suitable_shape() -> int:
     print(f"{'✓' if hit else '✗'} 형태가 제외를 조건부로 요구한다")
     ok += hit
 
-    hit = "재료가 적은 종수를 그대로 쓴다" in ANSWER_SHAPES["suitable"]
+    hit = "자료가 적은 종수를 그대로 쓴다" in ANSWER_SHAPES["suitable"]
     print(f"{'✓' if hit else '✗'} 형태가 통과 종수를 그대로 쓰라고 요구한다")
     ok += hit
 
-    hit = "재료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
+    hit = "자료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
     print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
     ok += hit
     return ok
@@ -2510,7 +2520,7 @@ def check_question_echo() -> int:
 
     # ⑥ 「없는 것은 첫 문장에서 없다고」 — 가진 재료로 다른 질문에 답하지 않게 하는 지시.
     from pension_agent.consult_agent.prompts import COMPOSE_SYSTEM
-    hit = "핵심 대상이 재료에 없으면 그것이 결론" in COMPOSE_SYSTEM
+    hit = "핵심 대상이 자료에 없으면 그것이 결론" in COMPOSE_SYSTEM
     print(f"{'✓' if hit else '✗'} 생성 지시가 «없음»을 결론 자리에 세운다")
     ok += hit
     return ok
