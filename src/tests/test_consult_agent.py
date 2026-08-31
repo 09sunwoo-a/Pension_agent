@@ -2291,6 +2291,74 @@ def check_product_advice() -> int:
     return ok
 
 
+def check_no_repeat() -> int:
+    """좁히는 후속 질문에 앞 답을 통째로 다시 세우지 않는가.
+
+    회귀 대상: 「그 중에 ISA 만기자금이랑 같이 가져갈 만한 건?」에 「자료가 없어요」로 잘
+    시작해 놓고, 직전 턴에서 방금 말한 적합성 목록 8종 + 제외 4종을 그대로 반복했다
+    (실 LLM 시연 대본 T11, 1,021자). **지시로 못 막는다** — 프롬프트에 실리는 이전 대화는
+    직원 질문만이고 답변 원문이 없어서(state.Turn) LLM 은 자기가 무엇을 나열했는지 볼 수
+    없다. 답변 원문을 싣는 것도 답이 아니다: 그 수치를 되받으면 이번 턴 원장 밖이라
+    `verify` 가 답을 통째로 버린다(§6). 그래서 **도구 이름만** 턴에 남기고, 겹침 판정은
+    코드가 한다.
+    """
+    ok = 0
+    ev = tools._ev("suitable", "q", "■ 재료", [{"id": "s.1", "title": "적합성"}])
+    seen: dict[str, str] = {}
+    orig = plan.generate
+    plan.generate = lambda p, **kw: seen.setdefault("p", p) or "답변"
+    try:
+        plan.compose({"question": "그 중에 ISA 만기자금이랑 같이 가져갈 만한 건?",
+                      "evidence": [ev],
+                      "history": [{"question": "그럼 이 고객한테 뭘 권할 수 있어?",
+                                   "tools": ["suitable"]}]})
+        hit = "직전 답변과 겹치는 재료" in seen["p"]
+        print(f"{'✓' if hit else '✗'} 직전 턴과 재료가 겹치면 반복 금지 블록이 실린다")
+        ok += hit
+
+        seen.clear()
+        plan.compose({"question": "q", "evidence": [ev],
+                      "history": [{"question": "IRP 세액공제 한도?", "tools": ["fact"]}]})
+        hit = "직전 답변과 겹치는 재료" not in seen["p"]
+        print(f"{'✓' if hit else '✗'} 재료가 다르면 붙지 않는다")
+        ok += hit
+
+        seen.clear()
+        plan.compose({"question": "q", "evidence": [ev], "history": []})
+        hit = "직전 답변과 겹치는 재료" not in seen["p"]
+        print(f"{'✓' if hit else '✗'} 첫 턴에는 붙지 않는다")
+        ok += hit
+    finally:
+        plan.generate = orig
+
+    # 형태 요구와 모순이 되면 안 된다 — 「목록을 실어라」와 「다시 세우지 마라」가 함께
+    # 걸리면 LLM 은 어느 쪽이든 지키려다 재료를 지어낸다(§5, T13 과 같은 부류).
+    from pension_agent.consult_agent.prompts import REPEAT_BLOCK
+    hit = "이미 채운 항목은 다시 채우지 않아도 된다" in REPEAT_BLOCK
+    print(f"{'✓' if hit else '✗'} 반복 금지 블록이 형태 요구를 명시적으로 풀어준다")
+    ok += hit
+
+    # 턴 기록에 도구 이름이 남아야 판정이 성립한다 — **답변 원문은 남기지 않는다**(§6).
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "KB 중립형 MP 는 최근 1년 5.1% 예요.", "sources": [],
+            "evidence": [ev, tools._ev("customer", "q", "■ 고객", [])],
+        })})
+        out = G.ask("이 고객한테 뭘 권할 수 있어?")
+    finally:
+        G._AGENT = orig_agent
+    turn = out["history"][-1]
+    hit = turn.get("tools") == ["customer", "suitable"]
+    print(f"{'✓' if hit else '✗'} 턴 기록이 무슨 재료로 답했는지 남긴다({turn.get('tools')})")
+    ok += hit
+
+    hit = not any("5.1" in str(v) for v in turn.values())
+    print(f"{'✓' if hit else '✗'} 턴 기록에 답변 수치는 남지 않는다")
+    ok += hit
+    return ok
+
+
 def check_table_row_names() -> int:
     """표의 행 이름을 **답변이 부르는 표기**로도 알아보는가.
 
@@ -4295,6 +4363,7 @@ def main() -> int:
         check_caution_roles()
         check_question_echo()
         check_table_row_names()
+        check_no_repeat()
         check_suitable_shape()
         check_history_material()
         check_today_material()

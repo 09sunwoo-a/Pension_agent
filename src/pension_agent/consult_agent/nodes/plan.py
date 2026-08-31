@@ -28,7 +28,7 @@ from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
     ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_SYSTEM, MUST_BLOCK, PLAN_MISSES_BLOCK,
-    PLAN_PROMPT, PLAN_RETRY_BLOCK, SHAPE_BLOCK,
+    PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -350,6 +350,26 @@ def _shape_block(evidence: list[tools.Evidence]) -> str:
     return SHAPE_BLOCK.format(shapes="\n".join(f"- {x}" for x in seen)) if seen else ""
 
 
+def _repeated_materials(state: AgentState, evidence: list[tools.Evidence]) -> list[str]:
+    """직전 턴이 이번 턴과 같은 재료로 답했는가 — 겹치는 도구 이름.
+
+    「그 중에 ~」처럼 좁히는 후속 질문에서, LLM 은 앞 답을 통째로 다시 세웠다(실측 T11 —
+    적합성 목록 8종 + 제외 4종을 그대로 반복, 1,021자). 지시로 못 막는 이유는 **볼 수가
+    없어서**다: 프롬프트에 실리는 이전 대화는 직원 질문만이고 답변 원문은 없다.
+
+    답변 원문을 실어 해결하지 않는다 — LLM 이 그 수치를 되받으면 이번 턴 원장 밖이라
+    `verify` 가 답을 통째로 버린다(§6). 도구 **이름**만 보면 그 위험이 없다.
+
+    직전 한 턴만 본다. 두세 턴 전이면 직원이 다시 보고 싶어 물었을 수 있고, 그때는
+    반복이 아니라 답이다.
+    """
+    history = state.get("history") or []
+    if not history:
+        return []
+    prev = set(history[-1].get("tools") or [])
+    return sorted(prev & {e["tool"] for e in evidence})
+
+
 # ─────────────────────────────────────────────────────────────
 # Node. compose — 원장만으로 답을 만든다
 # ─────────────────────────────────────────────────────────────
@@ -389,6 +409,10 @@ def compose(state: AgentState) -> dict[str, Any]:
         question=state["question"],
         situation_line=situation_line(state.get("intent"), tools.ledger_slots(evidence)),
     )
+    # 직전 턴이 같은 재료로 답했으면 그 사실을 알린다 — **판정은 코드가 한다.** history 에는
+    # 답변 원문이 없어서(state.Turn) LLM 은 자기가 방금 무엇을 나열했는지 볼 수 없다.
+    if _repeated_materials(state, evidence):
+        prompt = f"{prompt}\n{REPEAT_BLOCK}"
     note = guard.prompt_note(guards, alts)
     if note:
         prompt = f"{prompt}\n\n{note}"
