@@ -2539,6 +2539,13 @@ def check_question_echo() -> int:
     hit = "생략한 조건은 코칭 문장이 채운다" in COMPOSE_SYSTEM
     print(f"{'✓' if hit else '✗'} 생성 지시가 인용 대사의 생략 조건을 채우게 한다 (T9 회귀)")
     ok += hit
+
+    # ⑨ 상품 나열은 한 줄에 하나 — 실 LLM 시연 대본 T13 에서 12종을 쉼표로 이은 한
+    # 문단이 나왔다. 출력 형식의 «불릿 없이»가 목록까지 줄글로 밀어붙인 것이라, 3종
+    # 이상 나열에는 예외를 선언한다.
+    hit = "3종 이상 나열할 때는 줄글로 잇지 않는다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 상품 나열을 줄 단위로 세우게 한다 (T13 회귀)")
+    ok += hit
     return ok
 
 
