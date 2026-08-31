@@ -54,9 +54,13 @@ _NODE_LABELS = {name: f"{name} — {title}<br/>{desc}"
 _TOOL_GROUPS = (
     ("지식베이스", ("pitch", "fact", "procedure", "screen", "channel",
                     "segment", "method", "fieldtip", "market", "lineup")),
-    ("열린 고객", ("customer", "suitable", "history", "playbook")),
+    ("현재 고객", ("customer", "suitable", "history", "playbook")),
     ("계산", ("tax_credit", "date")),
 )
+
+#: 한 줄에 올리는 도구 수 상한. 지식베이스 10종을 한 줄에 다 쓰면 상자가 옆으로 늘어져
+#: 다른 상자들이 그 폭에 끌려간다 — 넘치면 다음 줄로 내리고 들여쓴다.
+_TOOLS_PER_LINE = 4
 
 
 def _graph_lines() -> list[str]:
@@ -89,10 +93,12 @@ def _tool_lines() -> list[str]:
             f"갈래에만 {sorted(grouped - set(T.TOOLS))} · 레지스트리에만 {sorted(set(T.TOOLS) - grouped)}")
     rows = []
     for label, names in _TOOL_GROUPS:
-        shown = " · ".join(T.TOOLS[n].progress or n for n in names)
-        rows.append(f"{label}: {shown}")
+        shown = [T.TOOLS[n].progress or n for n in names]
+        chunks = [shown[i:i + _TOOLS_PER_LINE] for i in range(0, len(shown), _TOOLS_PER_LINE)]
+        rows.append(f"{label}: {' · '.join(chunks[0])}")
+        rows += ["&nbsp;&nbsp;&nbsp;&nbsp;" + " · ".join(c) for c in chunks[1:]]
     return [
-        f'    tools[["자료 도구 {len(T.TOOLS)}종 — 답변의 근거는 전부 여기서 온다'
+        f'    tools[["자료 도구 {len(T.TOOLS)}종 — 답변의 근거는 모두 이 도구로 조회한다'
         f'<br/>{"<br/>".join(rows)}"]]',
         '    plan -. "필요한 자료를 골라 조회" .-> tools',
     ]
@@ -106,10 +112,10 @@ def _gate_lines() -> list[str]:
     if missing:
         raise AttributeError(f"게이트 검사가 사라졌습니다 — 다이어그램이 거짓이 됩니다: {missing}")
     return [
-        '    gates[["답변 점검 — 걸리면 그 답변은 화면에 나가지 않는다'
-        '<br/>① 근거에 없는 숫자·상품명 차단'
-        '<br/>② 값과 조건을 잘못 짝지은 문장 차단'
-        '<br/>③ 원문 인용이 필요한 문장·필수 안내 문구 보완"]]',
+        '    gates[["답변 점검 — 근거를 벗어난 답변은 화면에 내보내지 않는다'
+        '<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음'
+        '<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음'
+        '<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]',
         '    answer -. "내보내기 전 검사" .-> gates',
     ]
 
@@ -118,6 +124,10 @@ def render_block() -> str:
     """마커 사이에 들어갈 본문 전체."""
     body = "\n".join([
         "```mermaid",
+        # 줄바꿈은 라벨의 <br/> 가 정한다 — 기본 wrapping(200px)이 도구 이름·설명을
+        # 낱말 중간에서 다시 접어 「가/려 보낸다」 꼴이 되는 것을 막는다. 노드 6개가
+        # 한 단에 늘어서는 그래프라 가로 간격은 조이고 세로 간격을 벌려 비율을 잡는다.
+        '%%{init: {"flowchart": {"wrappingWidth": 800, "nodeSpacing": 35, "rankSpacing": 80}}}%%',
         "flowchart TD",
         *_graph_lines(),
         *_tool_lines(),
