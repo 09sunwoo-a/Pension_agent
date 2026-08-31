@@ -2996,8 +2996,49 @@ def check_followups() -> int:
 
     # pitch → pitch(반론 후속)만 예외다. 같은 재료의 **다른 카드**가 답하기 때문이다.
     again = suggest.followup_questions({"evidence": [ev("pitch", "수수료 부담 반론")], "history": []})
-    hit = len(again) == 1 and "고객이" in again[0]
+    hit = "고객이 그래도 망설이면 뭐라고 답하지?" in again
     print(f"{'✓' if hit else '✗'} 화법의 반론 후속만은 같은 재료로 다시 보낸다({again})")
+    ok += hit
+
+    # ⑤-b 같은 도구로 이끄는 칩은 MAX_PER_LEAD 까지만. 하나로 조이면 직원에게는 다른
+    #     질문인 것이 «도구가 같다»는 이유로 빠지고, 넘기면 다음 걸음이 한 갈래로 보인다.
+    def lead_of(question: str) -> str | None:
+        """이 문구가 어느 도구로 이끄는 후보였나 — 상한을 세려면 되짚어야 한다."""
+        for rows in suggest._NEXT.values():
+            for variants, lead, _probe in rows:
+                for text in variants:
+                    tail = text.split("}")[-1] if "{topic}" in text else text
+                    if question == text or question.endswith(tail):
+                        return lead
+        return None
+
+    # 재료 확인과 총 상한을 잠시 걷어내고 **도구별 상한만** 잰다 — 안 그러면 총 상한(3)에
+    # 먼저 걸려 도구별 상한이 실제로 도는지 알 수 없다.
+    orig_has, orig_max = suggest._has_material, suggest.MAX_FOLLOWUPS
+    try:
+        suggest._has_material = lambda *a, **k: True
+        suggest.MAX_FOLLOWUPS = 99
+        wide = suggest.followup_questions(
+            {"evidence": [ev("fact", "세액공제 한도"), ev("segment", "미운용 현금성자산"),
+                          ev("method", "수익률 관리"), ev("fieldtip", "현장 관찰")],
+             "history": []})
+    finally:
+        suggest._has_material, suggest.MAX_FOLLOWUPS = orig_has, orig_max
+    to_pitch = [q for q in wide if lead_of(q) == "pitch"]
+    hit = len(to_pitch) == suggest.MAX_PER_LEAD
+    print(f"{'✓' if hit else '✗'} 같은 도구로 이끄는 칩은 {suggest.MAX_PER_LEAD}개까지만"
+          f"(후보 4개 → pitch 행 {len(to_pitch)}개)")
+    ok += hit
+
+    # ⑤-c 재료 확인어 — n-gram 유사도는 질의가 길수록 희석돼(kb._sim) 자연스러운 문장이
+    #     문턱 아래로 떨어진다. 자기완결형 칩("요즘 시장 상황은 어때?")이 자기 확인어를
+    #     갖지 않으면, 시황 카드가 멀쩡히 있는데도 «없다»로 판정돼 안 뜬다.
+    selfcontained = [(found, lead, probe) for found, rows in suggest._NEXT.items()
+                     for _v, lead, probe in rows if probe]
+    market_chip = suggest.followup_questions(
+        {"evidence": [ev("lineup", "8월 추천펀드")], "history": []})
+    hit = bool(selfcontained) and "요즘 시장 상황은 어때?" in market_chip
+    print(f"{'✓' if hit else '✗'} 자기완결형 칩은 확인어로 재료를 찾는다(문장으로는 0건인 자리)")
     ok += hit
 
     # ⑥ 슬롯 — 근거 카드 제목이 문구에 박힌다. 없으면 슬롯 없는 변형으로 물러선다.
@@ -3019,13 +3060,33 @@ def check_followups() -> int:
     print(f"{'✓' if hit else '✗'} 대화 턴에 따라 문구 변형이 회전한다({sorted(turns)})")
     ok += hit
 
-    # ⑧ 직원이 이미 물어본 질문을 다시 제안하지 않는다.
+    # ⑧ 직원이 이미 물어본 질문을 다시 제안하지 않는다 — **이번 질문 포함**이 핵심이다.
+    #    history 는 이 턴에 들어온 이력이라 이번 질문이 없다(ask 가 invoke 뒤에 붙인다).
+    #    그래서 이 필터가 이전 턴만 보면 방금 물은 것이 그대로 추천으로 되돌아온다
+    #    — 「이 고객 왜 관리 대상이야?」 를 묻고 답을 읽었는데 맨 아래 같은 질문이 다시
+    #    서 있던 자리다. 「이미 쓴 재료」 제외는 이걸 못 잡는다: 그 답은 customer 재료로
+    #    나왔는데 그 질문은 segment 로 이끄는 후보라 재료 축이 겹치지 않는다.
     asked = suggest.followup_questions(
         {"evidence": [ev("fact", "세액공제 한도")], "history": [], "customer_id": None})
     repeat = suggest.followup_questions(
         {"evidence": [ev("fact", "세액공제 한도")], "history": [{"question": asked[0]}]})
     hit = asked[0] not in repeat
     print(f"{'✓' if hit else '✗'} 직원이 이미 물은 질문은 다시 제안하지 않는다")
+    ok += hit
+
+    same = suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id,
+         "question": "이 고객 왜 관리 대상이야?"})
+    hit = "이 고객 왜 관리 대상이야?" not in same
+    print(f"{'✓' if hit else '✗'} 방금 물은 질문이 추천으로 되돌아오지 않는다({same})")
+    ok += hit
+
+    # 표기 차이(공백·물음표) 하나로 같은 질문이 다시 서면 안 된다.
+    loose = suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id,
+         "question": "이 고객 왜 관리대상이야"})
+    hit = "이 고객 왜 관리 대상이야?" not in loose
+    print(f"{'✓' if hit else '✗'} 공백·물음표만 다른 같은 질문도 다시 제안하지 않는다")
     ok += hit
 
     # ⑨ ask() 배선 — 답변 끝에 머리말과 함께 붙고, 반환에 followups 가 따로 실린다.
