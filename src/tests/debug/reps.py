@@ -6,6 +6,7 @@
     python -m tests.debug.reps 4 7          # 케이스 골라서
     python -m tests.debug.reps --demo       # 시연 대본 순서대로 (docs/DEMO_SCENARIO.md)
     python -m tests.debug.reps --demo --debug   # 대본 + 재료→답변 로그 (시연에서 띄울 것)
+    python -m tests.debug.reps --demo --time    # + 턴별 소요 시간 (리허설 진단용 — 시연에서는 끈다)
 
 왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
 이어진다(멀티턴 재현이 목적이다). 대표 질문 10개는 서로 독립이어야 하므로 케이스마다
@@ -223,7 +224,11 @@ def _width(text: str) -> int:
 
 
 def _row(no: object, sees: str, turn: TR.Turn, secs: float) -> list[str]:
-    """요약표 한 줄. 판정하지 않고 «무엇이 일어났나»만 적는다."""
+    """요약표 한 줄. 판정하지 않고 «무엇이 일어났나»만 적는다.
+
+    시간 칸은 항상 채워 두고 표시 여부는 출력 쪽이 정한다(--time) — 여기서 칸을 넣다 뺐다
+    하면 예외 행과 열 수가 어긋난다.
+    """
     names = [n.name for n in turn.nodes]
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
     blocked = next((g.name for g in node.gates if not g.passed), None) if node else None
@@ -272,13 +277,14 @@ def main(argv: list[str]) -> int:
     brief = "--brief" in argv
     debug = "--debug" in argv
     show_llm = "--show-llm" in argv
+    timing = "--time" in argv
     picked = {a for a in argv if a[0].isdigit()}
 
     unknown = [a for a in argv if a.startswith("--")
-               and a not in ("--demo", "--brief", "--debug", "--show-llm")]
+               and a not in ("--demo", "--brief", "--debug", "--show-llm", "--time")]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
-        print("  옵션: --demo · --brief · --debug · --show-llm · 케이스 번호")
+        print("  옵션: --demo · --brief · --debug · --show-llm · --time · 케이스 번호")
         return 1
 
     if not LLM.available():
@@ -321,7 +327,7 @@ def main(argv: list[str]) -> int:
                     prof = SC.get_profile(customer)
                     if prof is not None:
                         SA.propose(prof)
-                    if not brief:
+                    if timing and not brief:
                         print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 — "
                               "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
@@ -341,7 +347,8 @@ def main(argv: list[str]) -> int:
                     took = time.monotonic() - asked
                     if not brief:
                         if show_progress:
-                            print(f"   ⋯ 답변까지 {took:.1f}초")
+                            if timing:
+                                print(f"   ⋯ 답변까지 {took:.1f}초")
                             print()   # 진행 줄과 답변을 가른다
                         _print_answer(result)
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1], took))
@@ -356,7 +363,10 @@ def main(argv: list[str]) -> int:
     print(f"\n{'═' * 70}\n요약 — 도구를 무엇을 어떤 순서로 골랐나\n")
     head = ["#", "도구(순서)", "게이트", "연계", "시간", "처분", "무엇을 보나"]
     table = [head, *rows]
-    widths = [max(_width(r[i]) for r in table) for i in range(len(head))]
+    if not timing:
+        drop = head.index("시간")
+        table = [[c for i, c in enumerate(r) if i != drop] for r in table]
+    widths = [max(_width(r[i]) for r in table) for i in range(len(table[0]))]
     for i, r in enumerate(table):
         print(("  " + "  ".join(_pad(c, w) for c, w in zip(r, widths, strict=True))).rstrip())
         if i == 0:
