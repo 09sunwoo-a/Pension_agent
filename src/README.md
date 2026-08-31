@@ -11,7 +11,8 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 
 ```bash
 cd src
-pip install -r requirements.txt
+pip install -r requirements.txt          # 행내 배포와 같은 목록 (Python 3.10)
+pip install -r requirements-dev.txt      # + Streamlit 화면·변환기·사외 프로바이더
 cp .env.example .env      # 사내 게이트웨이 URL·키 (pension_agent/llm.py 가 읽음)
 
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
@@ -26,6 +27,12 @@ $CA "고객이 주식이 더 낫다는데 뭐라고 하지?"           # 단발 
 $CA -c 198734-1205842                                 # REPL — 고객 화면이 열린 상태
 $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을 한 줄로 (맥락 이어서)
 streamlit run app.py                                  # 평가 대시보드 (개발용 화면)
+
+# ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
+./run_local.sh                                        # uvicorn main:app :8000
+./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
+docker build -f Dockerfile.local -t pension-agent:local .   # 외부망 로컬 빌드
+#   내부망 배포 이미지는 Dockerfile (STG 기준 · PRD 는 주석 줄로 교체)
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다 — 모듈만 바꾸고 --debug)
 $CAD --debug "세액공제 한도가 얼마야?"
@@ -45,7 +52,8 @@ python -m tests.test_engine            # ①~⑤ 결정론 로직
 python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치
 python -m tests.test_strategy_agent    # LLM 산출 검증 · 폴백
 python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드
-python -m tests.test_infra             # 공용 인프라 · 임포트 경계
+python -m tests.test_infra             # 공용 인프라 · 임포트 경계 · 429 호출 게이트
+python -m tests.test_api               # HTTP 진입점 — 플랫폼 I/O 스키마 계약
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
 python -m scripts.kb_build.test_paths  # 경로 · locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증

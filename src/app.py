@@ -27,12 +27,21 @@ if not os.path.exists(FEEDBACK_FILE):
         writer.writerow(["Timestamp", "Customer", "Issue_Type", "Feedback", "Status"])
 
 # 상태 유지를 위한 캐싱 (LLM 호출 비용 및 대기 시간 절약)
+#
+# **고객 한 명 단위로** 캐싱한다. 예전에는 화면이 뜨는 순간 9명을 한꺼번에 만들었는데,
+# 브리핑 1건이 LLM 9~11 연쇄 호출이라 첫 로드가 90~100 호출의 버스트였다 — 행내
+# 게이트웨이에서 429(Too Many Requests)로 화면이 통째로 죽었다. 지금은 실제로 보는
+# 고객만 만든다(전체 표는 «한눈에 보기» 탭에서 직원이 명시적으로 켠다).
 @st.cache_data(show_spinner=False)
-def load_all_proposals(use_llm=True):
-    return {p.nm: propose(p, use_llm=use_llm) for p in PERSONAS}
+def load_proposal(nm: str, use_llm: bool):
+    p = next(x for x in PERSONAS if x.nm == nm)
+    with llm.client_user(client_user):
+        return propose(p, use_llm=use_llm)
 
 use_llm = st.sidebar.checkbox("LLM 문장 생성 적용", value=True)
-results = load_all_proposals(use_llm)
+# 이 화면이 내는 모든 LLM 호출의 x-client-user 가 된다. 플랫폼의 감사 기록이자 쿼터
+# 버킷이라, 비워 두면 전사 호출이 한 버킷에 몰려 429 를 자초한다(llm.client_user 주석).
+client_user = st.sidebar.text_input("직원 식별자 (x-client-user)", value="streamlit-dev")
 
 # 6개의 탭으로 구성
 tab_cat, tab1, tab2, tab_chat, tab3, tab4 = st.tabs([
@@ -93,8 +102,19 @@ with tab1:
             "`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 에 채웁니다."
         )
 
+    # 9명을 한꺼번에 만드는 자리다(= LLM 90~100 호출). 기본은 꺼 두고 직원이 켠다 —
+    # 다른 탭을 보려던 사람이 이 비용을 대신 내지 않게 한다(load_proposal 주석).
+    build_all = st.checkbox(
+        f"전체 고객 브리핑 생성 ({len(PERSONAS)}명 · LLM 호출 약 {len(PERSONAS) * 10}회)",
+        value=False, key="build_all_briefings")
+    if not build_all:
+        st.info("체크하면 전체 고객의 브리핑을 만들어 표로 비교합니다. "
+                "고객 한 명만 볼 때는 «상세 조회 및 피드백» 탭을 쓰세요.")
+
     summary_data = []
-    for nm, res in results.items():
+    for nm, res in (
+        {p.nm: load_proposal(p.nm, use_llm) for p in PERSONAS} if build_all else {}
+    ).items():
         f = res["facts"]
         summary_data.append({
             "고객명": nm,
@@ -107,7 +127,8 @@ with tab1:
             "적합성 차단 건수": len(f["blocked_products"])
         })
     
-    st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+    if summary_data:
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
 
 
 # ==========================================
@@ -126,7 +147,7 @@ with tab2:
     
         with col1:
             target_name = st.selectbox("리뷰할 고객 선택", [p.nm for p in PERSONAS])
-            target_res = results[target_name]
+            target_res = load_proposal(target_name, use_llm)
             f = target_res["facts"]
         
             # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — REQUIREMENTS.md ①~⑨ +
@@ -451,6 +472,7 @@ with tab_chat:
                         customer_id=customer_id,
                         session_id=st.session_state.chat_session_id,
                         on_progress=_status.write,
+                        x_client_user=client_user,
                     )
                     _status.update(label="답변 완료", state="complete", expanded=False)
                 except Exception as e:

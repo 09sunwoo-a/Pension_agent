@@ -1,0 +1,15 @@
+# 개발·시연 전용 — 행내 배포 이미지에는 들어가지 않는다.
+#     pip install -r requirements-dev.txt
+-r requirements.txt
+
+# 개발·데모 화면 (app.py)
+streamlit>=1.35.0
+pandas>=2.0.0
+
+# 사외 사전점검용 LLM 프로바이더 (llm.py 의 anthropic 경로).
+# 행내에서는 쓰지 않는다 — genai 경로는 표준 라이브러리만 쓴다.
+anthropic>=0.40.0
+
+# 시연 데이터 변환기 (scripts/import_customers.py · import_targets.py).
+# 변환할 때만 필요하고, 적재·테스트는 산출된 JSON 만 읽는다.
+openpyxl>=3.1.0

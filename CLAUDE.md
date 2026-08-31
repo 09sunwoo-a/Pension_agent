@@ -102,6 +102,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | 실서비스 위험 | `docs/PRODUCTION_RISKS.md` — 무엇이 더미 **구조**인가. 단일 프로세스라서 성립하고 실서비스에서 깨지는 자리 |
 | 지식 저작 | `src/AUTHORING.md` |
 | 실행·테스트 | `src/README.md` |
+| 행내 배포 | `src/main.py`(FastAPI 진입점) · `src/Dockerfile`(내부망) · `src/Dockerfile.local`(외부망) · `src/.env.example` |
 | consult_agent 기준 | `src/pension_agent/consult_agent/CLAUDE.md` — 대화형 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
 | 지식 데이터 기준 | `src/pension_agent/knowledge/CLAUDE.md` — 카드가 선언해야 하는 관계 5종 · 실측 · 이행 순서 |
 
@@ -116,7 +117,8 @@ python -m tests.test_engine               # 엔진 선정 로직
 python -m tests.test_support              # ⑥~⑨ · 더미 규약 · 시효성 수치
 python -m tests.test_strategy_agent       # LLM 산출 검증·폴백
 python -m tests.test_consult_agent        # 라우팅·즉답·도구 루프·하지말것 가드
-python -m tests.test_infra                # 공용 인프라 · 임포트 경계
+python -m tests.test_infra                # 공용 인프라 · 임포트 경계 · 429 호출 게이트
+python -m tests.test_api                  # HTTP 진입점 — 행내 플랫폼 I/O 스키마
 python -m scripts.kb_build.test_paths     # 경로·locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent
 ```

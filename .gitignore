@@ -3,6 +3,8 @@
 .Rhistory
 .env
 .env.*
+# .env.example 은 규격 문서다 — 값이 아니라 «채워야 할 항목» 목록이라 추적한다.
+!.env.example
 
 # OS 잡파일
 Thumbs.db

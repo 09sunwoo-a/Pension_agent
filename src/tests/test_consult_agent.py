@@ -3389,6 +3389,29 @@ def check_followups() -> int:
     hit = asking["followups"] == [] and G.FOLLOWUP_HEADER not in asking["answer"]
     print(f"{'✓' if hit else '✗'} 되묻기 턴의 답변에는 추천질문 블록이 붙지 않는다")
     ok += hit
+
+    # ask(x_client_user=) — 이 턴 안의 **모든** LLM 호출이 그 직원 이름으로 나가는가.
+    # 한 턴이 노드·도구 수십 갈래로 흩어지므로 인자로 꿰지 않고 ContextVar 로 흘린다
+    # (llm.client_user). 배선이 끊기면 전사 호출이 한 쿼터 버킷에 몰려 429 를 자초하는데,
+    # 그건 행내에 들고 가서야 드러난다 — 그래서 여기서 잡는다.
+    seen: dict = {}
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: (
+            seen.update(who=G.llm.current_client_user()) or
+            {"answer": "답변 본문", "sources": [], "evidence": []}))})()
+        G.ask("세액공제 한도 얼마야?", x_client_user="emp-0417")
+        inside = seen.get("who")
+        G.ask("세액공제 한도 얼마야?")
+        default_used = seen.get("who")
+    finally:
+        G._AGENT = orig_agent
+    hit = inside == "emp-0417"
+    print(f"{'✓' if hit else '✗'} ask(x_client_user=) 가 턴 전체의 LLM 호출 주체를 세운다")
+    ok += hit
+    hit = default_used == G.llm.DEFAULT_CLIENT_USER
+    print(f"{'✓' if hit else '✗'} 주지 않으면 기본 주체로 떨어진다(빈 값으로 나가지 않는다)")
+    ok += hit
     return ok
 
 
