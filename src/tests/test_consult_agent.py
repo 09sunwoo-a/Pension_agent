@@ -2546,6 +2546,19 @@ def check_question_echo() -> int:
     hit = "3종 이상 나열할 때는 줄글로 잇지 않는다" in COMPOSE_SYSTEM
     print(f"{'✓' if hit else '✗'} 생성 지시가 상품 나열을 줄 단위로 세우게 한다 (T13 회귀)")
     ok += hit
+
+    # ⑩ 스냅샷에서 이력·추세를 추정하지 않는다 — 실 LLM 시연 대본 T4 에서 카드의
+    # 「당해 납입액 0원」만 보고 "전년 납입 이력이 있었던 고객이라 납입이 끊긴 신호"라고
+    # 지어냈다. 원장의 연도별 납입액은 전부 0원인데 0원 연도는 카드 렌더에서 빠지므로
+    # (customer._paid_by_year 의 `and v` 필터) LLM 은 과거 값을 본 적이 없다. 성립 요건
+    # 6종에 없는 «납입 중단»을 일곱 번째 사유로 세운 것도 같은 문장이다 — 숫자가 없어
+    # 검증 게이트에 안 걸리는 자리라 지시로 막는다.
+    hit = "과거 이력이나 추세를 추정하지 않는다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 스냅샷 값의 이력·추세 추정을 금지한다 (T4 회귀)")
+    ok += hit
+    hit = "사유를 새로 만들어 붙이지 않는다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 생성 지시가 관리 사유를 성립 요건 목록으로 한정한다 (T4 회귀)")
+    ok += hit
     return ok
 
 
