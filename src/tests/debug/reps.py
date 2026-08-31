@@ -131,7 +131,9 @@ def _tools(turn: TR.Turn) -> str:
     for node in turn.nodes:
         if node.name != "plan_step" or "→" not in node.note:
             continue
-        signature, _, result = node.note.partition("→")
+        # 마지막 화살표가 구분자다 — LLM 이 쓴 질의 안에 "→" 가 들어올 수 있다(실측:
+        # «DB/DC → IRP 소급 적용»을 담은 질의가 첫 화살표에서 잘려 질의 낱말이 카드처럼 찍혔다).
+        signature, _, result = node.note.rpartition("→")
         name = signature.split(":")[0].strip()
         out.append(name + ("✗" if "자료 없음" in result else ""))
     return " → ".join(out) or "(없음)"
@@ -152,7 +154,8 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
         if node.name != "plan_step" or "→" not in node.note:
             continue
         step += 1
-        signature, _, found = node.note.partition("→")
+        # 마지막 화살표가 구분자다(_tools 와 같은 이유 — 질의 안의 "→" 에 잘리지 않게).
+        signature, _, found = node.note.rpartition("→")
         tool, _, query = signature.strip().partition(":")
         out.append(f"   │ {step}. {tool.strip()} «{query.strip()}»")
         if "자료 없음" in found:
