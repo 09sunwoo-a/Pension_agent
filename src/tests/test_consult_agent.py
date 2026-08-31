@@ -955,8 +955,9 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 승낙 턴이 근거만 싣고 답변 문장을 손으로 만들지 않는다")
     ok += hit
 
-    # 도착지는 `answer` 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께 끝난다.
-    hit = R.route_confirm(out) == "answer" and R.route_confirm(
+    # 도착지는 `compose`(답변 작성) 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께
+    # 끝난다. 라벨이 상태 키 `answer` 와 다른 이유는 graph.py 의 add_node 주석 참고.
+    hit = R.route_confirm(out) == "compose" and R.route_confirm(
         {"answer": "화면을 열었어요"}) == "__end__"
     print(f"{'✓' if hit else '✗'} 분기표가 그 턴을 답변 작성으로 보낸다(화면 연계는 그대로 끝)")
     ok += hit
@@ -4436,6 +4437,24 @@ def check_architecture_doc() -> int:
     return ok
 
 
+def check_node_label_collision() -> int:
+    """그래프 노드 라벨이 상태 키와 겹치지 않는가.
+
+    행내 환경의 langgraph(구버전)는 add_node 에서 라벨이 상태 키와 같으면 거부한다
+    ("'answer' is already being used as a state key"). 개발 환경(1.x)은 그 검사가 없어
+    여기서만 통과하고 행내에서 임포트가 죽었다 — answer 노드를 compose 로 개명한
+    이유다. 같은 충돌이 다시 들어오면 행내에 가서야 터지므로 여기서 잡는다."""
+    import typing
+
+    from pension_agent.consult_agent.state import AgentState
+    nodes = set(G.build_agent().get_graph().nodes) - {"__start__", "__end__"}
+    overlap = nodes & set(typing.get_type_hints(AgentState))
+    hit = not overlap
+    print(f"{'✓' if hit else '✗'} 노드 라벨이 상태 키와 겹치지 않는다 (구버전 langgraph 호환)"
+          + ("" if hit else f" — {sorted(overlap)}"))
+    return hit
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -4513,6 +4532,7 @@ def main() -> int:
         check_notice_scope()
         check_guard()
         check_architecture_doc()
+        check_node_label_collision()
     finally:
         # 위 테스트들(특히 lms_link)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
         # 것만** 지운다. 예전에는 디렉터리를 통째로 지웠는데, 경로가 옮겨진 뒤로는 존재하지

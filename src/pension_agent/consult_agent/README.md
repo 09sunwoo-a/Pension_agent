@@ -174,7 +174,7 @@ flowchart TD
     understand["understand — 질문 이해<br/>무엇을 원하는 질문인지 가려 보낸다"]
     agent_help["agent_help — 기능 안내<br/>무엇을 도와줄 수 있는지 답한다"]
     plan["plan — 근거 수집 루프<br/>질문에 필요한 자료를 도구로 찾아 모은다"]
-    answer["answer — 답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"]
+    compose["compose — 답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"]
     lms_link["lms_link — LMS 발송 화면 연계<br/>요청받은 문구로 발송 화면 열기를 제안한다"]
     correction["correction — 브리핑 수정<br/>화면의 AI 작성 문구를 고친다"]
     llm_down["llm_down — 장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다"]
@@ -182,11 +182,11 @@ flowchart TD
     offer["offer — 화면 연계 제안<br/>답변과 이어지는 업무 화면을 열지 묻는다"]
     __end__([END])
     __start__ --> understand
-    answer -.-> __end__
-    answer -.-> offer
+    compose -.-> __end__
+    compose -.-> offer
     confirm_action -.-> __end__
-    confirm_action -.-> answer
-    plan -.-> answer
+    confirm_action -.-> compose
+    plan -.-> compose
     plan -.-> plan
     understand -.-> agent_help
     understand -.-> confirm_action
@@ -202,7 +202,7 @@ flowchart TD
     tools[["자료 도구 16종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이 고객 상태에 걸린 참고자료<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
     plan -. "필요한 자료를 골라 조회" .-> tools
     gates[["답변 점검 — 근거를 벗어난 답변은 화면에 내보내지 않는다<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]
-    answer -. "내보내기 전 검사" .-> gates
+    compose -. "내보내기 전 검사" .-> gates
 ```
 
 실선은 고정된 흐름, 점선은 질문에 따라 갈리는 분기다. 자료 도구와 답변 점검 상자는

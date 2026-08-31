@@ -39,7 +39,9 @@ from pension_agent.consult_agent.nodes import clarify as CL
 from pension_agent.consult_agent.nodes import plan as P
 from pension_agent.consult_agent.nodes import understand as U
 
-#: 그래프에 실리는 노드 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는 전역들.
+#: 그래프에 실리는 노드 **함수** 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는
+#: 전역들. 계측은 함수를 감싸므로 그래프 라벨과 달라도 된다 — answer 함수의 라벨은
+#: `compose` 다(상태 키 `answer` 와 겹치면 구버전 langgraph 가 add_node 를 거부한다).
 #: 되묻기 판정과 답변 작성은 노드 하나(`answer`)에서 **동시에** 끝난다(nodes/answer.py) —
 #: 예전의 `clarify`·`compose` 두 노드 자리다. 두 LLM 호출이 서로 다른 스레드에서 나므로
 #: 한 노드의 호출 목록에 함께 실리는데, 정체는 프롬프트로 갈리므로(_stage) 구분은 남는다.

@@ -36,7 +36,7 @@ README = config.PACKAGE_ROOT / "consult_agent" / "README.md"
 _NODE_DESCS = {
     "understand": ("질문 이해", "무엇을 원하는 질문인지 가려 보낸다"),
     "plan": ("근거 수집 루프", "질문에 필요한 자료를 도구로 찾아 모은다"),
-    "answer": ("답변 작성", "모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"),
+    "compose": ("답변 작성", "모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"),
     "agent_help": ("기능 안내", "무엇을 도와줄 수 있는지 답한다"),
     "lms_link": ("LMS 발송 화면 연계", "요청받은 문구로 발송 화면 열기를 제안한다"),
     "correction": ("브리핑 수정", "화면의 AI 작성 문구를 고친다"),
@@ -105,7 +105,7 @@ def _tool_lines() -> list[str]:
 
 
 def _gate_lines() -> list[str]:
-    """답변 점검 → answer 옆의 주석 노드. 검사 함수가 사라지면 크게 실패한다 —
+    """답변 점검 → compose(답변 작성) 옆의 주석 노드. 검사 함수가 사라지면 크게 실패한다 —
     이름만 남아 있는 다이어그램은 없는 것만 못하다(tests/debug/trace 와 같은 원칙)."""
     from pension_agent.consult_agent.nodes import plan as P  # noqa: PLC0415
     missing = [a for a in ("verify_texts", "relations", "_span_verdict") if not hasattr(P, a)]
@@ -116,7 +116,7 @@ def _gate_lines() -> list[str]:
         '<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음'
         '<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음'
         '<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]',
-        '    answer -. "내보내기 전 검사" .-> gates',
+        '    compose -. "내보내기 전 검사" .-> gates',
     ]
 
 
