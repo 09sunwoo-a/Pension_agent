@@ -293,6 +293,7 @@ def main(argv: list[str]) -> int:
     if not LLM.available():
         print("LLM 이 설정돼 있지 않습니다 — 이 스크립트는 실 LLM 으로 도는 것이 목적입니다.")
         print("  genai:     LLM_BASE_URL · LLM_API_KEY   (src/.env 에 두면 됩니다)")
+        print("  gemma:     GEMINI_API_KEY")
         print("  anthropic: ANTHROPIC_API_KEY")
         return 1
 
