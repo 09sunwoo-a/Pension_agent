@@ -44,7 +44,7 @@ from pension_agent.consult_agent.nodes import understand as U
 #: 예전의 `clarify`·`compose` 두 노드 자리다. 두 LLM 호출이 서로 다른 스레드에서 나므로
 #: 한 노드의 호출 목록에 함께 실리는데, 정체는 프롬프트로 갈리므로(_stage) 구분은 남는다.
 NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
-              "lms_send", "correction", "llm_down", "confirm_action", "offer")
+              "lms_link", "correction", "llm_down", "confirm_action", "offer")
 
 #: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
 ANSWER_NODE = "answer"

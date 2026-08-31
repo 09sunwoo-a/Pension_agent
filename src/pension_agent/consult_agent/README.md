@@ -166,33 +166,56 @@ CLI·Streamlit 이 카드 id 대신 이걸 읽어준다(출처 문자열 규칙�
 
 ## 그래프 구조
 
+<!-- generated:architecture:start — python -m scripts.render_architecture 가 갱신한다. 손으로 고치지 않는다 -->
+```mermaid
+flowchart TD
+    __start__([START])
+    understand["understand<br/>질문 → intent·utterance"]
+    agent_help["agent_help<br/>에이전트 능력 안내"]
+    plan["plan<br/>계획 루프 — 도구를 골라 원장에 쌓는다"]
+    answer["answer<br/>되묻기 판정 ∥ 답변 작성 → 게이트"]
+    lms_link["lms_link<br/>LMS 발송 화면 연계 제안 (보내지 않는다)"]
+    correction["correction<br/>브리핑 산문 수정"]
+    llm_down["llm_down<br/>LLM 장애 안내 (§11)"]
+    confirm_action["confirm_action<br/>직전 제안의 네/아니오"]
+    offer["offer<br/>화면 연계·화법 제안 (규칙이 정한다)"]
+    __end__([END])
+    __start__ --> understand
+    answer -.-> __end__
+    answer -.-> offer
+    confirm_action -.-> __end__
+    confirm_action -.-> answer
+    plan -.-> answer
+    plan -.-> plan
+    understand -.-> agent_help
+    understand -.-> confirm_action
+    understand -.-> correction
+    understand -.-> llm_down
+    understand -.-> lms_link
+    understand -.-> plan
+    agent_help --> __end__
+    correction --> __end__
+    llm_down --> __end__
+    lms_link --> __end__
+    offer --> __end__
+    tools[["tools.TOOLS — 도구 16종 (능력 표면 · 코드 소유)<br/>pitch&nbsp;·&nbsp;fact&nbsp;·&nbsp;procedure&nbsp;·&nbsp;screen<br/>channel&nbsp;·&nbsp;segment&nbsp;·&nbsp;method&nbsp;·&nbsp;fieldtip<br/>market&nbsp;·&nbsp;lineup&nbsp;·&nbsp;suitable&nbsp;·&nbsp;customer<br/>history&nbsp;·&nbsp;tax_credit&nbsp;·&nbsp;date&nbsp;·&nbsp;playbook"]]
+    plan -. "무엇을 부를지는 LLM ·<br/>목록·상한·반복 차단은 코드" .-> tools
+    gates[["답변 점검 게이트 (걸리면 생성문 폐기·보완)<br/>① 원장 밖 수치·미등록 상품 (verify_texts)<br/>② 값–조건 오짝·알려진 오답 (relations)<br/>③ 원문 스팬·필수 표시 (span)"]]
+    answer -. "원장만 보고 대조" .-> gates
 ```
-START → understand ─┬─(기본값) → 〔계획 루프 ↓〕 → answer ─────────────────┬→ (답변)                │
-                     │                                                       └→ (되묻기)      → END   │
-                     ├─(agent_help)──────────────────────────────────────────────────→ agent_help → END │
-                     ├─(lms_send)────────────────────────────────────────────────────→ lms_send   → END │
-                     ├─(correction)──────────────────────────────────────────────────→ correction → END │
-                     ├─(confirm_action)──────────────────────────────────────────────→ confirm_action   │
-                     │                                                                            → END │
-                     └─(LLM 이 죽었으면)──────────────────────────────────────────────→ llm_down   → END │
-                                                                                                        │
-                            답변이 가리키는 화면이 있으면 연계를 제안한다 → offer → END ←─────────────────┘
-```
+
+실선은 고정 엣지, 점선은 분기(`routing.py`)·주석이다. `tools`·`gates` 상자는
+LangGraph 노드가 아니라 `plan`·`answer` **안**에서 도는 것을 꺼내 보인 것이다 —
+`get_graph()` 출력에 도구가 안 보이는 이유가 그것이고, 설계 그대로다(도구 선택은
+LLM, 경계는 코드 — 루트 CLAUDE.md 규칙 2).
+<!-- generated:architecture:end -->
 
 **전용 노드는 계획 루프로 답할 수 없는 것들뿐이다.** 값·절차·고객군·브리핑 질의는 전부
 기본값으로 떨어져 계획 루프가 재료를 고른다 — 무엇으로 답할지는 의도 분류가 아니라 도구
 목록이 정한다(`routing.py` 주석).
 
 〔계획 루프〕 — 한 턴에 질문이 요구하는 만큼 도구를 부르고(하나든 여럿이든) 근거를 원장에
-쌓은 뒤, 그 원장만으로 답을 만든다.
-
-```
-plan ─(도구 하나 호출 → 원장에 쌓기)─┐
-  ↑                                 │
-  └──────(더 필요하면)───────────────┘
-  └──(done · "last" · MAX_STEPS)──→ answer ─┬─(갈래가 갈리면)──→ 되묻고 턴 종료
-                                            └─(아니면)────────→ 답변 → offer
-```
+쌓은 뒤, 그 원장만으로 답을 만든다(위 다이어그램의 `plan ⇄ tools` 점선이 그 자리다).
 
 `answer` 안에서 **되묻기 판정과 답변 작성이 동시에 돈다**(`nodes/answer.py`). 둘은 서로를
 보지 않고 원장·질문·이전 대화만 먹는데 배선이 직렬이라 작성이 판정을 기다렸다 — 순수
@@ -238,14 +261,14 @@ plan ─(도구 하나 호출 → 원장에 쌓기)─┐
 | ├ `clarify` | 근거 안에 갈래가 갈리는데 정할 근거가 없으면 답변 대신 선택지를 보여주고 되묻음 | ○ |
 | └ `compose` | 원장만으로 답변 하나를 씀 → 원장 밖 수치·원문 스팬을 코드가 집행. 원장 0건이면 정직하게 없다고 답변 | ○ |
 | `llm_down` | LLM 이 죽어 분류조차 못 한 턴 — "LLM 연결이 안 되어 있다"고 원인과 함께 답변 | ✕ |
-| `lms_send` | 인용부호로 명시된 문구로 **발송 화면 연계를 제안**(보내지 않는다) | ✕ |
+| `lms_link` | 인용부호로 명시된 문구로 **발송 화면 연계를 제안**(보내지 않는다 — 이름의 `_send` 가 그 거짓말이라 개명했다) | ✕ |
 | `correction` | 수정 요청을 편집 가능 필드로 분류 → 편집 가능하면 재작성+검증, 아니면 거절 | ○ |
 | `offer` | 답변이 가리키는 화면이 있으면 "연계해드릴까요?" 를 덧붙이고 `pending_action` 설정 | ✕ |
 | `confirm_action` | 직전 **한 턴**의 제안에 대한 "네"/"아니오" → 화면 URL 연계 또는 철회 | ✕ |
 
 - `intent`: `situation`(기본값 — 지식·고객 재료로 답하는 질문 전부. 고객 대사를 그대로 던진
   질문도 여기다) / `guide`(직원 업무 기준 질문) / `agent_help`(메타 질문) /
-  `lms_send`(발송 화면 연계 요청) / `correction`(브리핑 수정 요청) /
+  `lms_link`(발송 화면 연계 요청) / `correction`(브리핑 수정 요청) /
   `confirm_action`(제안 확인) / `llm_down`(LLM 장애). 목록 밖 값은 기본값으로 떨어진다 — 분류가 어긋나도 능력이 잘리지
   않는다. `guide`도 같은 경로를 타되 응답 프롬프트 톤만 다름.
 - **값·절차·고객군·브리핑 질의에 전용 노드는 없다.** 예전에는 각각 intent 와 노드를 갖고

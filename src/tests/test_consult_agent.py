@@ -206,7 +206,7 @@ def check_pitch_stages() -> bool:
     return ok
 
 
-_ROUTED_INTENTS = ("lms_send", "correction", "confirm_action")
+_ROUTED_INTENTS = ("lms_link", "correction", "confirm_action")
 
 # 예전에는 값·절차·고객군·브리핑 질의도 각자 intent 와 노드를 갖고 있었다. 능력 표면이
 # 도구 목록이 되면서(CLAUDE.md §3) 그 넷은 전용 노드를 잃고 계획 루프로 합쳐졌다 —
@@ -277,22 +277,22 @@ def check_intent_routing() -> bool:
     return ok
 
 
-def check_lms_send_parsing() -> bool:
-    """lms_send 는 **보내지 않는다** — 발송 화면 연계를 제안할 뿐이다(§10).
+def check_lms_link_parsing() -> bool:
+    """lms_link 는 **보내지 않는다** — 발송 화면 연계를 제안할 뿐이다(§10).
 
     인용부호 파싱·문구 누락·customer_id 없음을 직접 검증한다(LLM 을 쓰지 않는 노드다).
     """
     from pension_agent.consult_agent.nodes import lms
 
-    out = lms.lms_send({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "CX"})
+    out = lms.lms_link({"question": '"안내 문구입니다" 로 LMS 보내줘', "customer_id": "CX"})
     pending = out.get("pending_action")
     ok1 = (bool(pending) and pending["kind"] == "lms" and pending["screen"]
            and pending["message"] == "안내 문구입니다"
            and "보낼지는 그 화면에서" in out["answer"])
-    ok2 = "큰따옴표" in lms.lms_send({"question": "그냥 보내줘", "customer_id": "CX"})["answer"]
-    ok3 = "찾을 수 없어요" in lms.lms_send({"question": '"문구" 보내줘', "customer_id": None})["answer"]
+    ok2 = "큰따옴표" in lms.lms_link({"question": "그냥 보내줘", "customer_id": "CX"})["answer"]
+    ok3 = "찾을 수 없어요" in lms.lms_link({"question": '"문구" 보내줘', "customer_id": None})["answer"]
     ok = ok1 and ok2 and ok3
-    print(f"{'✓' if ok else '✗'} lms_send: 발송이 아니라 화면 연계를 제안한다")
+    print(f"{'✓' if ok else '✗'} lms_link: 발송이 아니라 화면 연계를 제안한다")
     return ok
 
 
@@ -397,7 +397,7 @@ def check_screen_link() -> int:
 
     # 문구를 보내려는 직원은 그렇게 말한다 — 그 요청이 같은 화면 연계를 제안한다.
     from pension_agent.consult_agent.nodes import lms
-    lms_pending = lms.lms_send(
+    lms_pending = lms.lms_link(
         {"question": '"고객님, 남은 세액공제 한도가 264만원 있어요" 이 문구로 LMS 보내줘',
          "customer_id": "TEST_ACT"}).get("pending_action")
     hit = (bool(lms_pending) and lms_pending["kind"] == "lms"
@@ -4380,6 +4380,26 @@ def check_origin() -> int:
     return ok
 
 
+def check_architecture_doc() -> int:
+    """README 의 아키텍처 다이어그램은 생성물이다 — 코드(그래프 노드·도구·게이트)와
+    어긋난 채 남으면 손그림 시절의 사고(lms_send 개명 뒤에도 옛 이름이 그려져 있던 것)가
+    재발한다. 재생성 결과와 README 의 마커 구간이 같은지 대조한다."""
+    from scripts import render_architecture as RA
+
+    ok = 0
+    text = RA.README.read_text(encoding="utf-8")
+    hit = RA.MARK_START in text and RA.MARK_END in text
+    print(f"{'✓' if hit else '✗'} README 에 생성 구간 마커가 있다")
+    ok += hit
+
+    block = text.partition(RA.MARK_START)[2].partition(RA.MARK_END)[0] if hit else ""
+    hit = hit and (RA.MARK_START + block + RA.MARK_END) == RA.render_block()
+    print(f"{'✓' if hit else '✗'} 다이어그램이 코드와 일치한다"
+          + ("" if hit else " — python -m scripts.render_architecture 로 갱신"))
+    ok += hit
+    return ok
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -4413,7 +4433,7 @@ def main() -> int:
         check_pitch_stages()
         check_verify_gate()
         check_intent_routing()
-        check_lms_send_parsing()
+        check_lms_link_parsing()
         check_knowledge_intents()
         check_screen_link()
         check_briefing_shared()
@@ -4456,8 +4476,9 @@ def main() -> int:
         check_llm_down()
         check_notice_scope()
         check_guard()
+        check_architecture_doc()
     finally:
-        # 위 테스트들(특히 lms_send)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
+        # 위 테스트들(특히 lms_link)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
         # 것만** 지운다. 예전에는 디렉터리를 통째로 지웠는데, 경로가 옮겨진 뒤로는 존재하지
         # 않는 곳을 지우고 있어서 실제로는 아무것도 정리되지 않았다(루트 CLAUDE.md 규칙 4의
         # 같은 사고 — 경로를 하드코딩하면 한 칸 움직였을 때 조용히 빗나간다).

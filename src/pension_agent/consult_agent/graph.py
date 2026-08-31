@@ -13,7 +13,7 @@
 조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
 노드 함수는 기능별로 나뉘어 있다 — 상태정의는 state.py, 분기 predicate 는 routing.py,
 화법 슬롯 분해는 pitch.py, 계획 루프는 plan.py, 되묻기 판정·답변 작성은 answer.py,
-메타 질문 응답은 meta.py, LMS발송은 lms.py, 브리핑수정은 correction.py.
+메타 질문 응답은 meta.py, LMS 화면 연계는 lms.py, 브리핑수정은 correction.py.
 LLM 프롬프트는 prompts.py.
 
 **답변을 만드는 경로는 계획 루프 하나다.** 값·절차·고객군·브리핑 질의가 각자 노드를 갖고
@@ -37,7 +37,7 @@ from pension_agent.consult_agent import progress, suggest
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
 from pension_agent.consult_agent.nodes.correction import correction
-from pension_agent.consult_agent.nodes.lms import lms_send
+from pension_agent.consult_agent.nodes.lms import lms_link
 from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
@@ -59,7 +59,7 @@ def build_agent():
     g.add_node("agent_help", agent_help)
     g.add_node("plan", plan_step)
     g.add_node("answer", answer)
-    g.add_node("lms_send", lms_send)
+    g.add_node("lms_link", lms_link)
     g.add_node("correction", correction)
     g.add_node(LLM_DOWN, llm_down)
     g.add_node("confirm_action", confirm_action)
@@ -68,7 +68,7 @@ def build_agent():
     g.add_edge(START, "understand")
     g.add_conditional_edges(
         "understand", route_intent,
-        ["agent_help", "plan", "lms_send", "correction", "confirm_action", LLM_DOWN],
+        ["agent_help", "plan", "lms_link", "correction", "confirm_action", LLM_DOWN],
     )
     # 계획 루프 — LLM 이 도구를 고르고(plan), 코드가 상한에서 끊고(route_plan),
     # 모은 근거만으로 답을 낸다(answer). 능력 표면은 intent enum 이 아니라 tools.TOOLS 다.
@@ -83,7 +83,7 @@ def build_agent():
     g.add_conditional_edges("confirm_action", route_confirm,
                             {"answer": "answer", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_send", "correction", LLM_DOWN):
+    for node in ("agent_help", "lms_link", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 

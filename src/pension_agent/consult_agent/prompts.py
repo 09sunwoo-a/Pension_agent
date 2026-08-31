@@ -17,7 +17,7 @@ from __future__ import annotations
 ROUTE_PROMPT = """직원의 입력을 보고 어떤 기능으로 보낼지 판단해 JSON만 출력하라. 설명·코드펜스 금지.
 
 {{
-  "intent": "situation" 또는 "guide" 또는 "agent_help" 또는 "correction" 또는 "lms_send"
+  "intent": "situation" 또는 "guide" 또는 "agent_help" 또는 "correction" 또는 "lms_link"
             또는 "confirm_action",
   "utterance": "질문에서 핵심 요청·발화를 한 문장으로 정리한 것"
 }}
@@ -42,7 +42,7 @@ intent 판단 기준:
   어떤 거래·제안이 가능한지 묻는 것도, **지난 상담에서 무슨 얘기를 했는지 묻는 것도** 아니다
   (그건 situation 이다 — 상담 기록이라는 재료로 답한다)
   (예: "어떤 걸 도와줄 수 있어?", "너가 답변할 수 있는 화법은 뭐가 있어?")
-- "lms_send": 방금 나온 문구를 고객에게 보내는 화면으로 가고 싶다는 요청
+- "lms_link": 방금 나온 문구를 고객에게 보내는 화면으로 가고 싶다는 요청
   (예: "그 문구로 LMS 보내줘", "방금 화법 그대로 문자 발송해줘")
 - "correction": 방금 나온 AI브리핑 내용의 특정 부분이 틀렸으니 고쳐달라는 요청
   (예: "이 부분 틀렸어, 고쳐줘", "이 고객은 사정이 달라서 이렇게 바꿔줘")

@@ -21,7 +21,7 @@ from pension_agent.consult_agent.state import KB, AgentState
 _QUOTE = re.compile(r"[\"'“”‘’](.+?)[\"'“”‘’]")
 
 
-def lms_send(state: AgentState) -> dict[str, Any]:
+def lms_link(state: AgentState) -> dict[str, Any]:
     customer_id = state.get("customer_id")
     if not customer_id:
         return {
