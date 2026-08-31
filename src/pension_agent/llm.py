@@ -6,18 +6,25 @@
 ━━ 프로바이더 ━━
   genai      사내 GenAI 플랫폼 (OpenAI 호환 vLLM). base_url + kb-key + x-client-user.
              표준 라이브러리(urllib)만 사용 — 망분리 환경에서 추가 의존성이 필요 없다.
+  gemma      외부 사전점검용 Google generativelanguage API 의 Gemma. 사내 플랫폼이
+             서빙하는 것과 같은 계열 모델이라, 내부 이관 전에 "gemma 로도 답이
+             잘 나오는가"를 사외에서 확인하는 경로다. 표준 라이브러리만 사용.
   anthropic  외부 테스트용 Anthropic SDK (claude-sonnet-5). anthropic 패키지가 있어야 하며
              api.anthropic.com 에 접근 가능한 환경(사외)에서만 쓴다.
 
-선택 규칙: LLM_PROVIDER 가 있으면 그 값을, 없으면 LLM_BASE_URL 유무로 자동 판별
-           (내부로 코드를 들여오면 LLM_BASE_URL 이 잡혀 자동으로 genai 가 된다).
+선택 규칙: LLM_PROVIDER 가 있으면 그 값을, 없으면 자동 판별 —
+           LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
+           없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
 ━━ 환경변수 ━━
-  LLM_PROVIDER      "genai" | "anthropic" (미지정 시 자동 판별)
+  LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
   LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
   LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
+  GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
+  GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
+  GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
   ANTHROPIC_API_KEY anthropic 프로바이더용 (테스트 경로)
   IRP_AGENT_MODEL   anthropic 모델. 기본 claude-sonnet-5
 
@@ -78,7 +85,11 @@ def _bootstrap_env() -> None:
 
 _bootstrap_env()
 
-PROVIDER = os.getenv("LLM_PROVIDER") or ("genai" if os.getenv("LLM_BASE_URL") else "anthropic")
+PROVIDER = os.getenv("LLM_PROVIDER") or (
+    "genai" if os.getenv("LLM_BASE_URL")
+    else "gemma" if os.getenv("GEMINI_API_KEY")
+    else "anthropic"
+)
 
 #: max_tokens 를 넘기지 않은 호출의 기본치. 브리핑 문장 한 편 분량.
 DEFAULT_MAX_TOKENS = 900
@@ -88,6 +99,17 @@ BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
 API_KEY = os.getenv("LLM_API_KEY", "")
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
+
+# ── gemma (외부 사전점검) ──
+GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
+GEMMA_ENDPOINT = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{GEMMA_MODEL}:generateContent"
+)
+#: gemma-4 는 thinking 모델이라 기본 설정으로는 hidden reasoning 이 maxOutputTokens 를
+#: 전부 삼켜 답변이 빈 채로 잘린다(실측: 300 중 297 이 thought). MINIMAL 로 눌러야
+#: 호출부가 준 max_tokens 가 답변 분량으로 쓰인다. thinkingBudget=0 은 이 모델이 거부한다.
+GEMMA_THINKING_LEVEL = os.getenv("GEMMA_THINKING_LEVEL", "MINIMAL")
 
 # ── anthropic (외부 테스트) ──
 ANTHROPIC_MODEL = os.getenv("IRP_AGENT_MODEL", "claude-sonnet-5")
@@ -110,6 +132,8 @@ def available() -> bool:
     """LLM 호출 가능 여부. 미설정 시 상위 계층이 폴백 경로를 선택한다."""
     if PROVIDER == "anthropic":
         return bool(os.getenv("ANTHROPIC_API_KEY"))
+    if PROVIDER == "gemma":
+        return bool(os.getenv("GEMINI_API_KEY"))
     return bool(BASE_URL and API_KEY)
 
 
@@ -137,6 +161,45 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
     with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
         body = json.loads(resp.read().decode("utf-8"))
     return body["choices"][0]["message"]["content"]
+
+
+def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
+                    temperature: float) -> str:
+    """Google generativelanguage :generateContent 를 표준 라이브러리로 호출한다.
+
+    Gemma 모델은 이 API 에서 systemInstruction 을 받지 않으므로(요청이 거부된다)
+    시스템 프롬프트는 사용자 프롬프트 앞에 이어 붙인다 — 사내 vLLM 서빙으로 넘어가면
+    _generate_genai 가 system 메시지로 제대로 실어 보내니, 이 접합은 이 경로에만 있다.
+    """
+    text = f"{system}\n\n{prompt}" if system else prompt
+    body = {
+        "contents": [{"parts": [{"text": text}]}],
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": temperature,
+            "thinkingConfig": {"thinkingLevel": GEMMA_THINKING_LEVEL},
+        },
+    }
+    req = urllib.request.Request(
+        GEMMA_ENDPOINT,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": os.environ["GEMINI_API_KEY"].strip(),
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        raise LLMError(f"gemma 응답에 candidates 가 없습니다: {payload}")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    # thought=True 인 hidden reasoning 파트는 답변이 아니다 — 제외한다.
+    return "".join(
+        p.get("text", "") for p in parts
+        if isinstance(p, dict) and "text" in p and not p.get("thought")
+    ).strip()
 
 
 def _generate_anthropic(prompt: str, system: str | None, max_tokens: int,
@@ -172,11 +235,14 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "
-            "anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오." % PROVIDER
+            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오."
+            % PROVIDER
         )
     try:
         if PROVIDER == "anthropic":
             return _generate_anthropic(prompt, system, max_tokens, temperature)
+        if PROVIDER == "gemma":
+            return _generate_gemma(prompt, system, max_tokens, temperature)
         return _generate_genai(prompt, system, max_tokens, temperature, x_client_user)
     except LLMError:
         raise

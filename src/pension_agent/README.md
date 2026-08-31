@@ -44,7 +44,7 @@ python -m pension_agent.knowledge.schema validate <데이터 루트...>  # 통�
 `store.fields_of(kind)` 는 `{id, **fields}` flat dict 뷰를 돌려줘 엔진 등 기존 소비부와
 호환된다. `store.records(kind)` 는 원본 레코드(+doc 메타)를 준다.
 
-## llm.py — 하나의 인터페이스, 두 프로바이더
+## llm.py — 하나의 인터페이스, 세 프로바이더
 
 호출부는 `generate()` / `agenerate()` 만 쓴다. 백엔드는 환경변수로 정해진다.
 
@@ -59,11 +59,17 @@ else:
 
 - **genai** (사내 플랫폼): `LLM_BASE_URL` + `LLM_API_KEY` → OpenAI 호환 vLLM, `kb-key`·
   `x-client-user` 헤더. 표준 라이브러리만 사용해 추가 의존성이 없다.
+- **gemma** (외부 사전점검): `GEMINI_API_KEY` → Google generativelanguage API 의
+  Gemma(`GEMMA_MODEL`, 기본 `gemma-4-31b-it`). 사내 플랫폼이 서빙하는 것과 같은 계열
+  모델이라, 내부 이관 전에 gemma 기반으로도 답이 잘 나오는지 사외에서 확인하는 경로다.
+  표준 라이브러리만 사용. 이 API 는 Gemma 에 systemInstruction 을 허용하지 않아
+  시스템 프롬프트를 사용자 프롬프트 앞에 이어 붙인다(genai 로 가면 system 메시지로 실림).
 - **anthropic** (외부 테스트): `ANTHROPIC_API_KEY` → Anthropic SDK, `claude-sonnet-5`.
   `anthropic` 패키지가 이 분기에서만 lazy import 된다.
 
-선택은 `LLM_PROVIDER`, 미지정 시 `LLM_BASE_URL` 유무로 자동 판별한다 — **내부로 코드를
-들여오면 base_url 이 잡혀 자동으로 genai 로 동작**한다. 외부에서 테스트할 때만 anthropic.
+선택은 `LLM_PROVIDER`, 미지정 시 자동 판별 — `LLM_BASE_URL` 이 있으면 genai(**내부로
+코드를 들여오면 base_url 이 잡혀 자동으로 이쪽**), 없고 `GEMINI_API_KEY` 가 있으면 gemma,
+둘 다 없으면 anthropic.
 
 ```bash
 # 사내 (망분리)
@@ -71,7 +77,11 @@ export LLM_BASE_URL=http://<사내-genai-엔드포인트>
 export LLM_API_KEY=<kb-key>
 export LLM_MODEL=<모델 슬러그>      # 비우면 게이트웨이 기본 라우팅
 
-# 외부 테스트
+# 외부 gemma 사전점검 (내부 이관 전 품질 확인)
+export GEMINI_API_KEY=...           # Google AI Studio 발급 키
+export GEMMA_MODEL=gemma-4-31b-it   # 생략 시 이 값
+
+# 외부 테스트 (anthropic)
 export LLM_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 ```

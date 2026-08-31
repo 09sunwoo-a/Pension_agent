@@ -339,7 +339,8 @@ with tab_chat:
     if not llm.available():
         st.warning(
             "⚠️ LLM 이 설정되지 않았습니다. `src/.env`에 "
-            "`LLM_BASE_URL`/`LLM_API_KEY`(사내 GenAI) 또는 `ANTHROPIC_API_KEY`(테스트용)를 "
+            "`LLM_BASE_URL`/`LLM_API_KEY`(사내 GenAI), `GEMINI_API_KEY`(gemma 사전점검) "
+            "또는 `ANTHROPIC_API_KEY`(테스트용)를 "
             "설정한 뒤 앱을 다시 시작하세요 — understand(의도분류)·plan(도구 선택)·compose(문장생성) 등은 "
             "LLM 이 반드시 필요해, 지금 상태로는 질문마다 오류 메시지가 표시됩니다."
         )
