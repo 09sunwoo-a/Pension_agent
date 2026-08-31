@@ -170,15 +170,15 @@ CLI·Streamlit 이 카드 id 대신 이걸 읽어준다(출처 문자열 규칙�
 ```mermaid
 flowchart TD
     __start__([START])
-    understand["understand<br/>질문 → intent·utterance"]
-    agent_help["agent_help<br/>에이전트 능력 안내"]
-    plan["plan<br/>계획 루프 — 도구를 골라 원장에 쌓는다"]
-    answer["answer<br/>되묻기 판정 ∥ 답변 작성 → 게이트"]
-    lms_link["lms_link<br/>LMS 발송 화면 연계 제안 (보내지 않는다)"]
-    correction["correction<br/>브리핑 산문 수정"]
-    llm_down["llm_down<br/>LLM 장애 안내 (§11)"]
-    confirm_action["confirm_action<br/>직전 제안의 네/아니오"]
-    offer["offer<br/>화면 연계·화법 제안 (규칙이 정한다)"]
+    understand["질문 이해<br/>무엇을 원하는 질문인지 가려 보낸다"]
+    agent_help["기능 안내<br/>무엇을 도와줄 수 있는지 답한다"]
+    plan["근거 수집 루프<br/>질문에 필요한 자료를 도구로 찾아 모은다"]
+    answer["답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"]
+    lms_link["LMS 발송 화면 연계<br/>요청받은 문구로 발송 화면 열기를 제안한다"]
+    correction["브리핑 수정<br/>화면의 AI 작성 문구를 고친다"]
+    llm_down["장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다"]
+    confirm_action["제안 실행<br/>직전 턴에 제안한 화면 연계를 승낙받아 실행한다"]
+    offer["화면 연계 제안<br/>답변과 이어지는 업무 화면을 열지 묻는다"]
     __end__([END])
     __start__ --> understand
     answer -.-> __end__
@@ -198,16 +198,18 @@ flowchart TD
     llm_down --> __end__
     lms_link --> __end__
     offer --> __end__
-    tools[["tools.TOOLS — 도구 16종 (능력 표면 · 코드 소유)<br/>pitch&nbsp;·&nbsp;fact&nbsp;·&nbsp;procedure&nbsp;·&nbsp;screen<br/>channel&nbsp;·&nbsp;segment&nbsp;·&nbsp;method&nbsp;·&nbsp;fieldtip<br/>market&nbsp;·&nbsp;lineup&nbsp;·&nbsp;suitable&nbsp;·&nbsp;customer<br/>history&nbsp;·&nbsp;tax_credit&nbsp;·&nbsp;date&nbsp;·&nbsp;playbook"]]
-    plan -. "무엇을 부를지는 LLM ·<br/>목록·상한·반복 차단은 코드" .-> tools
-    gates[["답변 점검 게이트 (걸리면 생성문 폐기·보완)<br/>① 원장 밖 수치·미등록 상품 (verify_texts)<br/>② 값–조건 오짝·알려진 오답 (relations)<br/>③ 원문 스팬·필수 표시 (span)"]]
-    answer -. "원장만 보고 대조" .-> gates
+    tools[["자료 도구 16종 — 답변의 근거는 전부 여기서 온다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호 · 비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰 · 시황 자료 · 운용 상품 자료<br/>열린 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이 고객 상태에 걸린 참고자료<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
+    plan -. "필요한 자료를 골라 조회" .-> tools
+    gates[["답변 점검 — 걸리면 그 답변은 화면에 나가지 않는다<br/>① 근거에 없는 숫자·상품명 차단<br/>② 값과 조건을 잘못 짝지은 문장 차단<br/>③ 원문 인용이 필요한 문장·필수 안내 문구 보완"]]
+    answer -. "내보내기 전 검사" .-> gates
 ```
 
-실선은 고정 엣지, 점선은 분기(`routing.py`)·주석이다. `tools`·`gates` 상자는
-LangGraph 노드가 아니라 `plan`·`answer` **안**에서 도는 것을 꺼내 보인 것이다 —
-`get_graph()` 출력에 도구가 안 보이는 이유가 그것이고, 설계 그대로다(도구 선택은
-LLM, 경계는 코드 — 루트 CLAUDE.md 규칙 2).
+실선은 고정된 흐름, 점선은 질문에 따라 갈리는 분기다. 자료 도구와 답변 점검 상자는
+LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 것을 꺼내 그린 것이다 —
+`get_graph()` 출력에 도구가 보이지 않는 이유가 그것이다. 어떤 도구가 있는지와 답변을
+내보낼지는 코드가 정하고, 이번 질문에 무엇을 쓸지는 LLM 이 정한다(루트 CLAUDE.md 규칙 2).
+코드 대응: 도구 레지스트리 `tools.TOOLS` · 점검 `verify_texts`/`relations`/`span` ·
+분기 `routing.py`.
 <!-- generated:architecture:end -->
 
 **전용 노드는 계획 루프로 답할 수 없는 것들뿐이다.** 값·절차·고객군·브리핑 질의는 전부
@@ -217,9 +219,10 @@ LLM, 경계는 코드 — 루트 CLAUDE.md 규칙 2).
 〔계획 루프〕 — 한 턴에 질문이 요구하는 만큼 도구를 부르고(하나든 여럿이든) 근거를 원장에
 쌓은 뒤, 그 원장만으로 답을 만든다(위 다이어그램의 `plan ⇄ tools` 점선이 그 자리다).
 
-`answer` 안에서 **되묻기 판정과 답변 작성이 동시에 돈다**(`nodes/answer.py`). 둘은 서로를
-보지 않고 원장·질문·이전 대화만 먹는데 배선이 직렬이라 작성이 판정을 기다렸다 — 순수
-대기였다. 지금은 같이 던지고, 판정이 «되묻자»면 써 둔 답을 버린다. 되묻기는 코드 관문
+`answer` 안에서 **되묻기 판정과 답변 작성이 동시에 돈다**(`nodes/answer.py`). 둘은 서로의
+출력을 보지 않고 원장·질문·이전 대화만 입력으로 받는데, 예전에는 배선이 직렬이라 작성이
+판정을 기다렸다 — 순수 대기였다. 지금은 동시에 실행하고, 판정이 되묻기로 결정되면 써 둔
+답을 버린다. 되묻기는 코드 관문
 넷을 통과한 자리에서만 일어나므로 버려지는 일이 잦지 않고, 버릴 때 잃는 것은 토큰이지
 답의 품질이 아니다 — 판정도 작성도 프롬프트·입력·게이트가 그대로다.
 
@@ -240,7 +243,7 @@ LLM, 경계는 코드 — 루트 CLAUDE.md 규칙 2).
 (`pitch.extract_slots`), 계획은 `"last": true` 로 한 바퀴에 끝낼 수 있고, 되묻기 판정은 갈래가
 있을 수 없는 재료(고객 브리핑)뿐인 턴에는 돌지 않는다. 직원은 상담 중에 이 화면을 읽는다.
 
-**줄일 수 없는 호출은 줄 세우지 않는다.** 남은 것 둘 — 카드 종류 전체가 인덱스 예산에 들어가면
+**줄일 수 없는 호출은 병렬로 돌린다.** 남은 것 둘 — 카드 종류 전체가 인덱스 예산에 들어가면
 버킷 선택(L0)을 생략하고(`kb.whole_index`), 되묻기 판정과 답변 작성은 동시에 돈다(`answer`).
 답변 자체는 스트리밍하지 않는다: 생성문이 게이트에서 통째로 폐기될 수 있어 이미 읽은 문장이
 사라지기 때문이고, 대신 «지금 무엇을 하는지»를 흘린다(`progress.py` — 문구는 전부 코드 소유).

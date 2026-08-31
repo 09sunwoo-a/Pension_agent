@@ -28,19 +28,30 @@ MARK_END = "<!-- generated:architecture:end -->"
 
 README = config.PACKAGE_ROOT / "consult_agent" / "README.md"
 
-#: 그래프 노드의 화면 라벨. 노드 이름은 그래프에서 오고, 설명 한 줄만 여기서 단다 —
-#: 없는 노드에 라벨을 달아 두면 생성 시점에 그대로 드러난다(라벨만 있고 노드가 없으면 무시).
+#: 그래프 노드의 화면 라벨 — «기능명 + 하는 일 한 줄». 점검 자리에서 읽는 사람 기준으로
+#: 쓰고, 개발 용어와 코드 이름은 다이어그램 아래 산문으로 내린다. 노드 이름은 그래프에서
+#: 오고 설명만 여기서 단다(라벨만 있고 노드가 없으면 무시된다).
 _NODE_LABELS = {
-    "understand": "understand<br/>질문 → intent·utterance",
-    "plan": "plan<br/>계획 루프 — 도구를 골라 원장에 쌓는다",
-    "answer": "answer<br/>되묻기 판정 ∥ 답변 작성 → 게이트",
-    "agent_help": "agent_help<br/>에이전트 능력 안내",
-    "lms_link": "lms_link<br/>LMS 발송 화면 연계 제안 (보내지 않는다)",
-    "correction": "correction<br/>브리핑 산문 수정",
-    "llm_down": "llm_down<br/>LLM 장애 안내 (§11)",
-    "confirm_action": "confirm_action<br/>직전 제안의 네/아니오",
-    "offer": "offer<br/>화면 연계·화법 제안 (규칙이 정한다)",
+    "understand": "질문 이해<br/>무엇을 원하는 질문인지 가려 보낸다",
+    "plan": "근거 수집 루프<br/>질문에 필요한 자료를 도구로 찾아 모은다",
+    "answer": "답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다",
+    "agent_help": "기능 안내<br/>무엇을 도와줄 수 있는지 답한다",
+    "lms_link": "LMS 발송 화면 연계<br/>요청받은 문구로 발송 화면 열기를 제안한다",
+    "correction": "브리핑 수정<br/>화면의 AI 작성 문구를 고친다",
+    "llm_down": "장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다",
+    "confirm_action": "제안 실행<br/>직전 턴에 제안한 화면 연계를 승낙받아 실행한다",
+    "offer": "화면 연계 제안<br/>답변과 이어지는 업무 화면을 열지 묻는다",
 }
+
+#: 도구 상자의 갈래. 이름은 도구 선언의 진행 표시 라벨(`Tool.progress` — 코드 소유)에서
+#: 오고, 여기는 묶음만 정한다. 레지스트리와 어긋나면(새 도구가 갈래에 없거나, 갈래에 적힌
+#: 도구가 사라지면) 생성 시점에 크게 실패한다 — 낡은 다이어그램은 없는 것만 못하다.
+_TOOL_GROUPS = (
+    ("지식베이스", ("pitch", "fact", "procedure", "screen", "channel",
+                    "segment", "method", "fieldtip", "market", "lineup")),
+    ("열린 고객", ("customer", "suitable", "history", "playbook")),
+    ("계산", ("tax_credit", "date")),
+)
 
 
 def _graph_lines() -> list[str]:
@@ -64,30 +75,37 @@ def _graph_lines() -> list[str]:
 
 
 def _tool_lines() -> list[str]:
-    """도구 레지스트리 → plan 옆의 주석 노드. 이름은 레지스트리에서 그대로 옮긴다."""
+    """도구 레지스트리 → plan 옆의 주석 노드. 도구 이름은 선언의 진행 라벨에서 옮긴다."""
     from pension_agent.consult_agent import tools as T  # noqa: PLC0415
-    names = list(T.TOOLS)
-    rows = ["&nbsp;·&nbsp;".join(names[i:i + 4]) for i in range(0, len(names), 4)]
+    grouped = {name for _label, names in _TOOL_GROUPS for name in names}
+    if grouped != set(T.TOOLS):
+        raise AssertionError(
+            "도구 갈래가 레지스트리와 다릅니다 — _TOOL_GROUPS 를 고치세요: "
+            f"갈래에만 {sorted(grouped - set(T.TOOLS))} · 레지스트리에만 {sorted(set(T.TOOLS) - grouped)}")
+    rows = []
+    for label, names in _TOOL_GROUPS:
+        shown = " · ".join(T.TOOLS[n].progress or n for n in names)
+        rows.append(f"{label}: {shown}")
     return [
-        f'    tools[["tools.TOOLS — 도구 {len(names)}종 (능력 표면 · 코드 소유)'
+        f'    tools[["자료 도구 {len(T.TOOLS)}종 — 답변의 근거는 전부 여기서 온다'
         f'<br/>{"<br/>".join(rows)}"]]',
-        '    plan -. "무엇을 부를지는 LLM ·<br/>목록·상한·반복 차단은 코드" .-> tools',
+        '    plan -. "필요한 자료를 골라 조회" .-> tools',
     ]
 
 
 def _gate_lines() -> list[str]:
-    """답변 점검 게이트 → answer 옆의 주석 노드. 검사 함수가 사라지면 크게 실패한다 —
+    """답변 점검 → answer 옆의 주석 노드. 검사 함수가 사라지면 크게 실패한다 —
     이름만 남아 있는 다이어그램은 없는 것만 못하다(tests/debug/trace 와 같은 원칙)."""
     from pension_agent.consult_agent.nodes import plan as P  # noqa: PLC0415
     missing = [a for a in ("verify_texts", "relations", "_span_verdict") if not hasattr(P, a)]
     if missing:
         raise AttributeError(f"게이트 검사가 사라졌습니다 — 다이어그램이 거짓이 됩니다: {missing}")
     return [
-        '    gates[["답변 점검 게이트 (걸리면 생성문 폐기·보완)'
-        '<br/>① 원장 밖 수치·미등록 상품 (verify_texts)'
-        '<br/>② 값–조건 오짝·알려진 오답 (relations)'
-        '<br/>③ 원문 스팬·필수 표시 (span)"]]',
-        '    answer -. "원장만 보고 대조" .-> gates',
+        '    gates[["답변 점검 — 걸리면 그 답변은 화면에 나가지 않는다'
+        '<br/>① 근거에 없는 숫자·상품명 차단'
+        '<br/>② 값과 조건을 잘못 짝지은 문장 차단'
+        '<br/>③ 원문 인용이 필요한 문장·필수 안내 문구 보완"]]',
+        '    answer -. "내보내기 전 검사" .-> gates',
     ]
 
 
@@ -101,10 +119,12 @@ def render_block() -> str:
         *_gate_lines(),
         "```",
         "",
-        "실선은 고정 엣지, 점선은 분기(`routing.py`)·주석이다. `tools`·`gates` 상자는",
-        "LangGraph 노드가 아니라 `plan`·`answer` **안**에서 도는 것을 꺼내 보인 것이다 —",
-        "`get_graph()` 출력에 도구가 안 보이는 이유가 그것이고, 설계 그대로다(도구 선택은",
-        "LLM, 경계는 코드 — 루트 CLAUDE.md 규칙 2).",
+        "실선은 고정된 흐름, 점선은 질문에 따라 갈리는 분기다. 자료 도구와 답변 점검 상자는",
+        "LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 것을 꺼내 그린 것이다 —",
+        "`get_graph()` 출력에 도구가 보이지 않는 이유가 그것이다. 어떤 도구가 있는지와 답변을",
+        "내보낼지는 코드가 정하고, 이번 질문에 무엇을 쓸지는 LLM 이 정한다(루트 CLAUDE.md 규칙 2).",
+        "코드 대응: 도구 레지스트리 `tools.TOOLS` · 점검 `verify_texts`/`relations`/`span` ·",
+        "분기 `routing.py`.",
     ])
     return f"{MARK_START}\n{body}\n{MARK_END}"
 
