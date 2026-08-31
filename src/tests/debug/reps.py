@@ -45,6 +45,7 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import time
 import unicodedata
 from contextlib import contextmanager
 
@@ -221,7 +222,7 @@ def _width(text: str) -> int:
     return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
 
 
-def _row(no: object, sees: str, turn: TR.Turn) -> list[str]:
+def _row(no: object, sees: str, turn: TR.Turn, secs: float) -> list[str]:
     """요약표 한 줄. 판정하지 않고 «무엇이 일어났나»만 적는다."""
     names = [n.name for n in turn.nodes]
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
@@ -245,6 +246,7 @@ def _row(no: object, sees: str, turn: TR.Turn) -> list[str]:
         (f"✗ {blocked}" if blocked else
          "통과" if (node and node.gates) else "안 걸림"),
         "제안" if (offer and offer.delta) else "",
+        f"{secs:.1f}초",
         end,
         sees,
     ]
@@ -307,6 +309,21 @@ def main(argv: list[str]) -> int:
             show_progress = demo and not brief
             on_progress = (lambda text: print(f"   ⋯ {text}")) if show_progress else None
             with session(customer_id=customer, on_progress=on_progress) as (ask, tr):
+                # 고객 화면을 **여는 순간**을 재현한다 — 실서비스·Streamlit 화면은 브리핑을
+                # 열 때 AI 브리핑(LLM 11회)을 생성하고(app.py), 대화 턴의 customer 도구는
+                # 그 캐시를 읽는다(strategy_agent.propose 의 브리핑 캐시). 여기서 건너뛰면
+                # 첫 고객 질문(T4·T13)이 그 생성을 통째로 떠안아 수십 초 걸린다 — 그건
+                # 시연에는 없는 대기다. 화면을 여는 시점의 비용은 화면을 여는 자리에 둔다.
+                if demo and customer:
+                    from pension_agent.strategy_agent import agent as SA        # noqa: PLC0415
+                    from pension_agent.strategy_agent import customer as SC    # noqa: PLC0415
+                    t0 = time.monotonic()
+                    prof = SC.get_profile(customer)
+                    if prof is not None:
+                        SA.propose(prof)
+                    if not brief:
+                        print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 — "
+                              "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
                     if not brief:
                         if demo:
@@ -314,17 +331,20 @@ def main(argv: list[str]) -> int:
                         else:
                             who = f"  [고객 {customer}]" if customer else ""
                             print(f"\n{'═' * 70}\n[{label}] {sees}{who}\n> {question}\n")
+                    asked = time.monotonic()
                     try:
                         result = ask(question)
                     except Exception as exc:                       # noqa: BLE001 — 한 턴이 죽어도
                         print(f"   실행 중단 — {type(exc).__name__}: {exc}")    # 나머지는 돈다
-                        rows.append([label, "—", "—", "", f"예외 {type(exc).__name__}", sees])
+                        rows.append([label, "—", "—", "", "—", f"예외 {type(exc).__name__}", sees])
                         break
+                    took = time.monotonic() - asked
                     if not brief:
                         if show_progress:
+                            print(f"   ⋯ 답변까지 {took:.1f}초")
                             print()   # 진행 줄과 답변을 가른다
                         _print_answer(result)
-                    rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1]))
+                    rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1], took))
                     if demo and debug and not brief:
                         print()
                         print(_log(tr.turns[-1], result, show_llm=show_llm))
@@ -334,7 +354,7 @@ def main(argv: list[str]) -> int:
                         print(TR.render(tr))
 
     print(f"\n{'═' * 70}\n요약 — 도구를 무엇을 어떤 순서로 골랐나\n")
-    head = ["#", "도구(순서)", "게이트", "연계", "처분", "무엇을 보나"]
+    head = ["#", "도구(순서)", "게이트", "연계", "시간", "처분", "무엇을 보나"]
     table = [head, *rows]
     widths = [max(_width(r[i]) for r in table) for i in range(len(head))]
     for i, r in enumerate(table):
