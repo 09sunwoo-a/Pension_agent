@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -584,10 +585,61 @@ check(_min_shown == 1, "workb: 상한이 아무리 작아도 고객 한 명은 �
 check(workb.EMPTY_BODY in workb.render([])[0],
       "workb: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
 
-# 발송은 아직 하지 않는다 — MCP 클라이언트가 붙기 전까지 상태가 not_connected 여야 한다.
-_sent = workb.send_note(["E00000"], _note)
+# ── 발송 ───────────────────────────────────────────────────
+# 수신자는 리스트다. 문자열 하나를 넘기면 WorkB 가 64;ETC_ERR(기타 오류)로 거부하는데,
+# 파이썬은 문자열도 시퀀스라 타입 오류 없이 거기까지 가고 서버 사유도 «기타»라 어디가
+# 틀렸는지 아무 데서도 안 나온다(실제로 그렇게 한 번 잡았다).
+try:
+    workb.validate_recipients("3902172")
+    check(False, "workb: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
+except TypeError as _exc:
+    check("리스트" in str(_exc), "workb: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
+for _bad in ([], ["", "3902172"], None):
+    try:
+        workb.validate_recipients(_bad)
+        check(False, f"workb: 빈 수신자를 막는다 ({_bad!r})")
+    except (TypeError, ValueError):
+        check(True, f"workb: 빈 수신자를 막는다 ({_bad!r})")
+
+# 어댑터의 성공은 서버의 성공이 아니다 — WorkB 는 실패를 isError 가 아니라 본문에 담는다.
+# 아래 두 형태는 실제로 관측된 응답이다.
+_REFUSED = [{"type": "text", "text": '{\n  "success": false,\n  "error": "64;ETC_ERR"\n}'}]
+check(workb.parse_result(_REFUSED)["status"] == "failed",
+      "workb.parse_result: 본문의 success:false 를 «발송 완료»로 보고하지 않는다",
+      str(workb.parse_result(_REFUSED)))
+check(workb.parse_result(_REFUSED).get("error") == "64;ETC_ERR",
+      "workb.parse_result: 서버 오류코드를 그대로 남긴다")
+check(workb.parse_result([{"type": "text", "text": '{"success": true}'}])["status"] == "sent",
+      "workb.parse_result: success:true 는 발송으로 본다")
+check(workb.parse_result('{"success": true}')["status"] == "sent",
+      "workb.parse_result: 문자열로 온 응답도 읽는다")
+check(workb.parse_result(([{"type": "text", "text": '{"success": true}'}], None))["status"] == "sent",
+      "workb.parse_result: (content, artifact) 튜플도 읽는다")
+# 판정하지 못한 것을 성공 쪽으로 접지 않는다 — 그게 안 한 일을 했다고 말하는 경로다.
+for _amb in ("", "OK", '{"result": 1}', None):
+    check(workb.parse_result(_amb)["status"] == "unknown",
+          f"workb.parse_result: 판정 불가는 unknown 이다 ({_amb!r})",
+          str(workb.parse_result(_amb)))
+
+_sent = asyncio.run(workb.send_note(["E00000"], _note))
 check(_sent["status"] == "not_connected" and _sent["body"] == _note.body,
-      "workb.send_note: 미연결 상태를 «보냄»으로 보고하지 않는다", str(_sent["status"]))
+      "workb.send_note: 클라이언트 미주입을 «보냄»으로 보고하지 않는다", str(_sent["status"]))
+
+async def _fake_send(recipients, title, body):
+    _fake_send.seen = (recipients, title, body)
+    return [{"type": "text", "text": '{"success": true}'}]
+
+_ok = asyncio.run(workb.send_note(["3902172"], _note, send=_fake_send))
+check(_ok["status"] == "sent" and _fake_send.seen[0] == ["3902172"],
+      "workb.send_note: 주입한 클라이언트로 수신자·제목·본문을 그대로 넘긴다", str(_ok))
+check(_fake_send.seen[2] == _note.body, "workb.send_note: 본문을 손대지 않고 넘긴다")
+
+async def _boom(recipients, title, body):
+    raise RuntimeError("전송 끊김")
+
+_err = asyncio.run(workb.send_note(["3902172"], _note, send=_boom))
+check(_err["status"] == "failed" and "전송 끊김" in _err["detail"],
+      "workb.send_note: 호출이 죽으면 실패로 보고한다(삼키지 않는다)", str(_err))
 
 
 # ─────────────────────────────────────────────────────────────

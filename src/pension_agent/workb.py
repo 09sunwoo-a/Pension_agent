@@ -15,10 +15,8 @@
 원장 값**뿐이고, 값이 없는 요건(디폴트옵션 미설정 등)에는 아무것도 붙이지 않는다.
 
 ━━ 확정되지 않은 것 ━━
-아래 둘은 WorkB·MCP 규격을 받으면 교체할 자리표시자다. 지금은 눈에 띄게 상수로 세워 둔다.
-
-  · `MAX_CHARS`  — 쪽지 한 통의 길이 상한. 규격 미상이라 넉넉히 잡아 뒀다.
-  · `MASK_ID`    — 고객 id 마스킹 여부. 기본은 마스킹이다(아래 참고).
+`MAX_CHARS`(쪽지 한 통의 길이 상한)는 아직 규격을 못 받아 넉넉히 잡아 둔 자리표시자다.
+`MASK_ID`(고객 id 마스킹)는 규격이 아니라 정책 선택이다(아래 참고).
 
 **고객 id 는 기본으로 가린다.** KB-PIN 은 생년월일이 앞자리에 그대로 드러나는 형식이고,
 쪽지는 화면과 달리 받은편지함에 남는다. 직원이 목록에서 고객을 특정하는 데 필요한 것은
@@ -28,6 +26,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -214,28 +214,107 @@ def daily_targets_note(*, max_chars: int = MAX_CHARS) -> Note:
 
 
 # ─────────────────────────────────────────────────────────────
-# 발송 — MCP 클라이언트 자리
+# 발송 — WorkB MCP
+#
+# 클라이언트는 **주입받는다.** 행내 `mcp_sdk` 는 저장소 밖 패키지라 여기서 임포트하면
+# 테스트가 그 패키지 없이는 돌지 않게 되고(지금 전 테스트가 LLM 키도 사내 패키지도 없이
+# 돈다), 망분리 밖에서는 아예 설치할 수도 없다. 그래서 이 모듈이 아는 것은 «어떤 모양의
+# 함수를 부르면 쪽지가 나간다»뿐이고, 그 함수가 무엇인지는 부르는 쪽이 정한다.
 # ─────────────────────────────────────────────────────────────
 
-def send_note(recipients: list[str], note: Note) -> dict[str, Any]:
-    """WorkB 쪽지 발송. **지금은 보내지 않는다** — MCP 클라이언트가 아직 붙지 않았다.
+#: 주입받는 발송 함수의 모양 — `send(recipients, title, body)` 를 await 하면 원시 결과가
+#: 온다. 행내 클라이언트의 `MCPClient.send_message` 가 그대로 이 모양이다.
+Sender = Callable[[list[str], str, str], Awaitable[Any]]
 
-    붙일 때 고치는 것은 이 함수 **본문뿐**이다(`pension_agent/tools.py` 의 스텁들과 같은
-    규약). 시그니처와 반환 형태를 유지하면 부르는 쪽은 그대로 둔다.
 
-    ━━ 붙일 때 같이 오는 것 ━━
-    발송은 되돌릴 수 없다(CLAUDE.md 5번). 그래서 이 함수는 **직원이 승낙한 뒤에만** 불려야
-    하고, 그 승낙은 여기가 아니라 대화형의 제안→확인 경로가 받는다
-    (`consult_agent/nodes/act.py::confirm_action` — 지금 화면 연계가 쓰는 그 경로다).
-    이 함수가 스스로 «보낼까요?»를 묻지 않는 이유이고, 승낙 없이 불리면 안 되는 이유다.
+def validate_recipients(recipients: Any) -> list[str]:
+    """수신자 목록 검증. **문자열 하나를 리스트 대신 넘기는 것을 막는다.**
+
+    WorkB 의 `send_memo` 는 RECIPIENT 를 리스트로 받는다. 문자열 `"3902172"` 를 그대로
+    넘기면 서버가 거부하는데, 사유를 분류하지 못하고 `64;ETC_ERR`(기타 오류)로만 답한다 —
+    파이썬은 문자열도 시퀀스라 타입 오류 없이 그 자리까지 가고, 서버 응답도 «기타»라 어디가
+    틀렸는지 아무 데서도 안 나온다. 그래서 나가기 전에 여기서 막는다.
     """
-    return {
-        "status": "not_connected",
-        "detail": "WorkB MCP 클라이언트가 아직 연결되지 않았습니다 — 본문만 생성했습니다",
-        "recipients": recipients,
-        "title": note.title,
-        "body": note.body,
-    }
+    if isinstance(recipients, str):
+        raise TypeError("recipients 는 리스트여야 합니다 — 문자열 하나를 넘기면 WorkB 가 "
+                        f"64;ETC_ERR 로 거부합니다: [{recipients!r}] 처럼 감싸세요")
+    ids = list(recipients or [])
+    if not ids or not all(isinstance(r, str) and r.strip() for r in ids):
+        raise ValueError(f"recipients 가 비어 있거나 빈 값을 포함합니다: {recipients!r}")
+    return ids
+
+
+def _text_of(raw: Any) -> str:
+    """어댑터가 돌려준 결과에서 본문 텍스트를 꺼낸다.
+
+    형태가 버전·응답에 따라 갈린다 — 콘텐츠 블록 리스트(`[{"type":"text","text":...}]`),
+    문자열, `(content, artifact)` 튜플. 어느 쪽이든 텍스트만 이어 붙인다.
+    """
+    if isinstance(raw, tuple) and raw:
+        raw = raw[0]
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list):
+        return "".join(b.get("text", "") for b in raw
+                       if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def parse_result(raw: Any) -> dict[str, Any]:
+    """발송 결과 판정 — 「보냈다」고 말해도 되는지.
+
+    **어댑터의 성공은 서버의 성공이 아니다.** WorkB 는 실패를 `isError` 로 세우지 않고
+    본문에 `{"success": false, "error": "64;ETC_ERR"}` 로 담아 보낸다. 어댑터는 `isError`
+    만 보므로 그 응답을 `status="success"` 로 넘겨준다 — 본문을 까지 않으면 **거부당한
+    호출이 «발송 완료»로 보고된다.**
+
+    **판정하지 못하면 성공이 아니다.** 본문이 JSON 이 아니거나 `success` 키가 없으면
+    `unknown` 이다. 모르는 것을 성공 쪽으로 접으면, 그게 바로 안 한 일을 했다고 말하는
+    경로다(루트 CLAUDE.md 5번이 막으려는 것).
+    """
+    text = _text_of(raw).strip()
+    try:
+        body = json.loads(text)
+    except (TypeError, ValueError):
+        return {"status": "unknown",
+                "detail": "발송 결과를 판정하지 못했습니다 — 응답이 JSON 이 아닙니다",
+                "raw": text[:200]}
+    if not isinstance(body, dict) or "success" not in body:
+        return {"status": "unknown",
+                "detail": "발송 결과를 판정하지 못했습니다 — 응답에 success 가 없습니다",
+                "raw": text[:200]}
+    if body.get("success"):
+        return {"status": "sent", "detail": "쪽지를 발송했습니다"}
+    return {"status": "failed",
+            "detail": f"WorkB 가 발송을 거부했습니다: {body.get('error') or '사유 없음'}",
+            "error": body.get("error")}
+
+
+async def send_note(recipients: list[str], note: Note, *,
+                    send: Sender | None = None) -> dict[str, Any]:
+    """WorkB 쪽지 발송. `send` 를 주지 않으면 **보내지 않고** 미연결로 답한다.
+
+        from workb_mcp import MCPClient                     # 행내 클라이언트
+        client = MCPClient(emp_no)
+        await send_note(["3902172"], note, send=client.send_message)
+
+    ━━ 승낙은 여기서 받지 않는다 ━━
+    발송은 되돌릴 수 없다(CLAUDE.md 5번). 이 함수는 **직원이 승낙한 뒤에만** 불려야 하고,
+    그 승낙은 대화형의 제안→확인 경로가 받는다(`consult_agent/nodes/act.py::confirm_action`
+    — 지금 화면 연계가 쓰는 그 경로). 그래서 여기가 스스로 «보낼까요?»를 묻지 않는다.
+    """
+    ids = validate_recipients(recipients)
+    if send is None:
+        return {"status": "not_connected",
+                "detail": "WorkB 클라이언트가 주입되지 않았습니다 — 본문만 생성했습니다",
+                "recipients": ids, "title": note.title, "body": note.body}
+    try:
+        raw = await send(ids, note.title, note.body)
+    except Exception as exc:
+        # 실패를 성공으로 접지 않는다. 예외 종류까지 남겨야 다음 사람이 재현할 수 있다.
+        return {"status": "failed", "detail": f"발송 호출이 실패했습니다: {type(exc).__name__}: {exc}",
+                "error": type(exc).__name__, "recipients": ids, "title": note.title}
+    return {**parse_result(raw), "recipients": ids, "title": note.title}
 
 
 if __name__ == "__main__":  # 아웃풋 눈으로 보기: python -m pension_agent.workb
