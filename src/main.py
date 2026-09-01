@@ -8,22 +8,34 @@
 
 `input_value` 는 **JSON 을 문자열로 직렬화한 것**이다. 이 프로젝트가 그 안에서 읽는 키:
 
-    message        (필수) 직원이 입력한 질문
-    x_client_user  (필수) 호출한 직원 식별자. 플랫폼의 감사 기록이자 쿼터 버킷이다
-    customer_id    (선택) 지금 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능은
-                          이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
-    session_id     (선택) 상담 세션 구분자. 없으면 "default"
+    message         (필수) 직원이 입력한 질문
+    x_client_user   (필수) 호출한 직원 식별자. 플랫폼의 감사 기록이자 쿼터 버킷이다
+    customer_id     (선택) 지금 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능은
+                           이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
+    session_id      (선택) 상담 세션 구분자. 없으면 "default"
+    stream_progress (선택) 답변을 기다리는 동안 «지금 무엇을 하고 있는지»를 함께 흘린다.
+                           기본 거짓 — 아래 참고
 
 이 파일은 **얇다.** 판단·검증·문장 생성은 전부 consult_agent 안에서 끝나고, 여기서는
 파싱·스트리밍·오류 형태만 맡는다. 화면(Streamlit app.py)과 이 API 는 같은 `ask()` 하나를
 부른다 — 두 경로가 갈리면 «화면에서는 되는데 API 에서는 다르게 나오는» 자리가 생긴다.
 
-━━ 왜 진행 표시를 흘리지 않는가 ━━
-consult_agent 는 답변이 만들어지는 동안 "지금 무엇을 하고 있는지"를 한 줄씩 흘릴 수
-있다(progress.py). 그런데 플랫폼 스키마의 이벤트는 CHUNK 한 종류뿐이고, 소비자는 CHUNK
-의 content 를 이어 붙여 답변으로 삼는다 — 거기에 진행 문구를 섞으면 그게 답변의 일부가
-된다. 그래서 이 경로는 **답변만** 내보낸다(줄 단위로 쪼개 흘린다). 진행 표시는 콜백을
-직접 받을 수 있는 화면(app.py)의 몫이다.
+━━ 무엇을 흘리는가 ━━
+플랫폼 스키마의 이벤트는 CHUNK 한 종류뿐이고, 소비자는 content 를 이어 붙여 답변으로
+삼는다. 그래서 무엇을 싣느냐가 곧 "답변에 무엇이 남느냐"다.
+
+  답변      항상. 줄 단위로 쪼개 흘린다.
+  출처      **항상.** 이 에이전트의 답은 «근거 안에서만» 나오고, 그 근거를 보여주는 것이
+            존재 이유다(루트 CLAUDE.md §2). 출처 없는 답변은 이 시스템의 산출물이 아니다.
+            추천질문이 이미 같은 방식으로 답변 끝에 붙는다(graph.ask) — 같은 규약이다.
+  진행 표시 **요청이 켤 때만**(stream_progress). 이건 답변이 아니라 «기다리는 동안의
+            화면»이라, 이어 붙였을 때 답변의 일부가 되면 안 된다. 사람이 터미널에서 보는
+            테스트(test_local.sh)에서는 켜고, 플랫폼 UI 가 부르는 기본 호출에서는 끈다.
+
+답변 자체를 토큰 단위로 흘리지 않는 이유는 따로 있다 — compose 의 생성문은 검증 게이트
+(verify_texts · relations · 원문 스팬)에서 **통째로 폐기**될 수 있어서, 토큰을 흘려보내면
+직원이 이미 읽은 문장이 사라진다. "근거 밖 수치를 내보내지 않는다"는 보증이 화면에서
+뒤집히는 것이다(progress.py 주석).
 """
 
 from __future__ import annotations
@@ -42,6 +54,7 @@ from pydantic import BaseModel
 
 from pension_agent import llm
 from pension_agent.consult_agent import graph as consult_graph
+from pension_agent.consult_agent import render
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +105,7 @@ def _parse(req: ChatRequest) -> dict[str, Any]:
         "customer_id": payload.get("customer_id") or None,
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
+        "stream_progress": bool(payload.get("stream_progress")),
     }
 
 
@@ -152,16 +166,39 @@ async def chat(req: ChatRequest) -> StreamingResponse:
     args = _parse(req)
 
     async def generate():
+        loop = asyncio.get_running_loop()
+        # 진행 표시는 답변을 만드는 **워커 스레드**에서 나오고, 흘리는 것은 이벤트 루프다.
+        # 큐로 건네야 «기다리는 동안» 나간다 — 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
+        lines: asyncio.Queue = asyncio.Queue()
+        DONE = object()
+
+        def on_progress(text: str) -> None:
+            loop.call_soon_threadsafe(lines.put_nowait, text)
+
+        def run() -> dict[str, Any]:
+            try:
+                return consult_graph.ask(
+                    args["question"], args["history"],
+                    customer_id=args["customer_id"], session_id=args["session_id"],
+                    x_client_user=args["x_client_user"],
+                    on_progress=on_progress if args["stream_progress"] else None,
+                )
+            finally:
+                # 성공이든 실패든 반드시 닫는다 — 안 닫으면 아래 루프가 영원히 기다린다.
+                loop.call_soon_threadsafe(lines.put_nowait, DONE)
+
+        # ask() 는 동기 호출이고 그 안에서 LLM I/O 로 오래 막힌다. 이벤트 루프에서 직접
+        # 부르면 이 워커가 다른 요청을 하나도 못 받는다. to_thread 는 컨텍스트를 복사해
+        # 넘기므로 x-client-user 도 스레드 안까지 따라간다.
+        task = asyncio.create_task(asyncio.to_thread(run))
+        while True:
+            item = await lines.get()
+            if item is DONE:
+                break
+            yield _chunk(f"⋯ {item}\n")
+
         try:
-            # ask() 는 동기 호출이고 그 안에서 LLM I/O 로 오래 막힌다. 이벤트 루프에서
-            # 직접 부르면 이 워커가 다른 요청을 하나도 못 받는다. to_thread 는 컨텍스트를
-            # 복사해 넘기므로 x-client-user 도 스레드 안까지 따라간다.
-            result = await asyncio.to_thread(
-                consult_graph.ask,
-                args["question"], args["history"],
-                customer_id=args["customer_id"], session_id=args["session_id"],
-                x_client_user=args["x_client_user"],
-            )
+            result = await task
         except Exception as exc:  # noqa: BLE001
             # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다. 그래서 실패도 CHUNK 로
             # 나간다 — 클라이언트가 빈 응답을 받고 «답이 없다»로 오해하는 것보다,
@@ -170,11 +207,9 @@ async def chat(req: ChatRequest) -> StreamingResponse:
             yield _chunk(f"[오류] {type(exc).__name__}: {exc}")
             return
 
-        answer = result.get("answer", "")
-        # 답변은 토큰 단위로 흘릴 수 없다 — compose 의 생성문은 검증 게이트에서 통째로
-        # 폐기될 수 있어서, 흘려보낸 뒤 사라지면 «근거 밖 수치를 내보내지 않는다»는 보증이
-        # 화면에서 뒤집힌다(progress.py). 검증을 통과한 완성본을 줄 단위로 나눠 보낸다.
-        for line in answer.splitlines(keepends=True):
+        for line in result.get("answer", "").splitlines(keepends=True):
             yield _chunk(line)
+        # 출처는 답변의 일부다 — 근거를 못 보여주면 이 에이전트의 답이 아니다(위 주석).
+        yield _chunk("\n" + render.sources_block(result.get("sources")) + "\n")
 
     return StreamingResponse(generate(), media_type="text/event-stream")

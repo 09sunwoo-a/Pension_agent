@@ -31,6 +31,7 @@ streamlit run app.py                                  # 평가 대시보드 (개
 # ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
 ./run_local.sh                                        # uvicorn main:app :8000
 ./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
+CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"   # 고객 화면이 열린 상태
 docker build -f Dockerfile.local -t pension-agent:local .   # 외부망 로컬 빌드
 #   내부망 배포 이미지는 Dockerfile (STG 기준 · PRD 는 주석 줄로 교체)
 
