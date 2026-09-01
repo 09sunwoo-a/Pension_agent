@@ -350,6 +350,122 @@ def check_knowledge_intents() -> bool:
     return ok
 
 
+def check_workb_note() -> int:
+    """WorkB 쪽지 — 제안 → 승낙 → 발송 (§10 · 루트 CLAUDE.md 5번).
+
+    회귀 대상은 전부 **안 한 일을 했다고 보고하는** 경로다:
+    ① 승낙 없이 나가는 길 — 발송은 되돌릴 수 없으므로 confirm 을 지나지 않고는 못 나간다.
+    ② 어댑터의 성공을 서버의 성공으로 읽는 것 — WorkB 는 실패를 본문에 담아 보내므로,
+       예외가 없다는 사실은 발송의 근거가 아니다(실제로 `64;ETC_ERR` 를 그렇게 지나쳤다).
+    ③ 수신자를 LLM 이 정하는 것 — 코드가 정하지 않으면 엉뚱한 직원에게 고객 목록이 간다.
+    ④ 승낙한 글과 다른 글을 보내는 것 — 승낙 턴이 본문을 다시 만들면 자정을 넘긴 승낙이
+       직원이 본 것과 다른 날짜의 목록을 보낸다.
+    """
+    import asyncio
+    import os
+
+    from pension_agent import workb
+    from pension_agent.consult_agent.nodes import act
+    from pension_agent.consult_agent.nodes.workb import workb_note
+
+    ok = 0
+    sent: dict = {}
+    saved_sender, saved_env = workb.SENDER, os.environ.get(workb.EMP_NO_ENV)
+
+    async def _fake(recipients, title, body):
+        sent.update(recipients=recipients, title=title, body=body)
+        return [{"type": "text", "text": '{"success": true}'}]
+
+    async def _refuse(recipients, title, body):
+        return [{"type": "text", "text": '{"success": false, "error": "64;ETC_ERR"}'}]
+
+    try:
+        os.environ[workb.EMP_NO_ENV] = "TESTEMP"
+        workb.use_sender(_fake)
+
+        # 고객 화면이 없어도 성립한다 — 목록이 로스터 전체라 열려 있는 고객과 무관하다.
+        proposed = workb_note({"question": "오늘 타겟 고객 쪽지로 보내줘"})
+        action = proposed.get("pending_action")
+        hit = bool(action) and action["kind"] == "workb_note"
+        print(f"{'✓' if hit else '✗'} 고객 화면 없이도 쪽지 발송을 제안한다")
+        ok += hit
+
+        # ① 제안 턴은 **보내지 않는다**. 승낙 전에 나가면 확인 절차가 없는 것과 같다.
+        hit = not sent
+        print(f"{'✓' if hit else '✗'} 제안만 한 턴에는 발송하지 않는다")
+        ok += hit
+
+        # ③ 수신자는 코드가 정한다 — 대화에서 뽑지 않는다.
+        hit = action["recipients"] == ["TESTEMP"]
+        print(f"{'✓' if hit else '✗'} 수신자는 코드가 정한 직원 본인이다")
+        ok += hit
+
+        # 무엇을 보내는지 모르고 누른 «네» 는 승낙이 아니다 — 제안 턴이 본문을 보여준다.
+        hit = action["body"] in proposed["answer"] and "네 / 아니오" in proposed["answer"]
+        print(f"{'✓' if hit else '✗'} 보낼 글을 그대로 보여주고 승낙을 받는다")
+        ok += hit
+
+        hist = [{"question": "오늘 타겟 고객 쪽지로 보내줘", "pending_action": action}]
+
+        # 애매한 답은 승낙이 아니다(§10) — 제안을 유지한 채 다시 묻는다.
+        again = act.confirm_action({"question": "음 글쎄", "history": hist})
+        hit = not sent and again.get("pending_action") == action
+        print(f"{'✓' if hit else '✗'} 애매한 답을 승낙으로 읽지 않는다")
+        ok += hit
+
+        # 거절이면 보내지 않는다.
+        act.confirm_action({"question": "아니오", "history": hist})
+        hit = not sent
+        print(f"{'✓' if hit else '✗'} 거절하면 발송하지 않는다")
+        ok += hit
+
+        # ④ 승낙하면 **제안한 그 글**이 나간다.
+        said = act.confirm_action({"question": "네", "history": hist})
+        hit = (sent.get("body") == action["body"] and sent.get("title") == action["title"]
+               and sent.get("recipients") == ["TESTEMP"])
+        print(f"{'✓' if hit else '✗'} 승낙하면 제안한 그 글이 그대로 나간다")
+        ok += hit
+        hit = "했어요" in said["answer"] and not said.get("pending_action")
+        print(f"{'✓' if hit else '✗'} 발송 결과를 알리고 제안을 닫는다")
+        ok += hit
+
+        # ② 서버가 거부하면 «보냈다»고 말하지 않는다.
+        workb.use_sender(_refuse)
+        refused = act.confirm_action({"question": "네", "history": hist})
+        hit = "발송하지 못했어요" in refused["answer"] and "64;ETC_ERR" in refused["answer"]
+        print(f"{'✓' if hit else '✗'} 서버가 거부하면 «보냈다»고 말하지 않는다")
+        ok += hit
+
+        # 판정하지 못한 응답도 «보냈다»가 아니다 — 모르는 것을 성공으로 접지 않는다.
+        async def _mute(r, t, b):
+            return "OK"
+        workb.use_sender(_mute)
+        unknown = act.confirm_action({"question": "네", "history": hist})
+        hit = "확인하지 못했어요" in unknown["answer"]
+        print(f"{'✓' if hit else '✗'} 판정하지 못한 응답을 «보냈다»로 접지 않는다")
+        ok += hit
+
+        # 클라이언트가 없으면 조용히 성공하지 않는다.
+        workb.use_sender(None)
+        down = act.confirm_action({"question": "네", "history": hist})
+        hit = "발송하지 못했어요" in down["answer"]
+        print(f"{'✓' if hit else '✗'} 클라이언트 미연결도 «보냈다»로 접지 않는다")
+        ok += hit
+
+        # 받을 사람을 모르면 제안 자체를 하지 않는다 — 승낙받을 대상이 없다.
+        del os.environ[workb.EMP_NO_ENV]
+        hit = not workb_note({"question": "쪽지로 보내줘"}).get("pending_action")
+        print(f"{'✓' if hit else '✗'} 직원 사번을 모르면 발송을 제안하지 않는다")
+        ok += hit
+    finally:
+        workb.use_sender(saved_sender)
+        if saved_env is None:
+            os.environ.pop(workb.EMP_NO_ENV, None)
+        else:
+            os.environ[workb.EMP_NO_ENV] = saved_env
+    return ok
+
+
 def check_screen_link() -> int:
     """화면 연계 — 제안 → 확인 → 연계 (§10 · gap 14·15).
 
@@ -4491,6 +4607,7 @@ def main() -> int:
         check_lms_link_parsing()
         check_knowledge_intents()
         check_screen_link()
+        check_workb_note()
         check_briefing_shared()
         check_customer_material()
         check_playbook_material()

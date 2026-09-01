@@ -26,7 +26,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -226,6 +228,38 @@ def daily_targets_note(*, max_chars: int = MAX_CHARS) -> Note:
 #: 온다. 행내 클라이언트의 `MCPClient.send_message` 가 그대로 이 모양이다.
 Sender = Callable[[list[str], str, str], Awaitable[Any]]
 
+#: 앱이 등록한 발송 함수. 등록 전에는 None 이고, 그동안 발송 시도는 «미연결»로 답한다 —
+#: 조용히 성공처럼 끝나지 않는다. 등록은 앱 시작 시 한 번이다(`use_sender`).
+SENDER: Sender | None = None
+
+#: 쪽지 수신자 — **직원 본인**이다. 그래서 LLM 이 수신자를 정하는 자리가 아예 없다.
+#: 대화에서 사번을 뽑아내게 두면 엉뚱한 사람에게 고객 목록이 나갈 수 있고, 그건 확인
+#: 절차로도 못 막는다(직원은 자기가 승낙한 게 누구 앞인지 안 읽는다).
+#: 로그인 사번이 없을 때의 폴백은 환경변수 하나뿐이고, 그것도 없으면 발송하지 않는다.
+EMP_NO_ENV = "WORKB_EMP_NO"
+
+
+def use_sender(fn: Sender | None) -> None:
+    """행내 WorkB 클라이언트를 등록한다(앱 시작 시 1회).
+
+        from pension_agent import workb
+        workb.use_sender(MCPClient(emp_no).send_message)
+
+    여기서 임포트하지 않고 등록받는 이유는 `mcp_sdk` 가 저장소 밖 패키지이기 때문이다 —
+    임포트하면 그 패키지 없이는 테스트도 임포트도 안 된다(망분리 밖에서는 설치도 못 한다).
+    """
+    global SENDER
+    SENDER = fn
+
+
+def employee_id(explicit: str | None = None) -> str | None:
+    """쪽지를 받을 직원 사번. 로그인 사번이 우선이고, 없으면 환경변수, 그것도 없으면 None.
+
+    None 이면 발송을 제안하지 않는다 — 받을 사람을 모르는 채로 «보낼까요?» 를 묻는 것은
+    승낙받을 대상이 없는 제안이다.
+    """
+    return (explicit or os.getenv(EMP_NO_ENV, "")).strip() or None
+
 
 def validate_recipients(recipients: Any) -> list[str]:
     """수신자 목록 검증. **문자열 하나를 리스트 대신 넘기는 것을 막는다.**
@@ -292,11 +326,10 @@ def parse_result(raw: Any) -> dict[str, Any]:
 
 async def send_note(recipients: list[str], note: Note, *,
                     send: Sender | None = None) -> dict[str, Any]:
-    """WorkB 쪽지 발송. `send` 를 주지 않으면 **보내지 않고** 미연결로 답한다.
+    """WorkB 쪽지 발송. 클라이언트가 없으면 **보내지 않고** 미연결로 답한다.
 
-        from workb_mcp import MCPClient                     # 행내 클라이언트
-        client = MCPClient(emp_no)
-        await send_note(["3902172"], note, send=client.send_message)
+        workb.use_sender(MCPClient(emp_no).send_message)    # 앱 시작 시 1회
+        await send_note(["3902172"], note)
 
     ━━ 승낙은 여기서 받지 않는다 ━━
     발송은 되돌릴 수 없다(CLAUDE.md 5번). 이 함수는 **직원이 승낙한 뒤에만** 불려야 하고,
@@ -304,6 +337,7 @@ async def send_note(recipients: list[str], note: Note, *,
     — 지금 화면 연계가 쓰는 그 경로). 그래서 여기가 스스로 «보낼까요?»를 묻지 않는다.
     """
     ids = validate_recipients(recipients)
+    send = send or SENDER
     if send is None:
         return {"status": "not_connected",
                 "detail": "WorkB 클라이언트가 주입되지 않았습니다 — 본문만 생성했습니다",
@@ -315,6 +349,23 @@ async def send_note(recipients: list[str], note: Note, *,
         return {"status": "failed", "detail": f"발송 호출이 실패했습니다: {type(exc).__name__}: {exc}",
                 "error": type(exc).__name__, "recipients": ids, "title": note.title}
     return {**parse_result(raw), "recipients": ids, "title": note.title}
+
+
+def send_note_sync(recipients: list[str], note: Note, *,
+                   send: Sender | None = None) -> dict[str, Any]:
+    """동기 문맥에서의 발송. 대화형 그래프가 동기라서 있다(`consult_agent/nodes/act.py`).
+
+    이미 이벤트 루프 안이면 **여기서 기다릴 수 없다** — 그때는 실패로 답한다. 조용히
+    «보냄»으로 끝내지 않는 것이 핵심이고, 그런 앱은 `await send_note(...)` 를 직접 쓰면 된다.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(send_note(recipients, note, send=send))
+    return {"status": "failed",
+            "detail": ("이벤트 루프 안에서는 동기 발송을 기다릴 수 없습니다 — "
+                       "await send_note(...) 를 쓰세요"),
+            "error": "RunningLoop", "recipients": list(recipients), "title": note.title}
 
 
 if __name__ == "__main__":  # 아웃풋 눈으로 보기: python -m pension_agent.workb

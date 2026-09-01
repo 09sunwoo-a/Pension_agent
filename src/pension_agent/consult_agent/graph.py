@@ -41,6 +41,7 @@ from pension_agent.consult_agent.nodes.lms import lms_link
 from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
+from pension_agent.consult_agent.nodes.workb import workb_note
 from pension_agent.consult_agent.routing import (
     LLM_DOWN, route_answer, route_confirm, route_intent, route_plan,
 )
@@ -64,6 +65,7 @@ def build_agent():
     # 없어 여기서만 통과했었다. 함수 이름(answer)은 그대로라 트레이스 계측은 안 변한다.
     g.add_node("compose", answer)
     g.add_node("lms_link", lms_link)
+    g.add_node("workb_note", workb_note)
     g.add_node("correction", correction)
     g.add_node(LLM_DOWN, llm_down)
     g.add_node("confirm_action", confirm_action)
@@ -72,7 +74,8 @@ def build_agent():
     g.add_edge(START, "understand")
     g.add_conditional_edges(
         "understand", route_intent,
-        ["agent_help", "plan", "lms_link", "correction", "confirm_action", LLM_DOWN],
+        ["agent_help", "plan", "lms_link", "workb_note", "correction",
+         "confirm_action", LLM_DOWN],
     )
     # 계획 루프 — LLM 이 도구를 고르고(plan), 코드가 상한에서 끊고(route_plan),
     # 모은 근거만으로 답을 낸다(answer). 능력 표면은 intent enum 이 아니라 tools.TOOLS 다.
@@ -87,7 +90,7 @@ def build_agent():
     g.add_conditional_edges("confirm_action", route_confirm,
                             {"compose": "compose", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_link", "correction", LLM_DOWN):
+    for node in ("agent_help", "lms_link", "workb_note", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 
@@ -98,6 +101,7 @@ _AGENT = None
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
+    employee_id: str | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
@@ -109,6 +113,8 @@ def ask(
     customer_id: 현재 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능(브리핑 질의·수정·
     화면 연계)은 이것이 있어야 성립한다 — 없으면 "고객 화면을 먼저 열어달라"고 답한다
     (CLAUDE.md §3). 지식 질의응답·화법 코칭은 없이도 답한다.
+    employee_id: 로그인한 직원의 사번. WorkB 쪽지의 수신자다 — 없으면 환경변수
+    (`WORKB_EMP_NO`)로 떨어지고, 그것도 없으면 쪽지 발송을 제안하지 않는다.
     session_id: 상담 세션 구분자(REQUIREMENTS.md §14 상담이력 단위). 넘기지 않으면 "default"
     세션으로 기록된다 — 모든 턴은 intent 와 무관하게 이 진입점 한 곳에서 기록되므로, 새
     intent 가 추가돼도 상담이력 기록을 빠뜨릴 일이 없다.
@@ -123,7 +129,7 @@ def ask(
         out = _AGENT.invoke(
             {"question": question, "history": history or [], "customer_id": customer_id,
              # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
-             "session_id": session_id})
+             "session_id": session_id, "employee_id": employee_id})
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

@@ -183,7 +183,42 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 진행할까요? '네' 또는 '아니오'로 답해 주세요.",
                 "sources": [], "pending_action": pending}
 
-    return _show_playbook(pending) if pending.get("kind") == "pitch" else _link(pending)
+    if pending.get("kind") == "pitch":
+        return _show_playbook(pending)
+    if pending.get("kind") == "workb_note":
+        return _send_workb(pending)
+    return _link(pending)
+
+
+#: 발송 결과 → 직원에게 하는 말. **판정하지 못한 것을 «보냈다»고 말하지 않는다** —
+#: `unknown` 은 성공도 실패도 아니고, 그 사실을 그대로 말하는 것이 안 한 일을 했다고
+#: 말하는 것보다 낫다(루트 CLAUDE.md 5번).
+_SENT_WORD = {
+    "sent": "{label}했어요.",
+    "failed": "발송하지 못했어요. {detail}",
+    "not_connected": "발송하지 못했어요. {detail}",
+    "unknown": "발송 결과를 확인하지 못했어요. {detail} — WorkB 쪽지함에서 직접 확인해 주세요.",
+}
+
+
+def _send_workb(pending: dict) -> dict[str, Any]:
+    """승낙받은 쪽지를 실제로 보낸다 — **여기가 유일한 발송 지점**이다.
+
+    보내는 글은 **제안한 턴이 남긴 것**을 그대로 쓴다(§10). 여기서 다시 만들면 자정을
+    넘긴 승낙이 직원이 본 것과 다른 날짜의 목록을 보내게 된다.
+
+    결과는 서버 응답으로 판정한다 — 호출이 예외 없이 돌아온 것은 발송의 근거가 아니다
+    (`workb.parse_result`: WorkB 는 실패를 본문에 담아 보낸다).
+    """
+    from pension_agent import workb  # noqa: PLC0415 — 무거운 로스터 적재를 이 갈래에서만
+
+    note = workb.Note(title=pending.get("title") or "", body=pending.get("body") or "",
+                      count=0, shown=0, truncated=False)
+    result = workb.send_note_sync(pending.get("recipients") or [], note)
+    say = _SENT_WORD.get(result["status"], _SENT_WORD["unknown"])
+    return {"answer": say.format(label=pending.get("label") or "쪽지 발송",
+                                 detail=result.get("detail") or ""),
+            "sources": [], "pending_action": None}
 
 
 def _show_playbook(pending: dict) -> dict[str, Any]:
