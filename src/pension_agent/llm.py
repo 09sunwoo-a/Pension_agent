@@ -101,7 +101,7 @@ BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
 API_KEY = os.getenv("LLM_API_KEY", "")
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
-#: 429 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai 경로만 쓴다.
+#: 429 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
 RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "3"))
 
 # ── gemma (외부 사전점검) ──
@@ -162,18 +162,26 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
         },
         method="POST",
     )
-    # 429(Too Many Requests)만 스스로 재시도한다 — 게이트웨이의 속도 제한이라 잠깐 쉬면
-    # 풀리는 에러인데, 이 코드는 몰아서 부르는 자리가 많다(브리핑 1회 = 11연쇄 호출,
-    # app.py 기동 시 9명 선생성, 대화 한 턴 4~7회 + compose·되묻기 동시 호출). 행내에서
-    # 실제로 429 로 턴이 통째로 죽었다. 서버가 Retry-After 를 주면 그 값(상한 30초)을,
-    # 없으면 2·4초 백오프를 쓴다. 그 밖의 HTTP 에러는 재시도하지 않는다 — 401·500 은
-    # 기다려도 안 풀리고, 같은 요청을 반복하면 진단만 늦어진다.
+    body = _post_json(req)
+    return body["choices"][0]["message"]["content"]
+
+
+def _post_json(req: urllib.request.Request) -> dict:
+    """urlopen + JSON 파싱. genai·gemma 경로가 함께 쓴다.
+
+    429(Too Many Requests)만 스스로 재시도한다 — 속도 제한이라 잠깐 쉬면 풀리는
+    에러인데, 이 코드는 몰아서 부르는 자리가 많다(브리핑 1회 = 11연쇄 호출,
+    app.py 기동 시 고객 선생성, 대화 한 턴 4~7회 + compose·되묻기 동시 호출). 행내
+    게이트웨이(genai)에서도, 무료 쿼터의 generativelanguage(gemma)에서도 실제로 429 로
+    턴이 통째로 죽었다. 서버가 Retry-After 를 주면 그 값(상한 30초)을, 없으면 2·4초
+    백오프를 쓴다. 그 밖의 HTTP 에러는 재시도하지 않는다 — 401·500 은 기다려도 안
+    풀리고, 같은 요청을 반복하면 진단만 늦어진다.
+    """
     last: urllib.error.HTTPError | None = None
     for attempt in range(RETRY_ATTEMPTS):
         try:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-            return body["choices"][0]["message"]["content"]
+                return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code != 429:
                 raise
@@ -188,7 +196,7 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
             time.sleep(wait)
     raise LLMError(
         f"HTTP 429 Too Many Requests — {RETRY_ATTEMPTS}회 시도 후에도 속도 제한. "
-        "호출 간격을 두거나 게이트웨이 쿼터를 확인하십시오.") from last
+        "호출 간격을 두거나 쿼터를 확인하십시오.") from last
 
 
 def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
@@ -217,8 +225,7 @@ def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    payload = _post_json(req)
     candidates = payload.get("candidates") or []
     if not candidates:
         raise LLMError(f"gemma 응답에 candidates 가 없습니다: {payload}")
