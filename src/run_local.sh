@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-PYTHON="${PYTHON:-$HOME/miniconda3/envs/pension_agent/bin/python}"
-[ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
+# 지금 활성화된 파이썬을 쓴다. 행내 컨테이너에는 conda 가 없다 —
+# 다른 인터프리터를 쓰려면 PYTHON=/경로/python 으로 넘긴다.
+PYTHON="${PYTHON:-$(command -v python3 || command -v python)}"
 
 exec "$PYTHON" -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload

@@ -5,8 +5,9 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
-PYTHON="${PYTHON:-$HOME/miniconda3/envs/pension_agent/bin/python}"
-[ -x "$PYTHON" ] || PYTHON="$(command -v python3)"
+# 지금 활성화된 파이썬을 쓴다. 행내 컨테이너에는 conda 가 없다 —
+# 다른 인터프리터를 쓰려면 PYTHON=/경로/python 으로 넘긴다.
+PYTHON="${PYTHON:-$(command -v python3 || command -v python)}"
 
 MESSAGE="${1:-IRP 수수료가 부담된다고 하시는데 뭐라고 답하면 좋을까요?}"
 CLIENT_USER="${CLIENT_USER:-test-user}"
