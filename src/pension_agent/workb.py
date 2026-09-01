@@ -298,10 +298,11 @@ def render_html(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[s
     return body, shown
 
 
-#: 어느 형식으로 보낼까. 행내 WorkB 쪽지가 HTML 을 렌더하므로 기본은 표다. 뷰어가 태그를
-#: 그대로 보여주면 `"text"` 로 되돌린다 — 그때 직원이 보는 것은 태그 범벅이라, 되돌릴
-#: 스위치가 없으면 기능 자체를 못 쓴다.
-FORMAT = "html"
+#: 어느 형식으로 보낼까. **기본은 텍스트다** — 뷰어가 무엇까지 렌더하는지 아직 실물로
+#: 확인하지 못했고, 틀렸을 때의 결과가 형식마다 다르기 때문이다: 텍스트는 HTML 을 렌더하는
+#: 뷰어에서도 그냥 읽히지만, HTML 은 렌더하지 않는 뷰어에서 **태그 범벅**이 된다.
+#: 실물로 표가 뜨는 것을 확인하면 `"html"` 로 바꾼다(그 한 줄이 전부다).
+FORMAT = "text"
 
 RENDERERS: dict[str, Callable[..., tuple[str, int]]] = {"html": render_html, "text": render}
 
