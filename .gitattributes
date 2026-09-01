@@ -1,0 +1,20 @@
+# 줄바꿈 고정.
+#
+# 이 저장소는 Windows 에서 편집하고 리눅스(행내 Azure ML · 컨테이너)에서 실행한다.
+# 그 경로에서 셸 스크립트가 CRLF 로 내려가면 셰방이 «/bin/bash^M» 이 되어
+#     bash: ./run_local.sh: /bin/bash^M: bad interpreter: No such file or directory
+# 로 죽는다. chmod 로는 안 고쳐지고, 에러 메시지가 원인을 가리키지도 않는다.
+# Dockerfile·.env 도 같은 이유로 LF 로 못박는다(RUN·CMD 줄과 환경변수 값 끝에 \r 이 붙는다).
+* text=auto eol=lf
+
+*.sh        text eol=lf
+Dockerfile* text eol=lf
+*.py        text eol=lf
+*.md        text eol=lf
+*.json      text eol=lf
+
+# 바이너리 — 손대지 않는다.
+*.xlsx binary
+*.png  binary
+*.jpg  binary
+*.pdf  binary
