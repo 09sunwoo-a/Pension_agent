@@ -27,6 +27,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import os
 from collections.abc import Awaitable
@@ -44,7 +45,17 @@ from pension_agent.strategy_agent.target_list import Target, today_targets
 
 #: 쪽지 본문 길이 상한(자). 넘치면 **고객 블록 단위로** 잘라낸다 — 줄 중간에서 자르면
 #: "5억 2,00" 같은 반쪽 수치가 남고, 그건 틀린 값을 보낸 것과 같다.
-MAX_CHARS = 2000
+#:
+#: **실측 미확인이다.** WorkB 가 본문을 몇 자까지 받는지 규격을 아직 못 받았다. 그래서
+#: 값을 정할 때 «틀리는 방향»을 골랐다 — **높게 틀리면 시끄럽게 실패하고, 낮게 틀리면
+#: 조용히 잘못된다.** 상한이 실제보다 높으면 서버가 거부하고 그 사유가 직원 화면에 뜨지만
+#: (`parse_result`), 실제보다 낮으면 아무 경고 없이 고객 몇 명이 목록에서 사라진다.
+#: 직원은 그 목록이 전부인 줄 알고, 빠진 고객은 그날 아무도 안 본다.
+#:
+#: 9명 기준 실측: 텍스트 약 1,300자 · HTML 약 3,100자(태그 포함 — 상한 판정도 태그를
+#: 포함한 문자열 길이로 한다. 서버가 받는 것이 그 문자열이다). 실데이터에서 고객 수가
+#: 늘면 이 값이 먼저 걸리므로, 규격을 받으면 **제일 먼저 여기를 고친다.**
+MAX_CHARS = 8000
 
 #: 고객 id 마스킹. 모듈 docstring 참고.
 MASK_ID = True
@@ -173,6 +184,127 @@ FOOTER = ("※ 평가금액·보유 현황은 {as_of} 원장 기준이고, 잔�
 #: 가릴 수 있어야 한다.
 EMPTY_BODY = "오늘 사후관리 타겟으로 선정된 고객이 없습니다."
 
+#: 잘라낸 뒤 남기는 줄. 몇 명이 빠졌는지 밝히지 않으면 직원은 그 목록이 전부인 줄 안다.
+CUT_LINE = "…외 {n}명은 화면에서 확인하세요."
+
+
+def _head(count: int) -> str:
+    return f"오늘의 타겟 고객 · {today().isoformat()} · {count}명"
+
+
+def _foot() -> str:
+    return FOOTER.format(as_of=AS_OF.isoformat(), today=today().isoformat())
+
+
+def _fit(head: str, blocks: list[str], foot: str, *, joiner: str,
+         cut: Callable[[int], str], max_chars: int) -> tuple[str, int]:
+    """머리·고객 블록·꼬리를 상한 안에 맞춘다. **덜어내는 단위는 고객 블록이다.**
+
+    줄 중간에서 자르면 "5억 2,00" 같은 반쪽 수치가 남고, 그건 틀린 값을 보낸 것과 같다.
+    상한이 아무리 작아도 한 명은 담는다 — 아무도 없는 목록보다 낫다.
+    """
+    total, shown = len(blocks), len(blocks)
+    while shown > 1:
+        body = joiner.join([head, *blocks[:shown],
+                            *([cut(total - shown)] if shown < total else []), foot])
+        if len(body) <= max_chars:
+            return body, shown
+        shown -= 1
+    return joiner.join([head, blocks[0], cut(total - 1), foot]), 1
+
+
+# ─────────────────────────────────────────────────────────────
+# 본문 — 텍스트
+# ─────────────────────────────────────────────────────────────
+
+def render(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, int]:
+    """본문과 «실린 고객 수». HTML 이 렌더되지 않는 뷰어를 위한 형식이다."""
+    head, foot = f"[{_head(len(targets))}]", _foot()
+    if not targets:
+        return "\n\n".join([head, EMPTY_BODY, foot]), 0
+    blocks = [_block(i, t) for i, t in enumerate(targets, 1)]
+    return _fit(head, blocks, foot, joiner="\n\n",
+                cut=lambda n: CUT_LINE.format(n=n), max_chars=max_chars)
+
+
+# ─────────────────────────────────────────────────────────────
+# 본문 — HTML
+#
+# WorkB 쪽지는 HTML 로 볼 수 있다. 표로 만들면 훑기 좋아지지만, **쪽지 뷰어가 무엇까지
+# 렌더하는지는 확인된 바 없다.** 그래서 이메일 HTML 의 규율을 그대로 따른다 — 뷰어·위생
+# 처리기가 가장 많이 걷어내는 것들을 처음부터 쓰지 않는다:
+#
+#   · `<style>` 블록도 클래스도 쓰지 않는다 → 스타일은 전부 인라인
+#   · 바깥 자원(CSS·폰트·이미지)을 부르지 않는다 → 막히면 표가 통째로 무너진다
+#   · `border`·`cellpadding` 같은 옛 표 속성을 인라인 스타일과 **함께** 쓴다 → 스타일이
+#     걷혀도 표의 선은 남는다
+#   · 색으로 뜻을 나르지 않는다 → 흑백으로 떨어져도 읽히는 정보만 색으로 강조한다
+#
+# 그래도 뷰어가 태그를 그대로 보여줄 가능성은 남는다. 그 경우 직원은 태그 범벅을 보게
+# 되므로 텍스트 형식(`render`)을 지우지 않고 남겨 둔다 — `FORMAT` 하나로 되돌린다.
+# ─────────────────────────────────────────────────────────────
+
+#: 표 스타일. 뜻을 나르지 않는 장식이라 걷혀도 정보가 사라지지 않는다.
+_TABLE = ('border="1" cellspacing="0" cellpadding="6" '
+          'style="border-collapse:collapse;font-size:13px;line-height:1.5"')
+_TH = 'style="background:#f4f4f4;text-align:left;white-space:nowrap"'
+_TD_NUM = 'align="right" style="white-space:nowrap"'
+_MUTED = 'style="color:#777"'
+
+
+def _esc(text: str) -> str:
+    return html.escape(str(text), quote=False)
+
+
+def _row(no: int, target: Target) -> str:
+    """고객 한 명 = 표의 한 줄. 요건은 한 칸 안에서 줄바꿈으로 나눈다 — 요건마다 행을
+    나누면 고객 하나가 여러 줄이 되어 «몇 명인지»가 안 읽힌다."""
+    p = target.profile
+    attrs = " · ".join([f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else []))
+    shown = target.conds[:MAX_CONDS]
+    rest = len(target.conds) - len(shown)
+    conds = "<br>".join(_esc(_cond_text(target, c)) for c in shown)
+    if rest > 0:
+        conds += f"<br><span {_MUTED}>외 {rest}건</span>"
+    return (f"<tr><td {_TD_NUM}>{no}</td>"
+            f"<td><b>{_esc(p.nm)}</b><br>{_esc(attrs)}"
+            f"<br><span {_MUTED}>{_esc(_customer_id(p.id))}</span></td>"
+            f"<td {_TD_NUM}>{_esc(won(p.bal))}</td>"
+            f"<td>{conds}</td></tr>")
+
+
+def render_html(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, int]:
+    """HTML 본문과 «실린 고객 수».
+
+    상한 판정은 **태그를 포함한 문자열 길이**로 한다 — 서버가 받는 것이 그 문자열이기
+    때문이다. 그래서 같은 인원이라도 텍스트보다 훨씬 길다(대략 두 배 반).
+    """
+    head = f"<p><b>{_esc(_head(len(targets)))}</b></p>"
+    foot = ('<p style="color:#777;font-size:12px">'
+            + _esc(_foot()).replace("\n", "<br>") + "</p>")
+    if not targets:
+        return f"{head}<p>{_esc(EMPTY_BODY)}</p>{foot}", 0
+
+    cols = ("#", "고객", "평가금액", "선정 요건")
+    thead = "<tr>" + "".join(f"<th {_TH}>{_esc(c)}</th>" for c in cols) + "</tr>"
+    rows = [_row(i, t) for i, t in enumerate(targets, 1)]
+
+    # 표의 열고 닫는 태그는 «머리»와 «꼬리»에 붙여 둔다 — 행 단위로 덜어내도 표가 깨지지
+    # 않아야 하고, 그러려면 잘라내기가 보는 조각이 곧 행이어야 한다.
+    body, shown = _fit(f"{head}<table {_TABLE}>{thead}", rows, f"</table>{foot}",
+                       joiner="", cut=lambda n: f'<tr><td colspan="{len(cols)}" {_MUTED}>'
+                                                f'{_esc(CUT_LINE.format(n=n))}</td></tr>',
+                       max_chars=max_chars)
+    return body, shown
+
+
+#: 어느 형식으로 보낼까. 행내 WorkB 쪽지가 HTML 을 렌더하므로 기본은 표다. 뷰어가 태그를
+#: 그대로 보여주면 `"text"` 로 되돌린다 — 그때 직원이 보는 것은 태그 범벅이라, 되돌릴
+#: 스위치가 없으면 기능 자체를 못 쓴다.
+FORMAT = "html"
+
+RENDERERS: dict[str, Callable[..., tuple[str, int]]] = {"html": render_html, "text": render}
+
 
 @dataclass(frozen=True)
 class Note:
@@ -186,30 +318,10 @@ class Note:
     truncated: bool
 
 
-def render(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, int]:
-    """본문과 «실린 고객 수». 상한을 넘으면 뒤에서부터 고객 블록 단위로 덜어낸다."""
-    head = f"[오늘의 타겟 고객] {today().isoformat()} · {len(targets)}명"
-    foot = FOOTER.format(as_of=AS_OF.isoformat(), today=today().isoformat())
-    if not targets:
-        return "\n\n".join([head, EMPTY_BODY, foot]), 0
-
-    blocks = [_block(i, t) for i, t in enumerate(targets, 1)]
-    shown = len(blocks)
-    while shown > 1:
-        cut = ([f"…외 {len(targets) - shown}명은 화면에서 확인하세요."]
-               if shown < len(targets) else [])
-        body = "\n\n".join([head, *blocks[:shown], *cut, foot])
-        if len(body) <= max_chars:
-            return body, shown
-        shown -= 1
-    return "\n\n".join([head, blocks[0],
-                        f"…외 {len(targets) - 1}명은 화면에서 확인하세요.", foot]), 1
-
-
-def daily_targets_note(*, max_chars: int = MAX_CHARS) -> Note:
+def daily_targets_note(*, fmt: str = "", max_chars: int = MAX_CHARS) -> Note:
     """오늘의 타겟 고객 쪽지. 이 함수 하나가 «보낼 글»의 전부다."""
     targets = today_targets()
-    body, shown = render(targets, max_chars=max_chars)
+    body, shown = RENDERERS[fmt or FORMAT](targets, max_chars=max_chars)
     return Note(title=f"오늘의 타겟 고객 {len(targets)}명 ({today().isoformat()})",
                 body=body, count=len(targets), shown=shown,
                 truncated=shown < len(targets))

@@ -546,15 +546,49 @@ check([t.rank for t in _targets] == sorted(t.rank for t in _targets),
 check(all(c in _customer.CONDS for t in _targets for c in t.conds),
       "target_list: 요건 코드가 customer.CONDS 안에서만 나온다 — 새 판정을 만들지 않는다")
 
+# 형식 둘(텍스트·HTML)은 **같은 사실을 말해야 한다** — 표로 바꾸면서 정보가 빠지면
+# 직원이 보는 목록이 형식에 따라 달라진다.
+# 잘라내기 상한은 형식마다 다르게 잡는다 — HTML 은 표 뼈대(머리·머리행·꼬리)만 700자를
+# 넘어서, 텍스트 기준 상한을 그대로 쓰면 «한 명은 담는다» 하한에 걸려 상한을 넘게 된다.
+for _fmt, _cap in (("text", 700), ("html", 1800)):
+    _n = workb.daily_targets_note(fmt=_fmt)
+    check(_n.body == workb.daily_targets_note(fmt=_fmt).body,
+          f"workb[{_fmt}]: 같은 입력이면 같은 본문 (LLM 을 타지 않는다)")
+    check(_n.count == len(_targets) and not _n.truncated,
+          f"workb[{_fmt}]: 기본 상한에서는 전원이 실린다", f"{_n.shown}/{_n.count}")
+    check(_customer.AS_OF.isoformat() in _n.body,
+          f"workb[{_fmt}]: 원장 기준일이 본문에 남는다 — 평가금액이 오늘 값으로 읽히지 않게")
+    check(all(t.profile.nm in _n.body for t in _targets),
+          f"workb[{_fmt}]: 목록에 오른 고객이 본문에서 빠지지 않는다")
+    check(all(t.profile.id not in _n.body for t in _targets),
+          f"workb[{_fmt}]: 고객 id 원문이 본문에 실리지 않는다 (MASK_ID 기본값)")
+    _cb, _cs = workb.RENDERERS[_fmt](_targets, max_chars=_cap)
+    check(0 < _cs < len(_targets) and len(_cb) <= _cap,
+          f"workb[{_fmt}]: 상한을 넘으면 고객 수가 줄고 본문이 상한 안에 든다",
+          f"{_cs}/{len(_targets)} · {len(_cb)}자 (상한 {_cap})")
+    check(f"외 {len(_targets) - _cs}명" in _cb,
+          f"workb[{_fmt}]: 몇 명이 빠졌는지 본문이 밝힌다")
+    check(workb.RENDERERS[_fmt]([], max_chars=_cap)[1] == 0,
+          f"workb[{_fmt}]: 타겟이 0명이어도 렌더가 죽지 않는다")
+
+# HTML 은 뷰어·위생처리기가 걷어내는 것을 처음부터 쓰지 않는다(이메일 HTML 규율).
+_html = workb.daily_targets_note(fmt="html").body
+check("<table" in _html and _html.count("<tr") == len(_targets) + 1,
+      "workb[html]: 고객 한 명이 표의 한 줄이다(머리행 포함)", str(_html.count("<tr")))
+check("<style" not in _html and "class=" not in _html,
+      "workb[html]: <style> 블록·클래스를 쓰지 않는다 — 위생처리기가 걷어낸다")
+check("http://" not in _html and "https://" not in _html,
+      "workb[html]: 바깥 자원을 부르지 않는다 — 막히면 표가 무너진다")
+# 행 단위로 덜어내도 표가 깨지지 않아야 한다.
+_cut_html = workb.render_html(_targets, max_chars=1200)[0]
+check(_cut_html.count("<table") == _cut_html.count("</table") == 1,
+      "workb[html]: 잘라내도 표가 열고 닫힌다")
+# 속성이 중복되면 뒤엣것이 통째로 무시된다(실제로 style 이 두 번 붙어 font-size 가 죽었다).
+import re as _re
+check(not [t for t in _re.findall(r"<[^>]+>", _html) if t.count("style=") > 1],
+      "workb[html]: 한 태그에 같은 속성을 두 번 쓰지 않는다")
+
 _note = workb.daily_targets_note()
-check(_note.body == workb.daily_targets_note().body,
-      "workb: 같은 입력이면 같은 본문 (LLM 을 타지 않는다)")
-check(_note.count == len(_targets) and not _note.truncated,
-      "workb: 기본 상한에서는 전원이 실린다", f"{_note.shown}/{_note.count}")
-check(_customer.AS_OF.isoformat() in _note.body,
-      "workb: 원장 기준일이 본문에 남는다 — 평가금액이 오늘 값으로 읽히지 않게")
-check(all(t.profile.nm in _note.body for t in _targets),
-      "workb: 목록에 오른 고객이 본문에서 빠지지 않는다")
 
 # 요건 이름은 CONDS 원문 그대로 실린다 — 쪽지가 요건 이름을 새로 지어내면 화면과 갈린다.
 _lead = _targets[0]
@@ -562,28 +596,18 @@ check(_customer.CONDS[_lead.conds[0]] in _note.body,
       "workb: 요건 이름이 CONDS 원문 그대로 실린다", _customer.CONDS[_lead.conds[0]])
 
 # 고객 id 는 기본으로 가린다 (KB-PIN 앞자리가 생년월일이고, 쪽지는 받은편지함에 남는다).
-check(all(t.profile.id not in _note.body for t in _targets),
-      "workb: 고객 id 원문이 본문에 실리지 않는다 (MASK_ID 기본값)")
 check(all(t.profile.id.partition("-")[0] in _note.body for t in _targets),
       "workb: 마스킹해도 앞자리는 남아 화면과 대조할 수 있다")
 
 # 자를 때는 고객 블록 단위 — 줄 중간에서 끊으면 반쪽 수치가 남고, 그건 틀린 값을 보낸 것이다.
-_cut_body, _cut_shown = workb.render(_targets, max_chars=700)
-check(0 < _cut_shown < len(_targets), "workb: 상한을 넘으면 고객 수가 줄어든다",
-      f"{_cut_shown}/{len(_targets)}")
-check(len(_cut_body) <= 700, "workb: 잘라낸 본문이 상한 안에 든다", str(len(_cut_body)))
-check(f"외 {len(_targets) - _cut_shown}명" in _cut_body,
-      "workb: 몇 명이 빠졌는지 본문이 밝힌다")
-check(all(_block in _cut_body for _block in
-          [f"{i}. {t.profile.nm}" for i, t in enumerate(_targets[:_cut_shown], 1)]),
-      "workb: 남은 고객 블록은 통째로 남는다")
 
 # 한 명도 못 담는 상한이어도 한 명은 담는다 — 빈 쪽지가 «장애»처럼 읽히는 것보다 낫다.
+check(workb.EMPTY_BODY in workb.render([])[0],
+      "workb: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
+
 _min_body, _min_shown = workb.render(_targets, max_chars=1)
 check(_min_shown == 1, "workb: 상한이 아무리 작아도 고객 한 명은 담는다", str(_min_shown))
 
-check(workb.EMPTY_BODY in workb.render([])[0],
-      "workb: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
 
 # ── 발송 ───────────────────────────────────────────────────
 # 수신자는 리스트다. 문자열 하나를 넘기면 WorkB 가 64;ETC_ERR(기타 오류)로 거부하는데,
