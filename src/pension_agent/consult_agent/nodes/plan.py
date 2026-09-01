@@ -337,7 +337,8 @@ def _sources(evidence: list[tools.Evidence], guards: list, alts: list) -> list[d
         if len(excerpt) > 60:
             excerpt = excerpt[:60] + "…"
         out.append({"id": card, "title": item.get("title") or excerpt,
-                    "doc": item.get("doc"), "score": None, "page": None, "role": CAUTION})
+                    "doc": item.get("doc"), "url": item.get("url"),
+                    "score": None, "page": None, "role": CAUTION})
     return out
 
 

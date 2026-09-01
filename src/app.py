@@ -470,9 +470,13 @@ with tab_chat:
                 picked = [s for s in result.get("sources") or []
                           if s.get("role", "근거") == role]
                 if picked:
+                    # 원천 문서에 게시글 URL 이 있으면(핫팁 등, doc.url) 문서명을 클릭해
+                    # 원문으로 갈 수 있게 링크로 세운다. URL 은 문서 레지스트리가 가진
+                    # 것만 쓴다 — 없으면 지금처럼 문서명 텍스트만 남는다.
                     st.caption(f"{label}\n\n" + "\n\n".join(
-                        f"· {s.get('doc') or '출처 미상 — 확인 필요'}"
-                        f" — {s.get('title') or ''} `{s['id']}`"
+                        "· " + (f"[{s.get('doc')}]({s['url']})" if s.get("url")
+                                else (s.get("doc") or "출처 미상 — 확인 필요"))
+                        + f" — {s.get('title') or ''} `{s['id']}`"
                         for s in picked))
         st.session_state.chat_history = result["history"]
         st.session_state.chat_messages.append({"role": "assistant", "text": result["answer"]})

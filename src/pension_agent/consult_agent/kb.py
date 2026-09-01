@@ -323,6 +323,17 @@ def source_label(kb: KnowledgeBase, card: dict) -> str | None:
     return f"{doc['title']} ({meta})" if meta else doc["title"]
 
 
+def source_url(kb: KnowledgeBase, card: dict) -> str | None:
+    """카드 원천 문서의 게시글 URL. 레지스트리에 없으면 None — 지어내지 않는다.
+
+    URL 은 문서 레지스트리(`doc.url` — 영업점 핫팁 게시글 등)가 가진 것만 쓴다.
+    출처 표기(문서명·부서·시점)와 같은 곳에서 한 번만 관리한다는 규약 그대로다.
+    """
+    doc = kb.docs_by_id.get(
+        (card.get("_source") or {}).get("doc") or card.get("_doc_ref") or "")
+    return (doc or {}).get("url") or None
+
+
 def origin_of(kb: KnowledgeBase, card: dict) -> str:
     """답변에 붙일 출처 한 줄. **적재 파일 이름(`_doc`)은 절대 쓰지 않는다.**
 
@@ -505,7 +516,7 @@ def sources_of(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> list[dict]:
     보여주면 사내 json 안의 코드가 근거처럼 보인다 — 출처는 원본 문서 이름으로 말한다.
     """
     return [{"id": c["id"], "title": c.get("title") or c.get("label"),
-             "doc": origin_of(kb, c),
+             "doc": origin_of(kb, c), "url": source_url(kb, c),
              "score": round(s, 2), "page": c.get("page")} for s, c in hits]
 
 
