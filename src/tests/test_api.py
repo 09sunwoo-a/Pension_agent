@@ -75,6 +75,21 @@ try:
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
 
+    # 행내 첫 연결에서 실제로 걸린 자리 — 인증도 쿼터도 아니고 DNS 였다. LLM Gateway 의
+    # base_url 은 *.svc.cluster.local 이라 그 쿠버네티스 클러스터 안에서만 풀리는데,
+    # 실패는 첫 대화 턴에 가서야 «LLM 호출이 실패했습니다»로 나타나 원인이 안 보인다.
+    _saved_base = llm.BASE_URL
+    try:
+        llm.BASE_URL = "http://litellm.aidc-prod.svc.cluster.local:4000"
+        hh = client.get("/health").json()["llm"]
+        check(hh["host"] == "litellm.aidc-prod.svc.cluster.local" and hh["resolves"] is False,
+              "/health 가 «이름이 안 풀린다»를 첫 턴 전에 알려준다", str(hh))
+        llm.BASE_URL = "http://localhost:8000"
+        hh = client.get("/health").json()["llm"]
+        check(hh["resolves"] is True, "/health: 풀리는 호스트는 참으로 답한다", str(hh))
+    finally:
+        llm.BASE_URL = _saved_base
+
     # ── 필수 키 검증 ─────────────────────────────────────────
     r = client.post("/chat", json=_body(message="안녕"))
     check(r.status_code == 422 and "x_client_user" in r.text,

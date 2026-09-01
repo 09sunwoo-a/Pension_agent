@@ -33,6 +33,9 @@ import json
 import logging
 from typing import Any, List, Optional
 
+import socket
+import urllib.parse
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -92,12 +95,36 @@ def _parse(req: ChatRequest) -> dict[str, Any]:
     }
 
 
+def _host_check() -> dict[str, Any]:
+    """LLM_BASE_URL 의 호스트가 이 컨테이너에서 이름이 풀리는가.
+
+    행내 첫 연결에서 실제로 걸린 자리다 — 인증도 쿼터도 아니고 DNS 였다
+    (`URLError: [Errno -2] Name or service not known`). LLM Gateway 의 base_url 은
+    `*.svc.cluster.local` 이라 **그 쿠버네티스 클러스터 안에서만** 풀리는데, 개발용
+    컴퓨트 인스턴스는 그 밖이다. 그런데 실패는 첫 대화 턴에 가서야 «LLM 호출이
+    실패했습니다»로 나타나 원인이 안 보인다.
+
+    조회는 이름 해석까지만 한다(연결·인증은 하지 않는다) — /health 는 싸고 빨라야 하고,
+    붙는지까지는 실제 턴이 답한다.
+    """
+    if not llm.BASE_URL:
+        return {"host": None, "resolves": None}
+    host = urllib.parse.urlparse(llm.BASE_URL).hostname or ""
+    try:
+        socket.getaddrinfo(host, None)
+        return {"host": host, "resolves": True}
+    except socket.gaierror as exc:
+        return {"host": host, "resolves": False, "error": str(exc)}
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """기동 확인 + LLM 설정 진단.
 
-    행내에서 처음 붙일 때 «키가 안 잡혔나 / 게이트 설정이 얼마인가»를 로그 뒤지지 않고
-    한 번에 보려고 둔다. 키 값 자체는 절대 내보내지 않는다 — 설정 여부만 참/거짓으로 준다.
+    행내에서 처음 붙일 때 «키가 안 잡혔나 / 어디를 보고 있나 / 게이트 설정이 얼마인가»를
+    로그 뒤지지 않고 한 번에 보려고 둔다. 키 값은 절대 내보내지 않는다 — 설정 여부만
+    참/거짓으로 준다. 엔드포인트 호스트는 내보낸다(비밀이 아니고, 이것이 안 보이면
+    «어느 주소를 보고 있는지»를 알 방법이 없다).
     """
     return {
         "status": "ok",
@@ -108,6 +135,7 @@ def health() -> dict[str, Any]:
             "api_key_set": bool(llm.API_KEY),
             "model": llm.MODEL or "(게이트웨이 기본 라우팅)",
             "timeout_sec": llm.TIMEOUT,
+            **_host_check(),
         },
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
