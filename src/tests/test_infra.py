@@ -526,6 +526,71 @@ check(not _offenders, "3.11+ 전용 이름을 임포트하지 않는다 (로컬 
       "; ".join(_offenders))
 
 # ─────────────────────────────────────────────────────────────
+# WorkB 쪽지 — 오늘의 타겟 고객 본문
+#
+# 고정하는 것은 «본문이 무엇을 말하는가»다. 문장을 LLM 이 쓰지 않으므로 같은 입력이면 같은
+# 글이 나와야 하고, 자를 때도 값이 반쪽으로 남지 않아야 한다(보내고 나면 못 되돌린다).
+# ─────────────────────────────────────────────────────────────
+
+from pension_agent import workb  # noqa: E402
+from pension_agent.strategy_agent import customer as _customer  # noqa: E402
+from pension_agent.strategy_agent.target_list import today_targets  # noqa: E402
+
+_targets = today_targets()
+check(bool(_targets), "target_list: 오늘의 타겟 고객이 산출된다", str(len(_targets)))
+check(all(t.conds for t in _targets),
+      "target_list: 요건이 하나도 없는 고객은 목록에 오르지 않는다")
+check([t.rank for t in _targets] == sorted(t.rank for t in _targets),
+      "target_list: PRIO → 요건수 → id 순으로 정렬된다(결정론)")
+check(all(c in _customer.CONDS for t in _targets for c in t.conds),
+      "target_list: 요건 코드가 customer.CONDS 안에서만 나온다 — 새 판정을 만들지 않는다")
+
+_note = workb.daily_targets_note()
+check(_note.body == workb.daily_targets_note().body,
+      "workb: 같은 입력이면 같은 본문 (LLM 을 타지 않는다)")
+check(_note.count == len(_targets) and not _note.truncated,
+      "workb: 기본 상한에서는 전원이 실린다", f"{_note.shown}/{_note.count}")
+check(_customer.AS_OF.isoformat() in _note.body,
+      "workb: 원장 기준일이 본문에 남는다 — 평가금액이 오늘 값으로 읽히지 않게")
+check(all(t.profile.nm in _note.body for t in _targets),
+      "workb: 목록에 오른 고객이 본문에서 빠지지 않는다")
+
+# 요건 이름은 CONDS 원문 그대로 실린다 — 쪽지가 요건 이름을 새로 지어내면 화면과 갈린다.
+_lead = _targets[0]
+check(_customer.CONDS[_lead.conds[0]] in _note.body,
+      "workb: 요건 이름이 CONDS 원문 그대로 실린다", _customer.CONDS[_lead.conds[0]])
+
+# 고객 id 는 기본으로 가린다 (KB-PIN 앞자리가 생년월일이고, 쪽지는 받은편지함에 남는다).
+check(all(t.profile.id not in _note.body for t in _targets),
+      "workb: 고객 id 원문이 본문에 실리지 않는다 (MASK_ID 기본값)")
+check(all(t.profile.id.partition("-")[0] in _note.body for t in _targets),
+      "workb: 마스킹해도 앞자리는 남아 화면과 대조할 수 있다")
+
+# 자를 때는 고객 블록 단위 — 줄 중간에서 끊으면 반쪽 수치가 남고, 그건 틀린 값을 보낸 것이다.
+_cut_body, _cut_shown = workb.render(_targets, max_chars=700)
+check(0 < _cut_shown < len(_targets), "workb: 상한을 넘으면 고객 수가 줄어든다",
+      f"{_cut_shown}/{len(_targets)}")
+check(len(_cut_body) <= 700, "workb: 잘라낸 본문이 상한 안에 든다", str(len(_cut_body)))
+check(f"외 {len(_targets) - _cut_shown}명" in _cut_body,
+      "workb: 몇 명이 빠졌는지 본문이 밝힌다")
+check(all(_block in _cut_body for _block in
+          [f"{i}. {t.profile.nm}" for i, t in enumerate(_targets[:_cut_shown], 1)]),
+      "workb: 남은 고객 블록은 통째로 남는다")
+
+# 한 명도 못 담는 상한이어도 한 명은 담는다 — 빈 쪽지가 «장애»처럼 읽히는 것보다 낫다.
+_min_body, _min_shown = workb.render(_targets, max_chars=1)
+check(_min_shown == 1, "workb: 상한이 아무리 작아도 고객 한 명은 담는다", str(_min_shown))
+
+check(workb.EMPTY_BODY in workb.render([])[0],
+      "workb: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
+
+# 발송은 아직 하지 않는다 — MCP 클라이언트가 붙기 전까지 상태가 not_connected 여야 한다.
+_sent = workb.send_note(["E00000"], _note)
+check(_sent["status"] == "not_connected" and _sent["body"] == _note.body,
+      "workb.send_note: 미연결 상태를 «보냄»으로 보고하지 않는다", str(_sent["status"]))
+
+
+# ─────────────────────────────────────────────────────────────
 
 failed = [(label, detail) for ok, label, detail in _results if not ok]
 for ok, label, detail in _results:
