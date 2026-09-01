@@ -245,10 +245,13 @@ def render(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, i
 # ─────────────────────────────────────────────────────────────
 
 #: 표 스타일. 뜻을 나르지 않는 장식이라 걷혀도 정보가 사라지지 않는다.
-_TABLE = ('border="1" cellspacing="0" cellpadding="6" '
-          'style="border-collapse:collapse;font-size:13px;line-height:1.5"')
-_TH = 'style="background:#f4f4f4;text-align:left;white-space:nowrap"'
-_TD_NUM = 'align="right" style="white-space:nowrap"'
+#: 정렬은 옛 `align` 속성과 인라인 스타일에 **둘 다** 적는다 — 위생처리기가 style 을
+#: 걷어내도 정렬은 남는다(표 선을 border 속성으로도 그어 두는 것과 같은 이유).
+_TABLE = ('border="1" cellspacing="0" cellpadding="9" '
+          'style="border-collapse:collapse;font-size:13px;line-height:1.7"')
+_TH = 'align="center" style="background:#f4f4f4;text-align:center;white-space:nowrap"'
+_TD_NO = 'align="center" style="text-align:center;white-space:nowrap"'
+_TD_NUM = 'align="right" style="text-align:right;white-space:nowrap"'
 _MUTED = 'style="color:#777"'
 
 
@@ -266,7 +269,7 @@ def _row(no: int, target: Target) -> str:
     conds = "<br>".join(_esc(_cond_text(target, c)) for c in shown)
     if rest > 0:
         conds += f"<br><span {_MUTED}>외 {rest}건</span>"
-    return (f"<tr><td {_TD_NUM}>{no}</td>"
+    return (f"<tr><td {_TD_NO}>{no}</td>"
             f"<td><b>{_esc(p.nm)}</b><br>{_esc(attrs)}"
             f"<br><span {_MUTED}>{_esc(_customer_id(p.id))}</span></td>"
             f"<td {_TD_NUM}>{_esc(won(p.bal))}</td>"
@@ -285,7 +288,7 @@ def render_html(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[s
     if not targets:
         return f"{head}<p>{_esc(EMPTY_BODY)}</p>{foot}", 0
 
-    cols = ("#", "고객", "평가금액", "선정 요건")
+    cols = ("구분", "고객", "평가금액", "선정 요건")
     thead = "<tr>" + "".join(f"<th {_TH}>{_esc(c)}</th>" for c in cols) + "</tr>"
     rows = [_row(i, t) for i, t in enumerate(targets, 1)]
 
