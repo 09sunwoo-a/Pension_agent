@@ -7,9 +7,11 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 
 **발표용 내부 데모다. 실데이터 전환 전이다.**
 
-- 고객은 시연용 목업 9케이스다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`,
-  `scripts/import_customers.py` 가 `customers.json` 으로 내리고 `customer.py` 가 Profile 로
-  매핑한다(고칠 값은 xlsx 에 넣고 재생성). 타겟 선정 룰베이스는 더미가 아니다 — 기획자가
+- 고객은 시연용 목업 12명이다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`
+  9케이스와 `src/scripts/demo_cases.json` 3명(브리핑 에이전트 데모 골든 케이스,
+  DEMO_GOLDEN_CASES_V2). `scripts/import_customers.py` 가 둘을 합쳐 `customers.json` 으로
+  내리고 `customer.py` 가 Profile 로 매핑한다(고칠 값은 각 원본에 넣고 재생성 —
+  customers.json 을 직접 고치면 재생성 한 번에 사라진다). 타겟 선정 룰베이스는 더미가 아니다 — 기획자가
   행내 원문을 정규화해 확인해준 표다(`targets.json`). 원장 기준일은 `customer.AS_OF`(2026-08-24) 고정이고, 상담 시점의 «오늘»은
   `customer.today()`(실제 날짜 · `PENSION_TODAY` 로 고정 가능)로 갈라 둔다 — 잔여일수·경과일은
   뒤쪽 기준, 안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.

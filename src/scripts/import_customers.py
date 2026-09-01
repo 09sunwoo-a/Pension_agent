@@ -1,7 +1,9 @@
-"""시연용 더미 고객 원본(xlsx) → customers.json 변환기 (멱등).
+"""시연용 더미 고객 원본(xlsx + demo_cases.json) → customers.json 변환기 (멱등).
 
-원본은 저장소 루트의 `IRP_Agent_더미고객_9Cases_v3.xlsx` — 기준일 2026-08-24 의 목업
-9케이스다(00_시연케이스 시트 참고). 이 스크립트는 그 전 시트를 KB-PIN 단위 레코드로 묶어
+원본은 둘이다: ① 저장소 루트의 `IRP_Agent_더미고객_9Cases_v3.xlsx` — 기준일 2026-08-24 의
+목업 9케이스(00_시연케이스 시트 참고) ② `scripts/demo_cases.json` — 브리핑 에이전트 데모
+골든 케이스 3명(DEMO_GOLDEN_CASES_V2, 같은 기준일·같은 레코드 스키마). 이 스크립트는
+xlsx 전 시트를 KB-PIN 단위 레코드로 묶고 데모 3명을 뒤에 이어붙여
 `pension_agent/strategy_agent/customers.json` 으로 내린다. 값의 가공은 하지 않는다 —
 비중은 원본 그대로 소수(0~1)로 두고, Profile 로의 매핑(4분류 반올림·파생 필드)은 적재
 시점에 `strategy_agent/customer.py` 가 한다. 여기서 미리 가공하면 "원본이 무엇이었나"가
@@ -28,7 +30,13 @@ from typing import Any
 from pension_agent import config
 
 SOURCE_XLSX = config.REPO_ROOT / "IRP_Agent_더미고객_9Cases_v3.xlsx"
+#: 데모 골든 케이스(브리핑 에이전트 시연 3명, DEMO_GOLDEN_CASES_V2) 병합 소스.
+#: customers.json 에 직접 넣으면 이 스크립트 재실행 한 번에 증발하므로, 체크인된 JSON 을
+#: 여기서 xlsx 9케이스 뒤에 이어붙인다. 없으면 그냥 9케이스만 내린다.
+DEMO_JSON = config.SRC_ROOT / "scripts" / "demo_cases.json"
 OUTPUT_JSON = config.CUSTOMERS_JSON
+
+AS_OF = "2026-08-24"  # 09_데이터사전 '기준일' — customer.AS_OF 와 일치해야 한다
 
 #: 시트 → 레코드 키. BASIC 류(고객당 1행)는 dict 로, PRODUCTS·상담이력(고객당 n행)은 list 로 담는다.
 _ONE_ROW_SHEETS = {
@@ -99,15 +107,27 @@ def build() -> dict[str, Any]:
             pin = row.pop("KB-PIN")
             records[pin][key].append(row)
 
+    if DEMO_JSON.is_file():
+        demo = json.loads(DEMO_JSON.read_text(encoding="utf-8"))
+        if demo["meta"]["as_of"] != AS_OF:
+            raise ValueError(
+                f"demo_cases.json 기준일({demo['meta']['as_of']})이 {AS_OF} 와 다릅니다 — "
+                "스냅샷 시점이 다른 고객을 한 원장에 섞을 수 없습니다.")
+        for r in demo["records"]:
+            if r["id"] in records:
+                raise ValueError(f"demo_cases.json 고객 {r['id']} 가 xlsx 케이스와 겹칩니다.")
+            records[r["id"]] = r
+
     dictionary = _rows(wb["09_데이터사전"])
     return {
         "meta": {
-            "title": "시연용 더미 고객 9케이스",
-            "as_of": "2026-08-24",  # 09_데이터사전 '기준일' — customer.AS_OF 와 일치해야 한다
+            "title": f"시연용 더미 고객 {len(records)}케이스 (xlsx 9 + 데모 골든 케이스)",
+            "as_of": AS_OF,
             "source": SOURCE_XLSX.name,
             "note": "실제 고객/상품/수익률이 아닌 목업용 가상 데이터. 실거래·대고객 안내에 "
                     "사용 금지(09_데이터사전). 이 파일은 scripts/import_customers.py 산출물이다 "
-                    "— 고칠 값은 원본 xlsx 에 넣고 다시 생성한다.",
+                    "— 고칠 값은 원본(9케이스는 xlsx, 데모 골든 케이스 3명은 "
+                    "scripts/demo_cases.json)에 넣고 다시 생성한다.",
             "dictionary": dictionary,
         },
         "records": list(records.values()),

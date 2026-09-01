@@ -201,7 +201,8 @@ from pension_agent.strategy_agent import agent
 from pension_agent.strategy_agent.customer import PERSONAS
 
 BY_NAME = {p.nm: p for p in PERSONAS}
-check(len(PERSONAS) == 9, "목업 9케이스 적재", str(len(PERSONAS)))
+check(len(PERSONAS) == 12, "목업 고객 적재 (xlsx 9케이스 + 데모 골든 케이스 3명)",
+      str(len(PERSONAS)))
 
 # ── 배지 골든셋 ──────────────────────────────────────────────
 # 첫 화면 배지(원본 08_BADGES)는 기획자가 지식베이스 세그먼트를 읽고 9케이스에 부여한
