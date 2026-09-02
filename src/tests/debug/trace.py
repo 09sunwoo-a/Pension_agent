@@ -208,9 +208,21 @@ _TARGETS: tuple[tuple[object, str], ...] = (
 )
 
 
+def missing_targets() -> list[str]:
+    """계측 대상 중 사라진 것. 비어 있으면 계측을 걸 수 있다.
+
+    `instrument()` 는 하나라도 없으면 예외를 던진다 — 덜 보는 쪽이 아니라 크게 실패하는
+    쪽으로 기운다는 이 파일의 원칙 그대로다. 다만 그 «크게 실패»를 **답변 차단**으로
+    번역하면 안 되는 호출자가 있다: 평가 화면(app.py)의 디버그 토글은 켜져 있을 뿐이고,
+    계측이 망가졌다고 상담 테스트 자체를 못 하게 만들 이유는 없다. 그런 호출자가 미리
+    물어보고 «트레이스만 끄고 답변은 낸다»를 고를 수 있게 판정을 따로 낸다.
+    """
+    return [f"{getattr(mod, '__name__', mod)}.{attr}"
+            for mod, attr in _TARGETS if not hasattr(mod, attr)]
+
+
 def _check_targets() -> None:
-    missing = [f"{getattr(mod, '__name__', mod)}.{attr}"
-               for mod, attr in _TARGETS if not hasattr(mod, attr)]
+    missing = missing_targets()
     if missing:
         raise AttributeError(
             "계측 대상이 사라졌습니다 — 운영 코드가 바뀌어 트레이스가 덜 보게 됩니다: "

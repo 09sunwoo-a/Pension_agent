@@ -20,7 +20,9 @@ from tests.debug import script, trace as TR
 @contextmanager
 def session(*, customer_id: str | None = None,
             scenario: script.Scenario | None = None,
-            on_progress: Callable[[str], None] | None = None
+            on_progress: Callable[[str], None] | None = None,
+            history: list[dict] | None = None,
+            session_id: str = "default",
             ) -> Iterator[tuple[Callable[[str], dict], TR.Trace]]:
     """계측을 걸어둔 채 여러 턴을 이어 묻는다. 반환: (ask 함수, 트레이스).
 
@@ -30,18 +32,24 @@ def session(*, customer_id: str | None = None,
     on_progress: 진행 표시 콜백(graph.ask 와 같다). 리허설이 운영과 같은 경로로 돌려면
     화면이 대기 중에 보여주는 진행 줄까지 같은 배선으로 받아야 한다 — 넘기지 않으면
     emit 은 no-op 이라(progress.py) 리허설 출력에 진행 표시가 아예 안 나온다.
+
+    history / session_id: 대화 상태를 **자기가 들고 있는 호출자**를 위한 자리다. CLI 는
+    한 프로세스 안에서 여러 턴을 이어 물으므로 이 컨텍스트가 히스토리를 직접 들면 되지만,
+    Streamlit 은 턴마다 스크립트를 처음부터 다시 돌리므로 컨텍스트가 턴 하나보다 오래
+    살지 못한다. 그런 호출자가 앞 턴 히스토리를 넘겨 «이어지는 대화»로 계측할 수 있게
+    받는다. 넘기지 않으면 예전처럼 빈 히스토리로 시작한다.
     """
     tr = TR.Trace()
     outer = script.installed(scenario) if scenario else nullcontext()
     with outer, TR.instrument(tr):
-        history: list[dict] = []
+        turns: list[dict] = list(history or [])
 
         def ask(question: str) -> dict:
-            nonlocal history
+            nonlocal turns
             tr.begin_turn(question)
-            r = G.ask(question, history=history, customer_id=customer_id,
-                      on_progress=on_progress)
-            history = r["history"]
+            r = G.ask(question, history=turns, customer_id=customer_id,
+                      session_id=session_id, on_progress=on_progress)
+            turns = r["history"]
             return r
 
         yield ask, tr
