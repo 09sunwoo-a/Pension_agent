@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 CA="python -m pension_agent.consult_agent"
 
 # 화법 코칭 — 고객 화면 불필요, 단발 실행
-$CA "고객이 주식이 더 낫다는데 뭐라고 하지?"
+$CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라고 하지?"
 
 # 고객 화면이 열려 있는 상태로 테스트 — -c/--customer 로 customer_id(KB-PIN) 지정
 $CA "이 고객 만기 언제야?" -c 198734-1205842          # 이준호 — 예금 만기 1건 (D-17)
@@ -49,8 +49,15 @@ $CA -c 173544-2074623 "뭐라고 말하지?"     # 김현수 — 현금성 방�
 
 # 값·절차·정의도 같은 경로다 — 계획 루프가 필요한 재료를 골라 온다
 $CA "세액공제 한도가 얼마야?"
-$CA "디폴트옵션 변경 화면번호 알려줘"
+$CA "포트폴리오 운용현황 조회 화면번호 알려줘"
 $CA "현금성자산 편중 고객군은 왜 관리 대상이야?"
+
+# 디버그 — 이 답이 어디서 갈렸나. 인자 규약이 $CA 와 같다(모듈만 바꾸고 --debug)
+CAD="python -m tests.debug"
+$CAD --debug "세액공제 한도가 얼마야?"                       # 노드·도구 호출·게이트 판정 트레이스
+$CAD --debug -c 198734-1205842                              # REPL — 턴마다 방금 턴만 찍는다
+$CAD --script tax_credit_asserts_wrong --debug --show-llm   # 저장된 시나리오를 LLM 키 없이 재현
+$CAD --list                                                 # 시나리오 목록
 
 python -m tests.test_consult_agent               # API 키 없이 검색·라우팅 검증
 python -m pension_agent.consult_agent.kb         # 지식베이스 점검 리포트
