@@ -376,14 +376,39 @@ def check_outreach() -> int:
         return ok
 
     text = ev["text"]
-    hit = ("발송 문구:" in text and "다른 세미나 후보:" in text
-           and "매칭 키워드:" in text and "안내 링크:" in text)
+    hit = ("발송 문구:" in text and "다른 세미나 후보 4건:" in text
+           and "매칭 키워드:" in text and "안내 링크:" in text
+           and "지금 안내할 것 2건" in text)
     print(f"{'✓' if hit else '✗'} outreach: 문구·다른 후보·매칭 키워드·링크가 재료에 함께 실린다")
     ok += hit
 
     # 링크는 한 글자만 달라도 죽는다 — 답변이 그 값을 말하면 원문 그대로여야 한다.
     hit = bool(ev["atomic"]) and all(a.startswith("http") for a in ev["atomic"])
     print(f"{'✓' if hit else '✗'} outreach: 안내 링크를 원문 스팬으로 선언한다", )
+    ok += hit
+
+    # **개수와 열거 번호가 재료에 있어야 답이 살아남는다.**
+    #
+    # 회귀 대상(실측): 이벤트 1건 + 세미나 1건을 고른 답이 "2건을 추천드려요" 라고 쓰자
+    # verify_texts 가 «원장 밖 수치 2» 로 판정해 **생성문을 통째로 폐기**했고, compose 가
+    # 이 근거 블록을 그대로 덤프했다 — 직원에게 발송 문구·다른 후보·문제상황이 뒤섞인
+    # 내부 블록이 답변으로 나갔다. 세는 것은 코드가 이미 아는 사실이라 재료에 싣는다
+    # (`suitable` 이 「안내할 수 있는 상품 N종」을 싣는 것과 같은 처리).
+    from pension_agent.verify import verify_texts
+    _natural = ["김현수 고객님께는 2건을 추천드려요.",
+                "이벤트 1건과 세미나 1건, 총 2건을 안내해보세요.",
+                "1. 잠자는 IRP 자금 깨우기 운용 이벤트\n2. 예금만으로 괜찮을까?",
+                "다른 이벤트 후보도 3건 더 있어요."]
+    _killed = [t for t in _natural
+               if not verify_texts(t, [ev["text"]], echoable=[state["question"]])[0]]
+    hit = not _killed
+    print(f"{'✓' if hit else '✗'} outreach: 개수·열거 번호를 쓴 답이 폐기되지 않는다"
+          + (f" (잘린 것: {_killed})" if _killed else ""))
+    ok += hit
+
+    # 그렇다고 재료 밖 수치가 통과하면 안 된다 — 넓힌 것은 «코드가 센 개수» 하나뿐이다.
+    hit = not verify_texts("이 세미나는 연 7.2% 수익을 보장해요.", [ev["text"]])[0]
+    print(f"{'✓' if hit else '✗'} outreach: 지어낸 수치는 그대로 걸린다")
     ok += hit
 
     # 고객 화면이 닫혀 있으면 성립하지 않는 재료다(§3).
