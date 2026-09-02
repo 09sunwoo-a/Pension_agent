@@ -15,6 +15,32 @@
         }
       ],
       "outcome": null
+    },
+    {
+      "session_id": "tool-log",
+      "started_at": "2026-09-02T09:39:34.664330+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계] (광고) 이준호 고객님, KB국민은행입니다.\n9/30까지 'IRP 추가입금하고 절세혜택 챙",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "(광고) 이준호 고객님, KB국민은행입니다.\n9/30까지 'IRP 추가입금하고 절세혜택 챙기기 이벤트' 이벤트를 안내드려요.\n▶ https://obank.kbstar.com/demo/event/irp-001\n무료수신거부 080-XXX-XXXX"
+              },
+              "result": {
+                "status": "ok",
+                "detail": "발송 화면에 채울 수 있는 문구입니다",
+                "message": "(광고) 이준호 고객님, KB국민은행입니다.\n9/30까지 'IRP 추가입금하고 절세혜택 챙기기 이벤트' 이벤트를 안내드려요.\n▶ https://obank.kbstar.com/demo/event/irp-001\n무료수신거부 080-XXX-XXXX"
+              }
+            }
+          ],
+          "ts": "2026-09-02T09:39:34.664330+00:00"
+        }
+      ],
+      "outcome": null
     }
   ]
 }

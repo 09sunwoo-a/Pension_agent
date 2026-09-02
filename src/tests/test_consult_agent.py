@@ -529,6 +529,26 @@ def check_screen_link() -> int:
     print(f"{'✓' if hit else '✗'} '네' 면 화면 URL 을 주고, 링크가 못 싣는 문구는 따로 알린다")
     ok += hit
 
+    # 복붙 블록 — 화면번호·딥링크·발송 문구는 직원이 그대로 옮겨 쓰는 값이라 코드 블록으로
+    # 낸다. 문장에 섞여 있으면 따옴표·마침표가 딸려 붙고, 여러 줄인 발송 문구는 줄바꿈이
+    # 무너진다. **블록 안에는 값만 둔다** — 설명이 한 줄이라도 들어가면 그 줄까지 복사된다.
+    fences = [b for i, b in enumerate(yes["answer"].split("```")) if i % 2 == 1]
+    hit = (len(fences) == 2
+           and fences[0].strip().splitlines() == [lms_pending["screen"],
+                                                  screens.link(lms_pending["screen"])]
+           and fences[1].strip() == lms_pending["message"].strip())
+    print(f"{'✓' if hit else '✗'} 연계 결과는 복붙할 수 있는 코드 블록으로 준다"
+          f" (블록 {len(fences)}개)")
+    ok += hit
+
+    # 화면만 여는 연계(kind=screen)에는 문구 블록이 없다 — 없는 값을 빈 블록으로 세우지 않는다.
+    only_screen = act._link_answer(
+        {"label": "[75-08-110] 화면 열기", "screen": "75-08-110", "kind": "screen"},
+        screens.link("75-08-110"), "")
+    hit = only_screen.count("```") == 2 and "발송 문구" not in only_screen
+    print(f"{'✓' if hit else '✗'} 화면만 여는 연계에는 문구 블록을 세우지 않는다")
+    ok += hit
+
     logged = session_store.list_sessions("TEST_ACT")
     hit = any(t.get("role") == "tool" for sess in logged for t in sess["turns"])
     print(f"{'✓' if hit else '✗'} 연계 호출이 상담이력에 남는다")

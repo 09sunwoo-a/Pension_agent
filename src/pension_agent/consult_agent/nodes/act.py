@@ -298,8 +298,29 @@ def _link(pending: dict) -> dict[str, Any]:
                           "로 직접 이동해 주세요.",
                 "sources": [], "pending_action": None}
 
-    answer = f"{pending['label']} — {url}"
+    return {"answer": _link_answer(pending, url, message),
+            "sources": [], "pending_action": None}
+
+
+#: 연계 결과의 복붙 블록. 화면번호·딥링크·발송 문구는 **직원이 그대로 옮겨 쓰는 값**이라
+#: 코드 블록으로 낸다 — 문장 안에 섞여 있으면 따옴표·마침표가 딸려 붙고, 여러 줄인 발송
+#: 문구는 줄바꿈이 무너진다(실측: 문구를 큰따옴표로 감싸 한 문단에 넣던 형태).
+#: 블록 안에는 값만 둔다. 설명이 한 줄이라도 들어가면 그 줄까지 복사된다.
+_COPY_BLOCK = "```\n{body}\n```"
+
+
+def _link_answer(pending: dict, url: str, message: str) -> str:
+    """연계 답변 — 무엇을 열었는지 한 줄, 그다음 복붙할 값들.
+
+    **채우지 않은 값을 채웠다고 말하지 않는다**(§10). 딥링크가 싣는 것은 `scnNo`·`mode`
+    뿐이라 발송 문구는 링크로 넘어가지 않는다 — 그래서 문구를 따로 준다. 그 사실이 문장에
+    남아 있어야 직원이 «문구가 이미 들어가 있겠지» 하고 화면을 그냥 보내지 않는다.
+    """
+    parts = [f"{pending['label']} — 아래를 복사해서 쓰세요.", "",
+             "■ 화면번호 · 딥링크",
+             _COPY_BLOCK.format(body=f"{pending.get('screen') or ''}\n{url}")]
     if pending.get("kind") == "lms" and message:
         # 문구는 링크로 넘어가지 않으므로 직원이 화면에서 붙여넣도록 여기서 다시 준다.
-        answer += f'\n화면이 열리면 이 문구를 넣어 주세요 — "{message}"'
-    return {"answer": answer, "sources": [], "pending_action": None}
+        parts += ["", "■ 발송 문구 — 화면이 열리면 이대로 넣어 주세요",
+                  _COPY_BLOCK.format(body=message)]
+    return "\n".join(parts)
