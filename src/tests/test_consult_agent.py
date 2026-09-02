@@ -2907,12 +2907,16 @@ def check_tax_credit_calc() -> int:
     금지라(§5) 직원이 실제로 묻는 것에 답할 방법이 없었다. 그 장이 근거로 든 것이 이것이다 —
     직원 두 명이 각자 엑셀 계산기를 만들어 배포했을 만큼 니즈가 강하다.
 
-    여기서 재는 것 넷:
+    여기서 재는 것 다섯:
       ① 입력 금액은 **직원이 친 말**에서 뽑는다(계획 LLM 의 재작성본이 아니라)
       ② 총급여 구간이 미확인이면 두 경우를 다 낸다
       ③ 한도를 이미 채웠으면 «추가 공제 없음»으로 갈리고, 그 갈래에는 결정세액 단서를
          붙이지 않는다 — 최대 환급액을 단정할 때 걸리는 단서라 여기서는 무관하다(§7)
       ④ 계산 결과는 인용할 수 있고, 계산 밖 금액은 잘린다
+      ⑤ **«어디에 넣는 계산인가»가 재료에 있다** — 질문("300만원 더 넣으면")에는 계좌가
+         없고 계산은 개인형IRP 기준이라, 전제가 빠지면 직원은 어느 계좌 기준의 금액인지
+         모른 채 고객에게 옮긴다. 연금저축 단독 한도(600만원)를 넘는 금액에서는 계좌가
+         답을 실제로 가르므로 그 갈래를 함께 싣고, 그 아래에서는 싣지 않는다(§7)
     """
     ok = 0
     from pension_agent.consult_agent import relations as REL
@@ -2968,6 +2972,30 @@ def check_tax_credit_calc() -> int:
     hit = (not REL.check(ev["text"], cards)
            and bool(REL.check("총급여 5,500만원 초과면 16.5% 적용돼요.", cards)))
     print(f"{'✓' if hit else '✗'} 재료는 자기대조를 통과하고, 공제율 오짝은 잡힌다")
+    ok += hit
+
+    # ⑤ 어디에 넣는 계산인지가 재료에 있다. 없으면 답변도 말하지 않는다.
+    hit = "개인형IRP 계좌에 추가로 납입하는 경우" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 어느 계좌에 넣는 계산인지를 재료가 밝힌다")
+    ok += hit
+
+    # 계좌 갈래는 답을 가를 때만 선다. 연금저축 단독 한도 아래면 IRP 든 연금저축이든
+    # 공제 대상이 같아, 갈래를 세우는 것은 무관한 경고를 하나 더 다는 일이다(§7).
+    cap = CUST.PENSION_SAVINGS_CAP_WON
+    small = min(3_000_000, room.room * 10_000)
+    over = tools.TOOLS["tax_credit"].run(
+        {"customer_id": room.id, "question": f"{(cap + 10_000_000) // 10_000:,}만원 더 넣으면?"}, "q")
+    under = tools.TOOLS["tax_credit"].run(
+        {"customer_id": room.id, "question": f"{small // 10_000:,}만원 더 넣으면?"}, "q")
+    mark = "연금저축에 넣는 경우라면"
+    binds = room.room * 10_000 > cap          # 잔여한도가 단독 한도를 넘어야 갈래가 성립한다
+    hit = (mark in over["text"]) == binds and mark not in under["text"]
+    print(f"{'✓' if hit else '✗'} 연금저축 단독 한도({cap:,}원)를 넘는 금액에서만 계좌 갈래를 싣는다")
+    ok += hit
+
+    # 그 갈래를 실었으면 근거 카드도 함께 실린다 — 없으면 600만원이 원장 밖 수치가 된다.
+    hit = not binds or any(s["id"] == tools.SAVINGS_CAP_FACT_ID for s in over["sources"])
+    print(f"{'✓' if hit else '✗'} 계좌 갈래를 실으면 연금저축 한도 카드도 출처에 실린다")
     ok += hit
 
     # 브리핑과 계산기가 같은 산식을 쓴다 — 두 곳이 각자 곱하면 화면과 답변이 갈린다.
