@@ -44,6 +44,9 @@ def _print_source(s: dict) -> None:
     print(f"   · {s.get('doc') or '출처 미상 — 확인 필요'}")
     tail = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
     print(f"     — {s.get('title') or ''} [{s['id']}{tail}]")
+    # 원천 문서의 게시글 URL(핫팁 등) — 운영 CLI(consult_agent/__main__)와 같은 표기.
+    if s.get("url"):
+        print(f"     ↗ {s['url']}")
 
 
 def _print_answer(r: dict) -> None:

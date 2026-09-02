@@ -266,11 +266,18 @@ def _print_answer(r: dict) -> None:
     caution = [s for s in r["sources"] if s.get("role") == "주의"]
     print("\n─ 근거" + ("" if ground else ": 없음"))
     for s in ground:
-        print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+        _print_source_line(s)
     if caution:
         print("\n─ 이 고객 상담에서 지켜야 할 것")
         for s in caution:
-            print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+            _print_source_line(s)
+
+
+def _print_source_line(s: dict) -> None:
+    print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+    # 원천 문서의 게시글 URL(핫팁 등) — 운영 CLI(consult_agent/__main__)와 같은 표기.
+    if s.get("url"):
+        print(f"     ↗ {s['url']}")
 
 
 def main(argv: list[str]) -> int:
