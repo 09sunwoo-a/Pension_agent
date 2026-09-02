@@ -1177,7 +1177,7 @@ def check_adequacy_and_shape() -> int:
        값을 물었는데 화법이 나오면 답이 아니다.
     """
     from pension_agent.consult_agent.nodes import plan as P, procedure_qa
-    from pension_agent.consult_agent.prompts import ANSWER_SHAPES
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
 
     ok = 0
 
@@ -1270,6 +1270,14 @@ def check_adequacy_and_shape() -> int:
     hit = not missing
     print(f"{'✓' if hit else '✗'} 모든 도구에 형태 요구가 선언돼 있다"
           + ("" if hit else f" — 빠진 도구 {missing}"))
+    ok += hit
+
+    # 출처는 화면의 근거 목록이 전담한다(§5 「출처는 본문 문장이 아니다」). 형태 요구가
+    # 본문에 출처를 요구하던 동안 LLM 이 재료의 「· 기준시점 … · 출처 …」 메타 줄을 통째로
+    # 복사했다(gemma 실측 — 카드 덤프체 답변). 기준시점은 시효성 요구라 남는다.
+    hit = ("출처" not in ANSWER_SHAPES["fact"] and "기준시점" in ANSWER_SHAPES["fact"]
+           and "재료 블록의 형식은 옮기지 않는다" in COMPOSE_SYSTEM)
+    print(f"{'✓' if hit else '✗'} 출처는 형태 요구가 아니라 근거 목록이 전담한다")
     ok += hit
 
     # 실제 프롬프트에 그 요구가 실리는가.
