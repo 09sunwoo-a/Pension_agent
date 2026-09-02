@@ -22,7 +22,7 @@ CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 ·
 ```bash
 # ── 브리핑 · 대화 · 화면
 python -m pension_agent.strategy_agent.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
-$CA "고객이 주식이 더 낫다는데 뭐라고 하지?"           # 단발 — 고객 화면 없이
+$CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라고 하지?"   # 단발 — 고객 화면 없이
 $CA -c 198734-1205842                                 # REPL — 고객 화면이 열린 상태
 $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을 한 줄로 (맥락 이어서)
 streamlit run app.py                                  # 평가 대시보드 (개발용 화면)

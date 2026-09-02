@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 CA="python -m pension_agent.consult_agent"
 
 # 화법 코칭 — 고객 화면 불필요, 단발 실행
-$CA "고객이 주식이 더 낫다는데 뭐라고 하지?"
+$CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라고 하지?"
 
 # 고객 화면이 열려 있는 상태로 테스트 — -c/--customer 로 customer_id(KB-PIN) 지정
 $CA "이 고객 만기 언제야?" -c 198734-1205842          # 이준호 — 예금 만기 1건 (D-17)
