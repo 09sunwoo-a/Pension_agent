@@ -42,6 +42,11 @@ $CADR --demo --debug --show-llm                       # + 폐기된 생성문까
 $CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
 $CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
 
+# ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
+python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다
+python -m scripts.prebuild_briefings --status         # 무엇이 저장돼 있고 지금 읽히는가
+python -m scripts.prebuild_briefings --clear          # 지우고 저장소를 끈다(예전 동작)
+
 # ── 테스트 · 점검 (LLM 키 없이 돈다)
 python -m tests.test_engine            # ①~⑤ 결정론 로직
 python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치

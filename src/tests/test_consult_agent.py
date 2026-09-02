@@ -968,6 +968,25 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 고객 재료의 출처에는 관련도를 붙이지 않는다")
     ok += hit
 
+    # 같은 카드가 검색으로 오면 원천 게시글 URL 이 붙는데(sources_of) 이 재료로 오면 안
+    # 붙던 자리다 — strategy_agent 가 넘겨주는 항목에 문서명만 있어서, 「출처에 URL 을
+    # 싣는다」는 변경이 이 경로만 비껴갔다. 화면에는 ↗ 줄이 붙는 근거와 안 붙는 근거가
+    # 섞여 나갔고, 직원은 왜 어떤 것만 원문으로 갈 수 있는지 알 수 없었다.
+    from pension_agent.consult_agent.kb import card_source_meta
+    from pension_agent.consult_agent.state import KB as _KB
+    hit = all("url" in s and s["url"] == card_source_meta(_KB, s["id"]).get("url")
+              for s in ev["sources"] if s["id"] in card_ids)
+    print(f"{'✓' if hit else '✗'} 고객 재료의 카드 출처가 검색 경로와 같은 URL 을 싣는다")
+    ok += hit
+
+    # 위 대조가 «둘 다 None» 으로 늘 참이 되지 않게, 되짚기가 실제로 도는지 따로 잰다 —
+    # 송도윤의 ⑥⑦⑧ 은 본부 자료라 URL 이 없어서(핫팁 게시글이 아니다) 그 고객만으로는
+    # 판정할 수 없다. 어느 고객에게 어떤 카드가 뽑히느냐에 이 회귀가 좌우되면 안 된다.
+    linked = [c["id"] for c in _KB.cards if card_source_meta(_KB, c["id"]).get("url")]
+    hit = len(linked) > 10
+    print(f"{'✓' if hit else '✗'} 카드 id 로 원천 게시글 URL 을 되짚을 수 있다({len(linked)}건)")
+    ok += hit
+
     # ② 후보는 strategy_agent 매칭에서만 나온다 — 대화형이 자기 매칭을 만들지 않는다.
     hits = tools.playbook_hits({"customer_id": SONG, "question": "증권사 얘기를 꺼내네요"})
     from pension_agent.strategy_agent.support import matching as M
@@ -1577,6 +1596,22 @@ def check_relations() -> int:
     hit = (not R.known_wrong('"5,500만원 이상 13.2%"는 오기예요. "초과"가 맞습니다.', pf)
            and not R.known_wrong("「5,500만원 이상 13.2%」는 틀린 표기니 주의하세요.", pf))
     print(f"{'✓' if hit else '✗'} 오답 문구를 «틀렸다»고 짚는 정정은 막지 않는다")
+    ok += hit
+
+    # **정정 표지 목록은 카드가 실제로 쓰는 낱말을 덮어야 한다.** 「오답」이 빠져 있던 동안
+    # F47(퇴직금 60일 내 IRP 입금)의 verify_points 가 «"이미 통장으로 받았으면 끝" = 오답»
+    # 이라 적혀 있는데, 그 줄대로 짚어준 답변이 폐기되고 근거 원문이 덤프됐다 — 위와 똑같이
+    # 데이터가 시킨 일을 했다고 벌하는 자리다(2026-09-02 실측).
+    f47 = KB.facts.get("fact.k04.f47")
+    pf47 = (f47 or {}).get("pitfalls") or []
+    hit = bool(pf47) and not R.known_wrong(
+        '"이미 통장으로 받았으면 끝"이라고 생각하기 쉽지만 오답이에요. 60일 이내면 됩니다.', pf47)
+    print(f"{'✓' if hit else '✗'} 카드가 「오답」이라 부르는 문구를 그 말로 짚는 정정도 막지 않는다")
+    ok += hit
+
+    # 그렇다고 헐거워지지 않는다 — 따옴표 없이 그대로 주장하면 여전히 잡힌다.
+    hit = R.known_wrong("이미 통장으로 받았으면 끝이니 어쩔 수 없다고 안내하세요.", pf47) != []
+    print(f"{'✓' if hit else '✗'} 표지가 늘어도 그대로 주장한 오답은 잡는다")
     ok += hit
 
     # 정정으로 보는 조건은 둘 다다 — 하나만으로는 헐겁다.
@@ -3212,8 +3247,19 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 시효 표시를 재료가 달고 나온다(빠지면 코드가 채운다)")
     ok += hit
 
-    hit = closed is None and unseen is None
-    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혔거나 기록이 없으면 지어내지 않는다")
+    # 고객 화면이 닫혀 있으면 어느 고객인지가 없다 — «확인하지 못함»이라 None 이고, 계획은
+    # 다른 도구를 써 볼 여지가 남는다.
+    hit = closed is None
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혔으면 지어내지 않는다")
+    ok += hit
+
+    # **기록 0건은 «확인한 값»이라 재료다**(2026-09-02). None 이던 동안 이것이 «질의가
+    # 빗나감»과 구별되지 않아, 계획이 재계획으로 `customer` 를 끌어와 브리핑 한 편을
+    # 원장에 싣고 질문과 무관한 ⑥⑦⑧ 화법 카드를 «근거»로 세웠다. 시효 표시는 붙지
+    # 않는다 — 낡을 값 자체가 없다.
+    hit = (bool(unseen) and tools.HISTORY_NONE in unseen["text"]
+           and tools.HISTORY_MARK not in unseen["notices"])
+    print(f"{'✓' if hit else '✗'} 기록 0건도 재료로 올라온다(없다고 답할 근거)")
     ok += hit
 
     hit = "history" not in tools.catalog({}) and "history" in tools.catalog({"customer_id": "CX"})
@@ -4583,6 +4629,68 @@ def check_llm_down() -> int:
     return ok
 
 
+def check_compose_retry() -> int:
+    """점검에 걸린 생성문을 **한 번 다시 쓰게** 한다 (§6 — 처분은 구현이 정한다).
+
+    회귀 대상: 처분이 «근거 원문 덤프» 하나뿐이던 동안, 걸린 자리가 한 문장이어도 답이
+    통째로 버려지고 화면에는 카드 원문이 답변처럼 떨어졌다(■ 제목 줄 · 「· 기준시점 … ·
+    출처 …」 메타 줄). 직원 쪽에서는 에이전트가 갑자기 다른 말투로 말하는 것으로 보인다.
+
+    걸린 자리를 재작성 프롬프트에 실어야 같은 문장이 다시 나오지 않는다 — 「다시 쓰세요」
+    만으로는 처분이 한 바퀴 늘 뿐이다.
+    """
+    from pension_agent.consult_agent.nodes import plan
+
+    ok = 0
+    evidence = [{"tool": "fact", "query": "한도", "text": "■ 세액공제 한도\n\n한도는 900만원이다.",
+                 "atomic": [], "notices": [], "notice_scopes": [],
+                 "allow": ["한도는 900만원이다."], "sources": [{"id": "f1"}],
+                 "related": [], "marks": [], "meta": {}}]
+    state = {"question": "한도가 얼마야?", "evidence": evidence}
+
+    # ① 첫 생성문이 원장 밖 수치를 말하면, 두 번째 시도의 결과가 답이 된다.
+    seen: list[str] = []
+
+    def twice(prompt, **kw):
+        seen.append(prompt)
+        return ("한도는 1,234만원이에요." if len(seen) == 1 else "한도는 900만원이에요.")
+
+    orig = plan.generate
+    plan.generate = twice
+    try:
+        answer = plan.compose(dict(state))["answer"]
+    finally:
+        plan.generate = orig
+    hit = len(seen) == 2 and answer.startswith("한도는 900만원이에요")
+    print(f"{'✓' if hit else '✗'} 걸린 생성문을 한 번 다시 쓰고, 통과하면 그것이 답이다")
+    ok += hit
+
+    # ② 재작성 프롬프트가 **무엇이 걸렸는지**를 싣는다. 안 실으면 같은 문장이 다시 나온다.
+    hit = len(seen) == 2 and "1,234" in seen[1] and "다시 쓴다" in seen[1]
+    print(f"{'✓' if hit else '✗'} 재작성 프롬프트에 걸린 자리가 실린다")
+    ok += hit
+
+    # ③ 두 번째도 걸리면 예전 그대로 근거 원문이 답이다 — 틀린 문장이 나가는 선택지는 없다.
+    #    무한히 다시 쓰지 않는다는 것도 여기서 잰다(상한은 코드가 쥔다).
+    tries: list[str] = []
+
+    def always_bad(prompt, **kw):
+        tries.append(prompt)
+        return "한도는 1,234만원이에요."
+
+    plan.generate = always_bad
+    try:
+        answer = plan.compose(dict(state))["answer"]
+    finally:
+        plan.generate = orig
+    hit = (len(tries) == plan.COMPOSE_RETRIES + 1
+           and answer.startswith(evidence[0]["text"]) and "1,234" not in answer)
+    print(f"{'✓' if hit else '✗'} 계속 걸리면 상한에서 멈추고 근거 원문이 답이다({len(tries)}회)")
+    ok += hit
+
+    return ok
+
+
 def check_origin() -> int:
     """출처는 **원문 문서명**으로 말한다 — 적재 json 의 이름표가 새어나가면 안 된다.
 
@@ -4766,6 +4874,7 @@ def main() -> int:
         check_origin()
         check_plan_failure()
         check_llm_down()
+        check_compose_retry()
         check_notice_scope()
         check_guard()
         check_architecture_doc()
