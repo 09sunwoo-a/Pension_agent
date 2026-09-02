@@ -139,6 +139,26 @@ def _tools(turn: TR.Turn) -> str:
     return " → ".join(out) or "(없음)"
 
 
+def _stopped(node: TR.Node | None) -> TR.Gate | None:
+    """생성문을 실제로 버린 게이트. 없으면 None.
+
+    **같은 게이트가 한 턴에 여러 번 찍힌다** — 걸린 생성문을 한 번 다시 쓰기 때문이다
+    (`plan.COMPOSE_RETRIES`). 목록을 앞에서부터 훑으면 «첫 시도가 걸렸다»가 그대로
+    처분으로 읽혀, 다시 써서 통과한 턴이 폐기된 턴으로 보고된다. 마지막 판정이 처분이다
+    (`trace.Trace.gates` 도 같은 규약이다 — 이름으로 덮어쓴다).
+    """
+    if node is None:
+        return None
+    return next((g for g in {g.name: g for g in node.gates}.values() if not g.passed), None)
+
+
+def _retries(node: TR.Node | None) -> int:
+    """이 턴이 답변을 다시 쓴 횟수. compose LLM 호출 수에서 첫 시도를 뺀 값이다."""
+    if node is None:
+        return 0
+    return max(0, sum(1 for c in node.calls if c.stage == "compose") - 1)
+
+
 def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
     """시연용 한 줄 로그 — **어떤 재료가 들어가서 LLM 이 뭐라고 썼나**, 그것만.
 
@@ -168,12 +188,16 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
             out.append(f"   │      → {cid}  {titles.get(cid, '')}".rstrip())
 
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
-    stopped = next((g for g in node.gates if not g.passed), None) if node else None
+    stopped = _stopped(node)
     if node is not None and node.delta.get("clarify"):
         out.append("   └ 질문의 갈래가 나뉘어 답 대신 선택지를 되물음 (써 둔 답은 폐기)")
         return "\n".join(out)
     verdict = (f"검증에서 걸림({stopped.name}) — 생성문 폐기" if stopped else
                "근거와 대조 통과" if (node and node.gates) else "대조할 수치 없음")
+    if _retries(node):
+        # 걸린 자리를 실어 다시 쓴 턴이다(plan.COMPOSE_RETRIES). 이걸 안 적으면 위 «통과»가
+        # 첫 시도부터 통과한 것으로 읽히고, 리허설에서 무엇이 아슬아슬했는지가 사라진다.
+        verdict = f"{verdict} (한 번 걸려 다시 씀)"
     out.append(f"   └ 위 자료만 보고 LLM 이 {len(result.get('answer') or '')}자 작성 · {verdict}")
     # 폐기된 턴에서 **무엇이 걸렸는지**까지 적는다. 이름만 남기면 화면에 떨어진 원문
     # 덤프를 보고도 «왜 잘렸나»를 알 수 없어, 고칠 것이 질문인지 자료인지 검증기인지
@@ -234,7 +258,8 @@ def _row(no: object, sees: str, turn: TR.Turn, secs: float) -> list[str]:
     """
     names = [n.name for n in turn.nodes]
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
-    blocked = next((g.name for g in node.gates if not g.passed), None) if node else None
+    stopped = _stopped(node)          # 마지막 판정이 처분이다(재작성 턴 — _stopped 머리말)
+    blocked = stopped.name if stopped else None
 
     # 되묻기는 답변 작성과 **같은 노드**에서 끝난다(nodes/answer.py) — 노드 이름으로는
     # 갈리지 않으므로 상태 차분을 본다. `_compose_note` 는 이 갈래를 따로 적지 않는다.
@@ -252,6 +277,7 @@ def _row(no: object, sees: str, turn: TR.Turn, secs: float) -> list[str]:
         str(no),
         _tools(turn),
         (f"✗ {blocked}" if blocked else
+         f"통과(재작성 {_retries(node)})" if _retries(node) else
          "통과" if (node and node.gates) else "안 걸림"),
         "제안" if (offer and offer.delta) else "",
         f"{secs:.1f}초",
@@ -333,6 +359,11 @@ def main(argv: list[str]) -> int:
                 # 그 캐시를 읽는다(strategy_agent.propose 의 브리핑 캐시). 여기서 건너뛰면
                 # 첫 고객 질문(T4·T13)이 그 생성을 통째로 떠안아 수십 초 걸린다 — 그건
                 # 시연에는 없는 대기다. 화면을 여는 시점의 비용은 화면을 여는 자리에 둔다.
+                #
+                # 그 비용은 **리허설을 돌릴 때마다** 든다(캐시는 프로세스와 함께 사라진다).
+                # `python -m scripts.prebuild_briefings` 를 한 번 돌려 두면 여기서 읽어 쓴다 —
+                # 건너뛰는 것이 아니라 같은 자리에서 같은 산출을 읽는 것이라, 리허설이
+                # 예행하는 경로는 그대로다.
                 if demo and customer:
                     from pension_agent.strategy_agent import agent as SA        # noqa: PLC0415
                     from pension_agent.strategy_agent import customer as SC    # noqa: PLC0415
@@ -341,7 +372,10 @@ def main(argv: list[str]) -> int:
                     if prof is not None:
                         SA.propose(prof)
                     if timing and not brief:
-                        print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 — "
+                        from pension_agent.strategy_agent import briefing_store  # noqa: PLC0415
+                        how = ("미리 만들어 둔 것을 읽음" if briefing_store.enabled()
+                               else "이번에 생성 — scripts.prebuild_briefings 로 미리 만들 수 있다")
+                        print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 · {how} — "
                               "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
                     if not brief:

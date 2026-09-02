@@ -27,8 +27,8 @@ from pension_agent.consult_agent import guard, progress, relations, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
-    ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_SYSTEM, MUST_BLOCK, PLAN_MISSES_BLOCK,
-    PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
+    ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM, MUST_BLOCK,
+    PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -380,19 +380,80 @@ def _repeated_materials(state: AgentState, evidence: list[tools.Evidence]) -> li
 
 
 # ─────────────────────────────────────────────────────────────
+# 생성문 점검 — 걸리면 한 번 다시 쓰게 한다
+#
+# 점검 자체는 §6 그대로다(수치·관계·스팬). 바뀐 것은 **걸렸을 때의 처분**이다. 예전에는
+# 처분이 하나였다 — 근거 원문을 통째로 내보내기. 안전하지만 화면에서는 답변처럼 보이고,
+# 말투가 갑자기 카드 덤프로 바뀐다(■ 제목 줄 · 「· 출처 …」 메타 줄). 걸린 이유가 한 문장인
+# 경우가 대부분이라, 그 한 문장만 고치면 되는 답이 통째로 버려지고 있었다.
+#
+# §6 은 "걸린 생성문이 화면에 나가지 않는다"만 요구하고 그 뒤의 처분은 «재생성 · 근거 원문
+# 제시» 중 구현이 정한다고 적어 뒀다. 재생성을 **한 번** 붙인다. 상한이 코드에 있는 것은
+# 계획 루프의 MAX_STEPS 와 같은 이유다 — 통과할 때까지 돌면 한 턴의 비용이 열리게 된다.
+# 두 번째도 걸리면 예전 그대로 근거 원문이 나간다(틀린 문장이 나가는 선택지는 없다).
+# ─────────────────────────────────────────────────────────────
+
+#: 재작성 시도 횟수. 0 이면 예전 동작(걸리면 바로 근거 원문 폴백)이다.
+COMPOSE_RETRIES = 1
+
+#: 재작성 프롬프트에 싣는 «걸린 자리» 최대 건수. 전부 실으면 지시가 길어져 정작 고쳐야 할
+#: 자리가 묻힌다(§7 과 같은 이유 — 무관한 지시가 늘수록 관계있는 지시가 묻힌다).
+FAULTS_SHOWN = 8
+
+
+def _screen(answer: str, evidence: list[tools.Evidence],
+            question: str, known: set[str]) -> tuple[list[str], list[str]]:
+    """생성문을 §6 의 세 검사에 건다. 반환: (걸린 자리, 덧붙일 표시).
+
+    걸린 자리가 비어 있으면 통과다. 검사 순서는 예전과 같고(수치 → 관계 → 스팬), 앞에서
+    걸리면 뒤는 돌리지 않는다 — 계측(trace)이 「앞에서 끊김」을 그대로 말할 수 있어야 한다.
+    """
+    # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을 지어낸
+    # 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
+    ok, bad = verify_texts(answer, tools.ledger_texts(evidence),
+                           known_products=known, echoable=[question])
+    if not ok:
+        return [f"자료에 없는 수치·상품명: {b}" for b in (bad or [])] or ["자료 밖 수치"], []
+
+    # 관계 위반 — 값–조건 오짝 · 알려진 오답. 원장 밖 수치 검사가 못 잡는 자리다.
+    broken = relations.check(answer, tools.ledger_related(evidence))
+    if broken:
+        return [f"자료가 「틀린 표현」으로 적어둔 것을 그대로 말함: {b}" for b in broken], []
+
+    verdicts = [_span_verdict(e, answer) for e in evidence]
+    if any(v == DISCARD for v, _ in verdicts):
+        spans = [span for e, (v, detail) in zip(evidence, verdicts) if v == DISCARD
+                 for span, _ in detail]
+        return [f"그대로 옮겨야 하는 문장을 풀어 씀: {s}" for s in spans] or ["원문 스팬 누락"], []
+
+    # 채우는 것은 **빠진 표시**다. 예전에는 근거 블록을 통째로 덧붙여서, ⚠ 한 줄이 모자란
+    # 답변 아래에 카드 전문 1,000자가 붙었다 — 정작 그 한 줄이 묻힌다.
+    appends: list[str] = []
+    for _found, (verdict, gaps) in zip(evidence, verdicts):
+        if verdict != APPEND:
+            continue
+        appends += [f"· {label}\n" + "\n".join(f"  {m}" for m in missing)
+                    for label, missing in gaps]
+    return [], appends
+
+
+# ─────────────────────────────────────────────────────────────
 # Node. compose — 원장만으로 답을 만든다
 # ─────────────────────────────────────────────────────────────
 
 def compose(state: AgentState) -> dict[str, Any]:
     """모은 근거로 답을 만든다 — 도구 종류에 따라 방식이 갈리지 않는다.
 
-    한 번의 생성으로 답변 전체를 쓰고, 그 뒤에 코드가 세 가지를 집행한다.
+    한 번의 생성으로 답변 전체를 쓰고, 그 뒤에 코드가 세 가지를 집행한다(`_screen`).
       ① 원장 밖 수치가 있으면 생성문을 버린다(지어낸 값이므로 복구 불가).
       ② **데이터가 선언한 관계**를 어겼으면 생성문을 버린다 — 조건과 값을 잘못 짝지었거나
          행원들이 적어둔 알려진 오답을 그대로 말한 경우다(relations.py).
       ③ 관계 선언이 없는 카드는 아직 값 스팬 강제로 지킨다. 어기면 역시 버린다.
       ④ 필수 표시가 빠졌으면 **그 표시만** 덧붙인다(덜 갖춰진 것이므로 모자란 것을 채운다).
     통과한 답변은 근거 안에서만 나온 것이고, 그 안에서 문장은 자유롭다.
+
+    ①~③ 에 걸리면 **무엇이 걸렸는지를 실어 한 번 다시 쓰게 한다**(COMPOSE_RETRIES). 그래도
+    걸리면 근거 원문이 답이다 — 틀린 문장이 나가는 선택지는 없다(§6).
     """
     evidence: list[tools.Evidence] = list(state.get("evidence") or [])
     if not evidence:
@@ -427,8 +488,27 @@ def compose(state: AgentState) -> dict[str, Any]:
         prompt = f"{prompt}\n\n{note}"
 
     progress.emit("모은 근거로 답변을 작성하고 있어요")
+    known = _known_products()
+    appends: list[str] = []
     try:
         answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
+        for attempt in range(COMPOSE_RETRIES + 1):
+            if not answer:
+                break
+            # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
+            # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
+            progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
+            faults, appends = _screen(answer, evidence, state["question"], known)
+            if not faults:
+                break
+            answer = ""
+            if attempt >= COMPOSE_RETRIES:
+                break
+            # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
+            progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
+            retry = prompt + COMPOSE_RETRY_BLOCK.format(
+                faults="\n".join(f"- {f}" for f in faults[:FAULTS_SHOWN]))
+            answer = generate(retry, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
     except LLMError as exc:
         # 재료는 모았는데 문장을 못 쓴 것이다. 아래 폴백(근거 원문 그대로 싣기)으로 흘려보내면
         # 완성된 답변처럼 보이는 카드 덩어리가 나간다 — LLM 이 죽었을 때 다른 단계가 내는
@@ -439,38 +519,6 @@ def compose(state: AgentState) -> dict[str, Any]:
         return {"answer": LLM_FAILED.format(reason=f"{type(exc).__name__}: {exc}"),
                 "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}
-
-    if answer:
-        # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
-        # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
-        progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
-        # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을
-        # 지어낸 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
-        ok, _bad = verify_texts(answer, tools.ledger_texts(evidence),
-                                known_products=_known_products(),
-                                echoable=[state["question"]])
-        if not ok:
-            answer = ""
-
-    # 관계 위반 — 값–조건 오짝 · 알려진 오답. 원장 밖 수치 검사가 못 잡는 자리다.
-    if answer:
-        broken = relations.check(answer, tools.ledger_related(evidence))
-        if broken:
-            answer = ""
-
-    appends: list[str] = []
-    if answer:
-        verdicts = [_span_verdict(e, answer) for e in evidence]
-        if any(v == DISCARD for v, _ in verdicts):
-            answer = ""
-        else:
-            # 채우는 것은 **빠진 표시**다. 예전에는 근거 블록을 통째로 덧붙여서, ⚠ 한 줄이
-            # 모자란 답변 아래에 카드 전문 1,000자가 붙었다 — 정작 그 한 줄이 묻힌다.
-            for _found, (verdict, gaps) in zip(evidence, verdicts):
-                if verdict != APPEND:
-                    continue
-                appends += [f"· {label}\n" + "\n".join(f"  {m}" for m in missing)
-                            for label, missing in gaps]
 
     if answer:
         parts = [answer] + ([MISSING_NOTICES, *appends] if appends else [])
