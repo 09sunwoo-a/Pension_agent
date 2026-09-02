@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from pension_agent.consult_agent import guard, progress, relations, tools
@@ -403,16 +404,30 @@ FAULTS_SHOWN = 8
 
 
 def _screen(answer: str, evidence: list[tools.Evidence],
-            question: str, known: set[str]) -> tuple[list[str], list[str]]:
+            question: str, known: set[str],
+            prompt_texts: Iterable[str] = ()) -> tuple[list[str], list[str]]:
     """생성문을 §6 의 세 검사에 건다. 반환: (걸린 자리, 덧붙일 표시).
 
     걸린 자리가 비어 있으면 통과다. 검사 순서는 예전과 같고(수치 → 관계 → 스팬), 앞에서
     걸리면 뒤는 돌리지 않는다 — 계측(trace)이 「앞에서 끊김」을 그대로 말할 수 있어야 한다.
+
+    ━━ 프롬프트에 들어간 것은 인용도 허용된다 (§6) ━━
+    `prompt_texts` 는 원장 밖이면서 **코드가 이번 턴 프롬프트에 실어 보낸** 텍스트다 —
+    「하지 말 것」 가드와 승낙 턴의 제안 문구. 둘 다 코드가 LLM 에게 읽히기로 정한 것인데
+    원장에는 없어서, 시킨 대로 인용하면 «자료 밖 수치»로 답이 통째로 버려졌다(실측:
+    가드의 「…→ 6번」 → `수치 '6'`, 승낙 문구의 「화법 2건」 → `수치 '2'`). 가드는
+    `_sources()` 가 이미 **출처로도 싣는다** — 「이게 근거다」라고 세워 놓고 인용은 막는
+    상태였다.
+
+    넓히는 것은 **수치뿐**이다(`echoable` 규약 그대로). 상품명은 넓히지 않는다 — 이름만
+    대서 적합성 게이트를 뚫는 길을 열지 않기 위해서다(verify.verify_texts 머리말).
+    그리고 이번 턴 프롬프트에 **실제로 들어간 것**만 넣는다: `_POOL_KEYS` 가 경고한
+    «답변이 쓰지도 않을 후보 더미»와 다른 점이 그것이다.
     """
     # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을 지어낸
     # 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
-    ok, bad = verify_texts(answer, tools.ledger_texts(evidence),
-                           known_products=known, echoable=[question])
+    ok, bad = verify_texts(answer, tools.ledger_texts(evidence), known_products=known,
+                           echoable=[question, *(t for t in prompt_texts if t)])
     if not ok:
         return [f"자료에 없는 수치·상품명: {b}" for b in (bad or [])] or ["자료 밖 수치"], []
 
@@ -493,6 +508,9 @@ def compose(state: AgentState) -> dict[str, Any]:
     note = guard.prompt_note(guards, alts)
     if note:
         prompt = f"{prompt}\n\n{note}"
+    # 위에서 프롬프트에 실어 보낸 것 중 **원장 밖인 것**. 인용해도 되는 값이어야 한다
+    # (`_screen` 머리말). 원장에서 온 블록(재료·필수 스팬)은 이미 원장이라 넣지 않는다.
+    injected = [note, state.get("accepted") or ""]
 
     progress.emit("모은 근거로 답변을 작성하고 있어요")
     known = _known_products()
@@ -505,7 +523,8 @@ def compose(state: AgentState) -> dict[str, Any]:
             # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
             # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
             progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
-            faults, appends = _screen(answer, evidence, state["question"], known)
+            faults, appends = _screen(answer, evidence, state["question"], known,
+                                      prompt_texts=injected)
             if not faults:
                 break
             answer = ""

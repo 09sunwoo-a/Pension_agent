@@ -350,6 +350,91 @@ def check_knowledge_intents() -> bool:
     return ok
 
 
+def check_prompt_is_quotable() -> int:
+    """프롬프트에 들어간 것은 인용도 허용된다 (§6).
+
+    코드가 이번 턴 프롬프트에 실어 보내는데 원장에는 없는 텍스트가 있었다. 시킨 대로
+    인용하면 «자료 밖 수치»로 답이 통째로 버려지고 근거 원문이 덤프됐다 — `relations.py`
+    머리말이 「데이터가 시킨 일을 했다고 벌하는 것」이라 부른 것의 네 번째다.
+
+    실측(2026-09-02 박정호 P2)에서 답을 죽인 것은 **카드 기준시점의 범위 표기**다.
+    `ANSWER_SHAPES["fact"]` 가 기준시점을 쓰라고 요구하는데, `as_of` 가 «2026.03~04» 일 때
+    답변의 «2026년 3~4월» 이 날짜로 안 끊겨 3·4 가 맨숫자로 남았다. 재작성해도 형태 요구가
+    그대로라 또 썼다.
+
+    **짝으로 잰다.** 넓힌 쪽만 재면 헐거워진 것을 못 잡는다.
+    """
+    from pension_agent.consult_agent import guard, kb as KBMOD, tools
+    from pension_agent.consult_agent.nodes import facts_qa, plan as PLAN
+    from pension_agent.consult_agent.state import KB
+    from pension_agent.verify import verify_texts
+
+    ok = 0
+
+    # ── ① 기준시점 범위 표기 — 원장·답변 양쪽 정규화 (verify.py)
+    ledger = ["· 기준시점 2026.03~04 · 출처 …"]
+    passes = [t for t in ("이 내용은 2026년 3~4월 기준이에요.",
+                          "이 내용은 2026년 3월~4월 기준이에요.",
+                          "이 내용은 2026.03~04 기준이에요.",
+                          "2026년 3월 기준 자료입니다.")
+              if verify_texts(t, ledger, echoable=[""])[0]]
+    hit = len(passes) == 4
+    print(f"{'✓' if hit else '✗'} 기준시점: 원장의 기간 표기를 한국어로 풀어 쓴 답변이 통과한다")
+    ok += hit
+
+    # 넓히기만 하고 좁히는 쪽은 그대로여야 한다 — 기간을 늘리거나 옮기면 여전히 걸린다.
+    blocked = [t for t in ("이 내용은 2026년 3~9월 기준이에요.",
+                           "이 내용은 2026년 1~4월 기준이에요.",
+                           "이 내용은 2025년 3~4월 기준이에요.",
+                           "2026년 7월 기준 자료입니다.")
+               if not verify_texts(t, ledger, echoable=[""])[0]]
+    hit = len(blocked) == 4
+    print(f"{'✓' if hit else '✗'} 기준시점: 기간을 늘리거나 옮긴 답변은 여전히 걸린다")
+    ok += hit
+
+    # 화면번호·대표번호가 기간으로 오독되면 그 답변이 통째로 거부된다(_DATE_DOT 과 같은 경계).
+    hit = verify_texts("[04-12-640] 화면에서 1588-1234 로 문의하세요.",
+                       ["[04-12-640] 1588-1234"], echoable=[""])[0]
+    print(f"{'✓' if hit else '✗'} 기준시점: 화면번호·대표번호를 기간으로 읽지 않는다")
+    ok += hit
+
+    # ── ② 가드·승낙 문구 — 프롬프트에 실어 보낸 것 (plan._screen)
+    card = KB.facts.get("fact.k04.f47")
+    if card is None:
+        print("✗ 프롬프트 인용: 기준 카드(fact.k04.f47)가 없어 검사를 건너뛴다")
+        return ok
+    ev = tools._ev("fact", "q", facts_qa.render([(1.0, card)]),
+                   KBMOD.sources_of(KB, [(1.0, card)]), cards=[card])
+    known = PLAN._known_products()
+    question = "이 절차 얼마나 걸려?"
+    injected = ["- 사용계획 있는 자금은 먼저 걸러낼 것 → 6번",
+                "이 고객 «원리금보장상품 편중» 상태에 걸린 화법 2건"]
+
+    quoted = [a for a in ("사용계획 있는 자금은 먼저 걸러내세요(6번). 60일 이내면 됩니다.",
+                          "말씀하신 화법 2건을 보여드릴게요. 60일 이내면 재입금이 됩니다.")
+              if not PLAN._screen(a, [ev], question, known, prompt_texts=injected)[0]]
+    hit = len(quoted) == 2
+    print(f"{'✓' if hit else '✗'} 프롬프트 인용: 가드·승낙 문구를 인용한 답변이 폐기되지 않는다")
+    ok += hit
+
+    # 넓힌 것은 «프롬프트에 실제로 들어간 수치» 하나뿐이다 — 지어낸 값은 그대로 걸린다.
+    still = [a for a in ("이 상품은 연 7.2% 수익을 보장해요.",
+                         "이 고객은 IRP에 2,000만원이 있어요.",
+                         "사용계획 있는 자금은 먼저 걸러내세요(9번).",
+                         "말씀하신 화법 5건을 보여드릴게요.")
+             if PLAN._screen(a, [ev], question, known, prompt_texts=injected)[0]]
+    hit = len(still) == 4
+    print(f"{'✓' if hit else '✗'} 프롬프트 인용: 프롬프트에 없던 수치는 여전히 걸린다")
+    ok += hit
+
+    # 상품명은 넓히지 않는다 — 이름만 대서 적합성 게이트를 뚫는 길을 열지 않는다.
+    src = pathlib.Path("pension_agent/consult_agent/nodes/plan.py").read_text(encoding="utf-8")
+    hit = "echoable=[question, *(t for t in prompt_texts if t)]" in src
+    print(f"{'✓' if hit else '✗'} 프롬프트 인용: 넓히는 통로가 echoable(수치 전용) 하나다")
+    ok += hit
+    return ok
+
+
 def check_outreach() -> int:
     """⑨ 안내 콘텐츠 — 대화 재료(outreach 도구)와 발송 화면 제안(§10 예정 확장의 구현).
 
@@ -4848,6 +4933,7 @@ def main() -> int:
         check_answer_parallel()
         check_replan_on_empty()
         check_outreach()
+        check_prompt_is_quotable()
         check_screen_registry()
         check_market_material()
         check_product_advice()
