@@ -2300,8 +2300,16 @@ def check_product_advice() -> int:
     print(f"{'✓' if hit else '✗'} 선언이 없으면 고지를 붙이지 않는다")
     ok += hit
 
-    hit = "권유하지 않는다" in COMPOSE_SYSTEM and "직원이 정한다" in COMPOSE_SYSTEM
-    print(f"{'✓' if hit else '✗'} 생성 지시가 한 상품을 골라 권유하는 것을 금지한다")
+    # 2026-09-02 개정(§8 관리대장): 직원 대상 도구라 특정 상품을 짚어 말하는 것은 허용하고,
+    # 남는 경계는 표현이다 — «이런 상품이 있습니다» 톤까지, 권유(«추천드립니다»)는 금지.
+    hit = ("특정해 말하" in COMPOSE_SYSTEM
+           and "권유 표현은 쓰지 않는다" in COMPOSE_SYSTEM
+           and "직원이 정한다" in COMPOSE_SYSTEM)
+    print(f"{'✓' if hit else '✗'} 생성 지시가 상품 특정을 허용하되 권유 표현을 금지한다")
+    ok += hit
+
+    hit = "권유 표현" in ANSWER_SHAPES["lineup"]
+    print(f"{'✓' if hit else '✗'} lineup 의 답변 형태도 권유 표현 금지를 요구한다")
     ok += hit
 
     hit = "투자권유가 아니라는 표시" in ANSWER_SHAPES["suitable"]
