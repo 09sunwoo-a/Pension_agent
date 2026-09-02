@@ -3,85 +3,65 @@
   코드와 1:1 대응하는 정식 다이어그램은 src/pension_agent/consult_agent/README.md 의
   생성 구간(python -m scripts.render_architecture)이 기준이고, 이 파일은 그 흐름을
   사람 관점(입력 → 자료 → LLM 처리 → 답변)으로 요약해 그린 발표 산출물이다.
-  브라우저로 열어 카드 영역을 캡처한다.
+  브라우저로 열어 캡처한다.
 -->
 <title>퇴직연금 사후관리 에이전트(대화형)</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap">
 <style>
   :root {
     color-scheme: light;
-    --ground: #F3F1EA;
-    --card: #FFFFFF;
     --ink: #262319;
     --muted: #877F6E;
     --line: #C9C2B2;
     --gold: #F2B705;
     --gold-ink: #3D2F00;
-    --gold-soft: #FFF3D0;
-    --gold-line: #D9A900;
     --panel: #F7F4EA;
     --panel-line: #DED6C2;
   }
   body {
     margin: 0;
-    background: var(--ground);
+    background: #FFFFFF;
     font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
     color: var(--ink);
     display: flex;
     justify-content: center;
-    padding: 40px 24px;
+    padding: 28px 20px;
   }
-  .card {
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 16px;
-    padding: 36px 40px 28px;
-    max-width: 1480px;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  header { margin: 0 0 18px 4px; }
+  .wrap { max-width: 1480px; width: 100%; }
   h1 {
-    font-size: 21px;
+    font-size: 25px;
     font-weight: 700;
-    margin: 0 0 4px;
+    margin: 0 4px 20px;
     letter-spacing: -0.01em;
-  }
-  header p {
-    margin: 0;
-    font-size: 13px;
-    color: var(--muted);
   }
   figure { margin: 0; }
   svg { display: block; width: 100%; height: auto; }
   svg text { font-family: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
-  .box       { fill: var(--card); stroke: var(--line); stroke-width: 1.4; }
-  .box-out   { fill: var(--gold-soft); stroke: var(--gold-line); stroke-width: 1.4; }
-  .box-in    { fill: var(--panel); stroke: var(--panel-line); stroke-width: 1.4; }
-  .box-data  { fill: var(--panel); stroke: var(--panel-line); stroke-width: 1.4; }
-  .tray      { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 5; }
+  .box       { fill: #FFFFFF; stroke: var(--line); stroke-width: 1.5; }
+  .box-out   { fill: #FFFFFF; stroke: var(--ink); stroke-width: 2; }
+  .box-in    { fill: var(--panel); stroke: var(--panel-line); stroke-width: 1.5; }
+  .box-data  { fill: var(--panel); stroke: var(--panel-line); stroke-width: 1.5; }
+  .tray      { fill: none; stroke: var(--line); stroke-width: 1.3; stroke-dasharray: 5 5; }
   .chip-llm  { fill: var(--gold); }
   .chip-code { fill: var(--ink); }
-  .t-chip-llm  { font-size: 11px; font-weight: 700; fill: var(--gold-ink); }
-  .t-chip-code { font-size: 11px; font-weight: 700; fill: #FFFFFF; }
-  .t-title   { font-size: 16.5px; font-weight: 700; fill: var(--ink); }
-  .t-sub     { font-size: 12.5px; fill: var(--muted); }
-  .t-quote   { font-size: 13px; fill: var(--ink); }
-  .t-note    { font-size: 12.5px; fill: var(--muted); }
-  .flow      { stroke: var(--ink); stroke-width: 1.7; fill: none; }
-  .feed      { stroke: var(--muted); stroke-width: 1.4; fill: none; }
-  .back      { stroke: var(--muted); stroke-width: 1.4; fill: none; stroke-dasharray: 5 5; }
+  .t-chip-llm  { font-size: 12px; font-weight: 700; fill: var(--gold-ink); }
+  .t-chip-code { font-size: 12px; font-weight: 700; fill: #FFFFFF; }
+  .t-title   { font-size: 18px; font-weight: 700; fill: var(--ink); }
+  .t-sub     { font-size: 13.5px; fill: var(--muted); }
+  .t-quote   { font-size: 14px; fill: var(--ink); }
+  .t-note    { font-size: 14px; fill: var(--muted); }
+  .t-label   { font-size: 14px; font-weight: 700; fill: var(--muted); letter-spacing: 0.02em; }
+  .flow      { stroke: var(--ink); stroke-width: 1.8; fill: none; }
+  .feed      { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .back      { stroke: var(--muted); stroke-width: 1.5; fill: none; stroke-dasharray: 5 5; }
 </style>
 
-<div class="card">
-  <header>
-    <h1>퇴직연금 사후관리 에이전트(대화형)</h1>
-    <p>직원의 질문 한 건이 답변이 되기까지</p>
-  </header>
+<div class="wrap">
+  <h1>퇴직연금 사후관리 에이전트(대화형)</h1>
 
   <figure>
-    <svg viewBox="0 0 1440 584" role="img"
-         aria-label="직원 질문이 의도 분류, 근거 수집 루프, 답변 생성, 답변 검증을 거쳐 출처가 붙은 답변이 되는 흐름. 기능 안내나 화면 열기 같은 요청은 의도 분류에서 갈라져 바로 처리되고, 근거 수집은 지식베이스와 고객 정보만 조회하며, 답변 검증은 근거 밖 내용을 차단한다.">
+    <svg viewBox="0 0 1440 600" role="img"
+         aria-label="직원 질문이 의도 분류, 근거 수집 루프, 답변 생성, 답변 검증을 거쳐 출처가 붙은 답변이 되는 흐름. 기능 안내나 화면 열기 같은 요청은 의도 분류에서 갈라져 즉시 응답 경로로 처리되고, 근거 수집은 행내 지식베이스와 상담 중 고객 정보만 조회하며, 답변 검증은 근거 밖 숫자와 상품명을 차단한다.">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5"
                 markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
@@ -94,94 +74,93 @@
       </defs>
 
       <!-- 범례 (우상단) -->
-      <rect class="chip-llm" x="1024" y="24" width="16" height="16" rx="5"/>
-      <text class="t-note" x="1048" y="37">LLM 판단</text>
-      <rect class="chip-code" x="1140" y="24" width="16" height="16" rx="5"/>
-      <text class="t-note" x="1164" y="37">코드 검증</text>
-      <rect x="1256" y="24" width="16" height="16" rx="5" fill="#F7F4EA" stroke="#DED6C2" stroke-width="1.2"/>
-      <text class="t-note" x="1280" y="37">데이터</text>
+      <rect class="chip-llm" x="1010" y="24" width="18" height="18" rx="5"/>
+      <text class="t-note" x="1036" y="38">LLM 판단</text>
+      <rect class="chip-code" x="1130" y="24" width="18" height="18" rx="5"/>
+      <text class="t-note" x="1156" y="38">코드 검증</text>
+      <rect x="1252" y="24" width="18" height="18" rx="5" fill="#F7F4EA" stroke="#DED6C2" stroke-width="1.3"/>
+      <text class="t-note" x="1278" y="38">데이터</text>
 
       <!-- 되묻기: 답변 생성 → 직원 -->
-      <path class="back" d="M 806 110 C 806 34, 138 34, 138 108" marker-end="url(#arrow-soft)"/>
-      <text class="t-note" x="472" y="46" text-anchor="middle">질문이 애매하면 다시 물어봄</text>
+      <path class="back" d="M 811 110 C 811 30, 120 30, 120 106" marker-end="url(#arrow-soft)"/>
+      <text class="t-note" x="460" y="44" text-anchor="middle">모호한 질문 되묻기</text>
 
       <!-- 직원 입력 -->
-      <rect class="box-in" x="48" y="110" width="180" height="118" rx="12"/>
-      <text class="t-title" x="66" y="140" font-size="14.5">직원 질문</text>
-      <text class="t-quote" x="66" y="170">“이 고객 만기</text>
-      <text class="t-quote" x="66" y="189">&nbsp;언제야?”</text>
-      <text class="t-quote" x="66" y="212">“뭐라고 안내하지?”</text>
+      <rect class="box-in" x="32" y="110" width="176" height="126" rx="12"/>
+      <text class="t-title" x="50" y="142" font-size="15.5">직원 질문</text>
+      <text class="t-quote" x="50" y="174">“이 고객 만기</text>
+      <text class="t-quote" x="50" y="194">&nbsp;언제야?”</text>
+      <text class="t-quote" x="50" y="220">“뭐라고 안내하지?”</text>
 
       <!-- 1 의도 분류 -->
-      <rect class="box" x="264" y="110" width="188" height="118" rx="12"/>
-      <rect class="chip-llm" x="280" y="124" width="44" height="20" rx="10"/>
-      <text class="t-chip-llm" x="302" y="138.5" text-anchor="middle">LLM</text>
-      <text class="t-title" x="280" y="174">의도 분류</text>
-      <text class="t-sub"   x="280" y="198">질문 의도를 판별해 분기</text>
+      <rect class="box" x="234" y="110" width="210" height="126" rx="12"/>
+      <rect class="chip-llm" x="250" y="126" width="48" height="22" rx="11"/>
+      <text class="t-chip-llm" x="274" y="141.5" text-anchor="middle">LLM</text>
+      <text class="t-title" x="250" y="182">의도 분류</text>
+      <text class="t-sub"   x="250" y="208">질문 의도 판별 · 경로 분기</text>
 
       <!-- 2 근거 수집 루프 -->
-      <path class="feed" d="M 612 110 C 604 80, 652 80, 644 112" marker-end="url(#arrow-soft)"/>
-      <rect class="box" x="488" y="110" width="188" height="118" rx="12"/>
-      <rect class="chip-llm" x="504" y="124" width="44" height="20" rx="10"/>
-      <text class="t-chip-llm" x="526" y="138.5" text-anchor="middle">LLM</text>
-      <text class="t-title" x="504" y="174">근거 수집 루프</text>
-      <text class="t-sub"   x="504" y="196">도구로 자료 조회</text>
-      <text class="t-sub"   x="504" y="214">부족하면 반복 (최대 4회)</text>
+      <path class="feed" d="M 597 110 C 589 78, 637 78, 629 112" marker-end="url(#arrow-soft)"/>
+      <rect class="box" x="470" y="110" width="210" height="126" rx="12"/>
+      <rect class="chip-llm" x="486" y="126" width="48" height="22" rx="11"/>
+      <text class="t-chip-llm" x="510" y="141.5" text-anchor="middle">LLM</text>
+      <text class="t-title" x="486" y="182">근거 수집 루프</text>
+      <text class="t-sub"   x="486" y="206">도구 기반 자료 조회</text>
+      <text class="t-sub"   x="486" y="226">반복 조회 (최대 4회)</text>
 
       <!-- 3 답변 생성 -->
-      <rect class="box" x="712" y="110" width="188" height="118" rx="12"/>
-      <rect class="chip-llm" x="728" y="124" width="44" height="20" rx="10"/>
-      <text class="t-chip-llm" x="750" y="138.5" text-anchor="middle">LLM</text>
-      <text class="t-title" x="728" y="174">답변 생성</text>
-      <text class="t-sub"   x="728" y="198">수집한 근거로만 작성</text>
+      <rect class="box" x="706" y="110" width="210" height="126" rx="12"/>
+      <rect class="chip-llm" x="722" y="126" width="48" height="22" rx="11"/>
+      <text class="t-chip-llm" x="746" y="141.5" text-anchor="middle">LLM</text>
+      <text class="t-title" x="722" y="182">답변 생성</text>
+      <text class="t-sub"   x="722" y="208">수집 근거 기반 작성</text>
 
       <!-- 4 답변 검증 -->
-      <rect class="box" x="936" y="110" width="188" height="118" rx="12"/>
-      <rect class="chip-code" x="952" y="124" width="44" height="20" rx="10"/>
-      <text class="t-chip-code" x="974" y="138.5" text-anchor="middle">코드</text>
-      <text class="t-title" x="952" y="174">답변 검증</text>
-      <text class="t-sub"   x="952" y="196">근거에 없는 숫자·상품명은</text>
-      <text class="t-sub"   x="952" y="214">화면에 내보내지 않음</text>
+      <rect class="box" x="942" y="110" width="210" height="126" rx="12"/>
+      <rect class="chip-code" x="958" y="126" width="48" height="22" rx="11"/>
+      <text class="t-chip-code" x="982" y="141.5" text-anchor="middle">코드</text>
+      <text class="t-title" x="958" y="182">답변 검증</text>
+      <text class="t-sub"   x="958" y="208">근거 밖 숫자·상품명 차단</text>
 
       <!-- 답변 -->
-      <rect class="box-out" x="1160" y="110" width="232" height="118" rx="12"/>
-      <text class="t-title" x="1178" y="152">답변 + 출처</text>
-      <text class="t-sub"   x="1178" y="178">답의 출처를 함께 표시</text>
-      <text class="t-sub"   x="1178" y="196">필요한 업무 화면 바로 열기 제안</text>
+      <rect class="box-out" x="1178" y="110" width="230" height="126" rx="12"/>
+      <text class="t-title" x="1196" y="158">답변 + 출처</text>
+      <text class="t-sub"   x="1196" y="186">근거 출처 표시</text>
+      <text class="t-sub"   x="1196" y="206">업무 화면 바로 열기 제안</text>
 
       <!-- 스파인 화살표 -->
-      <line class="flow" x1="228"  y1="169" x2="257"  y2="169" marker-end="url(#arrow)"/>
-      <line class="flow" x1="452"  y1="169" x2="481"  y2="169" marker-end="url(#arrow)"/>
-      <line class="flow" x1="676"  y1="169" x2="705"  y2="169" marker-end="url(#arrow)"/>
-      <line class="flow" x1="900"  y1="169" x2="929"  y2="169" marker-end="url(#arrow)"/>
-      <line class="flow" x1="1124" y1="169" x2="1153" y2="169" marker-end="url(#arrow)"/>
+      <line class="flow" x1="208"  y1="173" x2="227"  y2="173" marker-end="url(#arrow)"/>
+      <line class="flow" x1="444"  y1="173" x2="463"  y2="173" marker-end="url(#arrow)"/>
+      <line class="flow" x1="680"  y1="173" x2="699"  y2="173" marker-end="url(#arrow)"/>
+      <line class="flow" x1="916"  y1="173" x2="935"  y2="173" marker-end="url(#arrow)"/>
+      <line class="flow" x1="1152" y1="173" x2="1171" y2="173" marker-end="url(#arrow)"/>
 
-      <!-- 바로 처리 갈래: 의도 분류 → 전용 처리 → 답변 -->
-      <path class="back" d="M 358 228 L 358 275" fill="none"/>
-      <rect class="box" x="248" y="282" width="252" height="88" rx="12"/>
-      <text class="t-title" x="266" y="310" font-size="14.5">바로 처리하는 요청</text>
-      <text class="t-sub"   x="266" y="334">기능 안내 · 브리핑 문구 수정</text>
-      <text class="t-sub"   x="266" y="352">LMS 발송 화면 열기</text>
-      <path class="back" d="M 500 326 H 574 A 8 8 0 0 1 590 326 H 1256 Q 1276 326 1276 306 L 1276 236"
+      <!-- 즉시 응답 경로: 의도 분류 → 전용 처리 → 답변 -->
+      <path class="back" d="M 339 236 L 339 283" fill="none"/>
+      <rect class="box" x="232" y="290" width="276" height="96" rx="12"/>
+      <text class="t-title" x="250" y="320" font-size="16">바로 처리 요청</text>
+      <text class="t-sub"   x="250" y="346">기능 안내 · 브리핑 문구 수정</text>
+      <text class="t-sub"   x="250" y="368">LMS 발송 화면 열기</text>
+      <path class="back" d="M 508 338 H 567 A 8 8 0 0 1 583 338 H 1273 Q 1293 338 1293 318 L 1293 244"
             marker-end="url(#arrow-soft)"/>
-      <text class="t-note" x="880" y="314" text-anchor="middle">근거 수집 없이 즉시 응답</text>
+      <text class="t-note" x="900" y="326" text-anchor="middle">즉시 응답 경로</text>
 
       <!-- 자료 → 근거 수집 -->
-      <path class="feed" d="M 582 381 L 582 240" marker-end="url(#arrow-soft)"/>
+      <path class="feed" d="M 575 397 L 575 248" marker-end="url(#arrow-soft)"/>
 
       <!-- 자료 울타리 -->
-      <rect class="tray" x="356" y="382" width="728" height="176" rx="14"/>
-      <text class="t-note" x="384" y="408">모든 답은 이 자료 안에서만 나옴</text>
+      <rect class="tray" x="347" y="398" width="746" height="180" rx="14"/>
+      <text class="t-label" x="375" y="426">답변 근거 범위</text>
 
-      <rect class="box-data" x="384" y="424" width="320" height="104" rx="12"/>
-      <text class="t-title" x="404" y="456" font-size="15">행내 지식베이스</text>
-      <text class="t-sub"   x="404" y="482">원천 문서 87건 → 지식 카드 633건</text>
-      <text class="t-sub"   x="404" y="502">화법 · 제도 수치 · 절차 · 화면번호 등 10종</text>
+      <rect class="box-data" x="375" y="440" width="330" height="112" rx="12"/>
+      <text class="t-title" x="395" y="474" font-size="16.5">행내 지식베이스</text>
+      <text class="t-sub"   x="395" y="502">원천 문서 87건 → 지식 카드 633건</text>
+      <text class="t-sub"   x="395" y="524">화법 · 제도 수치 · 절차 · 화면번호 등 10종</text>
 
-      <rect class="box-data" x="736" y="424" width="320" height="104" rx="12"/>
-      <text class="t-title" x="756" y="456" font-size="15">지금 상담 중인 고객 정보</text>
-      <text class="t-sub"   x="756" y="482">브리핑 · 적합성 판정 결과 · 상담 이력</text>
+      <rect class="box-data" x="735" y="440" width="330" height="112" rx="12"/>
+      <text class="t-title" x="755" y="474" font-size="16.5">지금 상담 중인 고객 정보</text>
+      <text class="t-sub"   x="755" y="502">브리핑 · 적합성 판정 결과 · 상담 이력</text>
     </svg>
-    <figcaption hidden>직원 질문 → 의도 분류 → 근거 수집 루프(지식베이스·고객 정보) → 답변 생성 → 답변 검증 → 답변+출처. 단순 요청은 의도 분류에서 바로 처리.</figcaption>
+    <figcaption hidden>직원 질문 → 의도 분류 → 근거 수집 루프(지식베이스·고객 정보) → 답변 생성 → 답변 검증 → 답변+출처. 단순 요청은 즉시 응답 경로로 처리.</figcaption>
   </figure>
 </div>
