@@ -598,9 +598,8 @@ def clear_briefing_cache() -> None:
 # 화면에 띄울 수 있게 돌려준다.
 # ─────────────────────────────────────────────────────────────
 
-#: 저장본을 아예 쓰지 않게 하는 스위치. 회귀 테스트가 켠다(tests/__init__.py) —
-#: 테스트는 생성 경로 자체를 검증하므로 저장된 산출물을 받으면 안 된다.
-NO_PREBUILT_ENV = "PENSION_NO_PREBUILT"
+#: 저장본 off 스위치. 정의는 config 에 있다 — clock 도 같은 스위치를 봐야 하기 때문이다.
+NO_PREBUILT_ENV = config.NO_PREBUILT_ENV
 
 _PREBUILT_LOADED = False
 _PREBUILT_META: dict[str, Any] = {}

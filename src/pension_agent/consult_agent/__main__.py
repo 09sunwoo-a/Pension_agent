@@ -11,11 +11,22 @@ from __future__ import annotations
 
 import sys
 
+from pension_agent import clock
 from pension_agent.consult_agent.graph import ask
 from pension_agent.consult_agent.tools import source_lines
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+# «오늘»이 실제 날짜가 아니면 시작할 때 말한다.
+#
+# 미리 만들어 둔 브리핑이 있으면 오늘이 그 기준일로 맞춰진다(clock._prebuilt_today) —
+# 화면과 CLI 가 같은 저장본을 읽게 하려는 것이다. 그런데 그 파일이 묵으면 프로세스 전체가
+# 과거를 오늘로 믿게 되고, **아무 말도 안 하면 만기 D-day 가 이상한 것을 에이전트 탓으로
+# 읽는다.** 날짜와 그 출처를 한 줄로 먼저 밝혀 둔다.
+_today, _source = clock.resolve()
+if _source != "앱을 켠 날":
+    print(f"(오늘 {_today:%Y-%m-%d} — {_source})")
 
 argv = sys.argv[1:]
 customer_id = None

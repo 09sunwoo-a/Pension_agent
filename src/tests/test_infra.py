@@ -404,6 +404,74 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────
+# 오늘의 해석은 한 곳이다 — 화면과 CLI 가 갈리지 않는가
+#
+# 회귀 대상: 미리 만들어 둔 브리핑(briefings.json)은 만들어진 날짜에만 적중한다(만기
+# D-day·미접촉 개월이 프로파일 지문에 들어 있으므로). 처음에는 그 날짜 맞추기를 평가
+# 화면(app.py)에만 넣었는데, 그러면 화면은 저장본 날짜로 돌고 CLI 대화형은 실제 오늘로
+# 돌아 **같은 고객에게 서로 다른 D-day 를 말했다.** 저장본을 캐시 계층에 넣어 막으려던
+# 갈라짐을 날짜 층에서 다시 만든 것이다.
+#
+# 그래서 해석을 clock 한 곳으로 모았다. 이 검사가 고정하는 것은 «우선순위»와 «출처를
+# 밝힌다»는 사실이다 — 진입점이 각자 날짜를 정하기 시작하면 여기가 깨진다.
+# ─────────────────────────────────────────────────────────────
+
+import json  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+from pension_agent import clock as _clock, config as _config  # noqa: E402
+
+_saved_today = os.environ.get(_clock.TODAY_ENV)
+_saved_off = os.environ.get(_config.NO_PREBUILT_ENV)
+_saved_cache = _clock._PREBUILT_TODAY
+try:
+    with tempfile.TemporaryDirectory() as _tmp:
+        _fake = _Path(_tmp) / "briefings.json"
+        _fake.write_text(json.dumps({"meta": {"today": "2026-07-07"}, "briefings": {}}),
+                         encoding="utf-8")
+        _real_briefings = _config.BRIEFINGS_JSON
+        _config.BRIEFINGS_JSON = _fake
+
+        # ① 저장본이 있고 명시가 없으면 그 기준일을 따른다 — 화면이든 CLI 든 같은 값이다.
+        os.environ.pop(_clock.TODAY_ENV, None)
+        os.environ.pop(_config.NO_PREBUILT_ENV, None)
+        _clock._PREBUILT_TODAY = None
+        _d, _src = _clock.resolve()
+        check(_d == date(2026, 7, 7), "저장본이 있으면 그 기준일이 오늘이다", str(_d))
+        check(_src == "저장된 브리핑 기준일", "그리고 출처를 밝힌다", _src)
+
+        # ② 명시가 이긴다. 특정 날짜로 얼려 보는 쪽이 저장본보다 위다.
+        os.environ[_clock.TODAY_ENV] = "2026-10-10"
+        _d, _src = _clock.resolve()
+        check(_d == date(2026, 10, 10) and "PENSION_TODAY" in _src,
+              "PENSION_TODAY 가 저장본보다 우선한다", f"{_d} · {_src}")
+
+        # ③ 스위치를 켜면 저장본을 보지 않는다. **검사가 저장된 산출물을 읽고 통과하는
+        #    것을 막는 스위치이므로, 날짜까지 함께 꺼져야 한다** — 브리핑만 새로 만들고
+        #    오늘은 저장본 기준이면 어느 쪽도 아닌 상태가 된다.
+        os.environ.pop(_clock.TODAY_ENV, None)
+        os.environ[_config.NO_PREBUILT_ENV] = "1"
+        _d, _src = _clock.resolve()
+        check(_d == date.today() and _src == "앱을 켠 날",
+              f"{_config.NO_PREBUILT_ENV} 를 켜면 저장본 날짜를 쓰지 않는다", f"{_d} · {_src}")
+
+        _config.BRIEFINGS_JSON = _real_briefings
+finally:
+    _clock._PREBUILT_TODAY = _saved_cache
+    for _k, _v in ((_clock.TODAY_ENV, _saved_today), (_config.NO_PREBUILT_ENV, _saved_off)):
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+
+# 진입점이 날짜를 스스로 해석하지 않는가 — app.py 가 그러다 화면과 CLI 를 갈랐다.
+_app = (_Path(__file__).resolve().parent.parent / "app.py").read_text(encoding="utf-8")
+check("BRIEFINGS_JSON" not in _app,
+      "app.py 는 저장본을 직접 읽어 날짜를 정하지 않는다 (해석은 clock 한 곳)")
+
+
+# ─────────────────────────────────────────────────────────────
 # llm — 429(속도 제한) 재시도
 #
 # 행내 게이트웨이가 몰린 호출(브리핑 11연쇄·앱 기동 선생성)에 429 를 냈고, 재시도가
@@ -412,7 +480,6 @@ finally:
 # ─────────────────────────────────────────────────────────────
 
 import io
-import json
 import urllib.error
 
 from pension_agent import llm as _llm

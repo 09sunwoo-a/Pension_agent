@@ -1,14 +1,15 @@
 import streamlit as st
 import pandas as pd
 import csv
-import json
 import os
 import re
-from datetime import date, datetime
+from datetime import datetime
 
 # ── «오늘»을 프로세스 시작 시점에 못박는다. **pension_agent 임포트보다 먼저** 해야 한다.
 #
-# 두 가지를 동시에 막는 자리다.
+# 무엇이 오늘인지는 `clock.resolve()` 가 정한다(명시 → 저장된 브리핑 기준일 → 실제 날짜).
+# 여기서 하는 일은 그 결과를 **환경변수에 박아 프로세스 안에서 얼리는 것**뿐이다. 두 가지를
+# 막는다.
 #  1) `customer.py` 는 임포트 시점에 PERSONAS 를 만들면서 잔여일수·경과일을 «오늘» 기준으로
 #     센다. 프로세스가 자정을 넘겨 살아 있으면 화면 상단의 D-day 와 대화 답변의 D-day 가
 #     갈린다 — 한 세션 안에서는 같은 날이어야 한다.
@@ -16,35 +17,14 @@ from datetime import date, datetime
 #     `PENSION_TODAY` 를 **원장 스냅샷 기준일(2026-08-24)로 setdefault** 한다. 여기서
 #     먼저 채워두지 않으면 디버그 모드를 켠 순간 «오늘»이 조용히 과거로 밀리고, 그러면
 #     같은 질문의 답(만기 D-n, 연말까지 며칠)이 디버그 켜고/끄고에 따라 달라진다.
-# 밖에서 `PENSION_TODAY` 를 준 경우(특정 날짜로 얼려 보고 싶을 때)는 그것을 존중한다.
 #
-# 그리고 **미리 만들어 둔 브리핑이 있으면 그 기준일에 맞춘다.** 브리핑은 오늘에서 파생된
-# 값을 문장에 싣기 때문에(만기 D-day·미접촉 개월·투자기간) 날짜가 다르면 저장본이 통째로
-# 어긋나고, 그러면 화면은 다시 108회를 돌며 5분을 기다린다. 조용히 그러지 않도록 저장본이
-# 스스로 밝힌 날짜를 읽어 온다 — 무슨 날짜로 켜졌는지는 사이드바가 그 사유와 함께 말한다.
-from pension_agent import config as _config      # 경로만 아는 모듈 — 임포트 부작용이 없다
+# **날짜를 여기서 «해석»하지는 않는다.** 예전에는 저장본의 기준일을 이 파일이 직접 읽어
+# 맞췄는데, 그러면 화면만 저장본 날짜로 돌고 CLI 대화형(`python -m pension_agent.consult_agent`)
+# 은 실제 오늘로 돌아 같은 고객에게 서로 다른 D-day 를 말했다. 해석은 clock 한 곳이다.
+from pension_agent import clock as _clock        # config 만 보는 아래층 — 임포트 부작용이 없다
 
-
-def _prebuilt_today() -> str | None:
-    """저장된 브리핑이 밝힌 기준일. 없거나 못 읽으면 None(그러면 실제 오늘로 간다)."""
-    try:
-        meta = json.loads(_config.BRIEFINGS_JSON.read_text(encoding="utf-8")).get("meta") or {}
-    except (OSError, ValueError):
-        return None
-    return (meta.get("today") or "").strip() or None
-
-
-#: 밖에서 이미 못박아 준 «오늘». setdefault 전에 봐야 «누가 정했는지»를 알 수 있고,
-#: 사이드바는 그 출처를 그대로 말한다 — 날짜의 출처를 갈라 보라고 만든 패널이 엉뚱한
-#: 출처를 적으면 그 패널이 있는 이유가 없어진다.
-TODAY_FROM_ENV = bool(os.environ.get("PENSION_TODAY", "").strip())
-PREBUILT_TODAY = _prebuilt_today()
-os.environ.setdefault("PENSION_TODAY", PREBUILT_TODAY or date.today().isoformat())
-
-#: 오늘이 어디서 왔나 — 사이드바 표시용.
-TODAY_SOURCE = ("PENSION_TODAY 로 고정" if TODAY_FROM_ENV
-                else "저장된 브리핑 기준일" if PREBUILT_TODAY
-                else "앱을 켠 날")
+_TODAY, TODAY_SOURCE = _clock.resolve()
+os.environ.setdefault("PENSION_TODAY", _TODAY.isoformat())
 
 # 에이전트 모듈 임포트
 from pension_agent.strategy_agent.customer import PERSONAS, AS_OF
@@ -54,7 +34,7 @@ from pension_agent.strategy_agent import engine
 from pension_agent.strategy_agent import sections
 
 from pension_agent import clock
-from pension_agent import llm
+from pension_agent import llm  # noqa: E402
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import screens
 from pension_agent.consult_agent import suggest

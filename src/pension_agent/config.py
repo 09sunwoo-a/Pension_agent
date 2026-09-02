@@ -58,6 +58,12 @@ TARGETS_JSON = PACKAGE_ROOT / "strategy_agent" / "targets.json"
 # customers.json 과 같은 이유로 DATA_ROOTS 밖에 둔다.
 BRIEFINGS_JSON = PACKAGE_ROOT / "strategy_agent" / "briefings.json"
 
+#: 저장본을 아예 쓰지 않게 하는 스위치. 회귀 테스트가 켠다(tests/__init__.py) — 검사는
+#: «만드는 경로»를 검증하므로 저장된 산출물을 받으면 안 된다. clock.py 와 agent.py 가
+#: **함께** 보므로 여기 둔다: 한쪽만 끄면 «브리핑은 새로 만드는데 오늘은 저장본 기준»
+#: 이라는, 어느 쪽도 아닌 상태가 된다.
+NO_PREBUILT_ENV = "PENSION_NO_PREBUILT"
+
 #: Store 가 훑는 루트. 앞의 것이 먼저 적재된다.
 DATA_ROOTS: list[Path] = [STRATEGY_DATA_DIR, KB_DATA_DIR]
 
