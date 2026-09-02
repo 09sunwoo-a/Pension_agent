@@ -39,6 +39,8 @@ $CADR --brief                                         # 요약표만
 $CADR --demo                                          # 시연 대본 13턴 (청중이 보는 화면)
 $CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
 $CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
+$CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
+$CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
 
 # ── 테스트 · 점검 (LLM 키 없이 돈다)
 python -m tests.test_engine            # ①~⑤ 결정론 로직
