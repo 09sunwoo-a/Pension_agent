@@ -1448,6 +1448,32 @@ def ledger_texts(evidence: list[Evidence]) -> list[str]:
 GROUND, CAUTION = "근거", "주의"
 
 
+def source_lines(s: dict, *, compact: bool = False) -> list[str]:
+    """출처 한 건의 터미널 표기. 운영 CLI(`consult_agent/__main__`)와 디버그 실행기
+    (`tests/debug` — $CAD·$CADR)가 **같은 함수**를 쓴다. 각자 표기를 복사해 갖고 있던
+    동안 출처에 URL 을 싣는 변경이 운영 CLI 에만 적용되고 디버그 화면에는 빠졌다 —
+    한쪽만 고쳐지는 사고를 이 함수 하나로 막는다. (Streamlit 은 매체가 달라 별도 —
+    마크다운 링크로 렌더한다. `app.py`)
+
+    - 근거는 **원문 문서명**으로 읽어주고 카드 id 는 역추적용으로 뒤에 남긴다.
+    - 관련도는 **있을 때만** 찍는다 — 검색으로 오지 않은 재료(고객 브리핑·상담 기록·
+      가드)에는 관련도라는 것이 없고, 그 자리에 None 을 찍으면 "관련도를 못 잰 재료"가
+      "관련도가 없는 재료"로 읽힌다.
+    - 원천 문서에 게시글 URL(핫팁 등, doc.url)이 있으면 ↗ 줄로 함께 찍는다.
+    - compact 는 대표 질문 묶음($CADR)의 한 줄 표기다 — 관련도 없이 문서명·제목·id 만.
+    """
+    doc = s.get("doc") or "출처 미상 — 확인 필요"
+    title = s.get("title") or ""
+    if compact:
+        lines = [f"   · {doc} — {title} [{s['id']}]"]
+    else:
+        tail = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
+        lines = [f"   · {doc}", f"     — {title} [{s['id']}{tail}]"]
+    if s.get("url"):
+        lines.append(f"     ↗ {s['url']}")
+    return lines
+
+
 def ledger_sources(evidence: list[Evidence]) -> list[dict]:
     """원장의 근거 목록(중복 id 제거, 등장 순서 유지)."""
     out: list[dict] = []

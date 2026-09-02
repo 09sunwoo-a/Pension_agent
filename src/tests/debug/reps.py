@@ -266,11 +266,20 @@ def _print_answer(r: dict) -> None:
     caution = [s for s in r["sources"] if s.get("role") == "주의"]
     print("\n─ 근거" + ("" if ground else ": 없음"))
     for s in ground:
-        print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+        _print_source_line(s)
     if caution:
         print("\n─ 이 고객 상담에서 지켜야 할 것")
         for s in caution:
-            print(f"   · {s.get('doc') or '출처 미상'} — {s.get('title') or ''} [{s['id']}]")
+            _print_source_line(s)
+
+
+def _print_source_line(s: dict) -> None:
+    # 표기는 운영 CLI 와 같은 공용 함수가 정한다(tools.source_lines) — compact 는 이
+    # 묶음 화면의 한 줄 표기. 각자 복사하면 한쪽만 고쳐지는 사고가 재현된다.
+    from pension_agent.consult_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
+
+    for line in source_lines(s, compact=True):
+        print(line)
 
 
 def main(argv: list[str]) -> int:

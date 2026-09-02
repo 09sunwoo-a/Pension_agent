@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 
 from pension_agent.consult_agent.graph import ask
+from pension_agent.consult_agent.tools import source_lines
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,17 +29,11 @@ for flag in ("-c", "--customer"):
         del argv[i:i + 2]
 
 def _print_source(s: dict) -> None:
-    # 근거는 **원문 문서명**으로 읽어준다. 카드 id 는 역추적용으로 뒤에 남긴다 —
-    # id 만 찍으면 사내 json 안의 코드가 근거처럼 보인다.
-    # 관련도는 **있을 때만** 찍는다. 검색으로 오지 않은 재료(고객 브리핑·상담 기록·
-    # 고객 상태에 걸린 가드)에는 관련도라는 것이 없고, 그 자리에 None 을 찍으면
-    # "관련도를 못 잰 재료"가 "관련도가 없는 재료"로 읽힌다.
-    print(f"   · {s.get('doc') or '출처 미상 — 확인 필요'}")
-    tail = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
-    print(f"     — {s.get('title') or ''} [{s['id']}{tail}]")
-    # 원천 문서의 게시글 URL(핫팁 등) — 터미널이 링크를 지원하면 바로 열 수 있다.
-    if s.get("url"):
-        print(f"     ↗ {s['url']}")
+    # 표기는 공용 함수 하나가 정한다(tools.source_lines — 문서명·id·관련도·↗URL 규약이
+    # 전부 거기 있다). 디버그 실행기(tests/debug)와 각자 복사해 갖고 있던 동안 출처에
+    # URL 을 싣는 변경이 이쪽에만 적용되고 디버그 화면에는 빠졌다.
+    for line in source_lines(s):
+        print(line)
 
 
 def _progress(text: str) -> None:
