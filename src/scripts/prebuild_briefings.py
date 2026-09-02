@@ -1,7 +1,7 @@
 """브리핑을 미리 만들어 둔다 — 시연·리허설이 앞에서 기다리지 않게.
 
     cd src
-    python -m scripts.prebuild_briefings              # 9케이스 전부
+    python -m scripts.prebuild_briefings              # 로스터 전원(PERSONAS)
     python -m scripts.prebuild_briefings 188406-7352194 181245-3097614
     python -m scripts.prebuild_briefings --clear      # 저장분을 지우고 저장소를 끈다
     python -m scripts.prebuild_briefings --status     # 무엇이 저장돼 있나

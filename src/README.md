@@ -43,7 +43,7 @@ $CADR --scenario                                      # 고객별 대표 시나�
 $CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
 
 # ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
-python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다
+python -m scripts.prebuild_briefings                  # 로스터 전원의 브리핑을 미리 만들어 둔다
 python -m scripts.prebuild_briefings --status         # 무엇이 저장돼 있고 지금 읽히는가
 python -m scripts.prebuild_briefings --clear          # 지우고 저장소를 끈다(예전 동작)
 
