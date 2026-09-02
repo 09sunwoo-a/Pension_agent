@@ -25,11 +25,14 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
+import os
 import re
 import threading
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
+from pension_agent import config
 from pension_agent.strategy_agent import engine
 from pension_agent import llm
 from pension_agent.strategy_agent import sections
@@ -564,9 +567,113 @@ def _cache_key(p: Profile, use_llm: bool, top_n: int) -> str:
 
 def clear_briefing_cache() -> None:
     """캐시를 비운다. **입력이 바뀌었을 때** 부른다 — 고객 원장을 다시 적재했거나,
-    테스트가 LLM 스텁을 바꿔 끼워 같은 프로파일에서 다른 산출을 기대할 때다."""
+    테스트가 LLM 스텁을 바꿔 끼워 같은 프로파일에서 다른 산출을 기대할 때다.
+
+    비운 뒤에 저장본을 **다시 채우지 않는다**(`_PREBUILT_LOADED` 는 그대로 둔다) —
+    이 함수를 부르는 쪽은 «지금부터는 새로 만들어라»를 말한 것이고, 거기에 저장본을
+    되돌려 놓으면 그 말을 무시하는 것이 된다.
+    """
     with _BRIEFING_LOCK:
         _BRIEFING_CACHE.clear()
+
+
+# ─────────────────────────────────────────────────────────────
+# 미리 만들어 둔 브리핑 (scripts/build_briefings.py 산출물)
+#
+# 브리핑 한 건이 LLM 12회이고 로스터가 9명이라, 평가 화면을 켤 때마다 108회를 순차로
+# 도는 것이 시작 지연의 거의 전부였다. 미리 만들어 커밋해 두고 여기서 캐시를 채운다.
+#
+# ━━ 이 자리가 캐시 계층인 이유 ━━
+# 화면(app.py)과 대화형 에이전트(consult_agent/tools.py)가 **같은 propose() 를** 부른다.
+# 화면 쪽에만 저장본을 붙이면 «화면에는 A 라고 쓰여 있는데 에이전트는 B 라고 말하는»
+# 상태가 된다 — 이 캐시가 애초에 그것을 막으려고 있는 것이다(위 주석). 그래서 저장본도
+# 같은 캐시에 들어간다.
+#
+# ━━ 낡은 저장본이 조용히 화면에 서지 않는다 ━━
+# 키는 `_cache_key()` 그대로, 즉 Profile 34개 필드 전체의 지문이다. 고객 원장이 바뀌거나
+# «오늘»이 바뀌면(만기 D-day·미접촉 개월·투자기간이 오늘에서 파생된다) 키가 안 맞아
+# 그냥 **미스**가 나고 평소처럼 실시간 생성으로 간다. 저장본은 캐시를 «채울» 뿐
+# 대체하지 않으므로, 이 파일이 낡았을 때의 최악은 «느려지는 것»이지 «틀린 D-day 를
+# 화면에 세우는 것»이 아니다. 무엇이 맞고 무엇이 어긋났는지는 prebuilt_report() 가
+# 화면에 띄울 수 있게 돌려준다.
+# ─────────────────────────────────────────────────────────────
+
+#: 저장본을 아예 쓰지 않게 하는 스위치. 회귀 테스트가 켠다(tests/__init__.py) —
+#: 테스트는 생성 경로 자체를 검증하므로 저장된 산출물을 받으면 안 된다.
+NO_PREBUILT_ENV = "PENSION_NO_PREBUILT"
+
+_PREBUILT_LOADED = False
+_PREBUILT_META: dict[str, Any] = {}
+
+
+def _prebuilt_disabled() -> bool:
+    return os.environ.get(NO_PREBUILT_ENV, "").strip() not in ("", "0", "false", "False")
+
+
+def load_prebuilt(path: Path | None = None) -> dict[str, Any]:
+    """저장된 브리핑을 캐시에 채운다(warm start). 반환: 파일 메타(없으면 빈 dict).
+
+    파일이 없거나 읽히지 않으면 **조용히 아무것도 안 한 것과 같다** — 저장본은 속도를 위한
+    것이지 정확성의 근거가 아니므로, 없다고 화면을 멈출 이유가 없다. 대신 사유를 메타에
+    남겨 prebuilt_report() 가 화면에서 말할 수 있게 한다.
+    """
+    global _PREBUILT_LOADED, _PREBUILT_META
+    target = path or config.BRIEFINGS_JSON
+    if _prebuilt_disabled():
+        _PREBUILT_META = {"skipped": f"{NO_PREBUILT_ENV} 설정으로 저장본을 쓰지 않습니다"}
+        return _PREBUILT_META
+    try:
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        _PREBUILT_META = {"skipped": f"저장본 없음 ({target.name})"}
+        return _PREBUILT_META
+    except (OSError, ValueError) as exc:
+        _PREBUILT_META = {"skipped": f"저장본을 읽지 못했습니다 — {type(exc).__name__}: {exc}"}
+        return _PREBUILT_META
+
+    entries = raw.get("briefings") or {}
+    with _BRIEFING_LOCK:
+        for key, value in entries.items():
+            # 이미 만들어 둔 것이 있으면 그것을 이긴다 — 실시간 산출이 저장본보다 새롭다.
+            _BRIEFING_CACHE.setdefault(key, value)
+        while len(_BRIEFING_CACHE) > _BRIEFING_MAX:
+            _BRIEFING_CACHE.popitem(last=False)
+    _PREBUILT_META = {**(raw.get("meta") or {}), "loaded": len(entries)}
+    _PREBUILT_LOADED = True
+    return _PREBUILT_META
+
+
+def _ensure_prebuilt() -> None:
+    """첫 propose() 앞에 한 번만. 임포트 시점에 하지 않는 이유는, 파일을 읽는 부작용이
+    «이 모듈을 임포트했다»만으로 일어나면 테스트가 스위치를 걸 자리가 없기 때문이다."""
+    global _PREBUILT_LOADED
+    if _PREBUILT_LOADED:
+        return
+    # 꺼져 있을 때도 load_prebuilt 를 지난다 — 그 안에서 «왜 안 썼는지»를 메타에 남기고,
+    # 화면은 그 사유를 그대로 읽는다. 여기서 미리 걸러내면 사유가 비어 화면이 엉뚱한
+    # 추측("기준일이 다릅니다")을 말하게 된다.
+    load_prebuilt()
+    _PREBUILT_LOADED = True
+
+
+def prebuilt_report(personas: list[Profile] | None = None, *,
+                    use_llm: bool = True, top_n: int | None = None) -> dict[str, Any]:
+    """지금 로스터가 저장본과 맞는가. 화면이 사이드바에 띄운다.
+
+    **이 보고가 없으면 저장본이 통째로 어긋나도 증상이 «느리다»뿐이다.** 5분을 기다린
+    사람은 그것을 원래 그런 것으로 받아들이지, 기준일이 어긋났다고 읽지 않는다.
+    """
+    _ensure_prebuilt()
+    roster = personas if personas is not None else list(PERSONAS)
+    n = top_n if top_n is not None else engine.TOP_N
+    missing = [p.nm for p in roster
+               if _cache_key(p, use_llm, n) not in _BRIEFING_CACHE]
+    return {
+        "total": len(roster),
+        "hit": len(roster) - len(missing),
+        "missing": missing,
+        "meta": dict(_PREBUILT_META),
+    }
 
 
 def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> dict[str, Any]:
@@ -584,6 +691,7 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
     반환값은 **캐시본의 복사본**이다. 호출부가 돌려받은 dict 를 고쳐도 다음 호출자가 고쳐진
     브리핑을 받지 않는다 — 공유가 목적인 캐시에서 그건 화면과 대화를 갈라놓는 것과 같다.
     """
+    _ensure_prebuilt()
     key = _cache_key(p, use_llm, top_n)
     with _BRIEFING_LOCK:
         cached = _BRIEFING_CACHE.get(key)

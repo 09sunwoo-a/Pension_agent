@@ -49,6 +49,15 @@ CUSTOMERS_JSON = PACKAGE_ROOT / "strategy_agent" / "customers.json"
 # 기준이며, customers.json 과 같은 이유로 DATA_ROOTS 밖에 둔다.
 TARGETS_JSON = PACKAGE_ROOT / "strategy_agent" / "targets.json"
 
+# 미리 만들어 둔 AI 브리핑 (scripts/build_briefings.py 산출물).
+#
+# 브리핑 한 건이 LLM 12회이고 로스터가 9명이라, 화면을 켤 때마다 108회를 순차로 도는 것이
+# 시작 지연의 거의 전부였다. 미리 만들어 커밋해 두고 캐시를 채우는 자리다.
+# **캐시를 «채울» 뿐 대체하지 않는다** — 키가 Profile 전체의 지문이라 고객 원장이나
+# «오늘»이 바뀌면 그냥 미스가 나고 평소처럼 실시간 생성으로 간다(agent.load_prebuilt).
+# customers.json 과 같은 이유로 DATA_ROOTS 밖에 둔다.
+BRIEFINGS_JSON = PACKAGE_ROOT / "strategy_agent" / "briefings.json"
+
 #: Store 가 훑는 루트. 앞의 것이 먼저 적재된다.
 DATA_ROOTS: list[Path] = [STRATEGY_DATA_DIR, KB_DATA_DIR]
 

@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import csv
+import json
 import os
 import re
 from datetime import date, datetime
@@ -16,10 +17,38 @@ from datetime import date, datetime
 #     먼저 채워두지 않으면 디버그 모드를 켠 순간 «오늘»이 조용히 과거로 밀리고, 그러면
 #     같은 질문의 답(만기 D-n, 연말까지 며칠)이 디버그 켜고/끄고에 따라 달라진다.
 # 밖에서 `PENSION_TODAY` 를 준 경우(특정 날짜로 얼려 보고 싶을 때)는 그것을 존중한다.
-os.environ.setdefault("PENSION_TODAY", date.today().isoformat())
+#
+# 그리고 **미리 만들어 둔 브리핑이 있으면 그 기준일에 맞춘다.** 브리핑은 오늘에서 파생된
+# 값을 문장에 싣기 때문에(만기 D-day·미접촉 개월·투자기간) 날짜가 다르면 저장본이 통째로
+# 어긋나고, 그러면 화면은 다시 108회를 돌며 5분을 기다린다. 조용히 그러지 않도록 저장본이
+# 스스로 밝힌 날짜를 읽어 온다 — 무슨 날짜로 켜졌는지는 사이드바가 그 사유와 함께 말한다.
+from pension_agent import config as _config      # 경로만 아는 모듈 — 임포트 부작용이 없다
+
+
+def _prebuilt_today() -> str | None:
+    """저장된 브리핑이 밝힌 기준일. 없거나 못 읽으면 None(그러면 실제 오늘로 간다)."""
+    try:
+        meta = json.loads(_config.BRIEFINGS_JSON.read_text(encoding="utf-8")).get("meta") or {}
+    except (OSError, ValueError):
+        return None
+    return (meta.get("today") or "").strip() or None
+
+
+#: 밖에서 이미 못박아 준 «오늘». setdefault 전에 봐야 «누가 정했는지»를 알 수 있고,
+#: 사이드바는 그 출처를 그대로 말한다 — 날짜의 출처를 갈라 보라고 만든 패널이 엉뚱한
+#: 출처를 적으면 그 패널이 있는 이유가 없어진다.
+TODAY_FROM_ENV = bool(os.environ.get("PENSION_TODAY", "").strip())
+PREBUILT_TODAY = _prebuilt_today()
+os.environ.setdefault("PENSION_TODAY", PREBUILT_TODAY or date.today().isoformat())
+
+#: 오늘이 어디서 왔나 — 사이드바 표시용.
+TODAY_SOURCE = ("PENSION_TODAY 로 고정" if TODAY_FROM_ENV
+                else "저장된 브리핑 기준일" if PREBUILT_TODAY
+                else "앱을 켠 날")
 
 # 에이전트 모듈 임포트
 from pension_agent.strategy_agent.customer import PERSONAS, AS_OF
+from pension_agent.strategy_agent import agent as strategy
 from pension_agent.strategy_agent.agent import propose
 from pension_agent.strategy_agent import engine
 from pension_agent.strategy_agent import sections
@@ -62,7 +91,30 @@ def load_all_proposals(use_llm=True):
     return {p.nm: propose(p, use_llm=use_llm) for p in PERSONAS}
 
 use_llm = st.sidebar.checkbox("LLM 문장 생성 적용", value=True)
-results = load_all_proposals(use_llm)
+
+# ── 브리핑을 «자동으로» 만들지 않는다.
+#
+# 예전에는 여기서 9명 전원의 브리핑을 무조건 만들었다. 한 명이 LLM 12회이고 순차라
+# 108회 — 게이트웨이가 호출당 2~3초면 4~5분이고, 그동안 화면에는 아무 탭도 뜨지 않는다.
+# 대화형 탭은 이 결과를 하나도 쓰지 않는데 그 시간을 함께 기다렸다.
+#
+# 그래서 세 갈래로 나눈다.
+#   · use_llm=False        규칙 산출뿐이라 0.5초. 그냥 만든다.
+#   · 저장본이 전부 적중    캐시가 이미 차 있어 LLM 0회. 그냥 만든다(즉시).
+#   · 저장본이 어긋남      **버튼을 누르기 전에는 만들지 않는다.** 5분을 말없이 기다리게
+#                          하는 대신, 몇 건이 왜 어긋났는지 먼저 말한다. 대화형 탭은
+#                          브리핑이 없어도 되므로 그동안 바로 쓸 수 있다.
+briefing_report = strategy.prebuilt_report(use_llm=use_llm) if use_llm else None
+_needs_build = bool(briefing_report and briefing_report["missing"])
+
+if not use_llm or not _needs_build:
+    results = load_all_proposals(use_llm)
+elif st.session_state.get("build_briefings_now"):
+    with st.spinner(f"브리핑 {len(briefing_report['missing'])}명분을 생성하고 있어요 — "
+                    f"1명당 LLM 12회라 몇 분 걸립니다…"):
+        results = load_all_proposals(use_llm)
+else:
+    results = {}
 
 # ── 실행 조건을 사이드바에 상시 노출한다. 답변이 이상할 때 «에이전트가 틀렸다»와
 # «기준일이 어긋났다»·«LLM 이 안 붙었다»를 화면에서 바로 갈라야 신고가 재현 가능해진다.
@@ -70,13 +122,37 @@ with st.sidebar:
     st.divider()
     st.markdown("**실행 조건**")
     st.caption(
-        f"오늘(상담 시점) · {clock.today():%Y-%m-%d}\n\n"
+        f"오늘(상담 시점) · {clock.today():%Y-%m-%d} ({TODAY_SOURCE})\n\n"
         f"원장 기준일(AS_OF) · {AS_OF:%Y-%m-%d}\n\n"
         f"LLM · {'연결됨' if llm.available() else '미설정'}"
     )
+
+    # ── 저장본 적중 현황. **이게 없으면 저장본이 통째로 어긋나도 증상이 «느리다»뿐이다.**
+    # 5분을 기다린 사람은 그것을 원래 그런 것으로 받아들이지, 기준일이 어긋났다고 읽지 않는다.
+    if briefing_report is None:
+        st.caption("브리핑 · 규칙 산출(LLM 미사용) — 저장본을 쓰지 않습니다")
+    elif not briefing_report["missing"]:
+        _gen = (briefing_report["meta"].get("generated_at") or "")[:10]
+        st.caption(f"브리핑 · 저장본 {briefing_report['hit']}/{briefing_report['total']} 적중"
+                   + (f" ({_gen} 생성)" if _gen else ""))
+    else:
+        _why = briefing_report["meta"].get("skipped")
+        st.warning(
+            f"브리핑 저장본이 {len(briefing_report['missing'])}/{briefing_report['total']}명 "
+            f"어긋납니다 — {_why or '고객 원장이나 기준일이 저장본과 다릅니다'}.\n\n"
+            "브리핑 탭은 비어 있고, 💬 대화형 탭은 그대로 쓸 수 있습니다."
+        )
+        if st.button("지금 생성", use_container_width=True):
+            st.session_state["build_briefings_now"] = True
+            st.rerun()
+        st.caption(
+            "저장본을 다시 만들려면 앱을 끄고 "
+            "`python -m scripts.build_briefings` 를 돌린 뒤 커밋한다."
+        )
+
     st.caption(
-        "«오늘»은 앱을 켠 시각에 고정된다. 특정 날짜로 얼려 보려면 앱을 끄고 "
-        "`PENSION_TODAY=YYYY-MM-DD streamlit run app.py` 로 다시 켠다."
+        "«오늘»은 앱을 켤 때 고정된다(저장본이 있으면 그 기준일). 다른 날짜로 보려면 "
+        "앱을 끄고 `PENSION_TODAY=YYYY-MM-DD streamlit run app.py` 로 다시 켠다."
     )
 
 # 6개의 탭으로 구성
@@ -137,6 +213,13 @@ with tab1:
             "등록된 고객이 없습니다. 시연용 고객 데이터가 정해지면 "
             "`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 에 채웁니다."
         )
+    elif not results:
+        # 저장본이 어긋나 아직 안 만든 상태. 여기서 조용히 빈 표를 그리면 «고객이 없다»로
+        # 읽힌다 — 무엇을 눌러야 채워지는지 말한다(사이드바의 「지금 생성」).
+        st.info(
+            "브리핑이 아직 만들어지지 않았습니다. 사이드바의 「지금 생성」을 누르거나, "
+            "앱을 끄고 `python -m scripts.build_briefings` 로 미리 만들어 커밋하세요."
+        )
 
     summary_data = []
     for nm, res in results.items():
@@ -159,7 +242,12 @@ with tab1:
 # Tab 2: 상세 조회 및 자연어 피드백
 # ==========================================
 with tab2:
-    if not PERSONAS:
+    if PERSONAS and not results:
+        st.info(
+            "브리핑이 아직 만들어지지 않았습니다. 사이드바의 「지금 생성」을 누르거나, "
+            "앱을 끄고 `python -m scripts.build_briefings` 로 미리 만들어 커밋하세요."
+        )
+    elif not PERSONAS:
         # 로스터가 비어 있는 동안은 리뷰할 산출물 자체가 없다. 대화형 탭은 고객 없이도
         # 지식 질의를 받으므로 여기서 화면 전체를 멈추지 않는다(st.stop 금지).
         st.info(

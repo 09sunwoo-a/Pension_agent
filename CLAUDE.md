@@ -100,6 +100,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | 요건 기준 | `docs/REQUIREMENTS.md` — 전체 서비스 요건 앵커. 상위 기준은 `07_에이전트_기능정의/` |
 | 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/strategy_agent/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것 |
 | ⑨ 안내 콘텐츠 | `IRP_세미나이벤트_DB_v1.md` → `src/pension_agent/strategy_agent/data/assets.json` (손 저작 — 9건이라 생성기를 두지 않았다). 평가용 정답은 `data/outreach_golden.json` 에 따로 두고 **LLM 입력에 넣지 않는다** |
+| 미리 만든 브리핑 | `src/pension_agent/strategy_agent/briefings.json` (생성물) — `scripts/build_briefings.py`. 평가 화면의 시작 지연(9명 × LLM 12회)을 없애려고 커밋해 공유한다. 캐시를 **채울** 뿐 대체하지 않으므로 낡으면 조용히 실시간 생성으로 간다 |
 | 데모 상태 | `docs/DEMO_STATUS.md` (생성물) — 무엇이 더미 **데이터**인가 |
 | 실서비스 위험 | `docs/PRODUCTION_RISKS.md` — 무엇이 더미 **구조**인가. 단일 프로세스라서 성립하고 실서비스에서 깨지는 자리 |
 | 지식 저작 | `src/AUTHORING.md` |
@@ -129,6 +130,13 @@ python -m pension_agent.knowledge.schema validate pension_agent
 python -m scripts.kb_build.build_kb             # _draft_ 생성 + 변환 리포트
 python -m scripts.kb_build.build_kb --activate  # 검토 후 활성화
 python -m scripts.demo_status                   # 리포트 갱신
+```
+
+브리핑 문장에 영향을 주는 것(프롬프트·지식카드·고객 원장)을 고쳤으면, 미리 만든 브리핑도
+다시 만든다 — 안 그러면 키가 어긋나 평가 화면이 다시 108회를 돈다:
+
+```bash
+python -m scripts.build_briefings                # → strategy_agent/briefings.json (커밋)
 ```
 
 타겟 룰베이스 xlsx 를 기획자가 갱신해 왔으면:

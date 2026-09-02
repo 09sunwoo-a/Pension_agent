@@ -19,3 +19,10 @@ import os
 PINNED_TODAY = "2026-08-24"
 
 os.environ.setdefault("PENSION_TODAY", PINNED_TODAY)
+
+#: **저장된 브리핑을 쓰지 않는다.** 회귀 검사는 브리핑을 «만드는 경로»를 검증하는데,
+#: 미리 만들어 커밋해 둔 산출물(strategy_agent/briefings.json — scripts/build_briefings.py)이
+#: 캐시를 채우면 검사가 그 파일을 읽고 통과한다. 그러면 생성 로직이 깨져도 초록이 뜬다.
+#: 지금은 저장본의 기준일이 달라 어차피 키가 안 맞지만, «어쩌다 안 맞아서» 안전한 것과
+#: «끄기로 정해서» 안전한 것은 다르다 — 기준일이 같아지는 날 조용히 무너진다.
+os.environ.setdefault("PENSION_NO_PREBUILT", "1")

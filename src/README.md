@@ -55,6 +55,7 @@ python -m pension_agent.consult_agent.kb                          # 지식베이
 python -m scripts.kb_build.build_kb [--activate]   # 06_주제별_추출지식 → 카드
 python -m scripts.import_targets                   # 타겟 룰베이스 xlsx → targets.json
 python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
+python -m scripts.build_briefings                  # 9명 브리핑 미리 생성 → briefings.json
 ```
 
 **고객 지정(`-c/--customer`)** 은 고객 id(KB-PIN)다. 없으면 브리핑질의·LMS발송·수정이
@@ -102,9 +103,33 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 CSV 로 내려받는다. 브리핑 산출물 피드백(`feedback_log.csv`)과 **파일이 다르다**: 재현에
 필요한 것이 다르기 때문이다(대화는 질문·트레이스가 있어야 같은 자리를 다시 밟는다).
 
-**«오늘»은 앱을 켠 시각에 고정된다.** 사이드바 「실행 조건」이 오늘·원장 기준일(`AS_OF`)·
-LLM 연결 여부를 항상 보여준다 — 답이 이상할 때 «에이전트가 틀렸다»와 «기준일이 어긋났다»를
-화면에서 갈라야 신고가 재현 가능해진다. 특정 날짜로 얼려 보려면
+#### 브리핑을 미리 만들어 둔다 (시작 지연 없애기)
+
+브리핑 한 건이 **LLM 12회**이고 로스터가 9명이라, 예전에는 화면을 켤 때마다 **108회를
+순차로** 돌고 나서야 첫 탭이 떴다(호출당 2~3초면 4~5분). 대화형 탭은 브리핑을 하나도
+안 쓰는데 그 시간을 함께 기다렸다. 그래서 미리 만들어 **커밋해서 공유한다**.
+
+```bash
+python -m scripts.build_briefings     # → strategy_agent/briefings.json (커밋한다)
+```
+
+- 적재 자리는 `propose()` 의 **캐시 계층**이다(`agent.load_prebuilt`). 화면과 대화형
+  에이전트가 같은 `propose()` 를 부르므로, 화면에만 붙이면 둘이 갈린다.
+- **낡아도 틀리지는 않는다.** 키가 Profile 34개 필드 전체의 지문이라, 고객 원장이나
+  «오늘»이 바뀌면 그냥 미스가 나고 평소처럼 실시간 생성으로 간다. 최악이 «느려지는 것»
+  이지 «틀린 D-day 를 화면에 세우는 것»이 아니다.
+- 어긋난 건수는 사이드바가 말하고, 그때는 자동으로 108회를 돌지 않는다 — 「지금 생성」을
+  눌러야 만든다. 그동안 💬 대화형 탭은 그대로 쓸 수 있다.
+- 회귀 테스트는 저장본을 쓰지 않는다(`tests/__init__.py` 가 `PENSION_NO_PREBUILT` 를
+  켠다). 검사는 «만드는 경로»를 봐야지 저장된 산출물을 읽으면 안 된다.
+
+덤으로 **시연 재현성**이 생긴다 — 실행할 때마다 문장이 달라지지 않는다.
+
+**«오늘»은 앱을 켤 때 고정된다.** 저장본이 있으면 그 기준일에 맞춘다(브리핑이 만기
+D-day·미접촉 개월을 문장에 싣기 때문에, 날짜가 다르면 저장본이 통째로 어긋난다).
+사이드바 「실행 조건」이 오늘·**그 날짜가 어디서 왔는지**·원장 기준일(`AS_OF`)·LLM 연결
+여부·저장본 적중률을 항상 보여준다 — 답이 이상할 때 «에이전트가 틀렸다»와 «기준일이
+어긋났다»를 화면에서 갈라야 신고가 재현 가능해진다. 다른 날짜로 보려면
 `PENSION_TODAY=YYYY-MM-DD streamlit run app.py`.
 
 두 CSV 는 `.gitignore` 에 있다. 개발자에게 넘길 때는 화면의 내려받기 버튼을 쓴다.
