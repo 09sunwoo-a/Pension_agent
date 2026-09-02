@@ -1038,6 +1038,45 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 승낙 턴이 근거만 싣고 답변 문장을 손으로 만들지 않는다")
     ok += hit
 
+    # ④-b 승낙받은 자료가 «없는 자료»가 되어 나가면 안 된다.
+    #
+    #     실측(2026-09-02 김현수 세션): 화법 2건을 승낙받아 원장에 싣고도 답변은 "해당
+    #     질문에 대응하는 대사가 지금 준비된 자료에는 없어요"로 시작했고, 직원에게
+    #     디폴트옵션 등록 현황을 되물으며 끝났다. 작성 프롬프트에 실리는 것이 「직원 질문:
+    #     네」와 이전 대화뿐이라, LLM 이 <자료>를 **직전 턴의 질문**에 대고 재고 안 맞으니
+    #     시스템 규칙 9(핵심 대상이 자료에 없으면 그것이 결론)를 적용한 것이다. 그 판정은
+    #     여기서 성립하지 않는다 — 자료를 고른 것은 질문이 아니라 고객 상태이고, 무엇을
+    #     보여줄지는 제안한 턴이 이미 정했다(§10). 그래서 **코드가** 그 사실을 실어 준다.
+    hit = out.get("accepted") == action["label"]
+    print(f"{'✓' if hit else '✗'} 승낙 턴이 무엇을 승낙받았는지 남긴다(작성 단계가 볼 수 있게)")
+    ok += hit
+
+    # 선언이 없으면 LangGraph 가 노드 반환값에서 그 키를 **조용히** 버린다(state.py 주석).
+    # 그러면 위 검사는 통과하는데 그래프로 돌린 턴만 옛 증상으로 돌아간다.
+    from pension_agent.consult_agent.state import AgentState as _AS
+    hit = "accepted" in _AS.__annotations__
+    print(f"{'✓' if hit else '✗'} 그 값이 상태에 선언돼 있다(선언 없으면 그래프가 버린다)")
+    ok += hit
+
+    seen: dict[str, str] = {}
+    orig_gen = plan.generate
+    plan.generate = lambda p, **kw: seen.setdefault("p", p) or "답변"
+    try:
+        plan.compose({"question": "네", "customer_id": SONG, **out})
+        hit = ("승낙에 대한 답이다" in seen["p"] and action["label"] in seen["p"]
+               and '"준비된 자료가 없다"고 말하지 않는다' in seen["p"])
+        print(f"{'✓' if hit else '✗'} 승낙 턴의 작성 프롬프트가 «이 자료를 보여주라»고 말한다")
+        ok += hit
+
+        seen.clear()
+        plan.compose({"question": "실물이전 절차 알려줘", "customer_id": SONG,
+                      "evidence": out["evidence"]})
+        hit = "승낙에 대한 답이다" not in seen["p"]
+        print(f"{'✓' if hit else '✗'} 승낙 턴이 아니면 그 블록이 붙지 않는다")
+        ok += hit
+    finally:
+        plan.generate = orig_gen
+
     # 도착지는 `compose`(답변 작성) 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께
     # 끝난다. 라벨이 상태 키 `answer` 와 다른 이유는 graph.py 의 add_node 주석 참고.
     hit = R.route_confirm(out) == "compose" and R.route_confirm(

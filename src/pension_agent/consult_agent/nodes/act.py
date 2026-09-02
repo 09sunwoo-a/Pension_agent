@@ -269,7 +269,14 @@ def _show_playbook(pending: dict) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 물어봐 주세요.",
                 "sources": [], "pending_action": None}
     # answer 를 비워 둔 채 원장만 채운다 — 분기표가 이걸 보고 compose 로 보낸다.
-    return {"evidence": [ev], "pending_action": None}
+    #
+    # 무엇을 승낙받았는지(`accepted`)도 함께 남긴다. 작성 단계가 받는 질문은 "네" 한 마디라
+    # 그 말에는 무엇을 쓰라는 것인지가 없고, 알려주지 않으면 LLM 은 <자료> 를 **직전 턴의
+    # 질문**에 대고 재서 「그 자료는 없어요」로 답한다(prompts.ACCEPTED_BLOCK 의 실측).
+    # 여기서 답변 문장을 만들지 않는 것과 같은 규약이다 — 코드는 «무엇을 보여줄지»만 정하고
+    # 문장은 compose 가 쓴다.
+    return {"evidence": [ev], "pending_action": None,
+            "accepted": pending.get("label") or "고객 상태에 걸린 재료"}
 
 
 def _link(pending: dict) -> dict[str, Any]:
