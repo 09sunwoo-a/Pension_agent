@@ -426,6 +426,40 @@ finally:
     # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
     agent.clear_briefing_cache()
 
+# ── 미리 만들어 둔 브리핑(briefing_store) ────────────────────────────
+# 프로세스 캐시는 프로세스가 끝나면 사라져서, 리허설이 매 실행 앞에서 브리핑 생성(LLM 11회)을
+# 다시 치른다. 파일로 남겨 그것을 건너뛰되, **입력이 달라진 저장분은 절대 읽지 않는다** —
+# 낡은 브리핑이 화면에 뜨는 것은 이 저장소가 가장 경계하는 «화면과 값이 갈리는» 실패의
+# 조용한 형태다(캐시라서 아무도 안 본다).
+import pathlib as _pathlib  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+from pension_agent import config as _config  # noqa: E402
+from pension_agent.strategy_agent import briefing_store as _store  # noqa: E402
+
+_saved_dir, _saved_fp = _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT
+_tmp = _pathlib.Path(_tempfile.mkdtemp(prefix="briefing-store-"))
+try:
+    # 디렉터리가 없으면 저장소는 통째로 꺼진 것이다 — 돌린 적 없는 사람에게는 무변경이다.
+    _config.BRIEFING_CACHE_DIR = _tmp / "none"
+    check(not _store.enabled(), "디렉터리가 없으면 브리핑 저장소는 꺼져 있다")
+
+    _config.BRIEFING_CACHE_DIR = _tmp
+    _store._FINGERPRINT = "fp-A"
+    _store.save("k1", {"sentence": "저장본"})
+    check((_store.load("k1") or {}).get("sentence") == "저장본", "저장한 브리핑을 다시 읽는다")
+
+    # 지식 카드·프롬프트·날짜 중 하나라도 바뀌면 지문이 달라진다.
+    _store._FINGERPRINT = "fp-B"
+    check(_store.load("k1") is None, "입력(지문)이 바뀐 저장분은 읽지 않는다")
+
+    _store._FINGERPRINT = "fp-A"
+    check(_store.load("없는키") is None, "저장된 적 없는 키는 None")
+finally:
+    _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT = _saved_dir, _saved_fp
+    _shutil.rmtree(_tmp, ignore_errors=True)
+
 # dorm=None 이어도 브리핑이 죽지 않는다 (김현수는 실제로 상담이력이 없어 dorm=None 이다).
 check(BY_NAME["김현수"].dorm is None, "김현수: 상담이력 없음 → dorm=None")
 check("dor" not in conditions(BY_NAME["김현수"]), "dorm=None 이면 dor 요건 미성립")

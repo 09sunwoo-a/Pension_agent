@@ -30,6 +30,7 @@ import threading
 from collections import OrderedDict
 from typing import Any
 
+from pension_agent.strategy_agent import briefing_store
 from pension_agent.strategy_agent import engine
 from pension_agent import llm
 from pension_agent.strategy_agent import sections
@@ -590,9 +591,15 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
         if cached is not None:
             _BRIEFING_CACHE.move_to_end(key)      # 최근 쓴 것이 먼저 밀려나지 않게
     if cached is None:
-        out = _propose(p, use_llm=use_llm, top_n=top_n)
-        out["facts"]["summaries"] = engine.section_summaries(
-            out["facts"], out["sentence"], out["insight"])
+        # 미리 만들어 둔 것이 있으면 그것을 쓴다 — 프로세스가 새로 뜰 때마다 11 회를 다시
+        # 치르지 않게 하는 자리다(briefing_store 머리말). 아무것도 미리 만들지 않았으면
+        # 저장소는 꺼져 있고 아래 생성으로 그대로 내려간다.
+        out = briefing_store.load(key)
+        if out is None:
+            out = _propose(p, use_llm=use_llm, top_n=top_n)
+            out["facts"]["summaries"] = engine.section_summaries(
+                out["facts"], out["sentence"], out["insight"])
+            briefing_store.save(key, out)
         # 생성은 락 밖에서 한다 — 11 회의 LLM 호출 동안 다른 호출자를 세우지 않는다.
         # 동시에 처음 부른 둘이 각자 만들 수는 있고, 그때는 먼저 넣은 쪽으로 통일된다
         # (둘 다 같은 입력의 산출이므로 어느 쪽이 이겨도 «하나로 통일»이라는 목적은 선다).
