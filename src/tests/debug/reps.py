@@ -7,6 +7,8 @@
     python -m tests.debug.reps --demo       # 시연 대본 순서대로 (docs/DEMO_SCENARIO.md)
     python -m tests.debug.reps --demo --debug   # 대본 + 재료→답변 로그 (시연에서 띄울 것)
     python -m tests.debug.reps --demo --time    # + 턴별 소요 시간 (리허설 진단용 — 시연에서는 끈다)
+    python -m tests.debug.reps --scenario           # 고객별 대표 시나리오 5종 전부
+    python -m tests.debug.reps --scenario 김서연     # 이름(또는 번호)으로 골라서 — 옵션은 --demo 와 동일
 
 왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
 이어진다(멀티턴 재현이 목적이다). 대표 질문 10개는 서로 독립이어야 하므로 케이스마다
@@ -121,6 +123,46 @@ DEMO: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
     (2, "3막 대조 — 정민석(공격투자형인데 원리금보장 100%)",
      "181245-3097614", (
         ("T13", "이 고객한테는 뭘 권할 수 있어?"),                      # 같은 질문, 다른 답
+    )),
+)
+
+
+#: 고객별 대표 시나리오 — `docs/DEMO_CUSTOMER_SCENARIOS.md`. 고객마다 한 세션이라 블록
+#: 안에서는 맥락이 이어진다(K4 는 K3 의 되묻기에 답하는 턴이다). 실행 경로·화면은 --demo
+#: 리허설과 같고, 도는 목록만 다르다. 골라 돌리기: `--scenario 김서연` / `--scenario 1 5`.
+SCENARIOS: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
+    (1, "김서연 — 타행 ISA 8,000만원 · 되묻기 (골든 케이스 01)", "171203-4815062", (
+        ("K1", "이 고객 어떤 상황이야?"),
+        ("K2", "ISA 만기자금을 IRP로 옮기면 뭐가 좋아?"),
+        ("K3", "고객이 8천만원 전부는 부담스럽다는데, 일부만 옮기면 세액공제는 어떻게 돼?"),
+        # ↑ 핵심 장면 — 공제율이 갈리는 미확인 값(총급여 구간)을 답 대신 되묻는다
+        ("K4", "5,500만원 초과야"),
+        ("K5", "입금은 몇 번 화면에서 해?"),
+    )),
+    (2, "박정호 — 퇴직금 1.5억 통장 수령 · 순서 경고 (골든 케이스 03)", "168450-7293815", (
+        ("P1", "지난 상담에서 무슨 얘기 했지?"),                # 실화면에서는 추천 질문 칩
+        ("P2", "퇴직금을 이미 통장으로 받았다는데, 지금이라도 IRP로 되돌릴 수 있어?"),
+        ("P3", "절차가 어떻게 돼? 서류는 뭐가 필요해?"),
+        ("P4", "이 고객 연금개시 요건도 충족했던데, 개시도 같이 권할까?"),
+        # ↑ 핵심 장면 — 환급 완료 전 지급·연금설계 등록 제한과의 선후 충돌을 먼저 세운다
+    )),
+    (3, "이수민 — 만기 임박 · 디폴트옵션 미등록 (골든 케이스 05)", "175926-3048171", (
+        ("L1", "이 고객 왜 관리 대상이야?"),
+        ("L2", "만기 전에 미리 정해둘 방법 있어?"),
+        ("L3", "디폴트옵션을 등록하면 지금 있는 현금 1,000만원도 자동으로 굴러가?"),
+        # ↑ 핵심 장면 — 등록만으로 기존 현금성자산은 이동하지 않는다(교체매매 세트)
+        ("L4", "고객이 원치 않는 상품에 강제 가입되는 거 아니냐고 하면?"),
+    )),
+    (4, "송도윤 — 복합 3종 · 10개월 전 기록이 명분 (기존 9케이스)", "188406-7352194", (
+        ("S1", "이 고객 왜 관리 대상이야?"),
+        ("S2", "지난 상담에서 무슨 얘기 했지?"),                # 실화면에서는 추천 질문 칩
+        ("S3", "고객이 '그 돈 그냥 둬도 되지 않나요' 하는데 뭐라고 하지?"),
+        ("S4", "그럼 이 고객한테 뭘 권할 수 있어?"),
+    )),
+    (5, "정민석 — 같은 질문, 다른 답 (기존 9케이스)", "181245-3097614", (
+        ("J1", "이 고객한테 뭘 권할 수 있어?"),                 # 핵심 장면 — S4 직후의 대비축
+        ("J2", "고객이 원금 잃는 건 싫다는데, 그래도 권해야 해?"),
+        ("J3", "예금만 하겠다는 고객, 뭐라고 설득하지?"),
     )),
 )
 
@@ -277,17 +319,24 @@ def main(argv: list[str]) -> int:
     """검토(`CASES`)와 리허설(`--demo`)이 **같은 실행 경로**를 쓰고 화면만 갈린다 —
     리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
     demo = "--demo" in argv
+    scenario = "--scenario" in argv
     brief = "--brief" in argv
     debug = "--debug" in argv
     show_llm = "--show-llm" in argv
     timing = "--time" in argv
     picked = {a for a in argv if a[0].isdigit()}
+    #: --scenario 에서만 쓴다 — 고객 이름으로 블록을 고른다(`--scenario 김서연 정민석`).
+    names = {a for a in argv if not a.startswith("--") and not a[0].isdigit()}
 
     unknown = [a for a in argv if a.startswith("--")
-               and a not in ("--demo", "--brief", "--debug", "--show-llm", "--time")]
+               and a not in ("--demo", "--scenario", "--brief", "--debug", "--show-llm", "--time")]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
-        print("  옵션: --demo · --brief · --debug · --show-llm · --time · 케이스 번호")
+        print("  옵션: --demo · --scenario [고객명·번호] · --brief · --debug · --show-llm · "
+              "--time · 케이스 번호")
+        return 1
+    if demo and scenario:
+        print("--demo 와 --scenario 는 함께 쓸 수 없습니다 — 도는 대본이 다릅니다.")
         return 1
 
     if not LLM.available():
@@ -297,15 +346,20 @@ def main(argv: list[str]) -> int:
         print("  anthropic: ANTHROPIC_API_KEY")
         return 1
 
-    # 두 모드의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
-    # 트레이스를 기본으로 붙이는가.
-    blocks = DEMO if demo else CASES
+    # 모드의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
+    # 트레이스를 기본으로 붙이는가. --scenario 는 도는 목록만 다르고 화면·실행 경로는
+    # --demo 리허설과 같다 — 다른 경로로 돌면 시연을 예행한 것이 아니다.
+    blocks = SCENARIOS if scenario else DEMO if demo else CASES
+    demo = demo or scenario
     trace_by_default = not demo
 
     rows: list[list[str]] = []
     with _fixtures_intact():
         for no, sees, customer, turns in blocks:
             if picked and not demo and str(no) not in picked:
+                continue
+            if scenario and (picked or names) and str(no) not in picked \
+                    and not any(n in sees for n in names):
                 continue
             labelled = (turns if demo else
                         tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
@@ -376,7 +430,11 @@ def main(argv: list[str]) -> int:
         if i == 0:
             print("  " + "  ".join("─" * w for w in widths))
     print("\n  도구 뒤의 ✗ 는 그 호출이 자료를 못 찾은 것 — 다음 칸에서 다른 도구로 옮겨갔는지가 요점입니다.")
-    if demo:
+    if scenario:
+        print("  리허설에서 볼 것: K3 이 되묻기로 끝나는가 · P4 가 순서 경고를 세우는가 ·")
+        print("                    L3 이 «이동하지 않는다»로 답하는가 · S2 가 10개월 전 기록을 꺼내는가 ·")
+        print("                    J1 이 S4(송도윤)와 같은 질문에 다른 답을 내는가.")
+    elif demo:
         print("  리허설에서 볼 것: T9 가 도구를 여러 개 부르는가 · T10 이 suitable 을 부르는가 ·")
         print("                    T3 에 연계가 붙는가 · T12 가 «없다»로 끝나는가 ·")
         print("                    T9 가 «비대면 전환 시 면제»(F53)를 대면 0.38% 와 모순 없이 잇는가.")
