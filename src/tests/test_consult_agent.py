@@ -4407,6 +4407,32 @@ def check_origin() -> int:
           + ("" if hit else f" — {empty[:3]}"))
     ok += hit
 
+    # 출처 터미널 표기는 공용 함수 하나다(tools.source_lines). 운영 CLI 와 디버그 실행기가
+    # 표기를 각자 복사해 갖고 있던 동안, URL 을 싣는 변경이 운영 CLI 에만 적용되고 디버그
+    # 화면($CAD·$CADR)에는 빠졌다 — 한쪽만 고쳐지는 사고의 재발을 여기서 막는다.
+    s_full = {"id": "x.1", "title": "제목", "doc": "문서", "score": 1.0, "url": "https://u"}
+    s_bare = {"id": "x.2", "title": "제목", "doc": "문서"}   # 검색으로 오지 않은 재료
+    full, bare = tools.source_lines(s_full), tools.source_lines(s_bare)
+    compact = tools.source_lines(s_full, compact=True)
+    hit = (full[-1] == "     ↗ https://u" and "관련도 1.0" in full[1]
+           and "관련도" not in "".join(bare) and "↗" not in "".join(bare)
+           and len(compact) == 2 and compact[0].startswith("   · 문서 — 제목 [x.1]"))
+    print(f"{'✓' if hit else '✗'} source_lines — URL·관련도는 있을 때만, compact 는 한 줄")
+    ok += hit
+
+    # 세 진입점이 전부 그 함수를 부르는가. 운영 CLI 는 모듈 최상위에서 REPL 이 돌아
+    # **임포트하면 안 되므로**(스크립트다) 파일 텍스트로 확인한다.
+    import inspect
+
+    from tests.debug import __main__ as dbg_main
+    from tests.debug import reps as dbg_reps
+    ops_src = pathlib.Path(tools.__file__).with_name("__main__.py").read_text(encoding="utf-8")
+    hit = ("source_lines" in ops_src
+           and "source_lines" in inspect.getsource(dbg_main._print_source)
+           and "source_lines" in inspect.getsource(dbg_reps._print_source_line))
+    print(f"{'✓' if hit else '✗'} 운영 CLI·$CAD·$CADR 이 같은 출처 표기 함수를 쓴다")
+    ok += hit
+
     # 카드가 밝힌 원천 문서(source.doc)가 레지스트리로 이어져 문서명으로 나온다.
     # 적재 파일(06/03 영업화법의 변환본)이 아니라 그 앞의 행내 PDF 이름이어야 한다.
     card = next((c for c in KB.cards if c["id"] == "pitch.k03.001"), None)
