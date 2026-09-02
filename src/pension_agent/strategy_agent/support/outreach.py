@@ -175,6 +175,25 @@ def outreach_candidates(situations: list[dict] | None = None,
             for content_type, key in (("이벤트", "event"), ("세미나", "seminar"))}
 
 
+def relevant_outreach(situations: list[dict] | None = None,
+                      today: date | None = None,
+                      name: str = "고객") -> list[dict]:
+    """이 고객의 문제상황에 **실제로 걸린** 콘텐츠만. 하나도 안 걸리면 빈 목록.
+
+    `outreach_candidates()` 와 다른 점은 «관련 없는 후보를 남기지 않는다»는 것이다. 화면 ⑨ 는
+    관련도 0 이어도 임박 순으로 한 건을 세우는데(섹션을 비우지 않는 것이 요건이다), «이
+    고객에게 보낼 만한 것이 있는가»를 묻는 쪽은 그 폴백을 세면 안 된다 — 어느 고객에게나
+    항상 참이 되어 «조건이 맞을 때만»이라는 말이 없어진다.
+
+    추천 질문 칩(consult_agent/suggest.py)이 이 판정을 쓴다. LLM 을 부르지 않는다.
+    """
+    wanted = {c for s in (situations or []) for c in (s.get("conds") or [])}
+    if not wanted:
+        return []
+    rows = outreach_candidates(situations, today, name)
+    return [r for key in ("event", "seminar") for r in rows[key] if wanted & set(r["conds"])]
+
+
 def next_event_and_seminar(situations: list[dict] | None = None,
                            today: date | None = None,
                            name: str = "고객") -> dict[str, dict | None]:

@@ -371,9 +371,11 @@ with tab_chat:
         st.session_state.pending_question = None
 
     # ── 이 고객 관련 추천 질문 (consult_agent/suggest.py — 코드 조립, 상황 기반)
-    # 과거 상담이 있는 고객에게만 뜬다. 칩 문구 자체가 "지난 상담이 있었다"는 알림이고,
-    # 누르면 아래 pending_question 경로로 계획 루프(history 도구)를 탄다.
-    _chips = suggest.history_chips(customer_id)
+    # 상황이 맞는 고객에게만 뜬다. 칩 문구 자체가 알림이고("지난 상담이 있었다" ·
+    # "이 고객에게 맞는 세미나가 열려 있다"), 누르면 아래 pending_question 경로로 계획
+    # 루프(history · outreach 도구)를 탄다. 조건이 아니면 아무것도 안 뜬다 — 항상 뜨는
+    # 칩은 배경이 되어 아무도 읽지 않는다.
+    _chips = suggest.history_chips(customer_id) + suggest.outreach_chips(customer_id)
     if _chips:
         st.markdown("**💡 이 고객 관련 추천 질문**")
         _chip_cols = st.columns(len(_chips))

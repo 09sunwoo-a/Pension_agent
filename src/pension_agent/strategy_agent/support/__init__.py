@@ -56,6 +56,7 @@ from pension_agent.strategy_agent.support.outreach import (  # noqa: F401
     lms_frame,
     next_event_and_seminar,
     outreach_candidates,
+    relevant_outreach,
     rule_body,
     schedule_text,
     _outreach_row,

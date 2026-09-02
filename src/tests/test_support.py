@@ -156,6 +156,23 @@ if len(ordered) > 1:
           "⑨ 문제상황에 걸린 콘텐츠가 먼저 정렬된다", str(overlaps))
     check(overlaps[0] > 0, "⑨ 김현수(미운용 현금성자산)에게 걸리는 이벤트가 있다", str(overlaps))
 
+# 관련도 0 인 폴백과 «실제로 걸린 것»을 가른다. 화면 ⑨ 는 섹션을 비우지 않으려고 관련 없는
+# 콘텐츠도 한 건 세우는데(화면 요건이다), 추천 질문 칩은 그 폴백을 «있다»로 세면 안 된다 —
+# 어느 고객에게나 참이 되어 «조건이 맞을 때만»이라는 말이 없어진다.
+for p in PERSONAS:
+    _sits = FACTS[p.nm]["problem_situations"]
+    _wanted = {c for s in _sits for c in (s.get("conds") or [])}
+    _rel = support.relevant_outreach(_sits, name=p.nm)
+    check(all(_wanted & set(r["conds"]) for r in _rel),
+          f"⑨ {p.nm}: relevant_outreach 는 걸린 것만 돌려준다", str([r["id"] for r in _rel]))
+    check(all(r["end_date"] >= str(support.today()) for r in _rel),
+          f"⑨ {p.nm}: relevant_outreach 도 종료된 콘텐츠를 빼고 본다")
+# 전원이 매칭되면 «조건이 맞을 때만 뜬다»가 검증되지 않는다 — 대조군이 있어야 의미가 있다.
+check(any(not support.relevant_outreach(FACTS[p.nm]["problem_situations"]) for p in PERSONAS),
+      "⑨ 걸린 콘텐츠가 없는 고객이 있다(칩 대조군)",
+      str([p.nm for p in PERSONAS
+           if not support.relevant_outreach(FACTS[p.nm]["problem_situations"])]))
+
 # keywords → 요건 매핑은 **새 판정 규칙이 아니라 이름의 대응**이다. 실재하지 않는 요건을
 # 가리키면 그 콘텐츠는 영원히 관련도 0 이 되고, 그 사실은 화면 어디에도 안 나타난다.
 check(set(sum(map(list, support.KEYWORD_CONDS.values()), [])) <= set(engine.CONDS),

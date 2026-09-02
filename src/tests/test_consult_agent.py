@@ -3349,6 +3349,53 @@ def check_followups() -> int:
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫히면 고객 질문은 안 뜬다(닫힘 {len(closed)} · 열림 {len(opened)})")
     ok += hit
 
+    # ④-b 안내 콘텐츠 칩은 **이 고객 상태에 걸린 콘텐츠가 실제로 열려 있을 때만** 뜬다.
+    #      화면 ⑨ 는 섹션을 비우지 않으려고 관련 없는 콘텐츠도 한 건 세우는데(화면 요건이다),
+    #      그 폴백을 «있다»로 세면 칩이 어느 고객에게나 떠서 배경이 된다.
+    from pension_agent.strategy_agent import situations as _sit
+    from pension_agent.strategy_agent import support as _sup
+    matched = [p for p in PERSONAS if _sup.relevant_outreach(_sit.problem_situations(p))]
+    unmatched = [p for p in PERSONAS if not _sup.relevant_outreach(_sit.problem_situations(p))]
+    _CHIP = "이 고객한테 안내할 만한 세미나나 이벤트 있어?"
+    hit = bool(matched) and _CHIP in suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": matched[0].id})
+    print(f"{'✓' if hit else '✗'} 걸린 콘텐츠가 있는 고객에게는 안내 콘텐츠 질문이 뜬다"
+          + (f" ({matched[0].nm})" if matched else " — 대상 고객 없음"))
+    ok += hit
+
+    hit = bool(unmatched) and _CHIP not in suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": unmatched[0].id})
+    print(f"{'✓' if hit else '✗'} 걸린 콘텐츠가 없는 고객에게는 안 뜬다"
+          + (f" ({unmatched[0].nm})" if unmatched else " — 대조군 없음: 전원이 매칭되면 «조건이 맞을 때만»이 검증되지 않는다"))
+    ok += hit
+
+    # 화면을 여는 칩도 같은 판정이다 — 문구 자체가 «지금 이 고객에게 맞는 세미나가 열려
+    # 있다»는 알림이라, 조건이 아닌 고객에게 뜨면 알림이 아니라 배경이 된다.
+    hit = (bool(matched) and suggest.outreach_chips(matched[0].id)
+           and (not unmatched or not suggest.outreach_chips(unmatched[0].id))
+           and not suggest.outreach_chips(None))
+    print(f"{'✓' if hit else '✗'} 입구 칩도 조건이 맞는 고객에게만 뜬다")
+    ok += hit
+
+    # **칩 판정은 LLM 을 부르지 않는다.** 칩 하나 띄우자고 브리핑 한 편(LLM 11회)을
+    # 돌리면 답변 지연이 그대로 늘고, LLM 이 죽으면 칩이 통째로 사라진다.
+    from pension_agent import llm as _llm
+    _orig_gen = _llm.generate
+    try:
+        _llm.generate = lambda *a, **k: (_ for _ in ()).throw(AssertionError("칩이 LLM 을 불렀다"))
+        chips = suggest.outreach_chips(matched[0].id) if matched else []
+        follow = suggest.followup_questions(
+            {"evidence": [ev("customer")], "history": [],
+             "customer_id": matched[0].id if matched else None})
+        no_llm = True
+    except AssertionError:
+        chips, follow, no_llm = [], [], False
+    finally:
+        _llm.generate = _orig_gen
+    hit = no_llm and bool(chips) and bool(follow)
+    print(f"{'✓' if hit else '✗'} 안내 콘텐츠 칩 판정에 LLM 을 부르지 않는다")
+    ok += hit
+
     # ⑤ 이번 턴에 이미 쓴 재료로 다시 보내지 않는다 — 방금 답한 것을 또 묻게 된다.
     both = suggest.followup_questions(
         {"evidence": [ev("procedure", "계약이전"), ev("screen", "계약이전")], "history": []})
