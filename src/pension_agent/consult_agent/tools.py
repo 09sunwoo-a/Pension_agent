@@ -1292,6 +1292,86 @@ def cited_cards(state: AgentState) -> set[str]:
 # 레지스트리
 # ─────────────────────────────────────────────────────────────
 
+def _outreach(state: AgentState, query: str) -> Evidence | None:
+    """⑨ 이 고객에게 안내할 세미나·이벤트 — 화면 ⑨ 와 **같은 산출**을 재료로 싣는다.
+
+    화면 ⑨ 는 상담 전에 이벤트 1건 + 세미나 1건을 골라 두는데, 그 선정과 문구가 대화
+    쪽에는 재료로 없었다. 그래서 "이 고객한테 보낼 만한 세미나 있어?"·"왜 이거야?"·"다른 건
+    없어?"가 전부 재료 0건으로 끝났고, 문구를 다듬어 달라는 요청도 일정·링크가 원장에 없어
+    검증기에 잘렸다(pension_agent/verify.py 는 원장 밖 수치를 자른다).
+
+    **여기서 다시 고르지 않는다.** 선정은 strategy_agent 가 하고 이 도구는 그 결과와 후보군을
+    옮기기만 한다 — 고르는 경로가 둘이면 화면과 대화가 같은 고객에게 다른 세미나를 말한다
+    (`_customer` 가 ⑥⑦⑧ 을 옮기기만 하는 것과 같은 이유).
+
+    문구도 마찬가지다. 발송 화면 연계(nodes/act.py)가 쓰는 문구는 여기 실린 `lms_message`
+    이고, 그것은 브리핑이 만든 값 그대로다 — 대화가 문구를 새로 생성하면 화면에 뜬 것과
+    다른 문자가 나간다.
+    """
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    from pension_agent.strategy_agent import agent as strategy_agent  # noqa: PLC0415
+    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    try:
+        profile = strategy_customer.get_profile(customer_id)
+        if profile is None:
+            return None
+        facts = strategy_agent.propose(profile)["facts"]
+    except Exception:
+        return None
+
+    picked = facts.get("outreach") or {}
+    pools = ((facts.get("pools") or {}).get("outreach")) or {}
+    if not (picked.get("event") or picked.get("seminar")):
+        return None
+
+    lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)"]
+    atomic: list[str] = []
+    lms: dict[str, dict] = {}
+    for key, label in (("event", "이벤트"), ("seminar", "세미나")):
+        item = picked.get(key)
+        if not item:
+            continue
+        lines.append(f"· [{label}] {item['name']} — {item['schedule']} · 주관 {item.get('organizer') or '미상'}")
+        if item.get("description"):
+            lines.append(f"  내용: {item['description']}")
+        if item.get("reason"):
+            lines.append(f"  추천 사유: {item['reason']}")
+        if item.get("keywords"):
+            lines.append(f"  매칭 키워드: {', '.join(item['keywords'])}")
+        if item.get("url"):
+            lines.append(f"  안내 링크: {item['url']}")
+            # 링크는 한 글자만 달라도 죽는다 — 답변이 이 값을 말하면 원문 그대로여야 한다.
+            atomic.append(item["url"])
+        lines.append(f"  발송 문구: {item['lms_message']}")
+        lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"]}
+        # 다른 후보 — "다른 건 없어?" 에 답할 재료다. 선정된 것은 위에 이미 있으므로 뺀다.
+        others = [c for c in (pools.get(key) or []) if c["id"] != item["id"]]
+        for other in others:
+            lines.append(f"  · 다른 {label} 후보: {other['name']} — {other['schedule']}")
+
+    for label, values in (("문제상황", [s["title"] for s in facts.get("problem_situations") or []]),
+                          ("성립 요건", facts.get("conditions") or [])):
+        if values:
+            lines.append(f"· {label}: {', '.join(values[:4])}")
+    # 선별·문구가 LLM 산출이 아니면 그 사실을 재료에 남긴다 — 직원이 "AI 가 고른 것"으로
+    # 읽는 것과 "임박 순으로 뜬 것"으로 읽는 것은 다른 판단이다(REQUIREMENTS.md 「LLM 미생성 표시」).
+    for key, why in (facts.get("llm_skipped") or {}).items():
+        if key.startswith("outreach") or key == "lms_message":
+            lines.append(f"· 참고: {key} — {why}")
+
+    return _ev("outreach", query, "\n".join(lines),
+               [{"id": f"outreach.{customer_id}",
+                 "title": "고객님께 안내해보세요 — 열려 있는 이벤트·세미나",
+                 "doc": "안내 콘텐츠 레지스트리 (브리핑 ⑨ 와 같은 산출)",
+                 "score": None, "page": None}],
+               atomic=atomic,
+               # 발송 화면 연계(act.py)가 쓰는 문구. 승낙 턴이 문구를 다시 만들지 않도록
+               # 이번 턴의 산출을 그대로 들려 보낸다(CLAUDE.md §10 「제안한 턴이 남긴 것으로 정한다」).
+               meta={"lms": lms})
+
+
 TOOLS: dict[str, Tool] = {
     t.name: t for t in (
         Tool("pitch", "고객에게 실제로 할 말(대사·반론 대응·논거)을 만든다", _pitch,
@@ -1348,6 +1428,12 @@ TOOLS: dict[str, Tool] = {
         # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
         # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
         # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.
+        # 화면 ⑨ 가 이미 고른 안내 콘텐츠를 대화 쪽 재료로 잇는다. `lineup`(우리가 뭘 파나)·
+        # `suitable`(어디까지 안내할 수 있나)과 갈리는 축은 **고객에게 보낼 콘텐츠**다 —
+        # 설명이 갈리지 않으면 계획이 세미나 질문을 lineup 으로 보내고 재료 0건으로 끝난다.
+        Tool("outreach", "이 고객에게 안내할 세미나·이벤트와 그 발송 문구를 돌려준다 — "
+             "「보낼 만한 세미나 있어」·「왜 이 이벤트야」·「다른 건 없어」·「문자로 뭐라고 "
+             "보내지」가 여기다", _outreach, progress="안내할 이벤트·세미나"),
         Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·"
              "관리방법론·업무절차 참고자료를 브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다",
              _playbook, progress="이 고객 상태에 걸린 참고자료"),
@@ -1355,7 +1441,8 @@ TOOLS: dict[str, Tool] = {
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable", "tax_credit", "playbook"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable", "tax_credit", "playbook",
+                             "outreach"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:

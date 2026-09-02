@@ -268,9 +268,17 @@ with tab2:
                 st.markdown(f"**[{sections.title('outreach')}]**")
                 for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
                     if item:
-                        st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")
+                        st.markdown(f"- **[{label}]** {item['name']} — {item['schedule']}"
+                                    + (f" · 주관 {item['organizer']}" if item.get("organizer") else ""))
+                        # 추천 사유 — 콘텐츠 DB 가 추천대상을 저장하지 않으므로 «왜 이 고객에게
+                        # 이것인가»는 선별과 함께 생성된다(agent._select_outreach). 없으면 규칙
+                        # 순서로 뜬 것이고, 그 사유는 llm_skipped 가 아래에 밝힌다.
+                        if item.get("reason"):
+                            st.caption(f"추천 사유: {item['reason']}")
+                        if item.get("url"):
+                            st.caption(f"안내 링크: {item['url']}")
                         if item.get("lms_message"):
-                            st.caption(f"LMS 문구: {item['lms_message']}")
+                            st.caption("LMS 문구\n\n" + item["lms_message"].replace("\n", "  \n"))
 
             # ── §14 상담 이력
             if f.get("consult_history"):

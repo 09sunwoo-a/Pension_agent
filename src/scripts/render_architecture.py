@@ -54,7 +54,7 @@ _NODE_LABELS = {name: f"{name} — {title}<br/>{desc}"
 _TOOL_GROUPS = (
     ("지식베이스", ("pitch", "fact", "procedure", "screen", "channel",
                     "segment", "method", "fieldtip", "market", "lineup")),
-    ("현재 고객", ("customer", "suitable", "history", "playbook")),
+    ("현재 고객", ("customer", "suitable", "history", "playbook", "outreach")),
     ("계산", ("tax_credit", "date")),
 )
 

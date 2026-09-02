@@ -23,12 +23,21 @@ def _match_asset(message: str) -> dict[str, Any] | None:
     """이 문구가 어느 안내 콘텐츠에서 온 것인지 되짚는다.
 
     직원은 브리핑 ⑨ 에 뜬 문구를 그대로 복사해 온다. 그 문구가 더미 콘텐츠에서 왔다면
-    아래 게이트가 막아야 하는데, 게이트는 자산을 받아야 판정할 수 있다. LLM 이 문구를
-    다듬었을 수 있으므로 완전일치만 보지 않고 앞부분 일치도 함께 본다.
+    아래 게이트가 막아야 하는데, 게이트는 자산을 받아야 판정할 수 있다.
+
+    **되짚는 열쇠는 안내 링크(url)다.** 문구의 가운데 본문은 고객마다 LLM 이 다시 쓰지만
+    (agent._write_lms_messages) 링크는 코드가 조립하는 골격에 있어 바뀌지 않는다
+    (support/outreach.py::lms_frame). 예전에는 자산의 고정 문구와 앞부분을 대조했는데,
+    문구가 고객별 생성으로 바뀌면서 그 대조는 **LLM 이 문장을 다듬을수록 빗나갔다** —
+    게이트가 조용히 열리는 방향의 실패다. 링크가 없는 옛 자산을 위해 문구 대조도 남긴다.
     """
     from pension_agent.strategy_agent import support  # noqa: PLC0415 — 순환 임포트 회피
 
     norm = " ".join(message.split())
+    for a in support.ASSETS:
+        url = (a.get("url") or "").strip()
+        if url and url in norm:
+            return a
     for a in support.ASSETS:
         base = " ".join((a.get("lms_message") or "").split())
         if not base:
