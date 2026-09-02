@@ -350,6 +350,82 @@ def check_knowledge_intents() -> bool:
     return ok
 
 
+def check_outreach() -> int:
+    """⑨ 안내 콘텐츠 — 대화 재료(outreach 도구)와 발송 화면 제안(§10 예정 확장의 구현).
+
+    회귀 대상:
+    ① 화면 ⑨ 는 이벤트·세미나를 골라 두는데 그 산출이 **대화 쪽 재료로 없었다.** "이 고객한테
+       보낼 만한 세미나 있어?"·"왜 이거야?"·"다른 건 없어?"가 전부 재료 0건으로 끝났고,
+       문구를 다듬어 달라는 요청도 일정·링크가 원장에 없어 검증기에 잘렸다.
+    ② LMS 발송 화면은 직원이 문구를 따옴표로 옮겨 적어야만(lms_link) 열렸다.
+    ③ 그 제안이 **매 턴 붙지 않는가** — 예전 따옴표 휴리스틱 갈래가 지워진 이유다.
+    """
+    from pension_agent.consult_agent import tools
+    from pension_agent.consult_agent.nodes import act
+    from pension_agent.strategy_agent.customer import PERSONAS
+
+    ok = 0
+    cid = PERSONAS[0].id
+    state = {"customer_id": cid, "question": "이 고객한테 안내할 세미나 있어?"}
+    ev = tools.run("outreach", state, "안내할 세미나")
+
+    hit = ev is not None and ev["tool"] == "outreach"
+    print(f"{'✓' if hit else '✗'} outreach: 열려 있는 고객의 안내 콘텐츠를 재료로 낸다")
+    ok += hit
+    if ev is None:
+        return ok
+
+    text = ev["text"]
+    hit = ("발송 문구:" in text and "다른 세미나 후보:" in text
+           and "매칭 키워드:" in text and "안내 링크:" in text)
+    print(f"{'✓' if hit else '✗'} outreach: 문구·다른 후보·매칭 키워드·링크가 재료에 함께 실린다")
+    ok += hit
+
+    # 링크는 한 글자만 달라도 죽는다 — 답변이 그 값을 말하면 원문 그대로여야 한다.
+    hit = bool(ev["atomic"]) and all(a.startswith("http") for a in ev["atomic"])
+    print(f"{'✓' if hit else '✗'} outreach: 안내 링크를 원문 스팬으로 선언한다", )
+    ok += hit
+
+    # 고객 화면이 닫혀 있으면 성립하지 않는 재료다(§3).
+    hit = (tools.run("outreach", {"question": "세미나 있어?"}, "세미나") is None
+           and "outreach" not in tools.usable({}))
+    print(f"{'✓' if hit else '✗'} outreach: 고객 화면이 닫혀 있으면 부를 수 없다")
+    ok += hit
+
+    # ② 답변이 그 콘텐츠를 가리키면 발송 화면 연계를 제안한다.
+    name = (ev["meta"]["lms"].get("seminar") or ev["meta"]["lms"]["event"])["name"]
+    offered = act.offer({**state, "evidence": [ev], "answer": f"«{name}» 를 안내해보세요."})
+    pending = offered.get("pending_action")
+    hit = (bool(pending) and pending["kind"] == "lms" and name in pending["label"]
+           and pending["message"] == (ev["meta"]["lms"].get("seminar")
+                                      or ev["meta"]["lms"]["event"])["message"])
+    print(f"{'✓' if hit else '✗'} 답변이 가리킨 콘텐츠의 발송 화면을 제안한다(문구는 브리핑 산출 그대로)")
+    ok += hit
+
+    # ③ 재료만 있고 답변이 아무것도 고르지 않았으면 붙지 않는다 — 매 턴 붙는 제안은
+    # 직원이 읽지 않게 되고, 그게 §10 이 경계하는 상태다.
+    hit = not act.offer({**state, "evidence": [ev],
+                         "answer": "열려 있는 세미나가 몇 건 있어요."}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 콘텐츠를 가리키지 않은 답변에는 제안이 붙지 않는다")
+    ok += hit
+
+    # 이번 턴이 안내 콘텐츠를 안 다뤘으면(원장에 outreach 근거가 없으면) 붙지 않는다.
+    hit = not act.offer({**state, "evidence": [],
+                         "answer": f"«{name}» 라는 세미나가 있어요."}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 원장에 안내 콘텐츠 근거가 없으면 제안하지 않는다")
+    ok += hit
+
+    # 문구는 대화가 새로 만들지 않는다 — 화면 ⑨ 와 같은 값이어야 같은 문자가 나간다.
+    from pension_agent.strategy_agent import agent as strategy_agent
+    from pension_agent.strategy_agent import customer as strategy_customer
+    facts = strategy_agent.propose(strategy_customer.get_profile(cid))["facts"]
+    hit = all(ev["meta"]["lms"][k]["message"] == facts["outreach"][k]["lms_message"]
+              for k in ev["meta"]["lms"])
+    print(f"{'✓' if hit else '✗'} 대화가 싣는 문구가 브리핑 ⑨ 의 문구와 같다")
+    ok += hit
+    return ok
+
+
 def check_screen_link() -> int:
     """화면 연계 — 제안 → 확인 → 연계 (§10 · gap 14·15).
 
@@ -460,17 +536,24 @@ def check_screen_link() -> int:
     ok += hit
 
     # 더미 문구는 코드가 막는다 — 화면에 채우면 직원이 그대로 보낼 수 있기 때문이다.
+    #
+    # 등록된 안내 콘텐츠 9건은 연금사업부 DB 에서 와 전부 dummy 가 아니다. 그래서 검사용
+    # 자산을 하나 끼워 넣어 확인한다 — 레지스트리에 더미가 남아 있을 때만 도는 검사였다면
+    # 실데이터로 갈아탄 지금 **조용히 사라졌을** 자리다.
     from pension_agent.strategy_agent import support
-    dummy = next((a for a in support.ASSETS if a.get("dummy") and a.get("lms_message")), None)
-    if dummy:
+    probe = {"id": "TEST-DUMMY", "name": "게이트 검사용 더미", "content_type": "이벤트",
+             "url": "https://example.invalid/demo/gate-probe", "dummy": True}
+    support.ASSETS.append(probe)
+    try:
         blocked = act.confirm_action({
             "question": "네",
             "history": [{"question": "...", "pending_action": {
-                **lms_pending, "message": dummy["lms_message"]}}],
+                **lms_pending,
+                "message": support.lms_frame("검사", "안내드려요.", probe["url"])}}],
             "customer_id": "TEST_ACT"})
         hit = "연계하지 않았어요" in blocked["answer"] and screens.SCHEME not in blocked["answer"]
-    else:
-        hit = True
+    finally:
+        support.ASSETS.remove(probe)
     print(f"{'✓' if hit else '✗'} 더미 문구는 화면에 채우지 않는다(코드가 막는다)")
     ok += hit
 
@@ -3274,6 +3357,53 @@ def check_followups() -> int:
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫히면 고객 질문은 안 뜬다(닫힘 {len(closed)} · 열림 {len(opened)})")
     ok += hit
 
+    # ④-b 안내 콘텐츠 칩은 **이 고객 상태에 걸린 콘텐츠가 실제로 열려 있을 때만** 뜬다.
+    #      화면 ⑨ 는 섹션을 비우지 않으려고 관련 없는 콘텐츠도 한 건 세우는데(화면 요건이다),
+    #      그 폴백을 «있다»로 세면 칩이 어느 고객에게나 떠서 배경이 된다.
+    from pension_agent.strategy_agent import situations as _sit
+    from pension_agent.strategy_agent import support as _sup
+    matched = [p for p in PERSONAS if _sup.relevant_outreach(_sit.problem_situations(p))]
+    unmatched = [p for p in PERSONAS if not _sup.relevant_outreach(_sit.problem_situations(p))]
+    _CHIP = "이 고객한테 안내할 만한 세미나나 이벤트 있어?"
+    hit = bool(matched) and _CHIP in suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": matched[0].id})
+    print(f"{'✓' if hit else '✗'} 걸린 콘텐츠가 있는 고객에게는 안내 콘텐츠 질문이 뜬다"
+          + (f" ({matched[0].nm})" if matched else " — 대상 고객 없음"))
+    ok += hit
+
+    hit = bool(unmatched) and _CHIP not in suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": unmatched[0].id})
+    print(f"{'✓' if hit else '✗'} 걸린 콘텐츠가 없는 고객에게는 안 뜬다"
+          + (f" ({unmatched[0].nm})" if unmatched else " — 대조군 없음: 전원이 매칭되면 «조건이 맞을 때만»이 검증되지 않는다"))
+    ok += hit
+
+    # 화면을 여는 칩도 같은 판정이다 — 문구 자체가 «지금 이 고객에게 맞는 세미나가 열려
+    # 있다»는 알림이라, 조건이 아닌 고객에게 뜨면 알림이 아니라 배경이 된다.
+    hit = (bool(matched) and suggest.outreach_chips(matched[0].id)
+           and (not unmatched or not suggest.outreach_chips(unmatched[0].id))
+           and not suggest.outreach_chips(None))
+    print(f"{'✓' if hit else '✗'} 입구 칩도 조건이 맞는 고객에게만 뜬다")
+    ok += hit
+
+    # **칩 판정은 LLM 을 부르지 않는다.** 칩 하나 띄우자고 브리핑 한 편(LLM 11회)을
+    # 돌리면 답변 지연이 그대로 늘고, LLM 이 죽으면 칩이 통째로 사라진다.
+    from pension_agent import llm as _llm
+    _orig_gen = _llm.generate
+    try:
+        _llm.generate = lambda *a, **k: (_ for _ in ()).throw(AssertionError("칩이 LLM 을 불렀다"))
+        chips = suggest.outreach_chips(matched[0].id) if matched else []
+        follow = suggest.followup_questions(
+            {"evidence": [ev("customer")], "history": [],
+             "customer_id": matched[0].id if matched else None})
+        no_llm = True
+    except AssertionError:
+        chips, follow, no_llm = [], [], False
+    finally:
+        _llm.generate = _orig_gen
+    hit = no_llm and bool(chips) and bool(follow)
+    print(f"{'✓' if hit else '✗'} 안내 콘텐츠 칩 판정에 LLM 을 부르지 않는다")
+    ok += hit
+
     # ⑤ 이번 턴에 이미 쓴 재료로 다시 보내지 않는다 — 방금 답한 것을 또 묻게 된다.
     both = suggest.followup_questions(
         {"evidence": [ev("procedure", "계약이전"), ev("screen", "계약이전")], "history": []})
@@ -4545,6 +4675,7 @@ def main() -> int:
         check_clarify_golden()
         check_answer_parallel()
         check_replan_on_empty()
+        check_outreach()
         check_screen_registry()
         check_market_material()
         check_product_advice()

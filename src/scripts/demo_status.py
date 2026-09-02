@@ -102,17 +102,44 @@ def build() -> tuple[str, dict[str, int]]:
         "",
     ]
 
-    # 1. 안내 콘텐츠 더미
+    # 1. 안내 콘텐츠
+    #
+    # 예전에는 이 절이 "지어낸 더미 몇 건"만 셌다. 지금 ⑨ 의 이벤트·세미나 9건은 연금사업부가
+    # 확인해준 콘텐츠 DB 에서 왔고 dummy 가 아니다 — 게이트가 안 막는다. 그렇다고 실제 운영
+    # 정보인 것은 아니라서(일정·링크가 시연을 위해 구성된 값이다), 더미 건수만 세면 이 리포트가
+    # **아무것도 보고하지 않게 된다.** 그래서 두 가지를 함께 센다: 게이트가 막는 더미와,
+    # 게이트를 통과하지만 시연값인 콘텐츠.
+    outreach = [a for a in support.ASSETS if a.get("content_type") in ("이벤트", "세미나")]
     dummies = [a for a in support.ASSETS if a.get("dummy")]
     n["assets"] = len(dummies)
-    L += [f"## 1. 안내 콘텐츠 더미 — {len(dummies)} / {len(support.ASSETS)}건", "",
-          "지어낸 이벤트·세미나. 화면 이름과 발송문에 딱지가 없으므로 그대로 실제처럼 보인다.",
-          "`pension_agent/tools.py::open_lms_screen()` 이 이 자산의 문구를 발송 화면에 채우는 것을",
-          "거부하는 것이 유일한 안전장치다.",
-          "실제 콘텐츠로 교체할 때 `dummy` 를 지우면 게이트가 열린다.", ""]
-    _rows(L, ["id", "이름", "종류", "기간"],
+    L += [f"## 1. 안내 콘텐츠 — 시연용 {len(outreach)}건 · 게이트가 막는 더미 {len(dummies)}건", "",
+          "⑨ 「고객님께 안내해보세요」의 이벤트·세미나다. 출처가 있는 콘텐츠(`source`)는",
+          "`dummy` 를 달지 않으므로 `pension_agent/tools.py::open_lms_screen()` 게이트가 막지 않고,",
+          "발송 화면 연계까지 이어진다. **일정·링크·수신거부 번호는 시연을 위해 구성된 값이다** —",
+          "화면과 발송문에는 그 표시가 없으므로(발표용 데모라 딱지를 붙이지 않는다) 여기가",
+          "유일한 기록이다. 실제 콘텐츠 캘린더가 붙으면 이 표가 그대로 실제 일정으로 바뀐다.", "",
+          f"- 안내 링크: `https://obank.kbstar.com/demo/...` — 시연용 경로",
+          f"- 수신거부 번호: `{support.OPT_OUT}` — 실제 회선 미정, 자리표시자",
+          "- LMS 문구의 골격(광고 표기·인사말·링크·수신거부)은 코드가 조립하고",
+          "  (`support/outreach.py::lms_frame`), 가운데 본문만 LLM 이 쓴다", ""]
+    _rows(L, ["id", "이름", "종류", "일정", "매칭 키워드", "게이트"],
           [[a["id"], a.get("name", ""), a.get("content_type", ""),
-            f"{a.get('start_date', '?')} ~ {a.get('end_date', '?')}"] for a in dummies])
+            f"{a.get('start_date', '?')} ~ {a.get('end_date', '?')}",
+            ", ".join(a.get("keywords") or []) or "—",
+            "차단(더미)" if a.get("dummy") else "통과"] for a in outreach])
+
+    # keywords 중 요건으로 내려가지 못한 것 — 그 콘텐츠는 관련도 0 으로만 뜬다.
+    unmapped = sorted({kw for a in outreach for kw in (a.get("keywords") or [])
+                       if kw not in support.KEYWORD_CONDS and not support.conds_of(a)})
+    if unmapped:
+        L += ["", "### 고객 상태로 판정할 수 없는 키워드", "",
+              "요건(`customer.CONDS`)에 대응이 없어 관련도를 잴 수 없는 키워드다. 그 콘텐츠는",
+              "다른 후보가 없을 때만 노출된다 — 대응 컬럼이 확인되면",
+              "`support/outreach.py::KEYWORD_CONDS` 에 한 줄 더한다.", ""]
+        _rows(L, ["키워드", "쓰는 콘텐츠"],
+              [[kw, ", ".join(a["id"] for a in outreach if kw in (a.get("keywords") or []))]
+               for kw in unmapped])
+    L += [""]
 
     # 2. 데모 금리표
     n["rates"] = len(snap["rates"]) if snap.get("dummy") else 0
@@ -165,8 +192,9 @@ def build() -> tuple[str, dict[str, int]]:
          "상담 시점의 오늘 — 잔여일수·경과일의 기준. 기본은 실제 날짜이고 "
          "PENSION_TODAY=YYYY-MM-DD 로 고정한다(테스트는 AS_OF 로 고정한 채 돈다)"),
         ("data/assets.json 이벤트·세미나 창", _outreach_runway(),
-         "⑨ 후보는 종료되지 않은 콘텐츠만 남는다. 더미 캘린더라 오늘이 창을 지나가면 "
-         "후보가 마른다 — 실제 콘텐츠 캘린더 연동으로 교체"),
+         "⑨ 후보는 종료되지 않은 콘텐츠만 남는다. 시연용 캘린더라 오늘이 창을 지나가면 "
+         "후보가 마른다 — 발표일을 창 안으로 고정하려면 PENSION_TODAY 를 쓰고, "
+         "실제 콘텐츠 캘린더가 붙으면 이 자리가 사라진다"),
         ("customer.PERSONAS",
          f"{len(customer.PERSONAS)}명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)"
          if customer.PERSONAS else "0명 (비어 있음 — customers.json 미생성)",

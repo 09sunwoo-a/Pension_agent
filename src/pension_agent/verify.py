@@ -348,10 +348,21 @@ def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
     return nums, set()
 
 
-def allowed_facts(facts: dict) -> tuple[set[str], set[str]]:
-    """LLM 이 인용할 수 있는 숫자·상품명 집합. 이 범위를 벗어난 표현은 환각으로 판정한다."""
+def allowed_facts(facts: dict, extra: Iterable[str] = ()) -> tuple[set[str], set[str]]:
+    """LLM 이 인용할 수 있는 숫자·상품명 집합. 이 범위를 벗어난 표현은 환각으로 판정한다.
+
+    ━━ `extra` — facts 스키마 밖의 재료 ━━
+    이 함수는 브리핑 facts 의 정해진 네 자리(customer·conditions·briefing·items)만 편다.
+    그 밖에도 **코드가 조회해 확정한 재료**가 있고, 그것을 쓰는 생성문은 여기 실어 주지
+    않으면 통과할 수 없다 — ⑨ 안내 콘텐츠(일정·링크)가 그 자리다. 콘텐츠 DB 에서 온 값을
+    재료로 세지 않은 동안 LMS 문구는 «9/10 16시»의 숫자를 재료 밖 수치로 판정받아 전부
+    폐기됐고, 화면에는 늘 규칙 폴백 문구가 떴다.
+
+    넓히는 것은 **호출부가 명시한 텍스트**뿐이다. facts 스키마를 늘리지 않는 이유는 이
+    함수를 쓰는 다른 생성문(코칭·해석·추천 사유)까지 그 값을 인용할 수 있게 되기 때문이다.
+    """
     prods: set[str] = set()
-    blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"])
+    blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"]) + list(extra)
     blob += [str(v) for k, v in facts["briefing"].items() if k != "source"]
     for it in facts["items"]:
         blob += [it["clause"], it["evidence"], it["amount"] or "", it["formula"], it["talk"]]
@@ -364,7 +375,8 @@ def allowed_facts(facts: dict) -> tuple[set[str], set[str]]:
 
 
 def verify(
-    sentence: str, facts: dict, known_products: set[str] = frozenset()
+    sentence: str, facts: dict, known_products: set[str] = frozenset(),
+    *, extra: Iterable[str] = (),
 ) -> tuple[bool, list[str]]:
     """재료에 없는 수치 또는 게이트 미통과·미등록 상품명이 포함되었는지 검사한다.
 
@@ -372,7 +384,7 @@ def verify(
     없는 상품)을 구분해 거부 사유를 더 정확히 남기기 위한 선택 인자다. 호출부가 넘기지 않으면
     모두 "미등록"으로 보고한다.
     """
-    nums, prods = allowed_facts(facts)
+    nums, prods = allowed_facts(facts, extra)
     return _judge(sentence, nums, prods, known_products)
 
 

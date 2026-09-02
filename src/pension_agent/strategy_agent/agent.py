@@ -33,6 +33,7 @@ from typing import Any
 from pension_agent.strategy_agent import engine
 from pension_agent import llm
 from pension_agent.strategy_agent import sections
+from pension_agent.strategy_agent import support
 from pension_agent.strategy_agent.customer import PERSONAS, Profile
 from pension_agent.strategy_agent.prompts import (
     COACH_PROMPT,
@@ -41,6 +42,8 @@ from pension_agent.strategy_agent.prompts import (
     FALLBACK_SYSTEM,
     LMS_PROMPT,
     LMS_SYSTEM,
+    OUTREACH_SELECT_PROMPT,
+    OUTREACH_SELECT_SYSTEM,
     SELECT_PROMPT,
     SELECT_SYSTEM,
     TOP_HOLDINGS_PROMPT,
@@ -280,6 +283,61 @@ def _select(p: Profile, facts: dict, key: str, label: str,
     return chosen[:k]
 
 
+def _content_blob(item: dict) -> list[str]:
+    """안내 콘텐츠 한 건이 재료로 내놓는 텍스트. `engine.verify(..., extra=)` 에 싣는다.
+
+    콘텐츠 DB 의 값은 코드가 조회해 확정한 재료인데도 facts 스키마의 네 자리
+    (customer·conditions·briefing·items) 밖에 있어 검증기가 못 봤다. 그래서 일정·링크를
+    인용한 문구가 «재료 밖 수치»로 전부 폐기됐다(pension_agent/verify.py::allowed_facts).
+    """
+    return [str(v) for k, v in item.items()
+            if k in ("name", "organizer", "start_date", "end_date", "schedule",
+                     "description", "url", "channel") and v]
+
+
+def _select_outreach(p: Profile, facts: dict, key: str, label: str,
+                     candidates: list[dict]) -> dict | None:
+    """⑨ 안내 콘텐츠 1건 — LLM 이 번호와 **추천 사유**를 함께 낸다.
+
+    `_select` 와 갈라 둔 이유는 사유 때문이다. 콘텐츠 DB 는 추천대상·추천문구를 저장하지
+    않으므로("고객정보와 keywords 를 비교해 추천 여부와 사유는 LLM 이 판단한다"), 직원이
+    «왜 이 세미나인가»를 알려면 사유가 산출에 있어야 한다. 사유는 자유 문장이라 번호만 받는
+    `_select` 와 달리 engine.verify() 로 재검증한다 — 실패하면 사유 없이 선별만 살린다.
+    """
+    skipped = facts["llm_skipped"]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    listing = "\n".join(
+        f"{i}. {json.dumps(c, ensure_ascii=False)}" for i, c in enumerate(candidates))
+    try:
+        raw = llm.generate(
+            OUTREACH_SELECT_PROMPT.format(
+                customer_state=json.dumps(_customer_state(p), ensure_ascii=False),
+                conditions=", ".join(facts["conditions"]) or "없음",
+                label=label, candidates=listing,
+            ),
+            system=OUTREACH_SELECT_SYSTEM, max_tokens=300,
+        )
+    except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
+        skipped[key] = f"LLM 호출 실패 ({type(e).__name__}) — 규칙 순서로 표시됨"
+        return None
+    data = _parse(raw) or {}
+    pick = data.get("pick")
+    if not isinstance(pick, int) or not 0 <= pick < len(candidates):
+        skipped[key] = "LLM 이 후보 밖 번호를 지목함 — 규칙 순서로 표시됨"
+        return None
+    item = dict(candidates[pick])
+    reason = str(data.get("reason") or "").strip()
+    if reason and engine.verify(reason, facts, extra=_content_blob(item))[0]:
+        item["reason"] = reason
+    else:
+        skipped[f"{key}_reason"] = ("생성 사유가 재료를 벗어남 — 사유 없이 표시됨" if reason
+                                    else "LLM 응답에 reason 없음 — 사유 없이 표시됨")
+    return item
+
+
 def _select_db_sections(p: Profile, facts: dict) -> None:
     """⑦·⑧·⑨ — DB 가 만든 넓은 후보군에서 LLM 이 이 고객에게 맞는 것만 고른다(REQUIREMENTS.md §15).
 
@@ -296,8 +354,8 @@ def _select_db_sections(p: Profile, facts: dict) -> None:
 
     outreach = facts.get("outreach") or {}
     for key, label in (("event", "이벤트"), ("seminar", "세미나")):
-        if picked := _select(p, facts, f"outreach_{key}", label, pools["outreach"][key], 1):
-            outreach[key] = picked[0]
+        if picked := _select_outreach(p, facts, f"outreach_{key}", label, pools["outreach"][key]):
+            outreach[key] = picked
     facts["outreach"] = outreach
 
 
@@ -330,8 +388,13 @@ def _write_top_holdings_insight(p: Profile, facts: dict) -> None:
 def _write_lms_messages(p: Profile, facts: dict) -> None:
     """⑨ 이벤트·세미나의 LMS 문구를 고객별로 생성한다(REQUIREMENTS.md §15 — LMS 문구는 LLM).
 
-    실패하면 콘텐츠 DB(assets.json)의 고정 문구가 그대로 남는다. 그 경우 전 고객 동일 문구가
-    나가므로, 사유를 남겨 화면이 '고객별 생성 아님'을 밝히게 한다.
+    **LLM 이 쓰는 것은 본문 한 덩이다.** 인사말·안내 링크·수신거부 표기는 채널 규약이라
+    코드가 조립하고(support/outreach.lms_frame), 검증도 본문에만 건다 — 골격까지 생성문에
+    넣으면 URL 과 수신거부 번호의 숫자가 매번 재료 대조를 통과해야 하고, 그 값들은 지어내면
+    안 되는 자리라 애초에 LLM 이 쓸 이유가 없다.
+
+    실패하면 규칙 본문(support.rule_body — DB 값을 잇기만 한 문장)이 그대로 남는다. 그 경우
+    전 고객 동일 문구가 나가므로, 사유를 남겨 화면이 '고객별 생성 아님'을 밝히게 한다.
     """
     outreach = facts.get("outreach") or {}
     state = json.dumps(_customer_state(p), ensure_ascii=False)
@@ -342,24 +405,39 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
         try:
             raw = llm.generate(
                 LMS_PROMPT.format(customer_state=state,
-                                  content=json.dumps(item, ensure_ascii=False)),
+                                  content=json.dumps(_lms_content(item), ensure_ascii=False)),
                 system=LMS_SYSTEM, max_tokens=250,
             )
         except Exception as e:
             facts["llm_skipped"]["lms_message"] = (
-                f"LLM 호출 실패 ({type(e).__name__}) — 콘텐츠 DB 의 고정 문구가 표시됨")
+                f"LLM 호출 실패 ({type(e).__name__}) — 규칙 본문이 표시됨")
             return
-        message = str((_parse(raw) or {}).get("message") or "").strip()
-        if message and engine.verify(message, facts)[0]:
-            # 예전에는 여기서 '[더미] ' 접두를 코드가 다시 붙였다. 지금은 붙이지 않는다 —
-            # 발송문도 데모 산출물이라 딱지가 없어야 한다는 결정. 대신 보호막을 텍스트가
-            # 아니라 게이트로 옮겼다: pension_agent.tools.open_lms_screen() 이 dummy 자산의
-            # 문구를 발송 화면에 채우는 것을 거부한다. 접두는 LLM 이 지울 수 있지만
-            # 게이트는 못 지운다.
-            item["lms_message"] = message
+        body = str((_parse(raw) or {}).get("body") or "").strip()
+        # 예전에는 여기서 '[더미] ' 접두를 코드가 다시 붙였다. 지금은 붙이지 않는다 —
+        # 발송문도 데모 산출물이라 딱지가 없어야 한다는 결정. 대신 보호막을 텍스트가
+        # 아니라 게이트로 옮겼다: pension_agent.tools.open_lms_screen() 이 dummy 자산의
+        # 문구를 발송 화면에 채우는 것을 거부한다. 접두는 LLM 이 지울 수 있지만
+        # 게이트는 못 지운다.
+        if body and engine.verify(body, facts, extra=_content_blob(item))[0]:
+            item["lms_message"] = support.lms_frame(p.nm, body, item.get("url") or "")
             item["lms_generated"] = True
         else:
-            facts["llm_skipped"]["lms_message"] = "생성 문구가 재료를 벗어남 — 고정 문구가 표시됨"
+            facts["llm_skipped"]["lms_message"] = (
+                "생성 본문이 재료를 벗어남 — 규칙 본문이 표시됨" if body
+                else "LLM 응답에 body 없음 — 규칙 본문이 표시됨")
+
+
+def _lms_content(item: dict) -> dict:
+    """LMS 본문 생성에 싣는 콘텐츠 정보. **평가용 정답(golden)은 여기 없다.**
+
+    콘텐츠 DB 문서 §4 원칙 7 이 golden_dataset 을 LLM 입력에서 제외하라고 정했고, 그래서
+    정답 예시는 assets.json 이 아니라 data/outreach_golden.json 에 따로 있다. 이 함수가
+    항목을 통째로 넘기지 않고 키를 골라 싣는 것은 그 분리를 한 번 더 붙잡아 두기 위해서다 —
+    나중에 asset 에 어떤 필드가 붙어도 여기 적힌 것만 프롬프트로 나간다.
+    """
+    return {k: v for k, v in item.items()
+            if k in ("name", "content_type", "organizer", "schedule", "description",
+                     "keywords", "reason") and v}
 
 
 def _recommend(p: Profile, facts: dict) -> dict | None:
@@ -728,9 +806,11 @@ def _print(r: dict) -> None:
         print(f"\n  [{sections.title('outreach')}]")
         for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
             if item:
-                print(f"    · [{label}] {item['name']} ({item['start_date']}~{item['end_date']})")
+                print(f"    · [{label}] {item['name']} — {item['schedule']}")
+                if item.get("reason"):
+                    print(f"      추천 사유: {item['reason']}")
                 if item.get("lms_message"):
-                    print(f"      LMS 문구: {item['lms_message']}")
+                    print("      LMS 문구: " + item["lms_message"].replace("\n", "\n               "))
     if f.get("consult_history"):
         print(f"\n  [{sections.CONSULT_HISTORY_TITLE}]")
         for line in f["consult_history"]:

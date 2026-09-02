@@ -268,9 +268,17 @@ with tab2:
                 st.markdown(f"**[{sections.title('outreach')}]**")
                 for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
                     if item:
-                        st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")
+                        st.markdown(f"- **[{label}]** {item['name']} — {item['schedule']}"
+                                    + (f" · 주관 {item['organizer']}" if item.get("organizer") else ""))
+                        # 추천 사유 — 콘텐츠 DB 가 추천대상을 저장하지 않으므로 «왜 이 고객에게
+                        # 이것인가»는 선별과 함께 생성된다(agent._select_outreach). 없으면 규칙
+                        # 순서로 뜬 것이고, 그 사유는 llm_skipped 가 아래에 밝힌다.
+                        if item.get("reason"):
+                            st.caption(f"추천 사유: {item['reason']}")
+                        if item.get("url"):
+                            st.caption(f"안내 링크: {item['url']}")
                         if item.get("lms_message"):
-                            st.caption(f"LMS 문구: {item['lms_message']}")
+                            st.caption("LMS 문구\n\n" + item["lms_message"].replace("\n", "  \n"))
 
             # ── §14 상담 이력
             if f.get("consult_history"):
@@ -363,9 +371,11 @@ with tab_chat:
         st.session_state.pending_question = None
 
     # ── 이 고객 관련 추천 질문 (consult_agent/suggest.py — 코드 조립, 상황 기반)
-    # 과거 상담이 있는 고객에게만 뜬다. 칩 문구 자체가 "지난 상담이 있었다"는 알림이고,
-    # 누르면 아래 pending_question 경로로 계획 루프(history 도구)를 탄다.
-    _chips = suggest.history_chips(customer_id)
+    # 상황이 맞는 고객에게만 뜬다. 칩 문구 자체가 알림이고("지난 상담이 있었다" ·
+    # "이 고객에게 맞는 세미나가 열려 있다"), 누르면 아래 pending_question 경로로 계획
+    # 루프(history · outreach 도구)를 탄다. 조건이 아니면 아무것도 안 뜬다 — 항상 뜨는
+    # 칩은 배경이 되어 아무도 읽지 않는다.
+    _chips = suggest.history_chips(customer_id) + suggest.outreach_chips(customer_id)
     if _chips:
         st.markdown("**💡 이 고객 관련 추천 질문**")
         _chip_cols = st.columns(len(_chips))

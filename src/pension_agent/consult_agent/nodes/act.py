@@ -74,7 +74,65 @@ def _propose(state: AgentState) -> dict[str, Any] | None:
     for number in _answer_screens(state):
         return {"kind": "screen", "label": f"{number} 화면 열기", "screen": number,
                 "params": {"customer_id": state.get("customer_id") or ""}}
-    return _propose_playbook(state)
+    return _propose_lms(state) or _propose_playbook(state)
+
+
+def _propose_lms(state: AgentState) -> dict[str, Any] | None:
+    """이번 턴에 안내하기로 한 콘텐츠의 **발송 화면 연계**를 제안한다(§10 예정 확장의 구현).
+
+    지금까지 LMS 는 직원이 먼저 말해야 시작했다("이 문구로 보내줘" → nodes/lms.py). 그
+    갈래를 남겨 둔 채 이쪽을 더하는 이유는, 직원이 «세미나 뭐 있어»를 묻고 나면 다음에 할
+    일이 발송 하나뿐인데 그때마다 문구를 따옴표로 옮겨 적게 하는 것이 그 화면의 목적에
+    맞지 않기 때문이다.
+
+    **조건은 넷이고 전부 코드가 확인할 수 있는 사실이다**(위 `_propose_playbook` 과 같은
+    기준). 특히 ②가 «턴마다 갈리는 게이트»다 — 이게 없으면 고객 화면이 열려 있는 동안 매
+    턴 "보낼까요?"가 붙고, 그것이 예전에 따옴표 휴리스틱 갈래를 지운 바로 그 상태다.
+
+      1. 고객 화면이 열려 있고, 이 고객에게 성립한 관리 사유가 있다 — 없으면 관리 대상이
+         아니고, 사유를 만들어내지 않는다
+      2. **이번 턴이 안내 콘텐츠를 재료로 다뤘다**(원장에 outreach 근거가 있다)
+      3. 답변이 그 콘텐츠를 실제로 가리켰다 — 콘텐츠 이름을 인용했다는 뜻이다. 후보를
+         늘어놓기만 한 답변에 "보낼까요?"를 붙이면 무엇을 보낸다는 것인지가 없다
+      4. 그 콘텐츠에 발송할 문구가 있다(브리핑 ⑨ 가 만들어 둔 값)
+
+    **문구를 여기서 만들지 않는다.** 원장에 실린 브리핑 산출을 그대로 옮긴다 — 화면 ⑨ 가
+    어차피 만드는 값이고, 대화가 따로 생성하면 화면에 뜬 것과 다른 문자가 나간다(§10).
+    발송 여부는 여전히 직원이 그 화면에서 정하고, 더미 게이트도 `_link` 에 그대로 남는다.
+    """
+    if not state.get("customer_id") or not _playbook_reason(state):
+        return None
+    answer = state.get("answer") or ""
+    for ev in state.get("evidence") or []:
+        if ev["tool"] != "outreach":
+            continue
+        for key, item in _lms_items(ev):
+            if item["name"] not in answer:
+                continue          # 답변이 가리키지 않은 콘텐츠는 제안하지 않는다
+            found = screens.lms_screen(KB)
+            if not found:
+                # 발송 화면번호가 지식베이스에 없으면 링크를 만들지 않는다(§10).
+                return None
+            number, card = found
+            return {"kind": "lms", "label": f"«{item['name']}» 안내 문구로 {number} 발송 화면 열기",
+                    "screen": number, "card": card, "message": item["message"],
+                    "content_id": item["id"], "content_kind": key,
+                    "params": {"customer_id": state.get("customer_id") or ""}}
+    return None
+
+
+def _lms_items(ev: dict) -> list[tuple[str, dict]]:
+    """outreach 근거가 들려 보낸 «보낼 수 있는 것» 목록 — (이벤트/세미나, {id·name·message}).
+
+    이름과 문구를 도구가 함께 실어 주므로 제안 노드가 브리핑을 다시 부르지 않는다. 다시
+    부르면 그 사이 선정이 달라질 수 있고, 그러면 답변이 말한 것과 다른 콘텐츠를 보내자고
+    제안하게 된다.
+    """
+    out: list[tuple[str, dict]] = []
+    for key, item in ((ev["meta"].get("lms") or {})).items():
+        if isinstance(item, dict) and item.get("name") and item.get("message"):
+            out.append((key, item))
+    return out
 
 
 #: 제안 갈래를 여는 원장 재료. 이번 턴이 이 도구의 근거를 다뤘을 때 그 갈래의 나머지
