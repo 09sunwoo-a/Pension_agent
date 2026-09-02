@@ -1079,6 +1079,18 @@ def _date(state: AgentState, query: str) -> Evidence | None:
 #: 공제율의 근거 카드. 세율·한도·아래 단서가 전부 여기서 온다.
 TAX_FACT_ID = "fact.k04.f2"
 
+# ━━ ISA 만기자금 전환은 **다른 축이다** ━━
+# 위 계산은 900만원 한도 «안에서» 현금을 더 넣으면 얼마인가다. ISA 만기자금 전환은 그
+# 한도에 전환액의 10%(300만원)를 **더하고**, 전환금 자체는 연 1,800만원 납입한도에 걸리지
+# 않는다(fact.k04.f4). 이 갈래가 없던 동안 「ISA 8,000만원 중 일부만 옮기면?」에 잔여한도
+# 500만원으로 답했고 — 같은 대화에서 이미 인용한 카드(최대 1,200만원)와 어긋났다.
+#
+# **전환액을 `tax_credit()` 에 그대로 넣지 않는다.** 그러면 8,000만원 전환이 한도를 채운
+# 것으로 계산되는데, 그것이 카드가 못박은 오답이다("전환금 전액이 공제 대상" = 오답).
+# 늘어나는 것은 «공제 대상 납입액»뿐이고, 공제율은 거기에만 곱한다.
+#: 전환 특례의 근거 카드. 10%·300만원·60일·납입한도 예외가 전부 여기서 온다.
+ISA_FACT_ID = "fact.k04.f4"
+
 
 def _won(v: int) -> str:
     from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
@@ -1114,18 +1126,33 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
     target = paid + gain_base
     gain = CUST.tax_credit(target, 1.0) - CUST.tax_credit(paid, 1.0)
 
-    lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객 (시스템 계산 — 검색 결과가 아니다)",
+    # ISA 만기자금이 있으면 **질문에 ISA 라는 말이 없어도** 전환 축을 함께 싣는다. 되묻기
+    # 뒤의 답("초과야")처럼 질문이 한 마디로 줄어드는 턴이 있어서, 말에서 찾으면 정작 그
+    # 축이 필요한 턴에 빠진다 — 이 고객에게 성립한 상태인지는 코드가 이미 아는 값이다(§8).
+    isa_card = KB.facts.get(ISA_FACT_ID)
+    isa_used = bool(p.isa) and isa_card is not None and _isa_convertible(p.isa)
+    # 축이 둘이면 **각 블록이 자기가 무엇을 세는지 밝혀야 한다.** 안 밝히면 직원이 말한
+    # 금액(「8천만원」)이 두 블록에서 다른 뜻으로 쓰이는데 화면에서는 분간되지 않는다 —
+    # 위는 «현금을 더 납입한 금액», 아래는 «ISA 에서 옮긴 금액»이다.
+    axis = " · 연금계좌에 현금을 더 납입하는 경우" if isa_used else ""
+    lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객{axis} (시스템 계산 — 검색 결과가 아니다)",
              f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)}",
              f"· 계산에 쓴 추가 납입액 {_won(extra)}"
              + ("" if said else " (질문에 금액이 없어 잔여한도로 계산했다)")]
 
     notices: list[str] = []
     if gain <= 0:
-        # 환급 «금액»을 새로 단정하지 않는 갈래다. 아래 결정세액 단서도 붙이지 않는다 —
-        # 그 단서는 최대 환급액을 단정할 때 걸리는 것이라 여기서는 무관하다(CLAUDE.md §7).
+        # 이 블록은 환급 «금액»을 새로 단정하지 않으므로 결정세액 단서가 무관하다
+        # (CLAUDE.md §7). 단서를 붙일지는 아래에서 **두 블록을 다 보고** 정한다 — ISA 전환
+        # 축이 실리면 그쪽이 금액을 단정하므로, 이 블록만 보고 생략하면 단서가 빠진다.
+        #
+        # 아래 줄은 「연 납입한도 900만원」이라 적혀 있었다. 900만원은 **공제 한도**이고 납입한도는
+        # 1,800만원이라(fact.k04.f1), 그 이름으로 부르면 «더 넣을 수 없다»로 읽힌다 —
+        # 실제로는 더 넣을 수 있고 공제가 안 될 뿐이다(초과분은 과세이연·이연공제, f5).
         lines.append(f"· 세액공제 잔여한도가 {_won(room)}이라 **추가 공제 대상이 없다** — "
                      f"더 납입해도 올해 세액공제로 돌아오는 금액은 늘지 않는다 "
-                     f"(연 납입한도 {_won(cap)} 은 연금저축과 함께 쓴다)")
+                     f"(세액공제 한도 {_won(cap)}은 연금저축과 함께 쓴다. 납입 자체는 "
+                     f"연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)}까지 가능하다)")
     else:
         lines.append(f"· 공제 대상 {_won(min(paid, cap))} → {_won(min(target, cap))} "
                      f"(잔여한도 {_won(room)}까지)")
@@ -1136,12 +1163,88 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
                          f"(늘어나는 금액 {after - now:,}원)")
         lines.append("· 이 고객의 총급여 구간은 원장에 없어 두 경우를 다 실었다 — "
                      "어느 구간인지 확인하면 하나로 좁혀진다")
+
+    if isa_used:
+        lines += _isa_rollover_lines(p, said)
+    if gain > 0 or isa_used:
+        # 환급 «금액»을 단정하는 갈래에만 붙는다(§7). 두 축이 다 나와도 단서는 하나다 —
+        # 같은 카드의 같은 문장이라 두 번 실으면 화면에 같은 경고가 겹쳐 선다.
         notices.append(_caveat(card))
 
+    cards = [card, isa_card] if isa_used else [card]
     return _ev("tax_credit", query, "\n".join(lines),
-               KBMOD.sources_of(KB, [(1.0, card)]), notices=notices,
+               KBMOD.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
                scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
-               cards=[card])
+               cards=cards)
+
+
+def _isa_convertible(isa: dict) -> bool:
+    """아직 전환할 수 있는 ISA 만기자금인가 — 만기일로부터 60일 이내(fact.k04.f4).
+
+    기한이 지난 자금에 «옮기면 얼마 더 받는다»를 실으면 직원이 안내할 수 없는 것을
+    안내하게 된다. 잔여일수를 모르면(원장에 만기일이 없으면) 막지 않는다 — 확인하지
+    못한 것과 기한이 지난 것은 다르고, 앞엣것을 뒤엣것으로 다루면 있는 기회가 사라진다.
+    """
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+
+    dd = isa.get("dd")
+    return dd is None or dd >= -CUST.ISA_ROLLOVER_DEADLINE_DAYS
+
+
+def _isa_rollover_lines(p, said: tuple | None) -> list[str]:
+    """ISA 만기자금 전환 축의 재료. 위 계산과 **더해지는** 몫이라 블록을 갈라 싣는다."""
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+
+    amt, dd = p.isa["amount"], p.isa.get("dd")
+    cap = CUST.ISA_ROLLOVER_CREDIT_CAP_WON
+    # 상한에 닿는 전환액. 10%·300만원에서 나오는 값이라 코드가 다시 정하지 않는다.
+    at_cap = int(cap / CUST.ISA_ROLLOVER_CREDIT_RATE)
+
+    # 기한은 «만기까지 며칠»이 아니라 «전환할 수 있는 날이 며칠 남았나»다. 만기가 지난
+    # 자금도 60일 안이면 전환할 수 있고, 그때 직원이 봐야 하는 수는 남은 날이다.
+    left = CUST.ISA_ROLLOVER_DEADLINE_DAYS + dd if dd is not None and dd < 0 else dd
+    if dd is None:
+        window = ""
+    elif dd < 0:
+        window = f" (만기 {-dd}일 경과 · 전환 기한 {left}일 남음)"
+    else:
+        window = f" (D-{dd})"
+    lines = [
+        "■ ISA 만기자금을 전환하는 경우 — 위 계산과 **다른 축**이다 "
+        "(잔여한도 안에서 나눠 쓰는 것이 아니라, 공제 대상 한도 자체가 늘어난다)",
+        f"· ISA 만기자금 {_won(amt)} · 만기 {p.isa['date']}{window} · {p.isa['org']} — "
+        f"만기일로부터 {CUST.ISA_ROLLOVER_DEADLINE_DAYS}일 이내에 전환한다",
+        f"· 전환금은 연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)}과 무관하다 — "
+        f"만기금액의 전부 또는 일부를 넣을 수 있다",
+        f"· 전환액의 {CUST.ISA_ROLLOVER_CREDIT_RATE * 100:.0f}%가 세액공제 대상에 "
+        f"**더해진다**(상한 {_won(cap)}) — 전환액 {_won(at_cap)}에서 상한에 닿는다. "
+        f"전환금 전액이 공제 대상이 되는 것이 아니다",
+        f"· 그래서 공제 대상 한도가 {_won(CUST.TAX_CREDIT_CAP_WON)}에서 최대 "
+        f"{_won(CUST.TAX_CREDIT_CAP_WON + cap)}으로 늘어난다",
+    ]
+    # 「일부만 옮기면?」의 답은 금액 하나가 아니라 **전환액과의 관계**다. 직원이 금액을
+    # 말했으면 그 금액으로, 안 말했으면 구간표로 답한다.
+    tiers = [t for t in (10_000_000, 20_000_000, at_cap) if t <= amt] or [amt]
+    if amt not in tiers:
+        tiers.append(amt)
+    lines.append("· 전환액별 추가 공제 대상: " + " · ".join(
+        f"{_won(t)} → {_won(CUST.isa_rollover_credit(t))}"
+        + ("(상한)" if CUST.isa_rollover_credit(t) >= cap else "")
+        for t in tiers))
+
+    # 전환액은 만기금액을 넘을 수 없다. 직원이 만기금액 전체를 말한 경우(「8천만원 전부는
+    # 부담스럽다」)도 여기로 들어와 상한에서 잘린다 — 지어낸 수가 아니라 원장 값이다.
+    conv = min(said[1], amt) if said else amt
+    add_room = CUST.isa_rollover_credit(conv)
+    lines.append(f"· 계산에 쓴 전환액 {_won(conv)} → 추가 공제 대상 {_won(add_room)}"
+                 + ("" if said else " (질문에 금액이 없어 만기금액 전부로 계산했다)"))
+    for label, rate in (("총급여 5,500만원 이하", CUST.TAX_CREDIT_RATE["5500이하"]),
+                        ("총급여 5,500만원 초과", CUST.TAX_CREDIT_RATE["5500초과"])):
+        lines.append(f"· {label}({rate * 100:.1f}%): 이 전환으로 늘어나는 환급 "
+                     f"{CUST.tax_credit(add_room, rate):,}원")
+    lines.append("· 이 금액은 위의 «현금을 더 납입하는 경우»와 별개로 더해지는 몫이다 — "
+                 "둘을 같은 한도 안에서 저울질하지 않는다")
+    return lines
 
 
 #: 환급액에 따라붙는 단서를 카드에서 떼어 오는 표지. 코드가 문장을 갖지 않는다 —
@@ -1463,7 +1566,9 @@ TOOLS: dict[str, Tool] = {
         # 없고, 재료 밖 계산은 금지라(§5) 코드가 계산해 싣지 않으면 말할 방법이 없다.
         Tool("tax_credit", "«얼마를 더 납입하면 세액공제로 얼마나 돌려받는지»를 계산한다 — "
              "'300만원 더 넣으면 얼마 받아', '한도 채우면 얼마 돌려받아'처럼 **환급액·"
-             "납입액을 계산해 달라는** 질문에 쓴다(제도 설명이 아니라 이 고객의 금액)",
+             "납입액을 계산해 달라는** 질문에 쓴다(제도 설명이 아니라 이 고객의 금액). "
+             "이 고객이 ISA 만기자금을 갖고 있으면 «일부만 옮기면 세액공제 얼마»처럼 "
+             "전환액에 걸린 계산도 여기다 — 전환 특례까지 함께 계산해 돌려준다",
              _tax_credit, progress="세액공제 환급액"),
         Tool("date", "오늘이 며칠인지와 연말까지 남은 일수를 돌려준다 — '오늘 며칠이야', "
              "'연말까지 얼마 남았어', '언제까지 납입해야 해'처럼 **시점·기한**이 걸린 질문, "

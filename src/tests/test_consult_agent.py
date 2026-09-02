@@ -2977,6 +2977,90 @@ def check_tax_credit_calc() -> int:
     hit = f"{now // 10_000:,}만원" in shown or f"{now:,}" in shown
     print(f"{'✓' if hit else '✗'} 화면의 예상 세액공제액과 같은 산식을 쓴다 ({shown})")
     ok += hit
+    return ok + check_tax_credit_isa()
+
+
+def check_tax_credit_isa() -> int:
+    """ISA 만기자금 전환 — 900만원 한도 «안»이 아니라 그 한도에 **더해지는** 축.
+
+    이 갈래가 없던 동안 「ISA 8,000만원 중 일부만 옮기면 세액공제 어떻게 돼?」에 잔여한도
+    500만원으로 답했다 — 같은 대화에서 방금 인용한 카드(fact.k04.f4 「최대 1,200만원」)와
+    어긋나는 금액이었고, 카드가 오답으로 못박은 「전환금 전액이 공제 대상」의 반대편 오답
+    (「전환해도 잔여한도까지만」)이었다.
+
+    재는 것 다섯:
+      ① ISA 보유 고객이면 질문에 'ISA' 라는 말이 없어도 전환 축이 실린다(되묻기 뒤의
+         한 마디 답 "초과야" 가 그 자리다 — 말에서 찾으면 정작 필요한 턴에 빠진다)
+      ② 늘어나는 것은 전환액의 10%(300만원 상한)이지 전환액 전체가 아니다
+      ③ 잔여한도가 0이어도 전환으로는 더 받을 수 있다 — 두 축이 다르다는 것의 실증
+      ④ 60일이 지난 자금에는 싣지 않는다
+      ⑤ ISA 가 없는 고객의 답은 예전과 같다(축을 늘리지 않는다)
+    """
+    ok = 0
+    from pension_agent.strategy_agent import customer as CUST
+
+    isa = next(p for p in CUST.PERSONAS if p.isa and p.room > 0)
+    ev = tools.TOOLS["tax_credit"].run({"customer_id": isa.id, "question": "초과야"}, "세액공제")
+    text = (ev or {}).get("text", "")
+
+    hit = ev is not None and "ISA 만기자금을 전환하는 경우" in text
+    print(f"{'✓' if hit else '✗'} 질문에 'ISA' 가 없어도 보유 고객이면 전환 축이 실린다")
+    ok += hit
+
+    # ② 전환액 전체가 아니라 10%·300만원 상한. 상한에 닿는 전환액도 함께 있어야
+    #    「일부만 옮기면?」이 금액과 이어진다.
+    cap = CUST.ISA_ROLLOVER_CREDIT_CAP_WON
+    at_cap = int(cap / CUST.ISA_ROLLOVER_CREDIT_RATE)
+    add = CUST.isa_rollover_credit(isa.isa["amount"])
+    hit = (add == cap and CUST.isa_rollover_credit(10_000_000) == 1_000_000
+           and f"{at_cap // 10_000:,}만원에서 상한에 닿는다" in text
+           and "전환금 전액이 공제 대상이 되는 것이 아니다" in text)
+    print(f"{'✓' if hit else '✗'} 늘어나는 몫은 전환액의 10%(상한 {cap // 10_000:,}만원)다")
+    ok += hit
+
+    # 환급액은 «늘어난 공제 대상»에만 공제율을 곱한 값이다. 전환액을 tax_credit() 에 그대로
+    # 넣으면 8,000만원이 한도를 채운 것으로 계산된다 — 그 오답이 여기서 갈린다.
+    gain = CUST.tax_credit(add, CUST.TAX_CREDIT_RATE["5500초과"])
+    hit = f"{gain:,}원" in text and _vt(f"이 전환으로 {gain:,}원 더 돌려받아요.", ev["allow"])[0]
+    print(f"{'✓' if hit else '✗'} 전환 환급액은 늘어난 공제 대상 × 공제율이다 ({gain:,}원)")
+    ok += hit
+
+    # 카드가 못박은 1,200만원 한도와 코드의 두 상수가 같은 값을 말한다.
+    hit = f"{(CUST.TAX_CREDIT_CAP_WON + cap) // 10_000:,}만원" in text
+    print(f"{'✓' if hit else '✗'} 공제 대상 한도가 900만원 → 1,200만원으로 늘어난다고 싣는다")
+    ok += hit
+
+    # ③ 잔여한도가 0인데 ISA 가 있는 고객 — 예전에는 "더 넣어도 안 늘어난다"로 끝났다.
+    full_isa = next((p for p in CUST.PERSONAS if p.isa and p.room == 0), None)
+    if full_isa is not None:
+        zero = tools.TOOLS["tax_credit"].run({"customer_id": full_isa.id, "question": "얼마 더 받아?"}, "q")
+        hit = (zero is not None and "추가 공제 대상이 없다" in zero["text"]
+               and "ISA 만기자금을 전환하는 경우" in zero["text"] and bool(zero["notices"]))
+        print(f"{'✓' if hit else '✗'} 잔여한도 0이어도 전환 축은 따로 답한다 + 결정세액 단서가 붙는다")
+        ok += hit
+
+    # ④ 60일이 지나면 안내할 수 없는 것이라 싣지 않는다.
+    keep = isa.isa
+    try:
+        isa.isa = dict(keep, dd=-(CUST.ISA_ROLLOVER_DEADLINE_DAYS + 1))
+        late = tools.TOOLS["tax_credit"].run({"customer_id": isa.id, "question": "얼마 더 받아?"}, "q")
+        hit = late is not None and "ISA 만기자금을 전환하는 경우" not in late["text"]
+        print(f"{'✓' if hit else '✗'} 전환 기한(60일)이 지난 자금에는 싣지 않는다")
+        ok += hit
+        isa.isa = dict(keep, dd=-10)
+        mid = tools.TOOLS["tax_credit"].run({"customer_id": isa.id, "question": "얼마 더 받아?"}, "q")
+        hit = mid is not None and "만기 10일 경과 · 전환 기한 50일 남음" in mid["text"]
+        print(f"{'✓' if hit else '✗'} 만기가 지났어도 60일 안이면 남은 기한을 싣는다")
+        ok += hit
+    finally:
+        isa.isa = keep
+
+    # ⑤ ISA 가 없는 고객에게는 축을 늘리지 않는다.
+    plain = next(p for p in CUST.PERSONAS if not p.isa and p.room > 0)
+    ev2 = tools.TOOLS["tax_credit"].run({"customer_id": plain.id, "question": "300만원 더 넣으면?"}, "q")
+    hit = ev2 is not None and "ISA" not in ev2["text"] and "연금계좌에 현금을" not in ev2["text"]
+    print(f"{'✓' if hit else '✗'} ISA 가 없는 고객의 재료에는 전환 축도 축 이름도 없다")
+    ok += hit
     return ok
 
 
