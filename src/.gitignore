@@ -20,3 +20,6 @@ venv/
 
 # 원본 PDF·스캔본은 대외비 — 추출 결과(knowledge/data/*.json)만 버전관리
 sources/
+
+# 대화형 에이전트 평가 신고 로그 (app.py 💬 탭)
+**/chat_feedback.csv
