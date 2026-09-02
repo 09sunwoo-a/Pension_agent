@@ -83,6 +83,12 @@ class AgentState(TypedDict, total=False):
     # 있는데 또 끝내려 하면 그때는 존중한다 — 정직한 '없음' 경로를 막지 않는다.
     plan_retry: bool
     plan_done: bool                  # 계획 루프 종료 신호 (LLM 의 done, 또는 코드가 상한에서 끊음)
+    # 이번 턴이 «직전 제안을 승낙받아 재료를 싣는 턴»이면 그 제안 문구(act._show_playbook 이
+    # 채운다). 이 턴의 질문은 "네" 한 마디라, 이게 없으면 작성 LLM 은 무엇을 쓰라는 것인지
+    # 알 방법이 없어 <자료> 를 **직전 턴의 질문**에 대고 재고 "그 자료는 없어요"로 답한다
+    # (nodes/plan.py::compose 의 ACCEPTED_BLOCK 주석). 무엇을 보여주기로 했는지는 제안한
+    # 턴이 이미 정했으므로, 그 사실을 코드가 실어 준다(CLAUDE.md §10).
+    accepted: str | None
     # LLM 단계가 **깨져서** 끝났을 때의 이유(호출 실패·규격 밖 응답). 정상이면 비어 있다.
     # 슬롯 분해(situation_slots)·계획(plan_step)·문장 작성(compose) 어디서 실패해도 같은
     # 키에 남긴다 — 어느 단계에서 실패했든 직원이 받는 답은 같아야 한다(CLAUDE.md §11).

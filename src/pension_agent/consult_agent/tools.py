@@ -1353,7 +1353,20 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
     if not (picked.get("event") or picked.get("seminar")):
         return None
 
-    lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)"]
+    # **개수를 코드가 세어 싣는다.** 답을 쓰면 「2건을 추천드려요」·「1. … 2. …」처럼 개수와
+    # 열거 번호가 문장에 들어가는데, 그 수가 재료에 없으면 verify 가 «원장 밖 수치»로 보고
+    # **맞는 답을 통째로 폐기한다**(그러면 compose 가 이 블록을 그대로 덤프한다 — 실측:
+    # 안내 콘텐츠 2건을 고른 답이 "수치 '2'" 로 잘렸다). 세는 것은 코드가 이미 아는 사실이라
+    # 지어낼 자리가 없다 — `suitable` 도구가 「안내할 수 있는 상품 N종」을 싣는 것과 같다.
+    n_picked = sum(1 for key in ("event", "seminar") if picked.get(key))
+    n_other = {key: max(len(pools.get(key) or []) - (1 if picked.get(key) else 0), 0)
+               for key in ("event", "seminar")}
+    lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
+             f"· 지금 안내할 것 {n_picked}건 — "
+             + " · ".join(f"{label} {1 if picked.get(key) else 0}건"
+                          for key, label in (("event", "이벤트"), ("seminar", "세미나")))
+             + f" · 아직 열려 있는 다른 후보 이벤트 {n_other['event']}건 · "
+               f"세미나 {n_other['seminar']}건"]
     atomic: list[str] = []
     lms: dict[str, dict] = {}
     for key, label in (("event", "이벤트"), ("seminar", "세미나")):
@@ -1375,8 +1388,10 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
         lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"]}
         # 다른 후보 — "다른 건 없어?" 에 답할 재료다. 선정된 것은 위에 이미 있으므로 뺀다.
         others = [c for c in (pools.get(key) or []) if c["id"] != item["id"]]
+        if others:
+            lines.append(f"  다른 {label} 후보 {len(others)}건:")
         for other in others:
-            lines.append(f"  · 다른 {label} 후보: {other['name']} — {other['schedule']}")
+            lines.append(f"  · {other['name']} — {other['schedule']}")
 
     for label, values in (("문제상황", [s["title"] for s in facts.get("problem_situations") or []]),
                           ("성립 요건", facts.get("conditions") or [])):

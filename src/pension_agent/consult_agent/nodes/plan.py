@@ -27,7 +27,8 @@ from pension_agent.consult_agent import guard, progress, relations, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
-    ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM, MUST_BLOCK,
+    ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
+    MUST_BLOCK,
     PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
@@ -483,6 +484,12 @@ def compose(state: AgentState) -> dict[str, Any]:
     # 답변 원문이 없어서(state.Turn) LLM 은 자기가 방금 무엇을 나열했는지 볼 수 없다.
     if _repeated_materials(state, evidence):
         prompt = f"{prompt}\n{REPEAT_BLOCK}"
+    # 승낙 턴 — 이번 턴의 질문은 "네" 한 마디다. 그 말에는 무엇을 쓰라는 것인지가 없어서,
+    # 알려주지 않으면 LLM 은 <자료> 를 직전 턴의 질문에 대고 재고 「그 자료는 없어요」로
+    # 답한다(ACCEPTED_BLOCK 주석의 실측). 무엇을 보여주기로 했는지는 제안한 턴이 정했고,
+    # 그것을 아는 것은 코드다 — 이번 턴의 말에서 다시 추측하지 않는다(§10).
+    if state.get("accepted"):
+        prompt = f"{prompt}\n{ACCEPTED_BLOCK.format(label=state['accepted'])}"
     note = guard.prompt_note(guards, alts)
     if note:
         prompt = f"{prompt}\n\n{note}"
