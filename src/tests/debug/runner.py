@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 
@@ -22,7 +23,7 @@ def session(*, customer_id: str | None = None,
             scenario: script.Scenario | None = None,
             on_progress: Callable[[str], None] | None = None,
             history: list[dict] | None = None,
-            session_id: str = "default",
+            session_id: str | None = None,
             ) -> Iterator[tuple[Callable[[str], dict], TR.Trace]]:
     """계측을 걸어둔 채 여러 턴을 이어 묻는다. 반환: (ask 함수, 트레이스).
 
@@ -33,6 +34,12 @@ def session(*, customer_id: str | None = None,
     화면이 대기 중에 보여주는 진행 줄까지 같은 배선으로 받아야 한다 — 넘기지 않으면
     emit 은 no-op 이라(progress.py) 리허설 출력에 진행 표시가 아예 안 나온다.
 
+    session_id 를 넘기지 않으면 **이 컨텍스트마다 새 id** 를 만든다. 여기서 여는 것은
+    «독립된 상담 한 건»이고(reps 는 케이스마다 세션을 새로 연다), 예전처럼 전부 "default"
+    로 두면 관측 대시보드에서 어제 리허설과 오늘 리허설이 한 세션으로 뭉쳐 어느 실행의
+    턴인지 갈리지 않는다. `history` 도구가 «지난번»에서 현재 세션을 제외하는 판정도 이
+    id 로 하므로, 실행마다 갈리는 편이 실제 상담에 가깝다.
+
     history / session_id: 대화 상태를 **자기가 들고 있는 호출자**를 위한 자리다. CLI 는
     한 프로세스 안에서 여러 턴을 이어 물으므로 이 컨텍스트가 히스토리를 직접 들면 되지만,
     Streamlit 은 턴마다 스크립트를 처음부터 다시 돌리므로 컨텍스트가 턴 하나보다 오래
@@ -40,6 +47,7 @@ def session(*, customer_id: str | None = None,
     받는다. 넘기지 않으면 예전처럼 빈 히스토리로 시작한다.
     """
     tr = TR.Trace()
+    session_id = session_id or f"debug-{uuid.uuid4().hex[:8]}"
     outer = script.installed(scenario) if scenario else nullcontext()
     with outer, TR.instrument(tr):
         turns: list[dict] = list(history or [])

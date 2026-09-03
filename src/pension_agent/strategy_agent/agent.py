@@ -32,7 +32,7 @@ from typing import Any
 
 from pension_agent.strategy_agent import briefing_store
 from pension_agent.strategy_agent import engine
-from pension_agent import llm
+from pension_agent import llm, observability
 from pension_agent.strategy_agent import sections
 from pension_agent.strategy_agent import support
 from pension_agent.strategy_agent.customer import PERSONAS, Profile
@@ -132,7 +132,7 @@ def _write_talking_scripts(facts: dict) -> None:
     try:
         raw = llm.generate(
             TALK_PROMPT.format(points=json.dumps(payload, ensure_ascii=False, indent=1)),
-            system=TALK_SYSTEM, max_tokens=500,
+            system=TALK_SYSTEM, max_tokens=500, name="briefing.talking_scripts",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         facts["llm_skipped"]["talking_scripts"] = (
@@ -165,7 +165,7 @@ def _write_why_this_customer(facts: dict) -> None:
                 briefing=json.dumps(briefing, ensure_ascii=False),
                 conditions=", ".join(facts["conditions"]) or "없음",
             ),
-            system=WHY_CUSTOMER_SYSTEM, max_tokens=300,
+            system=WHY_CUSTOMER_SYSTEM, max_tokens=300, name="briefing.why_customer",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         facts["llm_skipped"]["why_this_customer"] = (
@@ -204,7 +204,7 @@ def _write_coaching(facts: dict) -> None:
                 briefing=json.dumps(briefing, ensure_ascii=False),
                 conditions=", ".join(facts["conditions"]) or "없음",
             ),
-            system=COACH_SYSTEM, max_tokens=400,
+            system=COACH_SYSTEM, max_tokens=400, name="briefing.coaching",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         facts["llm_skipped"]["coaching"] = f"LLM 호출 실패 ({type(e).__name__})"
@@ -264,7 +264,7 @@ def _select(p: Profile, facts: dict, key: str, label: str,
                 conditions=", ".join(facts["conditions"]) or "없음",
                 label=label, candidates=listing, k=k,
             ),
-            system=SELECT_SYSTEM, max_tokens=200,
+            system=SELECT_SYSTEM, max_tokens=200, name="briefing.select",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         skipped[key] = f"LLM 호출 실패 ({type(e).__name__}) — 규칙 순서로 표시됨"
@@ -319,7 +319,7 @@ def _select_outreach(p: Profile, facts: dict, key: str, label: str,
                 conditions=", ".join(facts["conditions"]) or "없음",
                 label=label, candidates=listing,
             ),
-            system=OUTREACH_SELECT_SYSTEM, max_tokens=300,
+            system=OUTREACH_SELECT_SYSTEM, max_tokens=300, name="briefing.select_outreach",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         skipped[key] = f"LLM 호출 실패 ({type(e).__name__}) — 규칙 순서로 표시됨"
@@ -371,7 +371,7 @@ def _write_top_holdings_insight(p: Profile, facts: dict) -> None:
                 customer_state=json.dumps(_customer_state(p), ensure_ascii=False),
                 holdings=json.dumps(holdings, ensure_ascii=False, indent=1),
             ),
-            system=TOP_HOLDINGS_SYSTEM, max_tokens=250,
+            system=TOP_HOLDINGS_SYSTEM, max_tokens=250, name="briefing.top_holdings",
         )
     except Exception as e:
         facts["llm_skipped"]["top_holdings_insight"] = f"LLM 호출 실패 ({type(e).__name__})"
@@ -407,7 +407,7 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
             raw = llm.generate(
                 LMS_PROMPT.format(customer_state=state,
                                   content=json.dumps(_lms_content(item), ensure_ascii=False)),
-                system=LMS_SYSTEM, max_tokens=250,
+                system=LMS_SYSTEM, max_tokens=250, name="briefing.lms_message",
             )
         except Exception as e:
             facts["llm_skipped"]["lms_message"] = (
@@ -490,7 +490,7 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
                 products=json.dumps(products_payload, ensure_ascii=False, indent=1),
                 portfolios=json.dumps(portfolios_payload, ensure_ascii=False, indent=1),
             ),
-            system=RECOMMEND_SYSTEM, max_tokens=700,
+            system=RECOMMEND_SYSTEM, max_tokens=700, name="briefing.recommend",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         skipped["recommendation"] = f"LLM 호출 실패 ({type(e).__name__})"
@@ -596,9 +596,28 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
         # 저장소는 꺼져 있고 아래 생성으로 그대로 내려간다.
         out = briefing_store.load(key)
         if out is None:
-            out = _propose(p, use_llm=use_llm, top_n=top_n)
-            out["facts"]["summaries"] = engine.section_summaries(
-                out["facts"], out["sentence"], out["insight"])
+            # 관측 트레이스 — 한 건 만드는 데 LLM 을 11번 부른다. 어느 단계가 무엇을 받고
+            # 무엇을 뱉었는지 되짚으려면 그 11번이 한 묶음이어야 한다(observability).
+            # 캐시·저장소에서 꺼내 쓴 경우는 생성이 아니므로 트레이스를 만들지 않는다.
+            with observability.trace(
+                "briefing.generate",
+                input={"customer_id": p.id, "customer": p.nm,
+                       "use_llm": use_llm, "top_n": top_n},
+                user_id=p.id, metadata={"customer_id": p.id}, tags=["briefing"],
+            ) as span:
+                out = _propose(p, use_llm=use_llm, top_n=top_n)
+                out["facts"]["summaries"] = engine.section_summaries(
+                    out["facts"], out["sentence"], out["insight"])
+                skipped = sorted(out["facts"].get("llm_skipped") or {})
+                span.update(output={"sentence": out["sentence"], "insight": out["insight"]},
+                            source=out["source"], tier=out["tier"], reason=out["reason"],
+                            llm_skipped=skipped)
+                # 「어제 돌린 9명 중 몇 명이 미매칭으로 떨어졌나 · 규칙 폴백이 몇 건인가 ·
+                # 어느 섹션이 자주 비나」는 브리핑을 한 건씩 열어서는 못 센다.
+                observability.score("briefing_tier", out["tier"], comment=out["reason"] or None)
+                observability.score("briefing_source", out["source"])
+                observability.score("sections_skipped", len(skipped),
+                                    comment=", ".join(skipped) or None)
             briefing_store.save(key, out)
         # 생성은 락 밖에서 한다 — 11 회의 LLM 호출 동안 다른 호출자를 세우지 않는다.
         # 동시에 처음 부른 둘이 각자 만들 수는 있고, 그때는 먼저 넣은 쪽으로 통일된다
@@ -650,7 +669,7 @@ def _propose(p: Profile, *, use_llm: bool, top_n: int) -> dict[str, Any]:
         return out
 
     try:
-        raw = llm.generate(_prompt(facts), system=SYSTEM)
+        raw = llm.generate(_prompt(facts), system=SYSTEM, name="briefing.sentence")
     except Exception as e:  # 게이트웨이 장애·타임아웃 등
         out["reason"] = f"LLM 호출 실패 ({type(e).__name__})"
         return out
@@ -698,7 +717,8 @@ def _fallback(facts: dict, out: dict[str, Any], use_llm: bool) -> dict[str, Any]
         out["reason"] = "행내 매칭 전략 없음 · LLM 미설정"
         return out
     try:
-        raw = llm.generate(_fallback_prompt(facts), system=FALLBACK_SYSTEM)
+        raw = llm.generate(_fallback_prompt(facts), system=FALLBACK_SYSTEM,
+                           name="briefing.fallback_sentence")
     except Exception as e:  # 게이트웨이 장애·타임아웃 등
         out["reason"] = f"행내 매칭 전략 없음 · LLM 호출 실패({type(e).__name__})"
         return out

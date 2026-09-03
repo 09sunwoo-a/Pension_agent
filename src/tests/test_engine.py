@@ -408,14 +408,14 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 _saved = (agent.llm.available, agent.llm.generate)
 try:
     agent.llm.available = lambda: True
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "현 구성 양호", '
         '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
     agent.clear_briefing_cache()
     _r2 = agent.propose(_calm, use_llm=True)
     check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
           "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
     agent.clear_briefing_cache()
     _r3 = agent.propose(_calm, use_llm=True)
@@ -502,6 +502,27 @@ check("납입여력" not in _pb and "연금수령" in _pb, "연금개시 계좌:
 _pens.pension_started = False
 check("tax" in conditions(_pens), "미개시 계좌(대조군): tax 성립")
 check("납입여력" in engine.prepare(_pens)["briefing"], "미개시 계좌(대조군): 납입여력 노출")
+
+# 「납입여력」과 「세액공제_잔여한도」는 **다른 축이다.** 한때 브리핑이 같은 수(p.room)를
+# 두 이름으로 실었고 — 라벨은 1,800만원 납입한도를 가리키는데 값은 900만원 공제한도에서
+# 왔다 — 그러자 화면이 «잔여한도 500만원 · 납입여력도 500만원»으로 한 숫자를 두 근거처럼
+# 말했고, 대화형은 ISA 8,000만원 전환 질문에 그 500만원을 상한으로 답했다.
+_room = Profile(id="T2", nm="T2", ag=52, bal=45_000_000, rk="위험중립형", grade="보통위험",
+                port=[67, 33, 0, 0], ret=3.1, retPct=50, dopt="설정", room=500, dorm=0,
+                nchM=0, pension_paid_ytd=4_000_000, paid_ytd_total=4_000_000)
+check(_room.deposit_room == 14_000_000,
+      "납입여력은 1,800만원 − 당해 실납입액이다 (세액공제 잔여한도가 아니다)",
+      f"{_room.deposit_room:,}원")
+_rb = engine.prepare(_room)["briefing"]
+check("1,400만원" in _rb["납입여력"] and "500만원" in _rb["납입여력"],
+      "브리핑이 두 축을 한 줄에서 갈라 적는다 (납입 가능액 · 그중 공제 대상)", _rb["납입여력"])
+check(_rb["납입여력"].split("(")[0].strip() != f"{_room.room:,}만원",
+      "납입여력의 값이 세액공제 잔여한도와 같은 수가 아니다", _rb["납입여력"])
+# 실납입액 컬럼이 없으면 인정액으로 떨어진다 — 여력을 과대 산출하지 않는 방향이다.
+check(Profile(id="T3", nm="T3", ag=50, bal=1, rk="안정형", grade="낮은위험",
+              port=[100, 0, 0, 0], ret=0.0, retPct=50, dopt="설정", room=0, dorm=0,
+              nchM=0).deposit_room == 18_000_000,
+      "실납입액을 모르면 납입여력은 한도 전액이다(기본값 0)")
 
 
 # ─────────────────────────────────────────────────────────────

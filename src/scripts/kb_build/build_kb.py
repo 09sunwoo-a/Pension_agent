@@ -27,6 +27,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 from scripts.kb_build import config
 
@@ -198,6 +199,90 @@ def inherit_parent_source(records: list[dict]) -> list[dict]:
         if parent_doc:
             rec.setdefault("source", {})["doc"] = parent_doc
     return records
+
+
+# ━━ 항목 상호참조 — 「항목 41·48」을 id 로 올린다 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 06 원문은 다른 항목을 가리킬 때 「→ 항목 41·48」·「(항목 41 참조)」로 적는다. 그 번호는
+# **지식베이스 안의 항목 번호**이지 단말 화면의 값이 아닌데, 파생 텍스트에 맨숫자로 남으면
+# 답변이 그것을 화면의 값으로 읽는다. 실제로 나갔던 문장이 이렇다 —
+#
+#   표A 원문:  거래구분 ① 과세이연/계약이전입금 ② ISA 만기자금 입금 → 항목 41·48
+#   답변:      거래구분에서 'ISA 만기자금 입금'(항목 48)을 선택하면 …
+#
+# 41·48 은 proc.041(과세이연 입금 5단계)·proc.048(ISA 만기자금 입금)을 가리키는 포인터인데,
+# 답변은 그것을 단말에서 고르는 항목번호로 옮겼다. 직원은 단말에서 48번을 찾게 된다.
+# **검증기는 못 잡는다** — "48" 이 근거 안에 실제로 있으므로 수치 검사를 그대로 통과한다
+# (숫자의 존재만 보고 그 숫자가 무엇의 번호인지는 보지 않는다).
+#
+# 그래서 두 가지를 한다. ① 파생 텍스트의 표기를 「지식항목 N」으로 바꿔 무엇의 번호인지
+# 스스로 밝히게 하고 ② 번호를 `refs`(관계 §5 — knowledge/CLAUDE.md)로 올려 깨진 참조를
+# 검증기가 잡게 한다. 원문(quotes·source_text)은 건드리지 않는다(루트 절대 규칙 1).
+
+#: 파생 텍스트에서 「항목 41」을 「지식항목 41」로. 뒤에 숫자가 오는 것만 바꾸고("이 항목을"은
+#: 그대로), 이미 붙은 것은 다시 붙이지 않는다 — 변환기는 몇 번을 돌려도 같아야 한다.
+_XREF_WORD = re.compile(r"(?<!지식)항목(?=\s*\d)")
+
+#: 표A 의 「… → 항목 41·48」은 칸 끝에 붙는 **참고 포인터**다. 그 화살표가 이 카드에서 가장
+#: 위험한 자리다 — 앞에 「거래구분 ①②」처럼 단말에서 실제로 고르는 순번이 서 있어서, 화살표
+#: 뒤의 번호가 그 순번의 연장으로 읽힌다. 「관련」을 붙여 무엇인지 못박는다.
+_XREF_ARROW = re.compile(r"→\s*(?!관련)지식항목")
+
+#: 「항목 41·48」·「항목 1·2·5·6·16」처럼 번호가 이어 붙는 형태까지 읽는다.
+_XREF_NUMS = re.compile(r"지식항목\s*(\d+(?:\s*[·,]\s*\d+)*)")
+
+#: `refs` 를 찾을 파생 텍스트 필드. 원문 인용 필드는 여기 없다 — 원문은 고치지 않는다.
+_XREF_FIELDS = ("summary", "key_points", "note", "implication")
+
+
+def _xref_mark(value: Any) -> Any:
+    """파생 텍스트의 항목 표기에 「지식」을 붙인다. 문자열·리스트·{role,text} 를 함께 훑는다."""
+    if isinstance(value, str):
+        return _XREF_ARROW.sub("→ 관련 지식항목", _XREF_WORD.sub("지식항목", value))
+    if isinstance(value, list):
+        return [_xref_mark(v) for v in value]
+    if isinstance(value, dict):
+        return {k: (_xref_mark(v) if k == "text" else v) for k, v in value.items()}
+    return value
+
+
+def link_xrefs(records: list[dict], target: str, index: dict[str, dict[str, str]],
+               report: list[str]) -> list[dict]:
+    """항목 상호참조를 표기하고 `refs` 로 올린다.
+
+    `target` 은 **번호가 가리키는 종류**다 — 같은 원문 파일 안의 번호이기 때문이다. 05 에서
+    나온 셋(procedure·screen·channel)은 전부 05 의 절차 항목을 가리키므로 `proc` 하나다.
+
+    해소하지 못한 번호는 조용히 버리지 않고 리포트에 남긴다 — 지어내지 않는 것과 같은
+    이유로, 못 이은 것은 못 이었다고 보여야 다음 저작자가 확인한다.
+    """
+    for rec in records:
+        fields = rec.get("fields") or {}
+        for key in _XREF_FIELDS:
+            if key in fields:
+                fields[key] = _xref_mark(fields[key])
+        blob = json.dumps({k: fields.get(k) for k in _XREF_FIELDS}, ensure_ascii=False)
+        refs: list[str] = []
+        for run in _XREF_NUMS.findall(blob):
+            for num in re.split(r"[·,]", run):
+                hit = index.get(target, {}).get(num.strip())
+                if hit is None:
+                    report.append(f"[미해소참조] {rec['id']} → {target} 항목 {num.strip()}")
+                elif hit != rec["id"] and hit not in refs:
+                    refs.append(hit)          # 자기 자신은 참조로 세우지 않는다
+        if refs:
+            rec["refs"] = refs
+    return records
+
+
+def xref_index(*groups: list[dict]) -> dict[str, dict[str, str]]:
+    """종류별 «항목번호 → 카드 id» 색인. 번호는 카드가 `fields.no` 로 이미 갖고 있다."""
+    index: dict[str, dict[str, str]] = {}
+    for group in groups:
+        for rec in group:
+            no = (rec.get("fields") or {}).get("no")
+            if no is not None:
+                index.setdefault(rec["id"].split(".")[0], {})[str(no)] = rec["id"]
+    return index
 
 
 def write(name: str, kind: str, title: str, records: list[dict], as_of: str,
@@ -2073,6 +2158,15 @@ def main() -> int:
     methods = inherit_parent_source(build_methods(resolver))
     fieldtips = build_fieldtips(resolver)
 
+    # 항목 상호참조는 **전 종류가 만들어진 뒤**에 잇는다 — 05 의 표A(screen)가 05 의 절차
+    # 항목을 가리키듯, 번호는 같은 원문 파일 안의 다른 카드를 가리킨다. 가리키는 종류는
+    # 원문 파일이 정한다(06/01 → seg · 02 → m · 03 → pitch · 05 → proc).
+    xrefs = xref_index(segments, methods, pitches, procedures)
+    xref_report: list[str] = []
+    for group, target in ((segments, "seg"), (methods, "m"), (pitches, "pitch"),
+                          (procedures, "proc"), (screens_, "proc"), (channels, "proc")):
+        link_xrefs(group, target, xrefs, xref_report)
+
     write("kb_docs", "doc", "원천 문서 레지스트리 (01~05·08 폴더)", docs, "2026-08")
     write("kb_segments", "segment", "고객 세그먼트 — 06/01 고객세그먼트", segments, "2026-08")
     write("kb_methods", "method", "IRP 관리 방법론 — 06/02 IRP관리방법론", methods, "2026-08")
@@ -2134,6 +2228,14 @@ def main() -> int:
         print("   " + line)
     conds = sum(1 for s in segments if s["fields"]["conds"])
     print(f"CONDS 매핑: {conds}건 (나머지는 conds=[] — 자동 매칭 제외, 검색에는 남음)")
+
+    linked = sum(1 for s in built if s.get("refs"))
+    edges = sum(len(s.get("refs") or []) for s in built)
+    print(f"항목 상호참조(refs): {linked}장 · {edges}건 연결 — 파생 텍스트 표기는 「지식항목 N」")
+    if xref_report:
+        print(f"⚠ 미해소 참조 {len(xref_report)}건 — 번호가 가리키는 항목이 없다(확인 필요):")
+        for line in xref_report[:12]:
+            print("   " + line)
 
     if resolver.unresolved:
         uniq = sorted(set(resolver.unresolved))

@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import select
+from pension_agent.consult_agent import marks, select
 from pension_agent.consult_agent.kb import origin_of
 from pension_agent.consult_agent.state import KB
 
@@ -56,8 +56,12 @@ def _render(fact: dict) -> list[str]:
     # 출처는 어떤 경우에도 밝힌다 — 원천 문서 → 원문 표기 → 추출지식 절 순으로 물러선다.
     # 값만 있고 어디서 왔는지 없는 답은 직원이 고객에게 옮길 수 없다(origin_of).
     tail.append(f"출처 {origin_of(KB, fact)}")
-    if fact.get("customer_facing"):
-        tail.append("고객에게 그대로 안내 가능")
+    # 참·거짓을 **둘 다** 싣는다. 예전에는 참일 때만 붙였고, 그래서 내부용 팩트는 선언이
+    # 없는 카드와 구분되지 않은 채 재료로 들어갔다 — 작성 프롬프트의 「'내부용'으로 표시된
+    # 자료는…」 규칙이 가리킬 표시가 없었다(marks.py docstring).
+    facing = marks.facing_note(fact)
+    if facing:
+        tail.append(facing)
     lines.append("· " + " · ".join(tail))
     return lines
 

@@ -5,6 +5,10 @@ langgraph>=0.2.0          # consult_agent 대화 그래프 — 행내 0.4.8 · �
                           # (graph.py compose 주석 · test_consult_agent 충돌 검사)
 anthropic>=0.40.0         # 외부 테스트용 LLM 프로바이더 (사내 genai 는 표준 라이브러리만 씀)
 
+# Langfuse 관측(observability.py)은 여기 없다 — langfuse SDK 대신 표준 라이브러리로
+# 수집 API 를 부른다. 사내 genai 경로가 urllib 만 쓰는 것과 같은 이유다(망분리 대비:
+# 코드를 행내로 들여올 때 설치할 것이 늘지 않아야 한다). 켜는 것은 .env 의 키 두 개다.
+
 # 개발·데모 화면 (app.py)
 streamlit>=1.35.0
 pandas>=2.0.0

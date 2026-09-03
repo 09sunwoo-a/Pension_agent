@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from pension_agent.strategy_agent.customer import (
+    DEPOSIT_CAP_WON,
     RISK_ASSET_CAP_PCT,
     TAX_CREDIT_CAP_WON,
     Profile,
@@ -283,7 +284,17 @@ def _briefing(p: Profile) -> dict:
     if p.pension_started:
         snap["연금수령"] = "수령 중 · 추가납입 불가(연금지급설계 등록 계좌)"
     elif p.room > 0:
-        snap["납입여력"] = f"{won(p.room * 10000)} (연 납입한도 1,800만원 이내)"
+        # **한 숫자를 두 이름으로 싣지 않는다.** 예전에는 이 줄이 세액공제 잔여한도(p.room)를
+        # 「납입여력」이라는 이름으로 다시 실었다 — 라벨은 1,800만원 납입한도를 가리키는데
+        # 값은 900만원 공제한도에서 온 값이었다. 두 축이 한 이름이 되면 작은 쪽이 납입
+        # 상한으로 읽힌다(김서연: 실제 납입 여력 1,400만원인데 화면은 500만원을 말했고,
+        # 대화형은 ISA 8,000만원 전환 질문에 그 500만원으로 답했다).
+        # 그래서 값은 납입한도 축(deposit_room)으로 바꾸고, 그중 얼마가 공제 대상인지를
+        # 같은 줄에서 갈라 적는다. 요건 판정(add·tax)이 보는 값은 계속 p.room 이다.
+        snap["납입여력"] = (
+            f"{won(p.deposit_room)} (연 납입한도 {won(DEPOSIT_CAP_WON)} − 당해 납입 "
+            f"{won(p.paid_ytd_total)}) · 이 중 세액공제 대상은 잔여한도 "
+            f"{won(p.room * 10_000)}까지 (초과분은 과세이연·이연공제)")
 
     # 보유상품 개별 종목. 자산군별 합계로는 "무슨 상품 들고 있어"·"판매중단된 거 있어"에
     # 답할 수 없다. 수익률은 **고객 보유수익률**(그 고객이 실제로 얻은 것)을 쓴다 —

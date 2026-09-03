@@ -30,6 +30,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
+from pension_agent import observability
 from pension_agent.session_store import append_turn
 
 from pension_agent.consult_agent import progress, suggest
@@ -119,11 +120,31 @@ def ask(
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    with progress.reporting(on_progress):
-        out = _AGENT.invoke(
-            {"question": question, "history": history or [], "customer_id": customer_id,
-             # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
-             "session_id": session_id})
+    # 관측 트레이스 — 이 턴에서 나가는 LLM 호출(계획·판정·작성, 보통 4~7회)이 전부 이
+    # 하나에 묶인다. 키가 없으면 통째로 꺼진다(observability). session_id 를 넘겨 같은
+    # 상담의 턴들이 대시보드에서 한 줄로 이어지게 한다.
+    # user_id 는 **고객 id** 다. Langfuse 의 «user» 는 보통 최종 사용자를 뜻하지만, 여기서
+    # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
+    # 진입점에 함께 있는 안정된 id 는 이것뿐이다. 직원 id 는 아직 진입점이 받지 않는다.
+    with observability.trace(
+        "consult.turn", input=question, session_id=session_id, user_id=customer_id,
+        metadata={"customer_id": customer_id}, tags=["consult"],
+    ) as span:
+        with progress.reporting(on_progress):
+            out = _AGENT.invoke(
+                {"question": question, "history": history or [], "customer_id": customer_id,
+                 # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
+                 "session_id": session_id})
+        evidence = out.get("evidence") or []
+        span.update(output=out.get("answer"), intent=out.get("intent"),
+                    tools=sorted({e["tool"] for e in evidence}))
+        # 턴 하나가 어떻게 끝났는지. 「되묻기가 몇 %인가 · 근거 0건이 몇 %인가 · LLM 이
+        # 죽은 턴이 있었나」를 대시보드가 집계한다 — 트레이스를 한 건씩 열어서는 못 센다.
+        observability.score(
+            "turn_outcome",
+            "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify") else "answer",
+            comment=out.get("llm_error"))
+        observability.score("evidence_count", len(evidence))
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

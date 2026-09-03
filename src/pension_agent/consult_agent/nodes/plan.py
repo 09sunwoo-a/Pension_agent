@@ -24,6 +24,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
+from pension_agent import observability
 from pension_agent.consult_agent import guard, progress, relations, screens, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
@@ -159,6 +160,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
                 question=question,
             ),
             max_tokens=PLAN_MAX_TOKENS,
+            name="consult.plan",
         )
     except LLMError as exc:
         # LLM 이 없거나 죽으면 계획을 세울 수 없다. **왜 못 했는지를 남긴다** — 예전에는
@@ -545,25 +547,37 @@ def compose(state: AgentState) -> dict[str, Any]:
     known = _known_products()
     appends: list[str] = []
     try:
-        answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
-        for attempt in range(COMPOSE_RETRIES + 1):
-            if not answer:
-                break
-            # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
-            # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
-            progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
-            faults, appends = _screen(answer, evidence, state["question"], known,
-                                      prompt_texts=injected)
-            if not faults:
-                break
-            answer = ""
-            if attempt >= COMPOSE_RETRIES:
-                break
-            # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
-            progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
-            retry = prompt + COMPOSE_RETRY_BLOCK.format(
-                faults="\n".join(f"- {f}" for f in faults[:FAULTS_SHOWN]))
-            answer = generate(retry, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
+        # 관측 span — 작성과 게이트를 한 묶음으로 세운다. 「몇 번 다시 썼나 · 무엇에
+        # 걸렸나」는 점수로도 나가 대시보드가 집계한다(observability.score).
+        with observability.span("compose", metadata={"evidence": len(evidence)}) as sp:
+            answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM,
+                              name="consult.compose").strip()
+            faults: list[str] = []
+            for attempt in range(COMPOSE_RETRIES + 1):
+                if not answer:
+                    break
+                # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
+                # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
+                progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
+                faults, appends = _screen(answer, evidence, state["question"], known,
+                                          prompt_texts=injected)
+                if not faults:
+                    break
+                answer = ""
+                if attempt >= COMPOSE_RETRIES:
+                    break
+                # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
+                progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
+                retry = prompt + COMPOSE_RETRY_BLOCK.format(
+                    faults="\n".join(f"- {f}" for f in faults[:FAULTS_SHOWN]))
+                answer = generate(retry, max_tokens=1500, system=COMPOSE_SYSTEM,
+                                  name="consult.compose.retry").strip()
+            sp.update(output=answer or None, retries=attempt, faults=faults[:FAULTS_SHOWN])
+            # 「지난 30번 중 몇 번이 게이트에 걸렸나」는 트레이스를 한 건씩 열어서는 못
+            # 센다. 값은 전부 코드가 아는 사실이다 — LLM 이 자기 답을 채점하지 않는다.
+            observability.score("compose_passed", bool(answer),
+                                comment="; ".join(faults[:FAULTS_SHOWN]) or None)
+            observability.score("compose_retries", attempt)
     except LLMError as exc:
         # 재료는 모았는데 문장을 못 쓴 것이다. 아래 폴백(근거 원문 그대로 싣기)으로 흘려보내면
         # 완성된 답변처럼 보이는 카드 덩어리가 나간다 — LLM 이 죽었을 때 다른 단계가 내는
