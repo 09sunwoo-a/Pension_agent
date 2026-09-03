@@ -1114,6 +1114,35 @@ def _won(v: int) -> str:
     return won(v)
 
 
+def _extra_paid(state: AgentState) -> tuple[str, int] | None:
+    """계산에 쓸 «추가 납입액». 직원이 친 말에서 뽑되, **되물은 갈래를 고르는 답이면 그 말의
+    수치는 «갈래»이지 납입액이 아니다** — 원래 질문으로 거슬러 올라간다.
+
+    이게 없던 동안 되묻기 다음 턴이 **틀린 금액을 답했다**(2026-09-02 실측 — 이수민).
+    「300만원 더 넣으면 얼마 돌려받아?」가 총급여 구간을 되물었고, 직원이 「5,500만원
+    이하야」라고 답하자 그 5,500만원을 추가 납입액으로 읽었다. 잔여한도(900만원)로 잘려
+    화면에는 **1,485,000원**이 떴다 — 물어본 300만원의 답(495,000원)이 아니라 한도를 다
+    채웠을 때의 값이고, 되묻기 선택지에 방금 495,000원이라 적어 놓고 그랬다.
+
+    기준서 §5 가 정한 것이 그것이다 — 「되물은 다음 턴의 짧은 답은 그 질문의 답이므로,
+    **원래 질문과 고른 갈래를 합쳐** 답한다」. 도구가 이번 턴 질문만 보면 원래 질문이 없다.
+
+    직전 턴이 되묻기였는지는 코드가 아는 값이다(`pending_clarify`) — LLM 에 맡기지 않는다.
+    """
+    from pension_agent.verify import first_amount  # noqa: PLC0415
+
+    history = state.get("history") or []
+    if not (history and (history[-1] or {}).get("pending_clarify")):
+        return first_amount(state.get("question") or "")
+    # 갈래를 고르는 턴이다. 이번 말의 수치는 선택지 라벨이므로 보지 않고, 금액을 말한
+    # 가장 가까운 앞 질문을 쓴다. 없으면 None 이라 호출부가 잔여한도로 읽는다.
+    for turn in reversed(history):
+        found = first_amount(turn.get("question") or "")
+        if found:
+            return found
+    return None
+
+
 def _tax_credit(state: AgentState, query: str) -> Evidence | None:
     """세액공제 환급 예상액. 계산은 strategy_agent 것을 쓰고 여기서는 재료로 편다."""
     customer_id = state.get("customer_id")
@@ -1136,7 +1165,7 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
     room = p.room * 10_000
     # 금액을 안 말했으면 «잔여한도를 채우면» 으로 읽는다. 원장 값이라 지어낸 수가 아니고,
     # 직원이 실제로 묻는 것도 대개 그것이다("얼마나 더 받을 수 있어?").
-    said = first_amount(state.get("question") or "")
+    said = _extra_paid(state)
     extra = said[1] if said else room
     gain_base = min(extra, room)          # 잔여한도를 넘는 납입은 공제 대상이 아니다
     target = paid + gain_base

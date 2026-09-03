@@ -21,10 +21,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from pension_agent import observability
-from pension_agent.consult_agent import guard, progress, relations, tools
+from pension_agent.consult_agent import guard, progress, relations, screens, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
@@ -265,6 +266,16 @@ def _known_products() -> set[str]:
     return {r["name"] for r in engine.PRODUCTS} | KBMOD.product_names(KB)
 
 
+#: 근거 카드의 화면번호 스팬 꼴(`[04-12-646]`). 다른 `atomic` 스팬과 갈라 판정하기 위한 것이라
+#: 대괄호까지 포함해 본다 — 도구가 그 꼴로 선언한다(`tools._procedure_decls`).
+_SCREEN_SPAN = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
+
+#: 답변에서 화면번호를 찾는 꼴. **대괄호를 요구하지 않는다** — 직원이 읽는 문장에서는
+#: 「04-12-646 지급/해지조회」처럼 괄호 없이 쓰는 것이 정상이고, 표기 차이로 옳은 답변을
+#: 버리지 않는다(§6 「이름 표기도 같다」와 같은 자리).
+_SCREEN_IN_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}(?![0-9A-Za-z-])")
+
+
 def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     """이 근거의 원문 스팬이 답변에서 어떻게 어긋났는지 판정한다. 종류는 도구가 선언한다.
 
@@ -281,7 +292,26 @@ def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     따라 나오던 자리다). 판단은 값 스팬의 등장 여부로 하고, 걸 스팬이 없는 도구
     (화법·고객재료)는 판단할 수 없으므로 표시를 유지한다 — 잃는 쪽으로 기울지 않는다.
     """
+    # 화면번호는 **식별자**라 다른 스팬과 판정이 다르다(§12 gap 2). 이름을 정확히 부르거나
+    # 아예 안 부르거나이고, 흩어진 토큰으로 재면 안 된다 — 번호끼리 앞 마디를 공유하기
+    # 때문이다(`04-12-…`·`06-12-…`). 예전 규칙(스팬이 답변에 없는데 숫자가 겹치면 폐기)은
+    # 그래서 **답변이 화면번호를 일부만 인용하면 걸렸다**: 안 쓴 번호의 04·12 가 쓴 번호와
+    # 겹쳐 «숫자는 썼는데 원문을 안 실었다»로 오판됐다. 원장 화면이 일곱 개인 절차 답변이
+    # 여섯 개를 정확히 인용하고도 폐기돼 카드 원문이 덤프됐다(2026-09-02 실측 — 박정호 P3).
+    #
+    # 지금 재는 것은 «답변이 이 턴 근거에 **없는** 화면을 가리키는가» 하나다. 빠뜨린 것은
+    # 위반이 아니고(안 부른 것이다), 대괄호 유무는 같은 화면이다(`screens.normalize`).
+    # 지어낸 번호는 여기서도 걸리고 수치 검사에도 걸린다 — 마지막 마디가 원장에 없다.
+    known_screens = {screens.normalize(s) for s in found["atomic"] if _SCREEN_SPAN.fullmatch(s.strip())}
+    if known_screens:
+        for m in _SCREEN_IN_TEXT.finditer(answer):
+            said = screens.normalize(m.group())
+            if said not in known_screens:
+                return DISCARD, [(m.group(), [])]
+
     for span in found["atomic"]:
+        if _SCREEN_SPAN.fullmatch(span.strip()):
+            continue                      # 위에서 식별자 규칙으로 이미 판정했다
         if span not in answer and (numbers(span) & numbers(answer)):
             # 걸린 스팬을 함께 돌려준다 — DISCARD 처분에는 안 쓰이지만, 계측(trace)이 이걸
             # 실어야 리허설 로그가 «무엇을 그대로 안 실어서 잘렸나»를 말할 수 있다. 판정
@@ -405,16 +435,30 @@ FAULTS_SHOWN = 8
 
 
 def _screen(answer: str, evidence: list[tools.Evidence],
-            question: str, known: set[str]) -> tuple[list[str], list[str]]:
+            question: str, known: set[str],
+            prompt_texts: Iterable[str] = ()) -> tuple[list[str], list[str]]:
     """생성문을 §6 의 세 검사에 건다. 반환: (걸린 자리, 덧붙일 표시).
 
     걸린 자리가 비어 있으면 통과다. 검사 순서는 예전과 같고(수치 → 관계 → 스팬), 앞에서
     걸리면 뒤는 돌리지 않는다 — 계측(trace)이 「앞에서 끊김」을 그대로 말할 수 있어야 한다.
+
+    ━━ 프롬프트에 들어간 것은 인용도 허용된다 (§6) ━━
+    `prompt_texts` 는 원장 밖이면서 **코드가 이번 턴 프롬프트에 실어 보낸** 텍스트다 —
+    「하지 말 것」 가드와 승낙 턴의 제안 문구. 둘 다 코드가 LLM 에게 읽히기로 정한 것인데
+    원장에는 없어서, 시킨 대로 인용하면 «자료 밖 수치»로 답이 통째로 버려졌다(실측:
+    가드의 「…→ 6번」 → `수치 '6'`, 승낙 문구의 「화법 2건」 → `수치 '2'`). 가드는
+    `_sources()` 가 이미 **출처로도 싣는다** — 「이게 근거다」라고 세워 놓고 인용은 막는
+    상태였다.
+
+    넓히는 것은 **수치뿐**이다(`echoable` 규약 그대로). 상품명은 넓히지 않는다 — 이름만
+    대서 적합성 게이트를 뚫는 길을 열지 않기 위해서다(verify.verify_texts 머리말).
+    그리고 이번 턴 프롬프트에 **실제로 들어간 것**만 넣는다: `_POOL_KEYS` 가 경고한
+    «답변이 쓰지도 않을 후보 더미»와 다른 점이 그것이다.
     """
     # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을 지어낸
     # 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
-    ok, bad = verify_texts(answer, tools.ledger_texts(evidence),
-                           known_products=known, echoable=[question])
+    ok, bad = verify_texts(answer, tools.ledger_texts(evidence), known_products=known,
+                           echoable=[question, *(t for t in prompt_texts if t)])
     if not ok:
         return [f"자료에 없는 수치·상품명: {b}" for b in (bad or [])] or ["자료 밖 수치"], []
 
@@ -495,6 +539,9 @@ def compose(state: AgentState) -> dict[str, Any]:
     note = guard.prompt_note(guards, alts)
     if note:
         prompt = f"{prompt}\n\n{note}"
+    # 위에서 프롬프트에 실어 보낸 것 중 **원장 밖인 것**. 인용해도 되는 값이어야 한다
+    # (`_screen` 머리말). 원장에서 온 블록(재료·필수 스팬)은 이미 원장이라 넣지 않는다.
+    injected = [note, state.get("accepted") or ""]
 
     progress.emit("모은 근거로 답변을 작성하고 있어요")
     known = _known_products()
@@ -512,7 +559,8 @@ def compose(state: AgentState) -> dict[str, Any]:
                 # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
                 # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
                 progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
-                faults, appends = _screen(answer, evidence, state["question"], known)
+                faults, appends = _screen(answer, evidence, state["question"], known,
+                                          prompt_texts=injected)
                 if not faults:
                     break
                 answer = ""
