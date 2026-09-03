@@ -883,6 +883,63 @@ def _history(state: AgentState, query: str) -> Evidence | None:
                notices=[HISTORY_MARK] if records else [])
 
 
+#: 이번 상담 대화 재료의 범위 — 실을 턴 수와 발화 한 건의 길이. `history` 의 발췌(120자)보다
+#: 훨씬 길다. 그쪽은 «그때 무슨 얘기를 했나»의 실마리면 되지만, 이쪽은 **요약의 재료**라
+#: 답변이 말한 수치·화면번호가 잘리면 요약이 그것을 옮길 수 없다(§6 — 원장 밖 수치는 잘린다).
+TRANSCRIPT_TURNS, TRANSCRIPT_EXCERPT = 16, 1500
+
+#: 이번 상담에서 아직 오간 대화가 없을 때 싣는 줄. 0건도 확인한 값이다(`HISTORY_NONE` 과 같은
+#: 이유) — 비워 두면 «질의가 빗나감»과 구별되지 않아 계획이 다른 도구를 헛돈다.
+TRANSCRIPT_NONE = "· 기록 없음 — 이번 상담에서 아직 오간 대화가 없습니다."
+
+#: 기록된 답변 끝에 붙어 있는 제안 문구(act.offer — 화면 연계·화법 제시·쪽지 보내기). 안내가
+#: 아니라 화면 장치라 요약 재료에서 뗀다 — 추천질문을 기록에서 빼는 것과 같은 이유다(graph.ask).
+_OFFER_TRAILER = re.compile(r"\n*— [^\n]*\(네 / 아니오\)\s*$")
+
+
+def _transcript(state: AgentState, query: str) -> Evidence | None:
+    """**이번 상담**(지금 진행 중인 세션)에서 지금까지 오간 대화 — `history` 의 반대편이다.
+
+    `history` 는 이번 세션을 제외한다(방금 한 말이 «지난 상담»으로 나가면 안 되므로). 그러면
+    「지금까지 얘기한 거 정리해서 쪽지로 보내줘」에 쓸 재료가 어디에도 없다 — 대화 맥락
+    (`format_history`)은 직원 질문만 싣고 답변 원문을 들지 않기 때문이다(state.Turn). 요약은
+    답변에 무엇이 있었는지를 봐야 쓸 수 있고, 그 원문은 진입점이 턴마다 세션 저장소에 남긴
+    것 하나뿐이다(graph.ask — 추천질문을 붙이기 전의 답변).
+
+    싣는 것은 **직원 발화와 에이전트 답변**이다. 도구 실행 기록(role=tool)은 대화가 아니라
+    빼고, 기록에 남은 화면 연계 제안 문구도 뗀다. 답변 원문이 원장에 실리므로 요약이 그
+    안의 수치·화면번호를 옮겨도 검증을 통과한다 — 원장 밖에서 새로 계산하지는 못한다.
+
+    고객 화면이 닫혀 있거나 세션 구분자가 없으면 None 이다 — «확인하지 못함»이라 다른
+    도구를 써 볼 여지를 남긴다. 세션은 있는데 대화가 0건이면 그것도 재료다(TRANSCRIPT_NONE).
+    """
+    customer_id, session_id = state.get("customer_id"), state.get("session_id")
+    if not customer_id or not session_id:
+        return None
+    from pension_agent import session_store  # noqa: PLC0415
+    try:
+        sessions = session_store.list_sessions(customer_id)
+    except Exception:
+        return None
+    current = next((s for s in sessions if s.get("session_id") == session_id), None)
+    turns = [t for t in ((current or {}).get("turns") or [])
+             if t.get("role") in ("user", "agent") and (t.get("text") or "").strip()]
+
+    lines = [f"■ 이번 상담 대화 기록 — 지금 진행 중인 상담에서 오간 대화 ({len(turns)}턴)"]
+    for turn in turns[-TRANSCRIPT_TURNS:]:
+        text = _OFFER_TRAILER.sub("", (turn.get("text") or "").strip())
+        text = " ".join(text.split())
+        if len(text) > TRANSCRIPT_EXCERPT:
+            text = text[:TRANSCRIPT_EXCERPT] + "…"
+        lines.append(f"- {_HISTORY_ROLE.get(turn.get('role'), '?')}: {text}")
+    if len(lines) == 1:
+        lines.append(TRANSCRIPT_NONE)
+    return _ev("transcript", query, "\n".join(lines),
+               [{"id": f"session.{customer_id}.{session_id}", "title": "이번 상담 대화 기록",
+                 "doc": "상담 세션 기록(에이전트가 턴마다 남긴 이번 상담의 대화)",
+                 "score": None, "page": None}])
+
+
 # ─────────────────────────────────────────────────────────────
 # 적합성 게이트 — 고른 근거가 질문에 답이 되는가 (CLAUDE.md §5)
 #
@@ -1616,8 +1673,16 @@ TOOLS: dict[str, Tool] = {
         Tool("customer", "지금 열려 있는 고객의 브리핑 자료(잔액·수익률·성립 요건, 그리고 이 고객이 "
              "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer,
              progress="고객 브리핑 자료"),
-        Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
+        Tool("history", "이 고객과 **지난** 상담(이전 세션)에서 무슨 얘기를 했는지(날짜·질문·"
+             "안내 요지) 돌려준다 — 지금 진행 중인 상담은 들어 있지 않다",
              _history, progress="지난 상담 기록"),
+        # `history` 와 갈라 두는 축은 **시점**이다 — 그쪽은 이번 세션을 제외하고 이쪽은 이번
+        # 세션만 싣는다. 설명이 갈리지 않으면 「대화 내용 요약해줘」가 history 로 가서 지난
+        # 상담을 요약하거나 «기록 없음»으로 끝난다.
+        Tool("transcript", "**이번 상담**(지금 진행 중인 세션)에서 지금까지 오간 대화 전문 — "
+             "직원 질문과 에이전트 답변을 돌려준다. 「지금까지 대화 요약해줘」·「상담 내용 "
+             "정리해서 쪽지로 보내줘」처럼 이번 상담을 정리·요약·전달하려는 요청은 여기다",
+             _transcript, progress="이번 상담 대화 기록"),
         # 시점·기한이 걸린 질문은 재료가 없으면 답이 안 나온다(§8 "지어내지 않는다"가 그대로
         # «말하지 못한다»가 된다). 도구 설명이 곧 계획의 판단 재료이므로, 언제 부르는지를
         # 예시로 박아 둔다 — "얼마 안 남았다"류 문장을 쓰려는 턴이 전부 여기 걸려야 한다.
@@ -1649,8 +1714,8 @@ TOOLS: dict[str, Tool] = {
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable", "tax_credit", "playbook",
-                             "outreach"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "transcript", "suitable", "tax_credit",
+                             "playbook", "outreach"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:

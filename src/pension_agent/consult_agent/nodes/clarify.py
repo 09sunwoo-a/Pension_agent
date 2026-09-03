@@ -49,7 +49,7 @@ MIN_OPTIONS = 2
 #: 열려 있는 고객 하나의 것이라, 되물어서 좁힐 갈래가 지식베이스에 없다.
 #: 오늘 날짜(date)도 같다. 갈래가 아니라 하나뿐인 값이라, 되묻는 것은 좁히는 게 아니라
 #: 「오늘이 며칠인지」를 직원에게 되묻는 꼴이 된다.
-_NO_BRANCH = frozenset({"customer", "history", "date"})
+_NO_BRANCH = frozenset({"customer", "history", "transcript", "date"})
 
 
 def asked_last_turn(history: list[dict] | None) -> bool:

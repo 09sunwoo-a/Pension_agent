@@ -26,12 +26,13 @@ from typing import Any
 
 from pension_agent.consult_agent import screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
-from pension_agent.tools import TOOL_REGISTRY
+from pension_agent.tools import MEMO_DEFAULT_TO, TOOL_REGISTRY
 
 #: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
 _SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
 
-_YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "ok", "yes")
+_YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "보내",
+        "ok", "yes")
 _NO = ("아니", "괜찮", "나중", "취소", "안 열", "안열", "하지마", "no")
 
 
@@ -71,10 +72,54 @@ def _propose(state: AgentState) -> dict[str, Any] | None:
     받아 같은 화면 연계를 제안한다 — 기능이 사라진 것이 아니라, **추측이 아니라 요청으로**
     시작하게 바뀐 것이다.
     """
+    # 요약 턴이 먼저다 — 요약이 앞 답변의 화면번호를 옮겨 적어도 그 턴에 열 화면은 없다.
+    memo = _propose_memo(state)
+    if memo:
+        return memo
     for number in _answer_screens(state):
         return {"kind": "screen", "label": f"{number} 화면 열기", "screen": number,
                 "params": {"customer_id": state.get("customer_id") or ""}}
     return _propose_lms(state) or _propose_playbook(state)
+
+
+#: 직원이 «쪽지로» 보내 달라고 말했는지의 판정어. 규칙이지 LLM 판단이 아니다(§10).
+_MEMO_WORDS = ("쪽지",)
+
+
+def _propose_memo(state: AgentState) -> dict[str, Any] | None:
+    """이번 턴의 답변(상담 요약)을 **쪽지로 보낼지** 제안한다(§10 의 제안·확인 형태).
+
+    쪽지는 직원 본인 쪽지함으로 가는 행내 메모라 대외 행위가 아니고, 그래서 에이전트가
+    화면을 열어 주는 데서 멈추지 않고 보내는 것까지 한다(`pension_agent/tools.py::send_memo`).
+    그래도 승낙을 받는 이유는 본문이 **LLM 이 쓴 요약**이기 때문이다 — 직원이 읽기 전에
+    나가면 무엇이 나갔는지 아무도 모르고, 보낸 쪽지는 되돌릴 수 없다(루트 규칙 5).
+
+    조건은 셋이고 전부 코드가 확인할 수 있는 사실이다.
+      1. 고객 화면이 열려 있다 — 어느 상담의 요약인지가 있어야 한다
+      2. 이번 턴이 **이번 상담 대화**를 재료로 다뤘다(원장에 `transcript` 근거가 있다) —
+         턴마다 갈리는 게이트다. 이게 없으면 「쪽지」라는 낱말이 든 아무 질문에나 붙는다
+      3. 직원이 쪽지로 보내 달라고 말했다(질문에 «쪽지») — 요약만 부탁한 턴에 "보낼까요?"를
+         붙이면 묻지 않은 것을 제안하는 것이다(§3)
+
+    보낼 본문은 **이번 답변 그대로**다. 검증을 통과한 문장이 곧 쪽지이고, 승낙 턴이 다시
+    쓰거나 다듬지 않는다 — 화면에 보여 준 것과 다른 쪽지가 나가면 안 된다(§10 「제안한
+    턴이 남긴 것으로 정한다」).
+    """
+    if not state.get("customer_id"):
+        return None
+    if not any(e["tool"] == "transcript" for e in (state.get("evidence") or [])):
+        return None
+    question = state.get("question") or ""
+    if not any(w in question for w in _MEMO_WORDS):
+        return None
+    text = (state.get("answer") or "").strip()
+    if not text:
+        return None
+    to = MEMO_DEFAULT_TO
+    return {"kind": "memo", "label": f"이 요약을 쪽지로 보내기(받는 사람: {to})",
+            "prompt": f"이 요약을 쪽지로 보낼까요? 받는 사람은 {to}이에요. (네 / 아니오)",
+            "text": text, "to": to,
+            "params": {"customer_id": state.get("customer_id") or ""}}
 
 
 def _propose_lms(state: AgentState) -> dict[str, Any] | None:
@@ -229,8 +274,12 @@ def offer(state: AgentState) -> dict[str, Any]:
     action = _propose(state)
     if not action:
         return {}
+    # 묻는 문장은 제안이 정한다 — 쪽지는 «연계»가 아니라 «보내기»라 같은 꼴로 물으면
+    # 직원이 무엇에 답하는지 흐려진다. 끝의 「(네 / 아니오)」는 공통이다(transcript 재료가
+    # 기록에서 이 줄을 떼는 표지 — tools._OFFER_TRAILER).
+    ask = action.get("prompt") or f"{action['label']}, 연계해드릴까요? (네 / 아니오)"
     return {
-        "answer": state["answer"] + f"\n\n— {action['label']}, 연계해드릴까요? (네 / 아니오)",
+        "answer": state["answer"] + f"\n\n— {ask}",
         "pending_action": action,
     }
 
@@ -266,7 +315,34 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 진행할까요? '네' 또는 '아니오'로 답해 주세요.",
                 "sources": [], "pending_action": pending}
 
-    return _show_playbook(pending) if pending.get("kind") == "pitch" else _link(pending)
+    kind = pending.get("kind")
+    if kind == "pitch":
+        return _show_playbook(pending)
+    if kind == "memo":
+        return _send_memo(pending)
+    return _link(pending)
+
+
+def _send_memo(pending: dict) -> dict[str, Any]:
+    """승낙받은 요약을 쪽지로 보내고 결과를 알린다(§10 「연계 결과를 알린다」).
+
+    본문은 제안한 턴이 남긴 것 그대로다 — 여기서 다시 쓰지 않는다. 보낸 본문을 답변에
+    다시 싣는 이유는, 무엇이 나갔는지가 이 턴의 답이기 때문이다(직원이 방금 읽은 것과
+    같은 문장이어야 «그대로 보냈다»가 확인된다).
+    """
+    text = (pending.get("text") or "").strip()
+    if not text:
+        # 본문을 잃었으면 지어내지 않는다 — 무엇을 보내기로 했는지 잃은 것이다.
+        return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 요약을 한 번 더 부탁해 주세요.",
+                "sources": [], "pending_action": None}
+    to = pending.get("to") or MEMO_DEFAULT_TO
+    result = TOOL_REGISTRY["send_memo"](
+        (pending.get("params") or {}).get("customer_id") or "", text, to=to)
+    if result.get("status") not in ("ok", "stubbed"):
+        return {"answer": f"쪽지를 보내지 못했어요. {result.get('detail') or ''}".strip(),
+                "sources": [], "pending_action": None}
+    return {"answer": f"쪽지를 보냈어요 — 받는 사람: {to}. 보낸 내용은 아래와 같아요.\n\n{text}",
+            "sources": [], "pending_action": None}
 
 
 def _show_playbook(pending: dict) -> dict[str, Any]:
