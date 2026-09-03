@@ -60,6 +60,38 @@ from pension_agent.strategy_agent.prompts import (
 )
 
 
+def _cond_names(facts: dict) -> str:
+    """프롬프트에 싣는 성립 요건 — 이름만, 코드(`isa`·`tax`·`add`)는 뺀다.
+
+    `facts["conditions"]` 는 `코드:이름` 이다(engine/pipeline.py — 코드는 판정·매칭의 키다).
+    그것을 프롬프트에 그대로 실었던 동안 LLM 산출이 코드를 되받았다 — ⑨ 추천 사유가
+    「세액공제 활용 가능(tax)과 추가입금 여력 보유(add) 요건」이라 썼고, 그 사유가 대화 재료로
+    실려 답변까지 그대로 나갔다(2026-09-03 확정본 E1 실측). 코드는 직원에게 뜻이 없고
+    LLM 에게도 판단 재료가 아니다 — 화면(`app.py`)이 이름만 보여주는 것과 같은 처리다.
+    """
+    return ", ".join(c.split(":", 1)[1] if ":" in c else c for c in facts["conditions"]) or "없음"
+
+
+#: 후보 목록에서 LLM 에게 보이지 않는 키. `conds` 는 요건 코드라 위와 같은 이유로 이름으로
+#: 바꿔 싣고, `dummy`·`lms_message` 는 선별 판단과 무관한 운영값·발송 문구다(문구는 따로
+#: 고객별로 다시 쓴다 — _write_lms_messages).
+_LISTING_HIDDEN = frozenset({"conds", "dummy", "lms_message"})
+
+
+def _listing(candidates: list[dict]) -> str:
+    """선별 프롬프트의 후보 목록 — 번호 + JSON 한 줄. 요건 코드는 이름으로 바꿔 싣는다."""
+    from pension_agent.strategy_agent.customer import CONDS  # noqa: PLC0415
+
+    def shown(c: dict) -> dict:
+        row = {k: v for k, v in c.items() if k not in _LISTING_HIDDEN}
+        if c.get("conds"):
+            row["맞는 요건"] = [CONDS.get(x, x) for x in c["conds"]]
+        return row
+
+    return "\n".join(f"{i}. {json.dumps(shown(c), ensure_ascii=False)}"
+                     for i, c in enumerate(candidates))
+
+
 def _prompt(facts: dict) -> str:
     items = [{
         "id": it["id"], "title": it["title"], "구분": it["kind"], "주체": it["actor"],
@@ -73,7 +105,7 @@ def _prompt(facts: dict) -> str:
     return WRITE_PROMPT.format(
         customer=json.dumps(facts["customer"], ensure_ascii=False),
         briefing=json.dumps(briefing, ensure_ascii=False),
-        conditions=", ".join(facts["conditions"]) or "없음",
+        conditions=_cond_names(facts),
         items=json.dumps(items, ensure_ascii=False, indent=1),
         risk_cap=facts["risk_cap"],
         needs_slot=", ".join(facts["needs_slot"]) or "없음",
@@ -88,7 +120,7 @@ def _fallback_prompt(facts: dict) -> str:
     return FALLBACK_PROMPT.format(
         customer=json.dumps(facts["customer"], ensure_ascii=False),
         briefing=json.dumps(briefing, ensure_ascii=False),
-        conditions=", ".join(facts["conditions"]) or "없음",
+        conditions=_cond_names(facts),
     )
 
 
@@ -163,7 +195,7 @@ def _write_why_this_customer(facts: dict) -> None:
             WHY_CUSTOMER_PROMPT.format(
                 customer=json.dumps(facts["customer"], ensure_ascii=False),
                 briefing=json.dumps(briefing, ensure_ascii=False),
-                conditions=", ".join(facts["conditions"]) or "없음",
+                conditions=_cond_names(facts),
             ),
             system=WHY_CUSTOMER_SYSTEM, max_tokens=300, name="briefing.why_customer",
         )
@@ -202,7 +234,7 @@ def _write_coaching(facts: dict) -> None:
             COACH_PROMPT.format(
                 customer=json.dumps(facts["customer"], ensure_ascii=False),
                 briefing=json.dumps(briefing, ensure_ascii=False),
-                conditions=", ".join(facts["conditions"]) or "없음",
+                conditions=_cond_names(facts),
             ),
             system=COACH_SYSTEM, max_tokens=400, name="briefing.coaching",
         )
@@ -255,13 +287,12 @@ def _select(p: Profile, facts: dict, key: str, label: str,
         # 후보가 뽑을 개수 이하면 고를 여지가 없다 — 전부 그대로 쓰고 LLM 호출은 아낀다.
         # (콘텐츠가 쌓이면 자연히 이 분기를 벗어나 아래 선별 경로를 탄다)
         return candidates
-    listing = "\n".join(
-        f"{i}. {json.dumps(c, ensure_ascii=False)}" for i, c in enumerate(candidates))
+    listing = _listing(candidates)
     try:
         raw = llm.generate(
             SELECT_PROMPT.format(
                 customer_state=json.dumps(_customer_state(p), ensure_ascii=False),
-                conditions=", ".join(facts["conditions"]) or "없음",
+                conditions=_cond_names(facts),
                 label=label, candidates=listing, k=k,
             ),
             system=SELECT_SYSTEM, max_tokens=200, name="briefing.select",
@@ -310,13 +341,12 @@ def _select_outreach(p: Profile, facts: dict, key: str, label: str,
         return None
     if len(candidates) == 1:
         return candidates[0]
-    listing = "\n".join(
-        f"{i}. {json.dumps(c, ensure_ascii=False)}" for i, c in enumerate(candidates))
+    listing = _listing(candidates)
     try:
         raw = llm.generate(
             OUTREACH_SELECT_PROMPT.format(
                 customer_state=json.dumps(_customer_state(p), ensure_ascii=False),
-                conditions=", ".join(facts["conditions"]) or "없음",
+                conditions=_cond_names(facts),
                 label=label, candidates=listing,
             ),
             system=OUTREACH_SELECT_SYSTEM, max_tokens=300, name="briefing.select_outreach",
