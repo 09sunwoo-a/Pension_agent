@@ -32,6 +32,7 @@ from langgraph.graph import END, START, StateGraph
 
 from pension_agent import observability
 from pension_agent.session_store import append_turn
+from pension_agent.strategy_agent import customer as CUST
 
 from pension_agent.consult_agent import progress, suggest
 
@@ -96,6 +97,21 @@ def build_agent():
 _AGENT = None
 
 
+def _customer_name(customer_id: str | None) -> str | None:
+    """관측 표시용 고객 이름. 없으면 None — 답변 경로는 이 값을 쓰지 않는다.
+
+    이름을 못 찾아도 조용히 지나간다(로스터에 없는 id·원장 미적재). 관측이 답변을
+    막지 않는다는 규약이 여기에도 적용된다.
+    """
+    if not customer_id:
+        return None
+    try:
+        profile = CUST.get_profile(customer_id)
+    except Exception:                          # noqa: BLE001 — 표시용 값이 턴을 죽이지 않는다
+        return None
+    return getattr(profile, "nm", None)
+
+
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
@@ -126,9 +142,15 @@ def ask(
     # user_id 는 **고객 id** 다. Langfuse 의 «user» 는 보통 최종 사용자를 뜻하지만, 여기서
     # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
     # 진입점에 함께 있는 안정된 id 는 이것뿐이다. 직원 id 는 아직 진입점이 받지 않는다.
+    #
+    # 이름은 **태그로도** 싣는다. 사람은 KB-PIN(171203-4815062)이 아니라 이름(김서연)으로
+    # 기억하는데, id 로만 두면 대시보드에서 그 고객을 부르려고 매번 원장을 뒤져야 한다.
+    # 두 진입점이 같은 꼴로 붙여야 브리핑과 대화 턴이 한 태그로 묶인다.
+    name = _customer_name(customer_id)
     with observability.trace(
         "consult.turn", input=question, session_id=session_id, user_id=customer_id,
-        metadata={"customer_id": customer_id}, tags=["consult"],
+        metadata={"customer_id": customer_id, "customer": name},
+        tags=["consult", *observability.tag("고객", name)],
     ) as span:
         with progress.reporting(on_progress):
             out = _AGENT.invoke(

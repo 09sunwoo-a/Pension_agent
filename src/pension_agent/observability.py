@@ -236,9 +236,13 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
             if key in fields:
                 meta[key] = fields.pop(key)
         _put_if(closing, "output", _payload(fields.pop("output", None)))
-        _put_if(closing, "userId", fields.pop("user_id", None))
-        _put_if(closing, "sessionId", fields.pop("session_id", None))
-        _put_if(closing, "tags", fields.pop("tags", None))
+        # 여는 이벤트에서 준 값을 닫는 이벤트에도 그대로 싣는다. 같은 id 의 두 이벤트를
+        # Langfuse 가 병합하므로 생략해도 남을 값이지만, 빠진 필드를 어떻게 다루는지는
+        # 서버 판에 달렸다 — 「대시보드에서 user 가 비어 보인다」는 원인을 짚기 어려운
+        # 실패라 기대지 않는다. 호출부가 update() 로 덮었으면 그쪽이 이긴다.
+        _put_if(closing, "userId", fields.pop("user_id", None) or user_id)
+        _put_if(closing, "sessionId", fields.pop("session_id", None) or session_id)
+        _put_if(closing, "tags", fields.pop("tags", None) or tags)
         meta.update(fields)                              # 남은 것은 전부 메타데이터로
         closing["metadata"] = meta
         _emit("trace-create", closing)                   # 같은 id — Langfuse 가 병합한다
@@ -247,6 +251,18 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
 def current_trace_id() -> str | None:
     """지금 열려 있는 트레이스 id. 없으면 None."""
     return _TRACE_ID.get()
+
+
+def tag(kind: str, value: Any) -> list[str]:
+    """«분류:값» 태그 한 장. 값이 없으면 빈 목록이라 아무것도 붙지 않는다.
+
+    꼴을 여기서 정하는 이유는 **진입점이 둘이기 때문**이다 — 브리핑과 대화 턴이 같은
+    고객을 다른 꼴로 적으면 대시보드에서 한 태그로 묶이지 않고, 그 어긋남은 화면에
+    «태그가 두 개 보인다»로만 나타나서 알아채기 어렵다.
+
+        tags=["consult", *observability.tag("고객", name)]
+    """
+    return [f"{kind}:{value}"] if value else []
 
 
 # ─────────────────────────────────────────────────────────────
