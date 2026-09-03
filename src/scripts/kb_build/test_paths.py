@@ -152,6 +152,52 @@ for _part in re.split(r"\n(?=### F\d)", _facts_src.read_text(encoding="utf-8")):
 check(not _lost, f"팩트 절의 원문 표가 카드에 실린다 ({_checked}개 절 대조)", ", ".join(_lost))
 
 
+# ── 5. 항목 상호참조 — 「항목 41·48」이 단말 값으로 읽히지 않는가
+#
+# 표A 의 「거래구분 ① 과세이연/계약이전입금 ② ISA 만기자금 입금 → 항목 41·48」에서 41·48 은
+# 지식베이스의 항목 번호인데, 답변이 그것을 단말에서 고르는 항목번호로 옮겨 적었다
+# ("'ISA 만기자금 입금'(항목 48)을 선택하면"). 앞에 실제 순번 ①② 가 서 있어서 화살표 뒤의
+# 번호가 그 연장으로 읽힌 것이고, 검증기는 "48" 이 근거에 있으므로 통과시킨다.
+_cards: list[dict] = []
+for _f in sorted((config.KB_DATA if hasattr(config, "KB_DATA") else build_kb.OUT_DIR).glob("kb_*.json")):
+    _cards += json.loads(_f.read_text(encoding="utf-8")).get("records", [])
+_ids = {c["id"] for c in _cards}
+
+_bare, _arrow, _broken = [], [], []
+for _c in _cards:
+    _fields = _c.get("fields") or {}
+    _derived = json.dumps({k: _fields.get(k) for k in build_kb._XREF_FIELDS}, ensure_ascii=False)
+    if build_kb._XREF_WORD.search(_derived):
+        _bare.append(_c["id"])
+    if build_kb._XREF_ARROW.search(_derived):
+        _arrow.append(_c["id"])
+    _broken += [f"{_c['id']}→{r}" for r in _c.get("refs", []) if r not in _ids]
+check(not _bare, "파생 텍스트에 맨 「항목 N」이 없다 (전부 「지식항목 N」)",
+      ", ".join(_bare[:5]))
+check(not _arrow, "화살표 참조는 「→ 관련 지식항목」으로 못박혀 있다", ", ".join(_arrow[:5]))
+check(not _broken, "refs 가 실재하는 카드를 가리킨다", ", ".join(_broken[:5]))
+
+# **원문은 고치지 않는다**(루트 절대 규칙 1). 06 원문과 카드의 인용 필드에는 「항목 N」이
+# 그대로 남아 있어야 한다 — 파생 텍스트만 바꾼 것이 맞는지 여기서 가른다.
+_src_has = build_kb._XREF_WORD.search(
+    (config.EXTRACT_DIR / "05_업무처리절차.md").read_text(encoding="utf-8"))
+check(_src_has is not None, "06 원문의 「항목 N」 표기는 그대로다 (원문 불변)")
+# 변환기가 손대는 필드에 인용 필드가 섞이면 그때부터 원문이 조용히 고쳐진다. 지금 06 의
+# 「항목 N」은 표 셀·도출문에만 있어 인용에 걸린 것이 없지만, 원문이 바뀌면 걸릴 수 있다 —
+# 막을 자리는 «걸렸는지»가 아니라 **손대는 필드 목록**이다.
+check(not ({"quotes", "source_text"} & set(build_kb._XREF_FIELDS)),
+      "상호참조 표기는 파생 텍스트만 고친다 (인용 필드는 손대지 않는다)",
+      str(build_kb._XREF_FIELDS))
+
+# 대표 대조 — 표A 의 그 행이 실제로 두 절차 항목으로 이어졌는가.
+_isa_screen = next((c for c in _cards if c["id"] == "screen.01-12-213"), None)
+check(_isa_screen is not None
+      and sorted(_isa_screen.get("refs", [])) == ["proc.041", "proc.048"]
+      and "관련 지식항목 41·48" in (_isa_screen["fields"].get("summary") or ""),
+      "표A [01-12-213] 의 「항목 41·48」이 proc.041·proc.048 로 이어진다",
+      json.dumps((_isa_screen or {}).get("refs"), ensure_ascii=False))
+
+
 # ── 4. 최상위 폴더 번호를 코드에 하드코딩하지 않았는가
 _HARD = re.compile(r"""(?:REPO|parents\[3\])\s*/\s*["']0\d_""")
 for py in sorted(Path(__file__).parent.glob("*.py")):
