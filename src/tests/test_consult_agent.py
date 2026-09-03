@@ -1472,7 +1472,7 @@ def check_material_marks() -> int:
        본부 지침으로 읽히면 그게 곧 잘못된 안내다.
     """
     from pension_agent.consult_agent import marks as M
-    from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.nodes import facts_qa, plan as P, procedure_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -1496,6 +1496,38 @@ def check_material_marks() -> int:
            and M.notes_for(KB, [facing]) == []
            and M.notes_for(KB, [undeclared]) == [])
     print(f"{'✓' if hit else '✗'} 내부용 주의는 customer_facing 선언이 거짓일 때만 붙는다")
+    ok += hit
+
+    # ③ **재료에도 같은 선언이 보여야 한다.** 주의(notes_for)는 거짓을 보는데 재료 조립은
+    #    참일 때만 표시를 붙였다 — 그래서 답변 아래에는 "고객에게 안내하지 마세요"가 서고
+    #    본문은 그 카드를 근거로 "고객에게 이렇게 안내하는 게 핵심"이라고 썼다(송도윤 S6).
+    #    작성 프롬프트의 「'내부용'으로 표시된 재료는…」 규칙이 가리킬 표시가 없었다.
+    hit = (M.facing_note(internal) == M.FACING_NOTE[False]
+           and M.facing_note(facing) == M.FACING_NOTE[True]
+           and M.facing_note(undeclared) is None)
+    print(f"{'✓' if hit else '✗'} 재료 표시는 참·거짓을 둘 다 싣고 선언 없음은 비운다")
+    ok += hit
+
+    # 실제 재료 블록에 실리는가 — 두 종류 모두. 여기가 끊기면 위 단위 판정이 통과해도
+    # LLM 은 여전히 내부용 카드를 구분하지 못한다.
+    internal_fact = next(f for f in KB.facts.values() if f.get("customer_facing") is False)
+    hit = M.FACING_NOTE[False] in "\n".join(facts_qa._render(internal_fact))
+    print(f"{'✓' if hit else '✗'} 내부용 팩트의 재료 블록에 내부용 표시가 실린다")
+    ok += hit
+
+    def proc(card):
+        return "\n".join(procedure_qa._render({**card, "title": "t"}))
+
+    hit = (M.FACING_NOTE[False] in proc(internal)
+           and M.FACING_NOTE[True] in proc(facing)
+           and not any(n in proc(undeclared) for n in M.FACING_NOTE.values()))
+    print(f"{'✓' if hit else '✗'} 절차 재료 블록도 같은 표시를 쓴다")
+    ok += hit
+
+    # 작성 프롬프트가 그 표시를 실제로 가리키는가. 문구가 갈리면 규칙이 다시 헛돈다.
+    from pension_agent.consult_agent import prompts as PR
+    hit = "내부용" in PR.COMPOSE_SYSTEM and "고객에게 할 말로 옮기지" in PR.COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 규칙이 내부용 재료를 고객 안내로 옮기지 말라고 못 박는다")
     ok += hit
 
     # 같은 등급을 여러 장 썼다고 같은 문장을 여러 번 세우지 않는다.

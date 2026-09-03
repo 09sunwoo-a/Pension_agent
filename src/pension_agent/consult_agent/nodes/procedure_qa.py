@@ -14,6 +14,7 @@ facts_qa 와 같은 이유로 즉답 노드를 지웠다(§11 · 그 파일 주�
 
 from __future__ import annotations
 
+from pension_agent.consult_agent import marks
 from pension_agent.consult_agent.kb import origin_of, role_texts
 from pension_agent.consult_agent.select import pick
 from pension_agent.consult_agent.state import KB
@@ -37,8 +38,10 @@ def _render(card: dict) -> list[str]:
     # 직원에게 띄우지 않는다(역할 선언은 build_kb + config 예외표).
     for caution in role_texts(card.get("cautions"), "caution"):
         lines.append(f"· {caution}")
-    if card.get("customer_facing"):
-        lines.append("· ▶ 고객에게 그대로 안내할 수 있는 절차입니다.")
+    # 참·거짓을 둘 다 싣는다 — 팩트 재료와 같은 이유다(facts_qa._render · marks.py).
+    facing = marks.facing_note(card)
+    if facing:
+        lines.append(f"· {facing}")
     lines.append(f"· 출처 {origin_of(KB, card)}")
     return lines
 
