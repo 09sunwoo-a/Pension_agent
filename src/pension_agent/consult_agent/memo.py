@@ -18,14 +18,37 @@
 
 프로파일이 없거나 산출에 실패하면 표를 **붙이지 않는다** — 빈 칸을 «미확인»으로 채우면 그
 문자열이 쪽지로 나간다(render._customer_header 가 스타클럽 등급을 다루는 방식과 같다).
+
+**요약에서는 항목 줄만 취한다.** 형태 요구(`ANSWER_SHAPES["transcript"]`)가 「- 물은 것 — 안내
+요지」 줄만 쓰라고 시키는데, 실 LLM 은 그 위에 도입 문장을 두 줄 얹었다(2026-09-03 박정호 M1 —
+「쪽지 발송 여부는 시스템이 답변 뒤에 따로 안내해요」·「이번 상담에서 오간 내용은 아래와
+같아요」. 앞 줄은 지시 문장을 그대로 옮겨 적은 것이다). 프롬프트 지시만으로는 막히지 않는다는
+실측이므로, 형태에 맞는 줄(`_ITEM`)만 코드가 취한다 — 톤을 판정하는 것이 아니라 형태 요구와
+같은 규칙을 코드가 한 번 더 집행하는 것이다. 항목 줄이 하나도 없으면(「기록 없음」 한 줄 답변)
+요약 전체를 그대로 쓴다 — 지어내지도 비우지도 않는다.
 """
 
 from __future__ import annotations
+
+import re
 
 from pension_agent.clock import today
 
 MEMO_TITLE = "퇴직연금 사후관리 에이전트의"
 KEY_INFO_HEADER = "[고객 주요 정보]"
+
+#: 화면에서 쪽지 본문을 감싸는 코드블록 펜스(act.offer). 본문의 일부가 아니라 화면 장치다 —
+#: 보내는 본문(pending_action.text)에는 없고, 세션 기록에서 재료를 만들 때는 뗀다(tools._transcript).
+FENCE = "```"
+
+#: 요약의 «항목 줄» — 「- 」·「• 」·「* 」·「1. 」·「① 」로 시작하는 줄.
+_ITEM = re.compile(r"^\s*(?:[-•*]|\d+[.)]|[①-⑳])\s+")
+
+
+def items_of(summary: str) -> str:
+    """요약에서 항목 줄만. 하나도 없으면 요약 전체(모듈 docstring 마지막 문단)."""
+    lines = [ln.rstrip() for ln in summary.strip().splitlines() if _ITEM.match(ln)]
+    return "\n".join(lines) if lines else summary.strip()
 
 
 def _date_label() -> str:
@@ -62,7 +85,8 @@ def _key_info(customer_id: str) -> list[tuple[str, str]]:
 
 
 def compose(customer_id: str, summary: str) -> str:
-    """쪽지 본문. `summary` 는 검증을 통과한 이번 답변이고 여기서 고치지 않는다."""
+    """쪽지 본문. `summary` 는 검증을 통과한 이번 답변이고, 그중 항목 줄만 싣는다(items_of) —
+    줄 안의 내용은 고치지 않는다."""
     name = customer_id
     rows: list[tuple[str, str]] = []
     try:
@@ -74,7 +98,7 @@ def compose(customer_id: str, summary: str) -> str:
     except Exception:
         rows = []
     parts = [f"{MEMO_TITLE}\n{name} 고객님 ({_date_label()}) 상담 내용 요약입니다.",
-             summary.strip()]
+             items_of(summary)]
     if rows:
         table = ["| 항목 | 값 |", "|---|---|", *(f"| {k} | {v} |" for k, v in rows)]
         parts.append(KEY_INFO_HEADER + "\n" + "\n".join(table))

@@ -3638,6 +3638,9 @@ def check_memo() -> int:
       ⑤ 본문은 코드가 조립한다(memo.compose) — 머리말(성명·날짜)과 고객 주요 정보 표는 원장
          값이고 요약 항목만 LLM 답변이다. 화면에 보이는 본문과 나가는 쪽지가 같고, 승낙 턴은
          본문을 반복하지 않는다.
+      ⑥ 요약에서는 항목 줄만 취한다(memo.items_of) — LLM 이 도입 문장을 얹어도 본문에 실리지
+         않는다(2026-09-03 실측). 화면에서는 본문을 코드블록으로 감싸고, 보내는 본문과 기록
+         재료에는 펜스가 없다.
     """
     import tempfile
     from pathlib import Path
@@ -3663,6 +3666,11 @@ def check_memo() -> int:
                 "text": "[06-12-501] 후선업무 의뢰등록부터 해요. 60일 내 입금이에요.\n\n"
                         "— 06-12-501 화면 열기, 연계해드릴까요? (네 / 아니오)"})
             session_store.append_turn("CM", now, {"role": "tool", "text": "[발송 화면 연계] 문구"})
+            # 앞선 쪽지 제안 턴이 기록에 남은 꼴 — 펜스와 제안 문구는 화면 장치라 재료에서 뗀다.
+            session_store.append_turn("CM", now, {
+                "role": "agent",
+                "text": f"{memo.FENCE}\n앞선 쪽지 본문\n{memo.FENCE}\n\n"
+                        "— 이 요약을 쪽지로 보낼까요? 받는 사람은 본인이에요. (네 / 아니오)"})
             state = {"question": "대화 내용 요약해서 쪽지로 보내줘", "customer_id": "CM",
                      "session_id": now}
             found = tools.run("transcript", state, "이번 상담 요약")
@@ -3701,8 +3709,10 @@ def check_memo() -> int:
 
     # ② 화면 장치는 재료가 아니다 — 답변 안의 화면번호·기한은 남는다(요약이 옮길 값).
     hit = (bool(found) and "연계해드릴까요" not in found["text"] and "도구실행" not in found["text"]
-           and "[06-12-501]" in found["text"] and "60일" in found["text"])
-    print(f"{'✓' if hit else '✗'} 제안 문구·도구 실행 줄은 떼고 답변 본문은 그대로 싣는다")
+           and "[06-12-501]" in found["text"] and "60일" in found["text"]
+           and memo.FENCE not in found["text"] and "쪽지로 보낼까요" not in found["text"]
+           and "앞선 쪽지 본문" in found["text"])
+    print(f"{'✓' if hit else '✗'} 제안 문구·도구 실행 줄·코드블록 펜스는 떼고 답변 본문은 그대로 싣는다")
     ok += hit
 
     hit = closed is None and nosess is None and bool(empty) and tools.TRANSCRIPT_NONE in empty["text"]
@@ -3715,15 +3725,18 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 고객 전제 도구이고 갈래가 없으며 답의 형태 요구가 등록돼 있다")
     ok += hit
 
-    # ③ 제안 조건 — «쪽지»를 말한 요약 턴에만. 본문은 머리말 + 답변이고, 화면 답변이 곧 본문이다.
+    # ③ 제안 조건 — «쪽지»를 말한 요약 턴에만. 본문은 머리말 + 답변이고, 화면 답변은 그 본문을
+    #    코드블록으로 감싼 것이다(펜스는 보내는 본문에 없다).
     body = (pending or {}).get("text") or ""
     hit = (bool(pending) and pending["kind"] == "memo"
            and body.startswith(memo.MEMO_TITLE) and summary in body and "CM 고객님" in body
            and memo.KEY_INFO_HEADER not in body            # 프로파일 없는 고객 — 표를 지어내지 않는다
+           and memo.FENCE not in body
            and pending["to"] == REG.MEMO_DEFAULT_TO
-           and offered["answer"].startswith(body) and "쪽지로 보낼까요" in offered["answer"]
+           and offered["answer"].startswith(f"{memo.FENCE}\n{body}\n{memo.FENCE}\n\n— ")
+           and "쪽지로 보낼까요" in offered["answer"]
            and offered["answer"].endswith("(네 / 아니오)"))
-    print(f"{'✓' if hit else '✗'} 쪽지를 말한 요약 턴에 «쪽지로 보낼까요?»가 붙고 화면 답변이 곧 쪽지 본문이다")
+    print(f"{'✓' if hit else '✗'} 쪽지를 말한 요약 턴에 «쪽지로 보낼까요?»가 붙고 화면 답변은 코드블록으로 감싼 쪽지 본문이다")
     ok += hit
 
     hit = not plain.get("pending_action") and not shut.get("pending_action")
@@ -3754,9 +3767,24 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 쪽지 본문은 머리말(성명·오늘) → 요약 → 고객 주요 정보 표 6행이고 값은 화면 산출 그대로다")
     ok += hit
 
+    # ⑥ 항목 줄만 — 실 LLM 이 얹은 도입 문장 두 줄(2026-09-03 실측)은 본문에 실리지 않는다.
+    #    항목이 하나도 없으면(「기록 없음」) 요약 전체를 그대로 쓴다.
+    noisy = ("쪽지 발송 여부는 시스템이 답변 뒤에 따로 안내해요.\n\n"
+             "이번 상담에서 오간 내용은 아래와 같아요.\n\n"
+             "- 지난 상담 내용 문의 — 8/20 콜 기록\n- 계좌 분리 방법 문의 — 3단 분리 제안")
+    filtered = memo.compose("CM", noisy)
+    none = memo.compose("CM", "이번 상담에서 아직 오간 대화가 없어요.")
+    hit = ("따로 안내해요" not in filtered and "아래와 같아요" not in filtered
+           and "- 지난 상담 내용 문의 — 8/20 콜 기록\n- 계좌 분리 방법 문의 — 3단 분리 제안" in filtered
+           and "이번 상담에서 아직 오간 대화가 없어요." in none
+           and memo.items_of("1. 첫째\n둘째는 문장\n① 셋째") == "1. 첫째\n① 셋째")
+    print(f"{'✓' if hit else '✗'} 요약에서 항목 줄만 취한다 — 도입 문장은 본문에 실리지 않고, 항목이 없으면 그대로 둔다")
+    ok += hit
+
     shape = prompts.ANSWER_SHAPES["transcript"]
-    hit = "쪽지" in shape and "도입" in shape and "「- 물은 것 — 안내 요지」" in shape
-    print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지한다")
+    hit = ("쪽지" in shape and "도입" in shape and "「- 물은 것 — 안내 요지」" in shape
+           and "시스템이" not in shape and "답변 뒤에" not in shape)   # 옮겨 적힌 지시 문장(실측)
+    print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지하며, 시스템이 무엇을 하는지는 적지 않는다")
     ok += hit
 
     hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1

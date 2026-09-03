@@ -282,8 +282,13 @@ def offer(state: AgentState) -> dict[str, Any]:
     # 기록에서 이 줄을 떼는 표지 — tools._OFFER_TRAILER).
     ask = action.get("prompt") or f"{action['label']}, 연계해드릴까요? (네 / 아니오)"
     # 쪽지는 답변 자리를 **쪽지 본문**으로 바꾼다 — 직원이 화면에서 읽고 승낙하는 것이 곧
-    # 나가는 쪽지여야 한다(§10). 다른 제안은 답변에 덧붙이기만 한다.
-    body = action["text"] if action.get("kind") == "memo" else state["answer"]
+    # 나가는 쪽지여야 한다(§10). 본문은 코드블록으로 감싸 «여기까지가 쪽지»를 화면에서
+    # 가른다 — 펜스는 화면 장치라 보내는 본문(action.text)에는 없다. 다른 제안은 답변에
+    # 덧붙이기만 한다.
+    if action.get("kind") == "memo":
+        body = f"{memo.FENCE}\n{action['text']}\n{memo.FENCE}"
+    else:
+        body = state["answer"]
     return {
         "answer": body + f"\n\n— {ask}",
         "pending_action": action,
