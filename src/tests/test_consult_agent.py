@@ -3635,15 +3635,20 @@ def check_memo() -> int:
       ② 기록에 붙은 제안 문구·도구 실행 줄은 재료에서 뗀다(안내가 아니라 화면 장치).
       ③ 제안은 «쪽지»를 말한 요약 턴에만 붙는다 — 요약만 부탁한 턴에는 안 붙는다(§3).
       ④ 승낙하면 제안한 턴의 본문 **그대로** 보내고 기록에 남긴다. 거절하면 보내지 않는다.
+      ⑤ 본문은 코드가 조립한다(memo.compose) — 머리말(성명·날짜)과 고객 주요 정보 표는 원장
+         값이고 요약 항목만 LLM 답변이다. 화면에 보이는 본문과 나가는 쪽지가 같고, 승낙 턴은
+         본문을 반복하지 않는다.
     """
     import tempfile
     from pathlib import Path
 
     from pension_agent import session_store
     from pension_agent import tools as REG
-    from pension_agent.consult_agent import prompts
+    from pension_agent.consult_agent import memo, prompts
     from pension_agent.consult_agent.nodes import act
     from pension_agent.consult_agent.nodes import clarify as CL
+    from pension_agent.strategy_agent import engine
+    from pension_agent.strategy_agent import customer as CUST
 
     ok = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -3710,22 +3715,48 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 고객 전제 도구이고 갈래가 없으며 답의 형태 요구가 등록돼 있다")
     ok += hit
 
-    # ③ 제안 조건 — «쪽지»를 말한 요약 턴에만.
-    hit = (bool(pending) and pending["kind"] == "memo" and pending["text"] == summary
+    # ③ 제안 조건 — «쪽지»를 말한 요약 턴에만. 본문은 머리말 + 답변이고, 화면 답변이 곧 본문이다.
+    body = (pending or {}).get("text") or ""
+    hit = (bool(pending) and pending["kind"] == "memo"
+           and body.startswith(memo.MEMO_TITLE) and summary in body and "CM 고객님" in body
+           and memo.KEY_INFO_HEADER not in body            # 프로파일 없는 고객 — 표를 지어내지 않는다
            and pending["to"] == REG.MEMO_DEFAULT_TO
-           and "쪽지로 보낼까요" in offered["answer"] and offered["answer"].endswith("(네 / 아니오)"))
-    print(f"{'✓' if hit else '✗'} 쪽지를 말한 요약 턴에 «쪽지로 보낼까요?»가 붙고 본문은 답변 그대로다")
+           and offered["answer"].startswith(body) and "쪽지로 보낼까요" in offered["answer"]
+           and offered["answer"].endswith("(네 / 아니오)"))
+    print(f"{'✓' if hit else '✗'} 쪽지를 말한 요약 턴에 «쪽지로 보낼까요?»가 붙고 화면 답변이 곧 쪽지 본문이다")
     ok += hit
 
     hit = not plain.get("pending_action") and not shut.get("pending_action")
     print(f"{'✓' if hit else '✗'} 요약만 부탁했거나 고객 화면이 닫혀 있으면 제안하지 않는다")
     ok += hit
 
-    # ④ 승낙 → 그대로 보내고 기록. 거절 → 보내지 않는다.
-    hit = (yes["pending_action"] is None and "쪽지를 보냈어요" in yes["answer"] and summary in yes["answer"]
-           and len(sent) == 1 and sent[0]["tool_calls"][0]["args"]["text"] == summary
+    # ④ 승낙 → 그대로 보내고 기록. 답변은 한 줄 — 본문을 반복하지 않는다. 거절 → 보내지 않는다.
+    hit = (yes["pending_action"] is None and "쪽지를 보냈어요" in yes["answer"]
+           and summary not in yes["answer"] and "\n" not in yes["answer"].strip()
+           and len(sent) == 1 and sent[0]["tool_calls"][0]["args"]["text"] == body
            and sent[0]["tool_calls"][0]["args"]["to"] == REG.MEMO_DEFAULT_TO)
-    print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 제안한 본문 그대로 보내고 상담이력에 남는다")
+    print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 제안한 본문 그대로 보내고 상담이력에 남긴다 — 답변은 한 줄이다")
+    ok += hit
+
+    # ⑤ 본문 조립 — 실제 페르소나면 고객 주요 정보 표 6행이 붙고, 값은 화면 산출과 같은 문자열이다.
+    who = CUST.PERSONAS[0]
+    facts = engine.prepare(who)
+    built = memo.compose(who.id, "- 물은 것 — 안내 요지")
+    rows = [ln for ln in built.splitlines() if ln.startswith("| ") and not ln.startswith("| 항목")]
+    d = CUST.today()
+    hit = (built.startswith(f"{memo.MEMO_TITLE}\n{who.nm} 고객님 ({d.year}년 {d.month}월 {d.day}일)")
+           and "- 물은 것 — 안내 요지" in built
+           and built.index("- 물은 것") < built.index(memo.KEY_INFO_HEADER)
+           and len(rows) == 6
+           and f"| 평가금액 | {facts['customer']['평가금액']} |" in built
+           and f"| 세액공제 잔여한도 | {facts['account_state']['세액공제_잔여한도']} |" in built
+           and not any(":" in ln.split("|")[2] and ln.startswith("| 관리 사유") for ln in rows))
+    print(f"{'✓' if hit else '✗'} 쪽지 본문은 머리말(성명·오늘) → 요약 → 고객 주요 정보 표 6행이고 값은 화면 산출 그대로다")
+    ok += hit
+
+    shape = prompts.ANSWER_SHAPES["transcript"]
+    hit = "쪽지" in shape and "도입" in shape and "「- 물은 것 — 안내 요지」" in shape
+    print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지한다")
     ok += hit
 
     hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1

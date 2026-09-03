@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pension_agent.consult_agent import screens, tools
+from pension_agent.consult_agent import memo, screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.tools import MEMO_DEFAULT_TO, TOOL_REGISTRY
 
@@ -101,20 +101,23 @@ def _propose_memo(state: AgentState) -> dict[str, Any] | None:
       3. 직원이 쪽지로 보내 달라고 말했다(질문에 «쪽지») — 요약만 부탁한 턴에 "보낼까요?"를
          붙이면 묻지 않은 것을 제안하는 것이다(§3)
 
-    보낼 본문은 **이번 답변 그대로**다. 검증을 통과한 문장이 곧 쪽지이고, 승낙 턴이 다시
-    쓰거나 다듬지 않는다 — 화면에 보여 준 것과 다른 쪽지가 나가면 안 된다(§10 「제안한
-    턴이 남긴 것으로 정한다」).
+    보낼 본문은 `memo.compose` 가 조립한다 — **요약 항목은 이번 답변 그대로**이고(검증을
+    통과한 문장이 곧 쪽지다), 머리말(성명·날짜)과 고객 주요 정보 표는 코드가 원장 값으로
+    붙인다. 그 본문을 `offer` 가 이번 턴의 답변으로도 내보내므로 화면에 보이는 것과 나가는
+    쪽지가 같고, 승낙 턴은 다시 쓰거나 다듬지 않는다(§10 「제안한 턴이 남긴 것으로 정한다」).
     """
-    if not state.get("customer_id"):
+    customer_id = state.get("customer_id")
+    if not customer_id:
         return None
     if not any(e["tool"] == "transcript" for e in (state.get("evidence") or [])):
         return None
     question = state.get("question") or ""
     if not any(w in question for w in _MEMO_WORDS):
         return None
-    text = (state.get("answer") or "").strip()
-    if not text:
+    summary = (state.get("answer") or "").strip()
+    if not summary:
         return None
+    text = memo.compose(customer_id, summary)
     to = MEMO_DEFAULT_TO
     return {"kind": "memo", "label": f"이 요약을 쪽지로 보내기(받는 사람: {to})",
             "prompt": f"이 요약을 쪽지로 보낼까요? 받는 사람은 {to}이에요. (네 / 아니오)",
@@ -278,8 +281,11 @@ def offer(state: AgentState) -> dict[str, Any]:
     # 직원이 무엇에 답하는지 흐려진다. 끝의 「(네 / 아니오)」는 공통이다(transcript 재료가
     # 기록에서 이 줄을 떼는 표지 — tools._OFFER_TRAILER).
     ask = action.get("prompt") or f"{action['label']}, 연계해드릴까요? (네 / 아니오)"
+    # 쪽지는 답변 자리를 **쪽지 본문**으로 바꾼다 — 직원이 화면에서 읽고 승낙하는 것이 곧
+    # 나가는 쪽지여야 한다(§10). 다른 제안은 답변에 덧붙이기만 한다.
+    body = action["text"] if action.get("kind") == "memo" else state["answer"]
     return {
-        "answer": state["answer"] + f"\n\n— {ask}",
+        "answer": body + f"\n\n— {ask}",
         "pending_action": action,
     }
 
@@ -326,9 +332,8 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
 def _send_memo(pending: dict) -> dict[str, Any]:
     """승낙받은 요약을 쪽지로 보내고 결과를 알린다(§10 「연계 결과를 알린다」).
 
-    본문은 제안한 턴이 남긴 것 그대로다 — 여기서 다시 쓰지 않는다. 보낸 본문을 답변에
-    다시 싣는 이유는, 무엇이 나갔는지가 이 턴의 답이기 때문이다(직원이 방금 읽은 것과
-    같은 문장이어야 «그대로 보냈다»가 확인된다).
+    본문은 제안한 턴이 남긴 것 그대로다 — 여기서 다시 쓰지 않는다. 답변에 본문을 다시 싣지도
+    않는다 — 직원이 방금 읽고 승낙한 것이라, 반복하면 같은 글이 화면에 두 번 선다.
     """
     text = (pending.get("text") or "").strip()
     if not text:
@@ -341,7 +346,7 @@ def _send_memo(pending: dict) -> dict[str, Any]:
     if result.get("status") not in ("ok", "stubbed"):
         return {"answer": f"쪽지를 보내지 못했어요. {result.get('detail') or ''}".strip(),
                 "sources": [], "pending_action": None}
-    return {"answer": f"쪽지를 보냈어요 — 받는 사람: {to}. 보낸 내용은 아래와 같아요.\n\n{text}",
+    return {"answer": f"쪽지를 보냈어요 — 받는 사람: {to}.",
             "sources": [], "pending_action": None}
 
 
