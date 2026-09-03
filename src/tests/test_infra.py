@@ -78,6 +78,10 @@ check("open_lms_screen" in tools.TOOL_REGISTRY,
       "tools.TOOL_REGISTRY: open_lms_screen 등록됨")
 check("send_lms" not in tools.TOOL_REGISTRY,
       "tools.TOOL_REGISTRY: 발송 수행 도구는 남아 있지 않음 (§10 — 화면만 연다)")
+# 쪽지는 예외다 — 고객이 아니라 직원 본인에게 가는 행내 메모라 대외 행위가 아니고,
+# register_consult_note 와 같은 «내부 기록» 부류다. 승낙 뒤에만 불린다(act.confirm_action).
+check("send_memo" in tools.TOOL_REGISTRY,
+      "tools.TOOL_REGISTRY: send_memo 등록됨 (직원 본인 쪽지 — 대외 발송이 아니다)")
 
 _clean_session_data()
 

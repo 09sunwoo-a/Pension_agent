@@ -3625,6 +3625,117 @@ def check_history_material() -> int:
     return ok
 
 
+def check_memo() -> int:
+    """이번 상담 요약 → 쪽지(§3 «이번 상담 대화» 재료 · §10 쪽지 제안).
+
+    확정본 마지막 턴 「대화 내용 요약해서 쪽지로 보내줘」→「응, 보내줘」의 코드 경로.
+
+      ① `transcript` 는 **이번 세션만** 싣고 `history` 는 이번 세션을 뺀다 — 둘이 겹치면 방금
+         한 말이 «지난 상담»이 되고, 둘 다 비면 요약할 재료가 없다.
+      ② 기록에 붙은 제안 문구·도구 실행 줄은 재료에서 뗀다(안내가 아니라 화면 장치).
+      ③ 제안은 «쪽지»를 말한 요약 턴에만 붙는다 — 요약만 부탁한 턴에는 안 붙는다(§3).
+      ④ 승낙하면 제안한 턴의 본문 **그대로** 보내고 기록에 남긴다. 거절하면 보내지 않는다.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from pension_agent import session_store
+    from pension_agent import tools as REG
+    from pension_agent.consult_agent import prompts
+    from pension_agent.consult_agent.nodes import act
+    from pension_agent.consult_agent.nodes import clarify as CL
+
+    ok = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        orig_dir = session_store.SESSION_DATA_DIR
+        session_store.SESSION_DATA_DIR = Path(tmp)
+        try:
+            now, old = "s-now", "s-old"
+            session_store.append_turn("CM", old, {"role": "user", "text": "지난 세션의 질문"})
+            session_store.append_turn("CM", now, {"role": "user", "text": "과세이연 등록은 어떻게 해?"})
+            session_store.append_turn("CM", now, {
+                "role": "agent",
+                "text": "[06-12-501] 후선업무 의뢰등록부터 해요. 60일 내 입금이에요.\n\n"
+                        "— 06-12-501 화면 열기, 연계해드릴까요? (네 / 아니오)"})
+            session_store.append_turn("CM", now, {"role": "tool", "text": "[발송 화면 연계] 문구"})
+            state = {"question": "대화 내용 요약해서 쪽지로 보내줘", "customer_id": "CM",
+                     "session_id": now}
+            found = tools.run("transcript", state, "이번 상담 요약")
+            past = tools.run("history", state, "지난 상담")
+            closed = tools.run("transcript", {"question": "q", "session_id": now}, "요약")
+            nosess = tools.run("transcript", {"question": "q", "customer_id": "CM"}, "요약")
+            empty = tools.run("transcript", {"question": "q", "customer_id": "CM",
+                                             "session_id": "s-new"}, "요약")
+
+            summary = "직원이 과세이연 등록 절차를 물었고, [06-12-501] 등록부터 60일 내 입금까지 안내했어요."
+            offered = act.offer({**state, "answer": summary, "evidence": [found]})
+            pending = offered.get("pending_action")
+            plain = act.offer({**state, "question": "지금까지 대화 내용 요약해줘",
+                               "answer": summary, "evidence": [found]})
+            shut = act.offer({**state, "customer_id": None, "answer": summary, "evidence": [found]})
+            history = [{"question": state["question"], "pending_action": pending}]
+            yes = act.confirm_action({"question": "응, 보내줘", "history": history, "customer_id": "CM"})
+            sent = [t for s in session_store.list_sessions("CM") for t in s["turns"]
+                    if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
+            no = act.confirm_action({"question": "아니 괜찮아", "history": history, "customer_id": "CM"})
+            sent_after_no = [t for s in session_store.list_sessions("CM") for t in s["turns"]
+                             if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
+        finally:
+            session_store.SESSION_DATA_DIR = orig_dir
+
+    # ① 시점으로 갈린다.
+    hit = (bool(found) and "과세이연 등록은 어떻게 해?" in found["text"]
+           and "지난 세션의 질문" not in found["text"]
+           and found["sources"][0]["id"] == f"session.CM.{now}")
+    print(f"{'✓' if hit else '✗'} transcript 는 이번 세션의 대화만 싣는다")
+    ok += hit
+
+    hit = bool(past) and "지난 세션의 질문" in past["text"] and "과세이연" not in past["text"]
+    print(f"{'✓' if hit else '✗'} history 는 이번 세션을 빼고 싣는다(둘이 겹치지 않는다)")
+    ok += hit
+
+    # ② 화면 장치는 재료가 아니다 — 답변 안의 화면번호·기한은 남는다(요약이 옮길 값).
+    hit = (bool(found) and "연계해드릴까요" not in found["text"] and "도구실행" not in found["text"]
+           and "[06-12-501]" in found["text"] and "60일" in found["text"])
+    print(f"{'✓' if hit else '✗'} 제안 문구·도구 실행 줄은 떼고 답변 본문은 그대로 싣는다")
+    ok += hit
+
+    hit = closed is None and nosess is None and bool(empty) and tools.TRANSCRIPT_NONE in empty["text"]
+    print(f"{'✓' if hit else '✗'} 고객·세션이 없으면 None, 세션은 있는데 0건이면 «기록 없음» 재료")
+    ok += hit
+
+    hit = ("transcript" in tools._NEEDS_CUSTOMER and "transcript" in CL._NO_BRANCH
+           and "transcript" in prompts.ANSWER_SHAPES
+           and "transcript" not in tools.catalog({}) and "transcript" in tools.catalog({"customer_id": "CM"}))
+    print(f"{'✓' if hit else '✗'} 고객 전제 도구이고 갈래가 없으며 답의 형태 요구가 등록돼 있다")
+    ok += hit
+
+    # ③ 제안 조건 — «쪽지»를 말한 요약 턴에만.
+    hit = (bool(pending) and pending["kind"] == "memo" and pending["text"] == summary
+           and pending["to"] == REG.MEMO_DEFAULT_TO
+           and "쪽지로 보낼까요" in offered["answer"] and offered["answer"].endswith("(네 / 아니오)"))
+    print(f"{'✓' if hit else '✗'} 쪽지를 말한 요약 턴에 «쪽지로 보낼까요?»가 붙고 본문은 답변 그대로다")
+    ok += hit
+
+    hit = not plain.get("pending_action") and not shut.get("pending_action")
+    print(f"{'✓' if hit else '✗'} 요약만 부탁했거나 고객 화면이 닫혀 있으면 제안하지 않는다")
+    ok += hit
+
+    # ④ 승낙 → 그대로 보내고 기록. 거절 → 보내지 않는다.
+    hit = (yes["pending_action"] is None and "쪽지를 보냈어요" in yes["answer"] and summary in yes["answer"]
+           and len(sent) == 1 and sent[0]["tool_calls"][0]["args"]["text"] == summary
+           and sent[0]["tool_calls"][0]["args"]["to"] == REG.MEMO_DEFAULT_TO)
+    print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 제안한 본문 그대로 보내고 상담이력에 남는다")
+    ok += hit
+
+    hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1
+    print(f"{'✓' if hit else '✗'} '아니' 면 보내지 않는다")
+    ok += hit
+
+    hit = "send_memo" in REG.TOOL_REGISTRY and "쪽지로 보내줘" in prompts.ROUTE_PROMPT
+    print(f"{'✓' if hit else '✗'} 발송 스텁이 레지스트리에 있고, 쪽지 요청이 lms_link 로 새지 않게 라우팅 기준이 있다")
+    ok += hit
+    return ok
 
 
 def check_history_selection() -> int:
@@ -5175,6 +5286,7 @@ def main() -> int:
         check_no_repeat()
         check_suitable_shape()
         check_history_material()
+        check_memo()
         check_today_material()
         check_account_state()
         check_labeled_pairs()
