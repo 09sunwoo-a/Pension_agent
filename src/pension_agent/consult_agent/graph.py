@@ -30,6 +30,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
+from pension_agent import observability
 from pension_agent.session_store import append_turn
 
 from pension_agent.consult_agent import progress, suggest
@@ -119,11 +120,20 @@ def ask(
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    with progress.reporting(on_progress):
-        out = _AGENT.invoke(
-            {"question": question, "history": history or [], "customer_id": customer_id,
-             # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
-             "session_id": session_id})
+    # 관측 트레이스 — 이 턴에서 나가는 LLM 호출(계획·판정·작성, 보통 4~7회)이 전부 이
+    # 하나에 묶인다. 키가 없으면 통째로 꺼진다(observability). session_id 를 넘겨 같은
+    # 상담의 턴들이 대시보드에서 한 줄로 이어지게 한다.
+    with observability.trace(
+        "consult.turn", input=question, session_id=session_id,
+        metadata={"customer_id": customer_id}, tags=["consult"],
+    ) as span:
+        with progress.reporting(on_progress):
+            out = _AGENT.invoke(
+                {"question": question, "history": history or [], "customer_id": customer_id,
+                 # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
+                 "session_id": session_id})
+        span.update(output=out.get("answer"), intent=out.get("intent"),
+                    tools=sorted({e["tool"] for e in (out.get("evidence") or [])}))
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

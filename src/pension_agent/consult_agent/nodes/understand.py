@@ -31,7 +31,7 @@ def understand(state: AgentState) -> dict[str, Any]:
         question=state["question"],
     )
     try:
-        text = generate(prompt, max_tokens=150)
+        text = generate(prompt, max_tokens=150, name="consult.understand")
     except LLMError as exc:
         # 규칙으로 대신 분류하지 않는다 — 분류가 됐다고 답이 되는 것도 아니고(답을 쓰는 것도
         # LLM 이다), 규칙 라우팅이 살아 있으면 "LLM 없이도 절반은 도는" 경로가 굳는다.
