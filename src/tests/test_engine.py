@@ -408,14 +408,14 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 _saved = (agent.llm.available, agent.llm.generate)
 try:
     agent.llm.available = lambda: True
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "현 구성 양호", '
         '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
     agent.clear_briefing_cache()
     _r2 = agent.propose(_calm, use_llm=True)
     check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
           "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
     agent.clear_briefing_cache()
     _r3 = agent.propose(_calm, use_llm=True)

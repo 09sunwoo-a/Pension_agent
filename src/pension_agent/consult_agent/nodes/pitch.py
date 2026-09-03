@@ -50,7 +50,7 @@ def extract_slots(state: AgentState) -> dict[str, Any]:
         question=state["question"],
     )
     try:
-        text = generate(prompt, max_tokens=150)
+        text = generate(prompt, max_tokens=150, name="consult.pitch")
     except LLMError:
         # 슬롯 분해가 실패해도 화법 검색은 원문(utterance)만으로 돈다 — 슬롯은 n-gram
         # 폴백의 후보를 좁히는 보조 정보다. LLM 이 정말 죽었다면 뒤이은 적합성 판정·

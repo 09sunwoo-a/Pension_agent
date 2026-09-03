@@ -937,7 +937,7 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
                                           query=query or question,
                                           history_block=format_history(history)),
-                   max_tokens=ADEQUACY_MAX_TOKENS)
+                   max_tokens=ADEQUACY_MAX_TOKENS, name="consult.adequacy")
     m = re.search(r"\[.*\]", raw, re.S)
     try:
         kept = json.loads(m.group()) if m else []
