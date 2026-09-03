@@ -153,6 +153,11 @@ def reset() -> None:
 _TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "langfuse_trace_id", default=None)
 
+#: 현재 열려 있는 span 의 id. 이것이 있으면 그 아래에 붙는다 — 트레이스가 평면이 아니라
+#: 실행 구조(계획 루프 → 도구 호출 → 작성 → 재작성)를 그대로 닮은 트리가 된다.
+_PARENT_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "langfuse_parent_id", default=None)
+
 
 class Trace:
     """트레이스 하나. `trace()` 가 만들어 준다 — 직접 만들지 않는다."""
@@ -175,6 +180,19 @@ class Trace:
 _NULL_TRACE = Trace("", "", live=False)
 
 
+def _ensure_trace_id(name: str) -> str:
+    """열려 있는 트레이스 id. 없으면 하나 만들어 붙인다.
+
+    스크립트에서 도구·LLM 을 직접 부른 경우에도 관측을 잃지 않기 위한 자리다 —
+    트레이스 없는 관측은 대시보드에서 찾을 방법이 없다.
+    """
+    trace_id = _TRACE_ID.get()
+    if trace_id is None:
+        trace_id = uuid.uuid4().hex
+        _emit("trace-create", {"id": trace_id, "name": name, "timestamp": _now()})
+    return trace_id
+
+
 @contextlib.contextmanager
 def trace(name: str, *, input: Any = None, user_id: str | None = None,
           session_id: str | None = None, metadata: dict | None = None,
@@ -188,6 +206,9 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
         yield _NULL_TRACE
         return
 
+    # 환경은 메타데이터로 싣는다 — 대시보드가 필터로 쓰는 자리이고, 서버 판이 달라도
+    # 거부되지 않는다(수집 API 의 최상위 필드는 판마다 늘고 줄었다).
+    metadata = {"environment": conf().environment, **(metadata or {})}
     handle = Trace(uuid.uuid4().hex, name, live=True)
     body: dict[str, Any] = {"id": handle.id, "name": name, "timestamp": _now()}
     _put_if(body, "release", conf().release or None)
@@ -198,7 +219,8 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
     _put_if(body, "tags", tags)
     _emit("trace-create", body)   # 시작 시점에 한 번 — 도중에 프로세스가 죽어도 흔적이 남는다
 
-    token = _TRACE_ID.set(handle.id)
+    # 새 트레이스는 최상위에서 시작한다 — 바깥에 열려 있던 span 밑으로 들어가지 않는다.
+    tokens = (_TRACE_ID.set(handle.id), _PARENT_ID.set(None))
     started = time.time()
     try:
         yield handle
@@ -206,11 +228,10 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
         handle.update(level="ERROR", status_message=f"{type(exc).__name__}: {exc}")
         raise
     finally:
-        _TRACE_ID.reset(token)
+        _TRACE_ID.reset(tokens[0])
+        _PARENT_ID.reset(tokens[1])
         closing: dict[str, Any] = {"id": handle.id, "name": name, "timestamp": _now()}
-        fields = dict(handle._fields)
-        meta = dict(fields.pop("metadata", None) or {})
-        meta["latency_ms"] = int((time.time() - started) * 1000)
+        fields, meta = _split_fields(handle, dict(metadata or {}), started)
         for key in ("level", "status_message"):
             if key in fields:
                 meta[key] = fields.pop(key)
@@ -226,6 +247,99 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
 def current_trace_id() -> str | None:
     """지금 열려 있는 트레이스 id. 없으면 None."""
     return _TRACE_ID.get()
+
+
+# ─────────────────────────────────────────────────────────────
+# span — LLM 호출이 아닌 단계
+#
+# 트레이스가 generation 만 담으면 «LLM 을 다섯 번 불렀다»까지만 보인다. 정작 답이
+# 갈리는 자리는 그 사이다 — 어떤 도구를 어떤 질의로 불러 몇 건을 얻었나, 작성이 게이트에
+# 걸려 다시 썼나. span 은 그 단계를 트레이스 트리에 세워, 대시보드 한 화면에서 실행
+# 구조를 읽게 한다.
+# ─────────────────────────────────────────────────────────────
+
+@contextlib.contextmanager
+def span(name: str, *, input: Any = None, metadata: dict | None = None) -> Iterator[Trace]:
+    """실행 단계 하나를 연다. 이 블록 안의 LLM 호출·하위 span 은 이 밑에 붙는다.
+
+    핸들은 `trace()` 와 같은 모양이라 `update(output=…, 아무거나=…)` 로 결과를 얹는다 —
+    output·level·status_message 를 뺀 나머지는 메타데이터로 실린다.
+    """
+    if not enabled():
+        yield _NULL_TRACE
+        return
+
+    trace_id = _ensure_trace_id(name)
+    handle = Trace(uuid.uuid4().hex, name, live=True)
+    parent = _PARENT_ID.get()
+    started = time.time()
+    tokens = (_TRACE_ID.set(trace_id), _PARENT_ID.set(handle.id))
+    try:
+        yield handle
+    except BaseException as exc:                        # noqa: BLE001 — 기록만 하고 되던진다
+        handle.update(level="ERROR", status_message=f"{type(exc).__name__}: {exc}")
+        raise
+    finally:
+        _TRACE_ID.reset(tokens[0])
+        _PARENT_ID.reset(tokens[1])
+        body: dict[str, Any] = {
+            "id": handle.id, "traceId": trace_id, "name": name,
+            "startTime": _iso(started), "endTime": _now(),
+        }
+        _put_if(body, "parentObservationId", parent)
+        _put_if(body, "input", _payload(input))
+        fields, meta = _split_fields(handle, dict(metadata or {}), started)
+        _put_if(body, "output", _payload(fields.pop("output", None)))
+        _put_if(body, "level", fields.pop("level", None))
+        _put_if(body, "statusMessage", fields.pop("status_message", None))
+        meta.update(fields)
+        body["metadata"] = meta
+        _emit("span-create", body)
+
+
+def _split_fields(handle: Trace, meta: dict, started: float) -> tuple[dict, dict]:
+    """핸들에 얹힌 값을 «전용 필드»와 «메타데이터»로 가른다. 소요시간을 함께 넣는다."""
+    fields = dict(handle._fields)
+    meta.update(fields.pop("metadata", None) or {})
+    meta["latency_ms"] = int((time.time() - started) * 1000)
+    return fields, meta
+
+
+# ─────────────────────────────────────────────────────────────
+# score — 이 실행이 어땠는지
+#
+# 트레이스는 «무슨 일이 있었나»를 한 건씩 보여주지만, «지난 30번 중 몇 번이 게이트에
+# 걸렸나»는 답하지 못한다. 점수는 그 집계를 대시보드에 맡기는 자리다. 값은 전부 코드가
+# 아는 사실이다 — LLM 이 자기 답을 채점하지 않는다.
+# ─────────────────────────────────────────────────────────────
+
+def score(name: str, value: bool | int | float | str, *, comment: str | None = None) -> None:
+    """열려 있는 트레이스에 점수 한 건을 붙인다. 트레이스가 없으면 아무것도 하지 않는다.
+
+    bool 은 BOOLEAN(1/0), 숫자는 NUMERIC, 문자열은 CATEGORICAL 로 나간다.
+    """
+    if not enabled():
+        return
+    try:
+        trace_id = _TRACE_ID.get()
+        if trace_id is None:
+            return          # 트레이스 없는 점수는 대시보드에서 찾을 방법이 없다
+        body_value: Any
+        if isinstance(value, bool):
+            body_value, data_type = (1 if value else 0), "BOOLEAN"
+        elif isinstance(value, (int, float)):
+            body_value, data_type = value, "NUMERIC"
+        else:
+            body_value, data_type = str(value), "CATEGORICAL"
+        body: dict[str, Any] = {
+            "id": uuid.uuid4().hex, "traceId": trace_id,
+            "name": name, "value": body_value, "dataType": data_type,
+        }
+        _put_if(body, "observationId", _PARENT_ID.get())
+        _put_if(body, "comment", comment)
+        _emit("score-create", body)
+    except Exception as exc:                              # noqa: BLE001 — 관측은 흐름을 막지 않는다
+        _debug(f"score 실패: {type(exc).__name__}: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -245,17 +359,16 @@ def record_generation(name: str, *, model: str | None = None, input: Any = None,
     if not enabled():
         return
     try:
-        trace_id = _TRACE_ID.get()
-        if trace_id is None:
-            trace_id = uuid.uuid4().hex
-            _emit("trace-create", {"id": trace_id, "name": name, "timestamp": _now()})
         body: dict[str, Any] = {
             "id": uuid.uuid4().hex,
-            "traceId": trace_id,
+            "traceId": _ensure_trace_id(name),
             "name": name,
             "startTime": _iso(start),
             "endTime": _iso(end),
         }
+        # 열려 있는 span 이 있으면 그 밑에 붙는다 — 「어느 도구를 부르다가 난 호출인가」가
+        # 트레이스 트리에 그대로 보인다.
+        _put_if(body, "parentObservationId", _PARENT_ID.get())
         _put_if(body, "model", model)
         _put_if(body, "modelParameters", parameters)
         _put_if(body, "input", _payload(input))

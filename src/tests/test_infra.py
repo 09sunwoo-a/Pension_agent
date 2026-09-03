@@ -554,6 +554,42 @@ try:
     check(any(t["body"].get("sessionId") == "sess-x" for t in _traces),
           "observability: 상담 세션 id 가 트레이스에 실린다")
 
+    # span 중첩 — 트레이스가 평면이 아니라 실행 구조를 닮은 트리가 된다
+    _sent.clear()
+    with _obs.trace("test.turn2") as _tr2:
+        with _obs.span("tool:fact", input="세액공제") as _sp:
+            _llm.generate("q", name="test.in_span")
+            _sp.update(output="카드 1건", found=True)
+        _obs.score("compose_passed", True)
+        _obs.score("retries", 2)
+        _obs.score("outcome", "answer")
+    _obs.flush(timeout=5.0)
+    _ev = [e for batch in _sent for e in batch["batch"]]
+    _span = next((e["body"] for e in _ev if e["type"] == "span-create"), None)
+    _gen2 = next((e["body"] for e in _ev if e["type"] == "generation-create"), None)
+    _scores = [e["body"] for e in _ev if e["type"] == "score-create"]
+    check(bool(_span) and _span["name"] == "tool:fact" and _span["output"] == "카드 1건",
+          "observability: span 이 이름과 결과를 싣는다", str(_span))
+    check(bool(_span) and _span["metadata"].get("found") is True,
+          "observability: span 에 얹은 값은 메타데이터로 실린다")
+    check(bool(_gen2) and _gen2.get("parentObservationId") == (_span or {}).get("id"),
+          "observability: span 안의 LLM 호출은 그 span 밑에 붙는다")
+    check(bool(_span) and _span["traceId"] == _tr2.id,
+          "observability: span 이 열려 있는 트레이스에 묶인다")
+    check({(s["name"], s["value"], s["dataType"]) for s in _scores} ==
+          {("compose_passed", 1, "BOOLEAN"), ("retries", 2, "NUMERIC"),
+           ("outcome", "answer", "CATEGORICAL")},
+          "observability: 점수가 bool·숫자·문자열별로 형을 갈라 나간다", str(_scores))
+    check(all(s["traceId"] == _tr2.id for s in _scores),
+          "observability: 점수가 그 트레이스에 붙는다")
+
+    # 트레이스가 없으면 점수는 나가지 않는다 — 붙을 데가 없는 점수는 찾을 방법이 없다
+    _sent.clear()
+    _obs.score("orphan", 1)
+    _obs.flush(timeout=5.0)
+    check(not [e for batch in _sent for e in batch["batch"]],
+          "observability: 트레이스 밖 점수는 보내지 않는다")
+
     # 본문 차단 — 개인정보를 외부로 내보내지 않는 스위치
     _sent.clear()
     os.environ["LANGFUSE_CAPTURE_CONTENT"] = "0"

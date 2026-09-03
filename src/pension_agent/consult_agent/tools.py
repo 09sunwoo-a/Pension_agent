@@ -44,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypedDict
 
+from pension_agent import observability
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent import marks as MARKS
 from pension_agent.consult_agent import progress
@@ -1645,18 +1646,26 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
         progress.emit(f"{progress.object_of(tool.progress)} 찾고 있어요")
     question = (state.get("question") or "").strip()
     attempts = [query] + ([question] if question and question != query else [])
-    for attempt in attempts:
-        try:
-            found = tool.run(state, attempt)
-        except LLMError:
-            # 도구가 죽은 것과 **LLM 이 죽은 것**은 다른 사건이다. 뒤를 앞으로 접으면
-            # "찾아봤는데 재료가 없다"로 나가고, 그게 §11 이 막으려는 바로 그 답이다.
-            raise
-        except Exception:
-            return None  # 도구 하나가 죽어도 루프는 다음 도구로 간다
-        if found is not None:
-            return found
-    return None
+    # 관측 span — 「어떤 도구를 어떤 질의로 불러 무엇을 얻었나」가 답이 갈리는 자리다.
+    # generation 만 보내면 트레이스에는 «LLM 을 다섯 번 불렀다»까지만 남는다.
+    with observability.span(f"tool:{name}", input=query) as sp:
+        for i, attempt in enumerate(attempts):
+            try:
+                found = tool.run(state, attempt)
+            except LLMError:
+                # 도구가 죽은 것과 **LLM 이 죽은 것**은 다른 사건이다. 뒤를 앞으로 접으면
+                # "찾아봤는데 재료가 없다"로 나가고, 그게 §11 이 막으려는 바로 그 답이다.
+                raise
+            except Exception:
+                sp.update(output=None, found=False, failed=True)
+                return None  # 도구 하나가 죽어도 루프는 다음 도구로 간다
+            if found is not None:
+                # 원문 재검색으로 건졌는지도 남긴다 — 계획이 고른 질의가 얼마나 빗나가는지가
+                # 이 한 칸에 쌓인다(재검색이 잦으면 계획 프롬프트를 봐야 한다는 신호다).
+                sp.update(output=found["text"], found=True, retried=bool(i))
+                return found
+        sp.update(output=None, found=False)
+        return None
 
 
 def ledger_slots(evidence: list[Evidence]) -> dict:
