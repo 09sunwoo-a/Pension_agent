@@ -603,14 +603,21 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
                 "briefing.generate",
                 input={"customer_id": p.id, "customer": p.nm,
                        "use_llm": use_llm, "top_n": top_n},
-                metadata={"customer_id": p.id}, tags=["briefing"],
+                user_id=p.id, metadata={"customer_id": p.id}, tags=["briefing"],
             ) as span:
                 out = _propose(p, use_llm=use_llm, top_n=top_n)
                 out["facts"]["summaries"] = engine.section_summaries(
                     out["facts"], out["sentence"], out["insight"])
+                skipped = sorted(out["facts"].get("llm_skipped") or {})
                 span.update(output={"sentence": out["sentence"], "insight": out["insight"]},
                             source=out["source"], tier=out["tier"], reason=out["reason"],
-                            llm_skipped=sorted(out["facts"].get("llm_skipped") or {}))
+                            llm_skipped=skipped)
+                # 「어제 돌린 9명 중 몇 명이 미매칭으로 떨어졌나 · 규칙 폴백이 몇 건인가 ·
+                # 어느 섹션이 자주 비나」는 브리핑을 한 건씩 열어서는 못 센다.
+                observability.score("briefing_tier", out["tier"], comment=out["reason"] or None)
+                observability.score("briefing_source", out["source"])
+                observability.score("sections_skipped", len(skipped),
+                                    comment=", ".join(skipped) or None)
             briefing_store.save(key, out)
         # 생성은 락 밖에서 한다 — 11 회의 LLM 호출 동안 다른 호출자를 세우지 않는다.
         # 동시에 처음 부른 둘이 각자 만들 수는 있고, 그때는 먼저 넣은 쪽으로 통일된다
