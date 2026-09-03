@@ -36,7 +36,7 @@ $CAD --list                                           # 시나리오 목록
 # ── 묶음 실행: 검토(독립 케이스 10개) · 시연 대본(docs/DEMO_SCENARIO.md)
 $CADR                                                 # 검토 10케이스 + 요약표
 $CADR --brief                                         # 요약표만
-$CADR --demo                                          # 시연 대본 13턴 (청중이 보는 화면)
+$CADR --demo                                          # 시연 대본 16턴 (청중이 보는 화면)
 $CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
 $CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
 $CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
