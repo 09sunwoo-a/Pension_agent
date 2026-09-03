@@ -44,6 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypedDict
 
+from pension_agent import observability
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent import marks as MARKS
 from pension_agent.consult_agent import progress
@@ -503,9 +504,10 @@ def _market_like(kind: str, label: str) -> Callable[[AgentState, str], Evidence 
 # ─────────────────────────────────────────────────────────────
 # 적합성 범위 — "이 고객에게 뭘 추천하지?" 에 답할 수 있는 것
 #
-# **권유가 아니라 범위다.** 직원이 상품을 물으면 답할 수 있는 것은 «이 고객 투자성향에서
-# 어디까지 가능한가»와 «그 안에 무엇이 있는가»이지, 한 상품을 고르는 것이 아니다 —
-# 무엇을 권유할지는 자본시장법과 당행 규정에 따라 직원이 정한다(§8 관리대장).
+# **권유가 아니라 정보 제공이다.** 직원이 상품을 물으면 «이 고객 투자성향에서 어디까지
+# 가능한가»와 «그 안에 무엇이 있는가»를 답하고, 범위 안의 특정 상품을 짚어 말할 수도
+# 있다 — 다만 «이런 상품이 있습니다» 톤까지이고, 무엇을 권유할지는 자본시장법과 당행
+# 규정에 따라 직원이 정한다(§8 관리대장, 2026-09-02 개정).
 #
 # 판정은 **하지 않는다.** strategy_agent 의 적합성 게이트가 이미 계산한 것을 그대로
 # 옮긴다(위험등급 상한·거래채널). 같은 판정을 두 번 구현하면 브리핑 화면 ⑤ 「이런 상품이
@@ -621,7 +623,7 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 값이 없어서가 아니라 문제일 때만 실려서였다(engine/render.py::_account_state).
     lines += [f"· {k.replace('_', ' ')} {v}" for k, v in (facts.get("account_state") or {}).items()]
     if facts.get("conditions"):
-        lines.append(f"· 성립 요건: {', '.join(facts['conditions'])}")
+        lines.append(f"· 성립 요건: {', '.join(_cond_labels(facts['conditions']))}")
     # 「왜 이 고객이 관리 대상인가」 — 직원이 실제로 가장 많이 묻는 것인데 통째로 빠져
     # 있었다. 요건 코드(dor·mis…)만 있고 그 요건이 왜 문제인지, 어느 세그먼트에 걸렸는지,
     # 무엇을 근거로 뽑혔는지가 재료에 없어서 LLM 이 요건 이름만 풀어 쓰거나 지어냈다.
@@ -658,9 +660,16 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
             # 이 줄들의 출처는 **지식 카드**다(고객 원장이 아니다). 답에 영향을 준 재료는
             # 전부 출처에 실린다(§3) — 안 실으면 직원은 화법이 어디서 나왔는지 모른 채
             # 읽는다. 검색으로 온 재료가 아니므로 관련도(score)는 없다.
+            #
+            # **URL 도 함께 되짚는다.** strategy_agent 가 넘겨주는 항목에는 문서명(`source`)
+            # 밖에 없어서, 출처에 원천 게시글 URL 을 싣기로 한 변경이 이 재료만 비껴갔다 —
+            # 같은 카드가 검색으로 오면 ↗ 줄이 붙고 고객 재료로 오면 안 붙었다. 표기를
+            # 만드는 곳은 하나라는 규약대로 kb 에서 되짚는다(`card_source_meta`).
             if item.get("card_id"):
+                meta = KBMOD.card_source_meta(KB, item["card_id"])
                 card_sources.append({"id": item["card_id"], "title": head,
-                                     "doc": item.get("source") or "출처 미상",
+                                     "doc": meta.get("doc") or item.get("source") or "출처 미상",
+                                     "url": meta.get("url"),
                                      "score": None, "page": None})
     lines += card_lines
     # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
@@ -750,6 +759,13 @@ def _citable(facts: dict) -> dict:
 #: 근거이지 현재 기준 값의 근거가 아니고, 둘을 섞으면 낡은 값이 오늘의 답으로 나간다.
 HISTORY_MARK = "※ 지난 상담 기록입니다 — 그때 나눈 이야기이지 지금 기준 값이 아닐 수 있습니다."
 
+#: 기록이 0건일 때 싣는 줄. **없다는 것도 이 도구가 확인한 값이다**(_history 머리말) —
+#: 이 줄이 없던 동안 0건은 «질의가 빗나감»과 구별되지 않아 계획이 다른 도구를 헛돌았다.
+#: «이번 세션 제외»를 밝힌다: 방금 나눈 대화는 재료에서 빼기 때문에(아래), 그 사실을
+#: 안 적으면 조금 전 대화를 기억하는 직원에게는 이 줄이 거짓말로 읽힌다.
+HISTORY_NONE = ("· 기록 없음 — 이 고객과의 지난 상담 기록이 0건입니다"
+                "(지금 진행 중인 이번 상담은 제외한 값입니다).")
+
 #: 재료에 싣는 범위(과거 상담 세션 수 · 대화 세션 수 · 세션당 턴 수 · 발췌 길이). 상담 중에
 #: 읽을 분량을 넘기면 아무도 안 읽고 원장만 무거워진다.
 #:
@@ -780,8 +796,20 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     순서만 바꾸는 이유도 같다: 질의어는 표현이 다를 수 있고, 뺐다가 틀리면 있는 기록을
     없다고 답하게 된다.
 
-    기록이 없으면 None 이다. "아직 상담 기록이 없습니다" 같은 문장을 도구가 지어내면
-    그게 근거가 되고, 원장이 빈 채로 끝나는 정직한 '없음' 경로가 막힌다.
+    **기록이 0건인 것도 재료다**(2026-09-02 — 그 전에는 None 이었다). 근거는 §3 의
+    「«정상»인 상태도 재료다」와 §5 의 「재료는 0건일 때 침묵하지 않는다」이고, 고친 이유는
+    실측이다: 상담 기록이 없는 고객에게 「지난 상담에서 무슨 얘기 했지?」를 물으면 이 도구가
+    None 을 돌려주고, 그러면 «질의를 잘못 골라 0건» 과 구별되지 않아 `_wrap_up` 이 재계획을
+    걸었다(gap 23 의 장치가 정상 동작한 것이다). 재계획은 안 써 본 `customer` 를 골랐고,
+    그 도구는 브리핑 한 편(LLM 11 회)을 통째로 끌어와 원장에 실었다 — 답은 "지난 상담 기록이
+    없어요" 한 줄인데 계획이 세 바퀴 돌고, 출처에는 질문과 무관한 ⑥⑦⑧ 화법 카드 다섯 장이
+    «근거»로 나란히 섰다.
+
+    저장소를 읽어 0건임을 확인한 것은 **판정**이지 지어낸 문장이 아니다 — 계좌 상태를
+    "미설정"으로 싣는 것과 같은 자리다. 지어내지 않는다는 규약이 지키는 것은 여전히 남는다:
+    이 도구는 고객 화면이 닫혀 있거나(어느 고객인지 없다) 저장소를 읽지 못하면 그대로
+    None 이다 — 그 둘은 «확인한 없음»이 아니라 «확인하지 못함»이라 다른 도구를 써 볼
+    여지가 남아 있다.
     """
     customer_id = state.get("customer_id")
     if not customer_id:
@@ -843,7 +871,7 @@ def _history(state: AgentState, query: str) -> Evidence | None:
         for session in dialogs[:HISTORY_DIALOG_SESSIONS]:
             _render(session, lines)
     if len(lines) == 1:
-        return None
+        lines.append(HISTORY_NONE)
 
     # 시효 표시는 **과거 상담이 실제로 실렸을 때만** 단다. 방금 나눈 대화에 "지난 상담
     # 기록입니다"를 붙이면 표시가 거짓말을 하고, 매번 붙는 표시는 읽히지 않는다 —
@@ -853,6 +881,63 @@ def _history(state: AgentState, query: str) -> Evidence | None:
                  "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],
                notices=[HISTORY_MARK] if records else [])
+
+
+#: 이번 상담 대화 재료의 범위 — 실을 턴 수와 발화 한 건의 길이. `history` 의 발췌(120자)보다
+#: 훨씬 길다. 그쪽은 «그때 무슨 얘기를 했나»의 실마리면 되지만, 이쪽은 **요약의 재료**라
+#: 답변이 말한 수치·화면번호가 잘리면 요약이 그것을 옮길 수 없다(§6 — 원장 밖 수치는 잘린다).
+TRANSCRIPT_TURNS, TRANSCRIPT_EXCERPT = 16, 1500
+
+#: 이번 상담에서 아직 오간 대화가 없을 때 싣는 줄. 0건도 확인한 값이다(`HISTORY_NONE` 과 같은
+#: 이유) — 비워 두면 «질의가 빗나감»과 구별되지 않아 계획이 다른 도구를 헛돈다.
+TRANSCRIPT_NONE = "· 기록 없음 — 이번 상담에서 아직 오간 대화가 없습니다."
+
+#: 기록된 답변 끝에 붙어 있는 제안 문구(act.offer — 화면 연계·화법 제시·쪽지 보내기). 안내가
+#: 아니라 화면 장치라 요약 재료에서 뗀다 — 추천질문을 기록에서 빼는 것과 같은 이유다(graph.ask).
+_OFFER_TRAILER = re.compile(r"\n*— [^\n]*\(네 / 아니오\)\s*$")
+
+
+def _transcript(state: AgentState, query: str) -> Evidence | None:
+    """**이번 상담**(지금 진행 중인 세션)에서 지금까지 오간 대화 — `history` 의 반대편이다.
+
+    `history` 는 이번 세션을 제외한다(방금 한 말이 «지난 상담»으로 나가면 안 되므로). 그러면
+    「지금까지 얘기한 거 정리해서 쪽지로 보내줘」에 쓸 재료가 어디에도 없다 — 대화 맥락
+    (`format_history`)은 직원 질문만 싣고 답변 원문을 들지 않기 때문이다(state.Turn). 요약은
+    답변에 무엇이 있었는지를 봐야 쓸 수 있고, 그 원문은 진입점이 턴마다 세션 저장소에 남긴
+    것 하나뿐이다(graph.ask — 추천질문을 붙이기 전의 답변).
+
+    싣는 것은 **직원 발화와 에이전트 답변**이다. 도구 실행 기록(role=tool)은 대화가 아니라
+    빼고, 기록에 남은 화면 연계 제안 문구도 뗀다. 답변 원문이 원장에 실리므로 요약이 그
+    안의 수치·화면번호를 옮겨도 검증을 통과한다 — 원장 밖에서 새로 계산하지는 못한다.
+
+    고객 화면이 닫혀 있거나 세션 구분자가 없으면 None 이다 — «확인하지 못함»이라 다른
+    도구를 써 볼 여지를 남긴다. 세션은 있는데 대화가 0건이면 그것도 재료다(TRANSCRIPT_NONE).
+    """
+    customer_id, session_id = state.get("customer_id"), state.get("session_id")
+    if not customer_id or not session_id:
+        return None
+    from pension_agent import session_store  # noqa: PLC0415
+    try:
+        sessions = session_store.list_sessions(customer_id)
+    except Exception:
+        return None
+    current = next((s for s in sessions if s.get("session_id") == session_id), None)
+    turns = [t for t in ((current or {}).get("turns") or [])
+             if t.get("role") in ("user", "agent") and (t.get("text") or "").strip()]
+
+    lines = [f"■ 이번 상담 대화 기록 — 지금 진행 중인 상담에서 오간 대화 ({len(turns)}턴)"]
+    for turn in turns[-TRANSCRIPT_TURNS:]:
+        text = _OFFER_TRAILER.sub("", (turn.get("text") or "").strip())
+        text = " ".join(text.split())
+        if len(text) > TRANSCRIPT_EXCERPT:
+            text = text[:TRANSCRIPT_EXCERPT] + "…"
+        lines.append(f"- {_HISTORY_ROLE.get(turn.get('role'), '?')}: {text}")
+    if len(lines) == 1:
+        lines.append(TRANSCRIPT_NONE)
+    return _ev("transcript", query, "\n".join(lines),
+               [{"id": f"session.{customer_id}.{session_id}", "title": "이번 상담 대화 기록",
+                 "doc": "상담 세션 기록(에이전트가 턴마다 남긴 이번 상담의 대화)",
+                 "score": None, "page": None}])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -910,7 +995,7 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
                                           query=query or question,
                                           history_block=format_history(history)),
-                   max_tokens=ADEQUACY_MAX_TOKENS)
+                   max_tokens=ADEQUACY_MAX_TOKENS, name="consult.adequacy")
     m = re.search(r"\[.*\]", raw, re.S)
     try:
         kept = json.loads(m.group()) if m else []
@@ -1047,16 +1132,72 @@ def _date(state: AgentState, query: str) -> Evidence | None:
 # 총급여 구간은 원장에 없다(demo_status §4 — 목업 9명 전원 미확인). 코드는 브리핑에서
 # 보수적으로 낮은 쪽을 쓰지만(과대산출 회피), 계산기가 그 값 하나만 내놓으면 16.5% 구간
 # 고객에게 "왜 적게 나와?" 가 된다. 두 경우를 다 싣고 어느 쪽인지는 직원이 가른다.
+#
+# ━━ «어디에 넣는 금액인가»를 재료가 적는다 ━━
+# "300만원 더 넣으면 얼마 돌려받아?" 의 300만원은 어느 계좌에 넣는 돈인지가 **질문에**
+# 없다. 그렇다고 갈래가 있는 것은 아니다 — 열려 있는 고객의 계좌가 개인형IRP 이고, 이
+# 계산의 여력(잔여한도)도 그 원장에서 온다. **정해져 있는 것을 «가정하면» 으로 말하지
+# 않는다**(§4 "제도·요건을 임의로 넓히거나 추정하지 않는다" 와 같은 자리 — 확정된 값을
+# 추측처럼 적으면 직원은 확인해야 할 것이 있는 줄 안다). 갈래가 없으므로 되묻지도 않는다.
+#
+# 재료가 그 자리를 비워 두면 답변도 비운다 — 직원은 어느 계좌에 넣는 300만원인지 적히지
+# 않은 금액을 고객에게 옮기게 된다. 그래서 계좌를 한 줄로 못박아 싣는다.
+#
+# 한도 쪽은 반대로 **계좌를 가리지 않는다.** 세액공제 한도 900만원은 IRP 단독이 아니라
+# 연금저축과 함께 쓰는 한도라(fact.k04.f2 "연금저축 세액공제 포함") 잔여한도가 그만큼
+# 줄어 있을 수 있다. 그것도 함께 적는다 — 「IRP 에 900만원까지 넣을 수 있다」로 읽히면
+# 안 된다.
 # ─────────────────────────────────────────────────────────────
 
 #: 공제율의 근거 카드. 세율·한도·아래 단서가 전부 여기서 온다.
 TAX_FACT_ID = "fact.k04.f2"
+
+# ━━ ISA 만기자금 전환은 **다른 축이다** ━━
+# 위 계산은 900만원 한도 «안에서» 현금을 더 넣으면 얼마인가다. ISA 만기자금 전환은 그
+# 한도에 전환액의 10%(300만원)를 **더하고**, 전환금 자체는 연 1,800만원 납입한도에 걸리지
+# 않는다(fact.k04.f4). 이 갈래가 없던 동안 「ISA 8,000만원 중 일부만 옮기면?」에 잔여한도
+# 500만원으로 답했고 — 같은 대화에서 이미 인용한 카드(최대 1,200만원)와 어긋났다.
+#
+# **전환액을 `tax_credit()` 에 그대로 넣지 않는다.** 그러면 8,000만원 전환이 한도를 채운
+# 것으로 계산되는데, 그것이 카드가 못박은 오답이다("전환금 전액이 공제 대상" = 오답).
+# 늘어나는 것은 «공제 대상 납입액»뿐이고, 공제율은 거기에만 곱한다.
+#: 전환 특례의 근거 카드. 10%·300만원·60일·납입한도 예외가 전부 여기서 온다.
+ISA_FACT_ID = "fact.k04.f4"
 
 
 def _won(v: int) -> str:
     from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
 
     return won(v)
+
+
+def _extra_paid(state: AgentState) -> tuple[str, int] | None:
+    """계산에 쓸 «추가 납입액». 직원이 친 말에서 뽑되, **되물은 갈래를 고르는 답이면 그 말의
+    수치는 «갈래»이지 납입액이 아니다** — 원래 질문으로 거슬러 올라간다.
+
+    이게 없던 동안 되묻기 다음 턴이 **틀린 금액을 답했다**(2026-09-02 실측 — 이수민).
+    「300만원 더 넣으면 얼마 돌려받아?」가 총급여 구간을 되물었고, 직원이 「5,500만원
+    이하야」라고 답하자 그 5,500만원을 추가 납입액으로 읽었다. 잔여한도(900만원)로 잘려
+    화면에는 **1,485,000원**이 떴다 — 물어본 300만원의 답(495,000원)이 아니라 한도를 다
+    채웠을 때의 값이고, 되묻기 선택지에 방금 495,000원이라 적어 놓고 그랬다.
+
+    기준서 §5 가 정한 것이 그것이다 — 「되물은 다음 턴의 짧은 답은 그 질문의 답이므로,
+    **원래 질문과 고른 갈래를 합쳐** 답한다」. 도구가 이번 턴 질문만 보면 원래 질문이 없다.
+
+    직전 턴이 되묻기였는지는 코드가 아는 값이다(`pending_clarify`) — LLM 에 맡기지 않는다.
+    """
+    from pension_agent.verify import first_amount  # noqa: PLC0415
+
+    history = state.get("history") or []
+    if not (history and (history[-1] or {}).get("pending_clarify")):
+        return first_amount(state.get("question") or "")
+    # 갈래를 고르는 턴이다. 이번 말의 수치는 선택지 라벨이므로 보지 않고, 금액을 말한
+    # 가장 가까운 앞 질문을 쓴다. 없으면 None 이라 호출부가 잔여한도로 읽는다.
+    for turn in reversed(history):
+        found = first_amount(turn.get("question") or "")
+        if found:
+            return found
+    return None
 
 
 def _tax_credit(state: AgentState, query: str) -> Evidence | None:
@@ -1081,24 +1222,42 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
     room = p.room * 10_000
     # 금액을 안 말했으면 «잔여한도를 채우면» 으로 읽는다. 원장 값이라 지어낸 수가 아니고,
     # 직원이 실제로 묻는 것도 대개 그것이다("얼마나 더 받을 수 있어?").
-    said = first_amount(state.get("question") or "")
+    said = _extra_paid(state)
     extra = said[1] if said else room
     gain_base = min(extra, room)          # 잔여한도를 넘는 납입은 공제 대상이 아니다
     target = paid + gain_base
     gain = CUST.tax_credit(target, 1.0) - CUST.tax_credit(paid, 1.0)
 
-    lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객 (시스템 계산 — 검색 결과가 아니다)",
-             f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)}",
+    # ISA 만기자금이 있으면 **질문에 ISA 라는 말이 없어도** 전환 축을 함께 싣는다. 되묻기
+    # 뒤의 답("초과야")처럼 질문이 한 마디로 줄어드는 턴이 있어서, 말에서 찾으면 정작 그
+    # 축이 필요한 턴에 빠진다 — 이 고객에게 성립한 상태인지는 코드가 이미 아는 값이다(§8).
+    isa_card = KB.facts.get(ISA_FACT_ID)
+    isa_used = bool(p.isa) and isa_card is not None and _isa_convertible(p.isa)
+    # 전제를 밝히는 축이 **둘**이다. 하나는 «어디에 넣나»(IRP 냐 연금저축이냐 — 아래 f3
+    # 갈래), 다른 하나는 «어디서 온 돈인가»(현금이냐 ISA 만기자금이냐). 둘 다 밝히지 않으면
+    # 직원이 말한 금액(「8천만원」)이 블록마다 다른 뜻으로 쓰이는데 화면에서는 분간되지 않는다.
+    axis = " · 현금을 더 납입하는 경우" if isa_used else ""
+    lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객{axis} (시스템 계산 — 검색 결과가 아니다)",
+             "· 어디에 넣는 금액인가: 이 고객의 **개인형IRP 계좌 추가 납입**이다",
+             f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)} "
+             f"— 한도와 잔여한도는 연금저축 납입분까지 합산한 값이다(원장 값)",
              f"· 계산에 쓴 추가 납입액 {_won(extra)}"
              + ("" if said else " (질문에 금액이 없어 잔여한도로 계산했다)")]
 
+    cards = [card]
     notices: list[str] = []
     if gain <= 0:
-        # 환급 «금액»을 새로 단정하지 않는 갈래다. 아래 결정세액 단서도 붙이지 않는다 —
-        # 그 단서는 최대 환급액을 단정할 때 걸리는 것이라 여기서는 무관하다(CLAUDE.md §7).
+        # 이 블록은 환급 «금액»을 새로 단정하지 않으므로 결정세액 단서가 무관하다
+        # (CLAUDE.md §7). 단서를 붙일지는 아래에서 **두 블록을 다 보고** 정한다 — ISA 전환
+        # 축이 실리면 그쪽이 금액을 단정하므로, 이 블록만 보고 생략하면 단서가 빠진다.
+        #
+        # 아래 줄은 「연 납입한도 900만원」이라 적혀 있었다. 900만원은 **공제 한도**이고 납입한도는
+        # 1,800만원이라(fact.k04.f1), 그 이름으로 부르면 «더 넣을 수 없다»로 읽힌다 —
+        # 실제로는 더 넣을 수 있고 공제가 안 될 뿐이다(초과분은 과세이연·이연공제, f5).
         lines.append(f"· 세액공제 잔여한도가 {_won(room)}이라 **추가 공제 대상이 없다** — "
                      f"더 납입해도 올해 세액공제로 돌아오는 금액은 늘지 않는다 "
-                     f"(연 납입한도 {_won(cap)} 은 연금저축과 함께 쓴다)")
+                     f"(세액공제 한도 {_won(cap)}은 연금저축과 함께 쓴다. 납입 자체는 "
+                     f"연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)}까지 가능하다)")
     else:
         lines.append(f"· 공제 대상 {_won(min(paid, cap))} → {_won(min(target, cap))} "
                      f"(잔여한도 {_won(room)}까지)")
@@ -1109,12 +1268,87 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
                          f"(늘어나는 금액 {after - now:,}원)")
         lines.append("· 이 고객의 총급여 구간은 원장에 없어 두 경우를 다 실었다 — "
                      "어느 구간인지 확인하면 하나로 좁혀진다")
-        notices.append(_caveat(card))
 
+    if isa_used:
+        lines += _isa_rollover_lines(p, said)
+        cards.append(isa_card)
+    if gain > 0 or isa_used:
+        # 환급 «금액»을 단정하는 갈래에만 붙는다(§7). 두 축이 다 나와도 단서는 하나다 —
+        # 같은 카드의 같은 문장이라 두 번 실으면 화면에 같은 경고가 겹쳐 선다.
+        notices.append(_caveat(card))
     return _ev("tax_credit", query, "\n".join(lines),
-               KBMOD.sources_of(KB, [(1.0, card)]), notices=notices,
+               KBMOD.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
                scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
-               cards=[card])
+               cards=cards)
+
+
+def _isa_convertible(isa: dict) -> bool:
+    """아직 전환할 수 있는 ISA 만기자금인가 — 만기일로부터 60일 이내(fact.k04.f4).
+
+    기한이 지난 자금에 «옮기면 얼마 더 받는다»를 실으면 직원이 안내할 수 없는 것을
+    안내하게 된다. 잔여일수를 모르면(원장에 만기일이 없으면) 막지 않는다 — 확인하지
+    못한 것과 기한이 지난 것은 다르고, 앞엣것을 뒤엣것으로 다루면 있는 기회가 사라진다.
+    """
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+
+    dd = isa.get("dd")
+    return dd is None or dd >= -CUST.ISA_ROLLOVER_DEADLINE_DAYS
+
+
+def _isa_rollover_lines(p, said: tuple | None) -> list[str]:
+    """ISA 만기자금 전환 축의 재료. 위 계산과 **더해지는** 몫이라 블록을 갈라 싣는다."""
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+
+    amt, dd = p.isa["amount"], p.isa.get("dd")
+    cap = CUST.ISA_ROLLOVER_CREDIT_CAP_WON
+    # 상한에 닿는 전환액. 10%·300만원에서 나오는 값이라 코드가 다시 정하지 않는다.
+    at_cap = int(cap / CUST.ISA_ROLLOVER_CREDIT_RATE)
+
+    # 기한은 «만기까지 며칠»이 아니라 «전환할 수 있는 날이 며칠 남았나»다. 만기가 지난
+    # 자금도 60일 안이면 전환할 수 있고, 그때 직원이 봐야 하는 수는 남은 날이다.
+    left = CUST.ISA_ROLLOVER_DEADLINE_DAYS + dd if dd is not None and dd < 0 else dd
+    if dd is None:
+        window = ""
+    elif dd < 0:
+        window = f" (만기 {-dd}일 경과 · 전환 기한 {left}일 남음)"
+    else:
+        window = f" (D-{dd})"
+    lines = [
+        "■ ISA 만기자금을 전환하는 경우 — 위 계산과 **다른 축**이다 "
+        "(잔여한도 안에서 나눠 쓰는 것이 아니라, 공제 대상 한도 자체가 늘어난다)",
+        f"· ISA 만기자금 {_won(amt)} · 만기 {p.isa['date']}{window} · {p.isa['org']} — "
+        f"만기일로부터 {CUST.ISA_ROLLOVER_DEADLINE_DAYS}일 이내에 전환한다",
+        f"· 전환금은 연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)}과 무관하다 — "
+        f"만기금액의 전부 또는 일부를 넣을 수 있다",
+        f"· 전환액의 {CUST.ISA_ROLLOVER_CREDIT_RATE * 100:.0f}%가 세액공제 대상에 "
+        f"**더해진다**(상한 {_won(cap)}) — 전환액 {_won(at_cap)}에서 상한에 닿는다. "
+        f"전환금 전액이 공제 대상이 되는 것이 아니다",
+        f"· 그래서 공제 대상 한도가 {_won(CUST.TAX_CREDIT_CAP_WON)}에서 최대 "
+        f"{_won(CUST.TAX_CREDIT_CAP_WON + cap)}으로 늘어난다",
+    ]
+    # 「일부만 옮기면?」의 답은 금액 하나가 아니라 **전환액과의 관계**다. 직원이 금액을
+    # 말했으면 그 금액으로, 안 말했으면 구간표로 답한다.
+    tiers = [t for t in (10_000_000, 20_000_000, at_cap) if t <= amt] or [amt]
+    if amt not in tiers:
+        tiers.append(amt)
+    lines.append("· 전환액별 추가 공제 대상: " + " · ".join(
+        f"{_won(t)} → {_won(CUST.isa_rollover_credit(t))}"
+        + ("(상한)" if CUST.isa_rollover_credit(t) >= cap else "")
+        for t in tiers))
+
+    # 전환액은 만기금액을 넘을 수 없다. 직원이 만기금액 전체를 말한 경우(「8천만원 전부는
+    # 부담스럽다」)도 여기로 들어와 상한에서 잘린다 — 지어낸 수가 아니라 원장 값이다.
+    conv = min(said[1], amt) if said else amt
+    add_room = CUST.isa_rollover_credit(conv)
+    lines.append(f"· 계산에 쓴 전환액 {_won(conv)} → 추가 공제 대상 {_won(add_room)}"
+                 + ("" if said else " (질문에 금액이 없어 만기금액 전부로 계산했다)"))
+    for label, rate in (("총급여 5,500만원 이하", CUST.TAX_CREDIT_RATE["5500이하"]),
+                        ("총급여 5,500만원 초과", CUST.TAX_CREDIT_RATE["5500초과"])):
+        lines.append(f"· {label}({rate * 100:.1f}%): 이 전환으로 늘어나는 환급 "
+                     f"{CUST.tax_credit(add_room, rate):,}원")
+    lines.append("· 이 금액은 위의 «현금을 더 납입하는 경우»와 별개로 더해지는 몫이다 — "
+                 "둘을 같은 한도 안에서 저울질하지 않는다")
+    return lines
 
 
 #: 환급액에 따라붙는 단서를 카드에서 떼어 오는 표지. 코드가 문장을 갖지 않는다 —
@@ -1292,6 +1526,113 @@ def cited_cards(state: AgentState) -> set[str]:
 # 레지스트리
 # ─────────────────────────────────────────────────────────────
 
+def _cond_labels(conditions: list[str]) -> list[str]:
+    """브리핑 산출의 성립 요건(`코드:이름`)에서 이름만. 화면(`app.py`)이 하는 것과 같은 처리.
+
+    코드(`isa`·`tax`·`add`)를 재료에 그대로 실었던 동안 답변이 그것을 옮겼다 — 「세액공제
+    활용 가능(tax)과 추가입금 여력 보유(add) 요건이 성립되어 있어서」(2026-09-03 실측,
+    확정본 E1). 재료에 있는 말은 답변에 그대로 나오고 생성 지시로는 못 막는다(CLAUDE.md
+    §5 「재료에 개발 용어를 쓰지 않는다」). 코드는 `customer.CONDS` 의 키일 뿐 직원에게
+    뜻이 없다.
+    """
+    return [c.split(":", 1)[1] if ":" in c else c for c in conditions]
+
+
+def _outreach(state: AgentState, query: str) -> Evidence | None:
+    """⑨ 이 고객에게 안내할 세미나·이벤트 — 화면 ⑨ 와 **같은 산출**을 재료로 싣는다.
+
+    화면 ⑨ 는 상담 전에 이벤트 1건 + 세미나 1건을 골라 두는데, 그 선정과 문구가 대화
+    쪽에는 재료로 없었다. 그래서 "이 고객한테 보낼 만한 세미나 있어?"·"왜 이거야?"·"다른 건
+    없어?"가 전부 재료 0건으로 끝났고, 문구를 다듬어 달라는 요청도 일정·링크가 원장에 없어
+    검증기에 잘렸다(pension_agent/verify.py 는 원장 밖 수치를 자른다).
+
+    **여기서 다시 고르지 않는다.** 선정은 strategy_agent 가 하고 이 도구는 그 결과와 후보군을
+    옮기기만 한다 — 고르는 경로가 둘이면 화면과 대화가 같은 고객에게 다른 세미나를 말한다
+    (`_customer` 가 ⑥⑦⑧ 을 옮기기만 하는 것과 같은 이유).
+
+    문구도 마찬가지다. 발송 화면 연계(nodes/act.py)가 쓰는 문구는 여기 실린 `lms_message`
+    이고, 그것은 브리핑이 만든 값 그대로다 — 대화가 문구를 새로 생성하면 화면에 뜬 것과
+    다른 문자가 나간다.
+    """
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    from pension_agent.strategy_agent import agent as strategy_agent  # noqa: PLC0415
+    from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+    try:
+        profile = strategy_customer.get_profile(customer_id)
+        if profile is None:
+            return None
+        facts = strategy_agent.propose(profile)["facts"]
+    except Exception:
+        return None
+
+    picked = facts.get("outreach") or {}
+    pools = ((facts.get("pools") or {}).get("outreach")) or {}
+    if not (picked.get("event") or picked.get("seminar")):
+        return None
+
+    # **개수를 코드가 세어 싣는다.** 답을 쓰면 「2건을 추천드려요」·「1. … 2. …」처럼 개수와
+    # 열거 번호가 문장에 들어가는데, 그 수가 재료에 없으면 verify 가 «원장 밖 수치»로 보고
+    # **맞는 답을 통째로 폐기한다**(그러면 compose 가 이 블록을 그대로 덤프한다 — 실측:
+    # 안내 콘텐츠 2건을 고른 답이 "수치 '2'" 로 잘렸다). 세는 것은 코드가 이미 아는 사실이라
+    # 지어낼 자리가 없다 — `suitable` 도구가 「안내할 수 있는 상품 N종」을 싣는 것과 같다.
+    n_picked = sum(1 for key in ("event", "seminar") if picked.get(key))
+    n_other = {key: max(len(pools.get(key) or []) - (1 if picked.get(key) else 0), 0)
+               for key in ("event", "seminar")}
+    lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
+             f"· 지금 안내할 것 {n_picked}건 — "
+             + " · ".join(f"{label} {1 if picked.get(key) else 0}건"
+                          for key, label in (("event", "이벤트"), ("seminar", "세미나")))
+             + f" · 아직 열려 있는 다른 후보 이벤트 {n_other['event']}건 · "
+               f"세미나 {n_other['seminar']}건"]
+    atomic: list[str] = []
+    lms: dict[str, dict] = {}
+    for key, label in (("event", "이벤트"), ("seminar", "세미나")):
+        item = picked.get(key)
+        if not item:
+            continue
+        lines.append(f"· [{label}] {item['name']} — {item['schedule']} · 주관 {item.get('organizer') or '미상'}")
+        if item.get("description"):
+            lines.append(f"  내용: {item['description']}")
+        if item.get("reason"):
+            lines.append(f"  추천 사유: {item['reason']}")
+        if item.get("keywords"):
+            lines.append(f"  매칭 키워드: {', '.join(item['keywords'])}")
+        if item.get("url"):
+            lines.append(f"  안내 링크: {item['url']}")
+            # 링크는 한 글자만 달라도 죽는다 — 답변이 이 값을 말하면 원문 그대로여야 한다.
+            atomic.append(item["url"])
+        lines.append(f"  발송 문구: {item['lms_message']}")
+        lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"]}
+        # 다른 후보 — "다른 건 없어?" 에 답할 재료다. 선정된 것은 위에 이미 있으므로 뺀다.
+        others = [c for c in (pools.get(key) or []) if c["id"] != item["id"]]
+        if others:
+            lines.append(f"  다른 {label} 후보 {len(others)}건:")
+        for other in others:
+            lines.append(f"  · {other['name']} — {other['schedule']}")
+
+    for label, values in (("문제상황", [s["title"] for s in facts.get("problem_situations") or []]),
+                          ("성립 요건", _cond_labels(facts.get("conditions") or []))):
+        if values:
+            lines.append(f"· {label}: {', '.join(values[:4])}")
+    # 선별·문구가 LLM 산출이 아니면 그 사실을 재료에 남긴다 — 직원이 "AI 가 고른 것"으로
+    # 읽는 것과 "임박 순으로 뜬 것"으로 읽는 것은 다른 판단이다(REQUIREMENTS.md 「LLM 미생성 표시」).
+    for key, why in (facts.get("llm_skipped") or {}).items():
+        if key.startswith("outreach") or key == "lms_message":
+            lines.append(f"· 참고: {key} — {why}")
+
+    return _ev("outreach", query, "\n".join(lines),
+               [{"id": f"outreach.{customer_id}",
+                 "title": "고객님께 안내해보세요 — 열려 있는 이벤트·세미나",
+                 "doc": "안내 콘텐츠 레지스트리 (브리핑 ⑨ 와 같은 산출)",
+                 "score": None, "page": None}],
+               atomic=atomic,
+               # 발송 화면 연계(act.py)가 쓰는 문구. 승낙 턴이 문구를 다시 만들지 않도록
+               # 이번 턴의 산출을 그대로 들려 보낸다(CLAUDE.md §10 「제안한 턴이 남긴 것으로 정한다」).
+               meta={"lms": lms})
+
+
 TOOLS: dict[str, Tool] = {
     t.name: t for t in (
         Tool("pitch", "고객에게 실제로 할 말(대사·반론 대응·논거)을 만든다", _pitch,
@@ -1320,9 +1661,11 @@ TOOLS: dict[str, Tool] = {
         # "왜 관리 대상(타겟)인가"를 설명에 명시한다 — 재료에 실려 있는데(why_this_customer·
         # 판단근거) 설명이 잔액·수익률만 말하면, 계획이 그 질문을 segment(고객군 일반 정의)로
         # 보내고 이 도구를 안 부른다. 도구 설명이 곧 계획의 판단 재료다.
-        # 「이 고객한테 뭘 추천하지」가 이 도구다. 설명에 **권유가 아니라 범위**임을 적는다 —
-        # 계획 LLM 이 읽는 유일한 판단 재료라, 여기가 흐리면 그 질문이 lineup 만 세 바퀴
-        # 돌다가 재료 0건으로 끝난다(실제로 그랬다).
+        # 「이 고객한테 뭘 추천하지」가 이 도구다. 설명에 **어디까지 안내할 수 있는가**를
+        # 적는다 — 계획 LLM 이 읽는 유일한 판단 재료라, 여기가 흐리면 그 질문이 lineup 만
+        # 세 바퀴 돌다가 재료 0건으로 끝난다(실제로 그랬다). 답의 톤(범위 안의 특정 상품은
+        # 짚어 말해도 되고 권유 표현만 금지)은 도구 설명이 아니라 생성 지시가 정한다
+        # (COMPOSE_SYSTEM 8 · §8 관리대장 2026-09-02 개정).
         Tool("suitable", "이 고객 투자성향으로 **어디까지 안내할 수 있는지** — 적합성 게이트가 "
              "허용하는 위험등급 상한, 그 범위를 통과한 상품·포트폴리오 목록, 제외된 상품과 "
              "그 사유를 돌려준다. 「이 고객한테 뭘 추천하지」·「무슨 상품 있어」가 여기다",
@@ -1330,8 +1673,16 @@ TOOLS: dict[str, Tool] = {
         Tool("customer", "지금 열려 있는 고객의 브리핑 자료(잔액·수익률·성립 요건, 그리고 이 고객이 "
              "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer,
              progress="고객 브리핑 자료"),
-        Tool("history", "이 고객과 지난 상담에서 무슨 얘기를 했는지(날짜·질문·안내 요지) 돌려준다",
+        Tool("history", "이 고객과 **지난** 상담(이전 세션)에서 무슨 얘기를 했는지(날짜·질문·"
+             "안내 요지) 돌려준다 — 지금 진행 중인 상담은 들어 있지 않다",
              _history, progress="지난 상담 기록"),
+        # `history` 와 갈라 두는 축은 **시점**이다 — 그쪽은 이번 세션을 제외하고 이쪽은 이번
+        # 세션만 싣는다. 설명이 갈리지 않으면 「대화 내용 요약해줘」가 history 로 가서 지난
+        # 상담을 요약하거나 «기록 없음»으로 끝난다.
+        Tool("transcript", "**이번 상담**(지금 진행 중인 세션)에서 지금까지 오간 대화 전문 — "
+             "직원 질문과 에이전트 답변을 돌려준다. 「지금까지 대화 요약해줘」·「상담 내용 "
+             "정리해서 쪽지로 보내줘」처럼 이번 상담을 정리·요약·전달하려는 요청은 여기다",
+             _transcript, progress="이번 상담 대화 기록"),
         # 시점·기한이 걸린 질문은 재료가 없으면 답이 안 나온다(§8 "지어내지 않는다"가 그대로
         # «말하지 못한다»가 된다). 도구 설명이 곧 계획의 판단 재료이므로, 언제 부르는지를
         # 예시로 박아 둔다 — "얼마 안 남았다"류 문장을 쓰려는 턴이 전부 여기 걸려야 한다.
@@ -1339,7 +1690,9 @@ TOOLS: dict[str, Tool] = {
         # 없고, 재료 밖 계산은 금지라(§5) 코드가 계산해 싣지 않으면 말할 방법이 없다.
         Tool("tax_credit", "«얼마를 더 납입하면 세액공제로 얼마나 돌려받는지»를 계산한다 — "
              "'300만원 더 넣으면 얼마 받아', '한도 채우면 얼마 돌려받아'처럼 **환급액·"
-             "납입액을 계산해 달라는** 질문에 쓴다(제도 설명이 아니라 이 고객의 금액)",
+             "납입액을 계산해 달라는** 질문에 쓴다(제도 설명이 아니라 이 고객의 금액). "
+             "이 고객이 ISA 만기자금을 갖고 있으면 «일부만 옮기면 세액공제 얼마»처럼 "
+             "전환액에 걸린 계산도 여기다 — 전환 특례까지 함께 계산해 돌려준다",
              _tax_credit, progress="세액공제 환급액"),
         Tool("date", "오늘이 며칠인지와 연말까지 남은 일수를 돌려준다 — '오늘 며칠이야', "
              "'연말까지 얼마 남았어', '언제까지 납입해야 해'처럼 **시점·기한**이 걸린 질문, "
@@ -1348,6 +1701,12 @@ TOOLS: dict[str, Tool] = {
         # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
         # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
         # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.
+        # 화면 ⑨ 가 이미 고른 안내 콘텐츠를 대화 쪽 재료로 잇는다. `lineup`(우리가 뭘 파나)·
+        # `suitable`(어디까지 안내할 수 있나)과 갈리는 축은 **고객에게 보낼 콘텐츠**다 —
+        # 설명이 갈리지 않으면 계획이 세미나 질문을 lineup 으로 보내고 재료 0건으로 끝난다.
+        Tool("outreach", "이 고객에게 안내할 세미나·이벤트와 그 발송 문구를 돌려준다 — "
+             "「보낼 만한 세미나 있어」·「왜 이 이벤트야」·「다른 건 없어」·「문자로 뭐라고 "
+             "보내지」가 여기다", _outreach, progress="안내할 이벤트·세미나"),
         Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·"
              "관리방법론·업무절차 참고자료를 브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다",
              _playbook, progress="이 고객 상태에 걸린 참고자료"),
@@ -1355,7 +1714,8 @@ TOOLS: dict[str, Tool] = {
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history", "suitable", "tax_credit", "playbook"})
+_NEEDS_CUSTOMER = frozenset({"customer", "history", "transcript", "suitable", "tax_credit",
+                             "playbook", "outreach"})
 
 
 def usable(state: AgentState | None = None) -> list[str]:
@@ -1392,18 +1752,26 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
         progress.emit(f"{progress.object_of(tool.progress)} 찾고 있어요")
     question = (state.get("question") or "").strip()
     attempts = [query] + ([question] if question and question != query else [])
-    for attempt in attempts:
-        try:
-            found = tool.run(state, attempt)
-        except LLMError:
-            # 도구가 죽은 것과 **LLM 이 죽은 것**은 다른 사건이다. 뒤를 앞으로 접으면
-            # "찾아봤는데 재료가 없다"로 나가고, 그게 §11 이 막으려는 바로 그 답이다.
-            raise
-        except Exception:
-            return None  # 도구 하나가 죽어도 루프는 다음 도구로 간다
-        if found is not None:
-            return found
-    return None
+    # 관측 span — 「어떤 도구를 어떤 질의로 불러 무엇을 얻었나」가 답이 갈리는 자리다.
+    # generation 만 보내면 트레이스에는 «LLM 을 다섯 번 불렀다»까지만 남는다.
+    with observability.span(f"tool:{name}", input=query) as sp:
+        for i, attempt in enumerate(attempts):
+            try:
+                found = tool.run(state, attempt)
+            except LLMError:
+                # 도구가 죽은 것과 **LLM 이 죽은 것**은 다른 사건이다. 뒤를 앞으로 접으면
+                # "찾아봤는데 재료가 없다"로 나가고, 그게 §11 이 막으려는 바로 그 답이다.
+                raise
+            except Exception:
+                sp.update(output=None, found=False, failed=True)
+                return None  # 도구 하나가 죽어도 루프는 다음 도구로 간다
+            if found is not None:
+                # 원문 재검색으로 건졌는지도 남긴다 — 계획이 고른 질의가 얼마나 빗나가는지가
+                # 이 한 칸에 쌓인다(재검색이 잦으면 계획 프롬프트를 봐야 한다는 신호다).
+                sp.update(output=found["text"], found=True, retried=bool(i))
+                return found
+        sp.update(output=None, found=False)
+        return None
 
 
 def ledger_slots(evidence: list[Evidence]) -> dict:
@@ -1446,6 +1814,32 @@ def ledger_texts(evidence: list[Evidence]) -> list[str]:
 #: 사건이고, 직원에게도 다르게 보여야 한다(§3 · §8). 답을 내보내는 노드가 둘(compose ·
 #: clarify)이라 어휘는 한 곳에 둔다 — 갈리면 화면이 한쪽만 갈라 보여준다.
 GROUND, CAUTION = "근거", "주의"
+
+
+def source_lines(s: dict, *, compact: bool = False) -> list[str]:
+    """출처 한 건의 터미널 표기. 운영 CLI(`consult_agent/__main__`)와 디버그 실행기
+    (`tests/debug` — $CAD·$CADR)가 **같은 함수**를 쓴다. 각자 표기를 복사해 갖고 있던
+    동안 출처에 URL 을 싣는 변경이 운영 CLI 에만 적용되고 디버그 화면에는 빠졌다 —
+    한쪽만 고쳐지는 사고를 이 함수 하나로 막는다. (Streamlit 은 매체가 달라 별도 —
+    마크다운 링크로 렌더한다. `app.py`)
+
+    - 근거는 **원문 문서명**으로 읽어주고 카드 id 는 역추적용으로 뒤에 남긴다.
+    - 관련도는 **있을 때만** 찍는다 — 검색으로 오지 않은 재료(고객 브리핑·상담 기록·
+      가드)에는 관련도라는 것이 없고, 그 자리에 None 을 찍으면 "관련도를 못 잰 재료"가
+      "관련도가 없는 재료"로 읽힌다.
+    - 원천 문서에 게시글 URL(핫팁 등, doc.url)이 있으면 ↗ 줄로 함께 찍는다.
+    - compact 는 대표 질문 묶음($CADR)의 한 줄 표기다 — 관련도 없이 문서명·제목·id 만.
+    """
+    doc = s.get("doc") or "출처 미상 — 확인 필요"
+    title = s.get("title") or ""
+    if compact:
+        lines = [f"   · {doc} — {title} [{s['id']}]"]
+    else:
+        tail = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
+        lines = [f"   · {doc}", f"     — {title} [{s['id']}{tail}]"]
+    if s.get("url"):
+        lines.append(f"     ↗ {s['url']}")
+    return lines
 
 
 def ledger_sources(evidence: list[Evidence]) -> list[dict]:

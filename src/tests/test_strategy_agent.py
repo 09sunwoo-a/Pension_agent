@@ -250,7 +250,45 @@ def check_recommend_rejects_fabricated_number() -> None:
     _restore_llm()
 
 
+def check_outreach_prompt_has_no_condition_codes() -> None:
+    """⑨ 선별 프롬프트에 요건 코드(isa·tax·add)가 실리지 않는다.
+
+    회귀 대상(2026-09-03 확정본 E1 실측): 성립 요건을 `코드:이름` 그대로, 후보를 `conds`
+    코드 목록 그대로 프롬프트에 실었더니 추천 사유가 「세액공제 활용 가능(tax)과 추가입금
+    여력 보유(add) 요건」이라 나왔고, 그 사유가 대화 재료로 실려 답변까지 그대로 나갔다.
+    """
+    import re
+
+    p = _BY_NAME.get("김서연")
+    if p is None:
+        check(False, "⑨ 선별 프롬프트: 전제조건 불충족 — 김서연 없음")
+        return
+    facts = engine.prepare(p)
+    pools = (facts.get("pools") or {}).get("outreach") or {}
+    candidates = pools.get("event") or []
+    if len(candidates) < 2 or not any(c.get("conds") for c in candidates):
+        check(False, "⑨ 선별 프롬프트: 전제조건 불충족 — 요건이 걸린 이벤트 후보 2건 이상 필요")
+        return
+    seen: list[str] = []
+
+    def _capture(prompt, *a, **k):
+        seen.append(prompt)
+        return json.dumps({"pick": 0, "reason": "세액공제 여력이 있는 고객이에요."}, ensure_ascii=False)
+
+    llm.available = lambda: True
+    llm.generate = _capture
+    A.llm = llm
+    A._select_outreach(p, facts, "outreach_event", "이벤트", candidates)
+    _restore_llm()
+
+    code = re.compile(r"(?<![A-Za-z])(isa|tax|add|dep|nod|idl|mat|mis|pen|dor|hlt|nch|out)(?![A-Za-z])")
+    hit = bool(seen) and not code.search(seen[0]) and "성립 요건" in seen[0]
+    check(hit, "⑨ _select_outreach(): 프롬프트의 성립 요건·후보 목록에 요건 코드가 없다",
+          detail=(code.search(seen[0]).group(0) if seen and code.search(seen[0]) else "프롬프트 없음"))
+
+
 def main() -> int:
+    check_outreach_prompt_has_no_condition_codes()
     check_order_mismatch_fallback()
     check_sentence_verify_rejects_fabrication()
     check_why_customer_accepts_grounded()

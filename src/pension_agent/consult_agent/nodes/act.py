@@ -24,14 +24,15 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pension_agent.consult_agent import screens, tools
+from pension_agent.consult_agent import memo, screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
-from pension_agent.tools import TOOL_REGISTRY
+from pension_agent.tools import MEMO_DEFAULT_TO, TOOL_REGISTRY
 
 #: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
 _SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
 
-_YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "ok", "yes")
+_YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "보내",
+        "ok", "yes")
 _NO = ("아니", "괜찮", "나중", "취소", "안 열", "안열", "하지마", "no")
 
 
@@ -71,10 +72,140 @@ def _propose(state: AgentState) -> dict[str, Any] | None:
     받아 같은 화면 연계를 제안한다 — 기능이 사라진 것이 아니라, **추측이 아니라 요청으로**
     시작하게 바뀐 것이다.
     """
+    # 요약 턴이 먼저다 — 요약이 앞 답변의 화면번호를 옮겨 적어도 그 턴에 열 화면은 없다.
+    memo = _propose_memo(state)
+    if memo:
+        return memo
     for number in _answer_screens(state):
         return {"kind": "screen", "label": f"{number} 화면 열기", "screen": number,
                 "params": {"customer_id": state.get("customer_id") or ""}}
-    return _propose_playbook(state)
+    return _propose_lms(state) or _propose_playbook(state)
+
+
+#: 직원이 «쪽지로» 보내 달라고 말했는지의 판정어. 규칙이지 LLM 판단이 아니다(§10).
+_MEMO_WORDS = ("쪽지",)
+
+
+def _propose_memo(state: AgentState) -> dict[str, Any] | None:
+    """이번 턴의 답변(상담 요약)을 **쪽지로 보낼지** 제안한다(§10 의 제안·확인 형태).
+
+    쪽지는 직원 본인 쪽지함으로 가는 행내 메모라 대외 행위가 아니고, 그래서 에이전트가
+    화면을 열어 주는 데서 멈추지 않고 보내는 것까지 한다(`pension_agent/tools.py::send_memo`).
+    그래도 승낙을 받는 이유는 본문이 **LLM 이 쓴 요약**이기 때문이다 — 직원이 읽기 전에
+    나가면 무엇이 나갔는지 아무도 모르고, 보낸 쪽지는 되돌릴 수 없다(루트 규칙 5).
+
+    조건은 셋이고 전부 코드가 확인할 수 있는 사실이다.
+      1. 고객 화면이 열려 있다 — 어느 상담의 요약인지가 있어야 한다
+      2. 이번 턴이 **이번 상담 대화**를 재료로 다뤘다(원장에 `transcript` 근거가 있다) —
+         턴마다 갈리는 게이트다. 이게 없으면 「쪽지」라는 낱말이 든 아무 질문에나 붙는다
+      3. 직원이 쪽지로 보내 달라고 말했다(질문에 «쪽지») — 요약만 부탁한 턴에 "보낼까요?"를
+         붙이면 묻지 않은 것을 제안하는 것이다(§3)
+
+    보낼 본문은 `memo.compose` 가 조립한다 — **요약 항목은 이번 답변 그대로**이고(검증을
+    통과한 문장이 곧 쪽지다), 머리말(성명·날짜)과 고객 주요 정보 표는 코드가 원장 값으로
+    붙인다. 그 본문을 `offer` 가 이번 턴의 답변으로도 내보내므로 화면에 보이는 것과 나가는
+    쪽지가 같고, 승낙 턴은 다시 쓰거나 다듬지 않는다(§10 「제안한 턴이 남긴 것으로 정한다」).
+    """
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    if not any(e["tool"] == "transcript" for e in (state.get("evidence") or [])):
+        return None
+    question = state.get("question") or ""
+    if not any(w in question for w in _MEMO_WORDS):
+        return None
+    summary = (state.get("answer") or "").strip()
+    if not summary:
+        return None
+    text = memo.compose(customer_id, summary)
+    to = MEMO_DEFAULT_TO
+    return {"kind": "memo", "label": f"이 요약을 쪽지로 보내기(받는 사람: {to})",
+            "prompt": f"이 요약을 쪽지로 보낼까요? 받는 사람은 {to}이에요. (네 / 아니오)",
+            "text": text, "to": to,
+            "params": {"customer_id": state.get("customer_id") or ""}}
+
+
+def _propose_lms(state: AgentState) -> dict[str, Any] | None:
+    """이번 턴에 안내하기로 한 콘텐츠의 **발송 화면 연계**를 제안한다(§10 예정 확장의 구현).
+
+    지금까지 LMS 는 직원이 먼저 말해야 시작했다("이 문구로 보내줘" → nodes/lms.py). 그
+    갈래를 남겨 둔 채 이쪽을 더하는 이유는, 직원이 «세미나 뭐 있어»를 묻고 나면 다음에 할
+    일이 발송 하나뿐인데 그때마다 문구를 따옴표로 옮겨 적게 하는 것이 그 화면의 목적에
+    맞지 않기 때문이다.
+
+    **조건은 넷이고 전부 코드가 확인할 수 있는 사실이다**(위 `_propose_playbook` 과 같은
+    기준). 특히 ②가 «턴마다 갈리는 게이트»다 — 이게 없으면 고객 화면이 열려 있는 동안 매
+    턴 "보낼까요?"가 붙고, 그것이 예전에 따옴표 휴리스틱 갈래를 지운 바로 그 상태다.
+
+      1. 고객 화면이 열려 있고, 이 고객에게 성립한 관리 사유가 있다 — 없으면 관리 대상이
+         아니고, 사유를 만들어내지 않는다
+      2. **이번 턴이 안내 콘텐츠를 재료로 다뤘다**(원장에 outreach 근거가 있다)
+      3. 답변이 그 콘텐츠를 실제로 가리켰다 — 콘텐츠 이름을 인용했다는 뜻이다. 후보를
+         늘어놓기만 한 답변에 "보낼까요?"를 붙이면 무엇을 보낸다는 것인지가 없다
+      4. 그 콘텐츠에 발송할 문구가 있다(브리핑 ⑨ 가 만들어 둔 값)
+
+    **문구를 여기서 만들지 않는다.** 원장에 실린 브리핑 산출을 그대로 옮긴다 — 화면 ⑨ 가
+    어차피 만드는 값이고, 대화가 따로 생성하면 화면에 뜬 것과 다른 문자가 나간다(§10).
+    발송 여부는 여전히 직원이 그 화면에서 정하고, 더미 게이트도 `_link` 에 그대로 남는다.
+    """
+    if not state.get("customer_id") or not _playbook_reason(state):
+        return None
+    answer = state.get("answer") or ""
+    for ev in state.get("evidence") or []:
+        if ev["tool"] != "outreach":
+            continue
+        for key, item in _lms_items(ev):
+            if not _mentions(answer, item["name"]):
+                continue          # 답변이 가리키지 않은 콘텐츠는 제안하지 않는다
+            found = screens.lms_screen(KB)
+            if not found:
+                # 발송 화면번호가 지식베이스에 없으면 링크를 만들지 않는다(§10).
+                return None
+            number, card = found
+            return {"kind": "lms", "label": f"«{item['name']}» 안내 문구로 {number} 발송 화면 열기",
+                    "screen": number, "card": card, "message": item["message"],
+                    "content_id": item["id"], "content_kind": key,
+                    "params": {"customer_id": state.get("customer_id") or ""}}
+    return None
+
+
+#: 콘텐츠 등록 이름의 끝에 붙는 종류 낱말. 답변은 이 낱말을 떼고 부른다.
+_CONTENT_KINDS = ("이벤트", "세미나")
+
+
+def _mentions(answer: str, name: str) -> bool:
+    """답변이 이 콘텐츠 이름을 불렀는가 — 조건 ③ 「답변이 그 콘텐츠를 실제로 가리켰다」의 판정.
+
+    글자 그대로의 부분문자열 대조였던 동안 **제안이 엉뚱한 콘텐츠에 붙었다**(2026-09-03
+    실측, 확정본 E1): 등록 이름은 「IRP 추가입금하고 절세혜택 챙기기 **이벤트**」인데 답변은
+    끝의 «이벤트»를 떼고 「…챙기기 (9/30까지)」로 썼고, 같은 답변이 세미나 이름은 그대로
+    옮겼다. 그래서 이벤트는 «언급 안 함»으로 탈락하고 발송 제안이 세미나에 붙었으며, 승낙
+    턴이 ISA 만기 고객에게 자산배분 세미나 문자를 열었다. 답변이 이름을 부르는 방식(종류
+    낱말 생략·공백 차이)은 LLM 이 정하는 표현이라 지시로 고정할 수 없다 — 대조 쪽이 그
+    폭을 갖는다. 넓히는 것은 **끝의 종류 낱말과 공백**뿐이다. 이름의 앞부분을 잘라 부르는
+    것은 여전히 «가리킨 것»이 아니다(후보를 늘어놓기만 한 답변에 붙이지 않는다는 조건 ③).
+    """
+    stem = name.strip()
+    for kind in _CONTENT_KINDS:
+        if stem.endswith(kind):
+            stem = stem[: -len(kind)].strip()
+            break
+    squash = lambda s: re.sub(r"\s+", "", s)  # noqa: E731
+    return bool(stem) and squash(stem) in squash(answer)
+
+
+def _lms_items(ev: dict) -> list[tuple[str, dict]]:
+    """outreach 근거가 들려 보낸 «보낼 수 있는 것» 목록 — (이벤트/세미나, {id·name·message}).
+
+    이름과 문구를 도구가 함께 실어 주므로 제안 노드가 브리핑을 다시 부르지 않는다. 다시
+    부르면 그 사이 선정이 달라질 수 있고, 그러면 답변이 말한 것과 다른 콘텐츠를 보내자고
+    제안하게 된다.
+    """
+    out: list[tuple[str, dict]] = []
+    for key, item in ((ev["meta"].get("lms") or {})).items():
+        if isinstance(item, dict) and item.get("name") and item.get("message"):
+            out.append((key, item))
+    return out
 
 
 #: 제안 갈래를 여는 원장 재료. 이번 턴이 이 도구의 근거를 다뤘을 때 그 갈래의 나머지
@@ -146,8 +277,15 @@ def offer(state: AgentState) -> dict[str, Any]:
     action = _propose(state)
     if not action:
         return {}
+    # 묻는 문장은 제안이 정한다 — 쪽지는 «연계»가 아니라 «보내기»라 같은 꼴로 물으면
+    # 직원이 무엇에 답하는지 흐려진다. 끝의 「(네 / 아니오)」는 공통이다(transcript 재료가
+    # 기록에서 이 줄을 떼는 표지 — tools._OFFER_TRAILER).
+    ask = action.get("prompt") or f"{action['label']}, 연계해드릴까요? (네 / 아니오)"
+    # 쪽지는 답변 자리를 **쪽지 본문**으로 바꾼다 — 직원이 화면에서 읽고 승낙하는 것이 곧
+    # 나가는 쪽지여야 한다(§10). 다른 제안은 답변에 덧붙이기만 한다.
+    body = action["text"] if action.get("kind") == "memo" else state["answer"]
     return {
-        "answer": state["answer"] + f"\n\n— {action['label']}, 연계해드릴까요? (네 / 아니오)",
+        "answer": body + f"\n\n— {ask}",
         "pending_action": action,
     }
 
@@ -183,41 +321,32 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 진행할까요? '네' 또는 '아니오'로 답해 주세요.",
                 "sources": [], "pending_action": pending}
 
-    if pending.get("kind") == "pitch":
+    kind = pending.get("kind")
+    if kind == "pitch":
         return _show_playbook(pending)
-    if pending.get("kind") == "workb_note":
-        return _send_workb(pending)
+    if kind == "memo":
+        return _send_memo(pending)
     return _link(pending)
 
 
-#: 발송 결과 → 직원에게 하는 말. **판정하지 못한 것을 «보냈다»고 말하지 않는다** —
-#: `unknown` 은 성공도 실패도 아니고, 그 사실을 그대로 말하는 것이 안 한 일을 했다고
-#: 말하는 것보다 낫다(루트 CLAUDE.md 5번).
-_SENT_WORD = {
-    "sent": "{label}했어요.",
-    "failed": "발송하지 못했어요. {detail}",
-    "not_connected": "발송하지 못했어요. {detail}",
-    "unknown": "발송 결과를 확인하지 못했어요. {detail} — WorkB 쪽지함에서 직접 확인해 주세요.",
-}
+def _send_memo(pending: dict) -> dict[str, Any]:
+    """승낙받은 요약을 쪽지로 보내고 결과를 알린다(§10 「연계 결과를 알린다」).
 
-
-def _send_workb(pending: dict) -> dict[str, Any]:
-    """승낙받은 쪽지를 실제로 보낸다 — **여기가 유일한 발송 지점**이다.
-
-    보내는 글은 **제안한 턴이 남긴 것**을 그대로 쓴다(§10). 여기서 다시 만들면 자정을
-    넘긴 승낙이 직원이 본 것과 다른 날짜의 목록을 보내게 된다.
-
-    결과는 서버 응답으로 판정한다 — 호출이 예외 없이 돌아온 것은 발송의 근거가 아니다
-    (`workb.parse_result`: WorkB 는 실패를 본문에 담아 보낸다).
+    본문은 제안한 턴이 남긴 것 그대로다 — 여기서 다시 쓰지 않는다. 답변에 본문을 다시 싣지도
+    않는다 — 직원이 방금 읽고 승낙한 것이라, 반복하면 같은 글이 화면에 두 번 선다.
     """
-    from pension_agent import workb  # noqa: PLC0415 — 무거운 로스터 적재를 이 갈래에서만
-
-    note = workb.Note(title=pending.get("title") or "", body=pending.get("body") or "",
-                      count=0, shown=0, truncated=False)
-    result = workb.send_note_sync(pending.get("recipients") or [], note)
-    say = _SENT_WORD.get(result["status"], _SENT_WORD["unknown"])
-    return {"answer": say.format(label=pending.get("label") or "쪽지 발송",
-                                 detail=result.get("detail") or ""),
+    text = (pending.get("text") or "").strip()
+    if not text:
+        # 본문을 잃었으면 지어내지 않는다 — 무엇을 보내기로 했는지 잃은 것이다.
+        return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 요약을 한 번 더 부탁해 주세요.",
+                "sources": [], "pending_action": None}
+    to = pending.get("to") or MEMO_DEFAULT_TO
+    result = TOOL_REGISTRY["send_memo"](
+        (pending.get("params") or {}).get("customer_id") or "", text, to=to)
+    if result.get("status") not in ("ok", "stubbed"):
+        return {"answer": f"쪽지를 보내지 못했어요. {result.get('detail') or ''}".strip(),
+                "sources": [], "pending_action": None}
+    return {"answer": f"쪽지를 보냈어요 — 받는 사람: {to}.",
             "sources": [], "pending_action": None}
 
 
@@ -246,7 +375,14 @@ def _show_playbook(pending: dict) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 물어봐 주세요.",
                 "sources": [], "pending_action": None}
     # answer 를 비워 둔 채 원장만 채운다 — 분기표가 이걸 보고 compose 로 보낸다.
-    return {"evidence": [ev], "pending_action": None}
+    #
+    # 무엇을 승낙받았는지(`accepted`)도 함께 남긴다. 작성 단계가 받는 질문은 "네" 한 마디라
+    # 그 말에는 무엇을 쓰라는 것인지가 없고, 알려주지 않으면 LLM 은 <자료> 를 **직전 턴의
+    # 질문**에 대고 재서 「그 자료는 없어요」로 답한다(prompts.ACCEPTED_BLOCK 의 실측).
+    # 여기서 답변 문장을 만들지 않는 것과 같은 규약이다 — 코드는 «무엇을 보여줄지»만 정하고
+    # 문장은 compose 가 쓴다.
+    return {"evidence": [ev], "pending_action": None,
+            "accepted": pending.get("label") or "고객 상태에 걸린 재료"}
 
 
 def _link(pending: dict) -> dict[str, Any]:

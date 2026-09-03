@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 CA="python -m pension_agent.consult_agent"
 
 # 화법 코칭 — 고객 화면 불필요, 단발 실행
-$CA "고객이 주식이 더 낫다는데 뭐라고 하지?"
+$CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라고 하지?"
 
 # 고객 화면이 열려 있는 상태로 테스트 — -c/--customer 로 customer_id(KB-PIN) 지정
 $CA "이 고객 만기 언제야?" -c 198734-1205842          # 이준호 — 예금 만기 1건 (D-17)
@@ -49,8 +49,15 @@ $CA -c 173544-2074623 "뭐라고 말하지?"     # 김현수 — 현금성 방�
 
 # 값·절차·정의도 같은 경로다 — 계획 루프가 필요한 재료를 골라 온다
 $CA "세액공제 한도가 얼마야?"
-$CA "디폴트옵션 변경 화면번호 알려줘"
+$CA "포트폴리오 운용현황 조회 화면번호 알려줘"
 $CA "현금성자산 편중 고객군은 왜 관리 대상이야?"
+
+# 디버그 — 이 답이 어디서 갈렸나. 인자 규약이 $CA 와 같다(모듈만 바꾸고 --debug)
+CAD="python -m tests.debug"
+$CAD --debug "세액공제 한도가 얼마야?"                       # 노드·도구 호출·게이트 판정 트레이스
+$CAD --debug -c 198734-1205842                              # REPL — 턴마다 방금 턴만 찍는다
+$CAD --script tax_credit_asserts_wrong --debug --show-llm   # 저장된 시나리오를 LLM 키 없이 재현
+$CAD --list                                                 # 시나리오 목록
 
 python -m tests.test_consult_agent               # API 키 없이 검색·라우팅 검증
 python -m pension_agent.consult_agent.kb         # 지식베이스 점검 리포트
@@ -176,7 +183,6 @@ flowchart TD
     plan["plan — 근거 수집 루프<br/>질문에 필요한 자료를 도구로 찾아 모은다"]
     compose["compose — 답변 작성<br/>모은 근거 안에서만 답을 쓰고,<br/>질문이 모호하면 선택지를 되묻는다"]
     lms_link["lms_link — LMS 발송 화면 연계<br/>요청받은 문구로 발송 화면 열기를 제안한다"]
-    workb_note["workb_note"]
     correction["correction — 브리핑 수정<br/>화면의 AI 작성 문구를 고친다"]
     llm_down["llm_down — 장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다"]
     confirm_action["confirm_action — 제안 실행<br/>직전 턴에 제안한 화면 연계를 승낙받아 실행한다"]
@@ -195,14 +201,12 @@ flowchart TD
     understand -.-> llm_down
     understand -.-> lms_link
     understand -.-> plan
-    understand -.-> workb_note
     agent_help --> __end__
     correction --> __end__
     llm_down --> __end__
     lms_link --> __end__
     offer --> __end__
-    workb_note --> __end__
-    tools[["자료 도구 16종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이 고객 상태에 걸린 참고자료<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
+    tools[["자료 도구 18종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이번 상담 대화 기록<br/>&nbsp;&nbsp;&nbsp;&nbsp;이 고객 상태에 걸린 참고자료 · 안내할 이벤트·세미나<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
     plan -. "필요한 자료를 골라 조회" .-> tools
     gates[["답변 점검 — 근거를 벗어난 답변은 화면에 내보내지 않는다<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]
     compose -. "내보내기 전 검사" .-> gates
@@ -234,7 +238,10 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 답이라 그 자리에서 끝나지만, 화법 제시 승낙은 지식 카드가 답이라 근거만 싣고 `answer` 로
 간다(`routing.route_confirm`). 답변을 만드는 경로를 둘로 늘리지 않기 위해서다. 그 턴에는
 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자라 모호함을 판정할 질문이 없고, 무엇을
-보여주기로 했는지는 제안한 턴이 정했다(`clarify.applicable` · §10).
+보여주기로 했는지는 제안한 턴이 정했다(`clarify.applicable` · §10). **그 턴에는 무엇을
+승낙받았는지(`accepted` — 제안 문구)도 함께 실린다**: 작성 프롬프트가 받는 질문은 "네"
+한 마디라, 이게 없으면 작성 LLM 이 자료를 직전 턴의 질문에 대고 재고 원장에 실려 있는
+자료를 "준비된 자료가 없어요"라고 답한다(`prompts.ACCEPTED_BLOCK` 의 실측 기록).
 
 근거를 못 낸 호출은 `plan_misses` 로 다음 계획 프롬프트에 실린다(원장에는 성공한 재료만
 쌓이므로, 이게 없으면 계획은 자기가 뭘 불러봤는지 모른 채 같은 호출을 반복한다). 근거
@@ -399,7 +406,9 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 - **더미 게이트**: `pension_agent/tools.py::open_lms_screen` 은 발송하지 않고, **더미 콘텐츠에서
   온 문구를 발송 화면에 채우는 것을 거부한다** — 채워 넣으면 직원이 그대로 보낼 수 있기
   때문이다. MCP 연동이 준비되면 함수 **본문만** 교체하면 된다(레지스트리 키·시그니처 불변).
-  `register_consult_note`(상담 이력 등록)도 같은 레지스트리에 있다.
+  `register_consult_note`(상담 이력 등록)와 `send_memo`(이번 상담 요약을 직원 본인 쪽지함으로
+  보내는 스텁 — 고객에게 나가는 것이 아니라 에이전트가 보내는 것까지 한다. 승낙 뒤에만
+  불린다)도 같은 레지스트리에 있다.
 - **브리핑 수정**: 편집 가능 항목은 `strategy_agent.agent.EDITABLE_FIELDS`(AI브리핑
   문장·근거해설·카드 한줄혜택 — 전부 LLM 이 쓴 산문)로 코드가 못박아둔다. 수치·상품명·전략
   선정처럼 시스템이 계산한 값을 고쳐달라는 요청은 조용히 수용하지 않고 명확히 거절한다.

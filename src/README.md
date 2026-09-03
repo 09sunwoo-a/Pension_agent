@@ -22,7 +22,7 @@ CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 ·
 ```bash
 # ── 브리핑 · 대화 · 화면
 python -m pension_agent.strategy_agent.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
-$CA "고객이 주식이 더 낫다는데 뭐라고 하지?"           # 단발 — 고객 화면 없이
+$CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라고 하지?"   # 단발 — 고객 화면 없이
 $CA -c 198734-1205842                                 # REPL — 고객 화면이 열린 상태
 $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을 한 줄로 (맥락 이어서)
 streamlit run app.py                                  # 평가 대시보드 (개발용 화면)
@@ -33,12 +33,21 @@ $CAD --debug -c 198734-1205842                        # REPL — 턴마다 방�
 $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 키 없이 재현
 $CAD --list                                           # 시나리오 목록
 
-# ── 묶음 실행: 검토(독립 케이스 10개) · 시연 대본(docs/DEMO_SCENARIO.md)
-$CADR                                                 # 검토 10케이스 + 요약표
+# ── 묶음 실행: 검토(독립 케이스 11개) · 시연 대본(docs/DEMO_SCENARIO.md)
+$CADR                                                 # 검토 11케이스 + 요약표
 $CADR --brief                                         # 요약표만
-$CADR --demo                                          # 시연 대본 13턴 (청중이 보는 화면)
+$CADR --demo                                          # 시연 대본 16턴 (청중이 보는 화면)
 $CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
 $CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
+$CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
+$CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
+$CADR --final                                         # 중간점검 시연 확정본 (docs/DEMO_FINAL.md — 기획자 확정 3고객 + 이벤트 턴)
+$CADR --final 이수민 --debug                           # 고객 골라서
+
+# ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
+python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다
+python -m scripts.prebuild_briefings --status         # 무엇이 저장돼 있고 지금 읽히는가
+python -m scripts.prebuild_briefings --clear          # 지우고 저장소를 끈다(예전 동작)
 
 # ── 테스트 · 점검 (LLM 키 없이 돈다)
 python -m tests.test_engine            # ①~⑤ 결정론 로직
@@ -80,6 +89,116 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 
 없는 고객 id 는 시작할 때 끊는다 — 그냥 두면 «재료 0건»이 되어 오타와 구분되지 않는다.
 
+### 관측 (Langfuse)
+
+`--debug` 트레이스가 **한 턴을 이 화면에서** 보는 것이라면, Langfuse 는 **여러 실행을
+쌓아 두고 나중에** 보는 것이다. 브리핑 한 건이 LLM 11회, 대화 한 턴이 4~7회라 "어제 그
+답이 왜 그랬지"를 로그로 되짚기 어렵다 — 트레이스 하나(브리핑 한 건 · 대화 한 턴) 아래
+그 호출들이 프롬프트·응답·토큰·소요시간과 함께 묶여 남는다.
+
+무엇이 나가나 — 네 가지다.
+
+| | |
+|---|---|
+| **트레이스** | 대화 한 턴(`consult.turn`) · 브리핑 한 건(`briefing.generate`). 세션 id 로 같은 상담의 턴들이 이어지고, user 는 **고객 id** 라 「이 고객 관련 실행 전부」를 한 번에 부른다 |
+| **span** | LLM 호출이 아닌 단계 — `tool:<도구명>`(무엇을 어떤 질의로 불러 몇 건 얻었나 · 원문 재검색으로 건졌나) · `compose`(몇 번 다시 썼나 · 무엇에 걸렸나) |
+| **generation** | LLM 호출 한 건. 프롬프트·응답·모델·토큰·소요시간. span 안에서 난 호출은 그 밑에 붙어 **트레이스가 실행 구조를 닮은 트리**가 된다 |
+| **score** | 이 실행이 어땠나. 아래 표 |
+
+점수는 **전부 코드가 아는 사실**이다 — LLM 이 자기 답을 채점하지 않는다.
+
+| 점수 | |
+|---|---|
+| `turn_outcome` | `answer` · `clarify`(되묻기) · `llm_down`. 「되묻기가 몇 %인가」 |
+| `evidence_count` | 그 턴이 모은 근거 수. 0건이 잦으면 계획·검색을 봐야 한다 |
+| `compose_passed` | 작성이 게이트를 통과했나(0 이면 근거 원문이 나갔다). comment 에 **무엇에 걸렸는지** |
+| `compose_retries` | 재작성 횟수 |
+| `briefing_tier` | `행내전략` · `LLM판단` · `미매칭`. comment 에 사유 |
+| `briefing_source` | `LLM` · `규칙` · `미생성` |
+| `sections_skipped` | LLM 이 못 채운 섹션 수. comment 에 어느 섹션인지 |
+
+「지난 30번 중 몇 번이 게이트에 걸렸나」는 트레이스를 한 건씩 열어서는 못 센다 — 그 집계를
+대시보드에 맡기는 것이 점수다.
+
+**한 고객의 실행 전부를 보려면** — 브리핑과 대화 턴이 셋으로 함께 묶여 있다.
+
+| 대시보드에서 | 쓰는 것 |
+|---|---|
+| **Users** 탭 → 그 고객 행 | `userId` = 고객 id (`171203-4815062`) |
+| **Tracing** → Filter → `Tags` = `고객:김서연` | 이름으로 찾을 때. KB-PIN 을 외우지 않아도 된다 |
+| **Tracing** → Filter → `User ID` = 고객 id | 위 Users 탭과 같은 것을 필터로 |
+
+브리핑(`briefing.generate`)과 대화 턴(`consult.turn`)이 **같은 id · 같은 태그**로 붙으므로
+셋 중 무엇으로 걸러도 그 고객의 브리핑 한 건과 대화 턴들이 한 목록에 선다. 한 상담만
+따로 보려면 거기서 `Session` 을 좁힌다 — 세션은 실행마다 갈린다(`debug-…` · `streamlit-…`).
+
+**`src/.env`** 에 키 두 개를 넣으면 켜진다(저장소 루트가 아니라 `src/` 다).
+**없으면 통째로 꺼진다** — 테스트·시연은 그대로 돈다.
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com   # 자체 호스팅이면 그 주소
+```
+
+**대시보드에 안 찍히면 먼저 이것을 돌린다** — 설정을 찍고 이벤트 한 건을 실제로 보낸다.
+
+```bash
+python -m pension_agent.observability
+```
+
+`.env` 를 읽었는지 · 키가 들어왔는지 · 어느 host 로 보내는지 · 전송이 성공했는지를
+한 번에 가른다. 흔한 원인 넷은 **`.env` 를 저장소 루트에 둠** · **키를 안 넣음** ·
+**host 지역이 다름**(Langfuse Cloud 는 EU `https://cloud.langfuse.com` · US
+`https://us.cloud.langfuse.com` 로 갈리고, 다른 지역 키로는 401 이 난다) ·
+**망이 막힘**이다.
+
+| 환경변수 | |
+|---|---|
+| `LANGFUSE_ENABLED=0` | 키가 있어도 끈다 |
+| `LANGFUSE_CAPTURE_CONTENT=0` | 프롬프트·응답 본문을 보내지 않고 길이만 남긴다 |
+| `LANGFUSE_ENVIRONMENT` | 기본 `demo`. 시연/스테이징/운영 구분 |
+| `LANGFUSE_RELEASE` · `LANGFUSE_MAX_CHARS` · `LANGFUSE_TIMEOUT` · `LANGFUSE_DEBUG` | 버전 태그 · 본문 상한(20000자) · 전송 타임아웃(10초) · 전송 실패를 stderr 로 |
+
+- **의존성을 늘리지 않는다.** langfuse SDK 대신 표준 라이브러리로 수집 API 를 부른다 —
+  사내 genai 경로가 urllib 만 쓰는 것과 같은 이유다(망분리).
+- **에이전트를 세우지 않는다.** 전송은 백그라운드 워커가 하고, 큐가 차면 이벤트를 버리며,
+  전송 실패는 예외로 올라오지 않는다. 관측이 죽어서 상담이 죽지 않는다.
+- **삼키되 침묵하지는 않는다.** 첫 실패는 stderr 에 한 줄 남고(두 번째부터는 잠잠하다 —
+  턴마다 쌓이면 그게 다시 노이즈다), 원인은 `observability.last_error()` 에 남는다.
+  전부 보려면 `LANGFUSE_DEBUG=1`.
+- **프롬프트에는 고객 원장이 실린다.** 지금 고객은 시연용 목업이라 그대로 보내지만,
+  실데이터 전환 때 정할 것은 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
+
+### 평가 대시보드 (`streamlit run app.py`) — 기획자용 테스트 환경
+
+기획자가 **키보드만으로** 대화형 에이전트를 두드려 보고, 이상한 답을 그 자리에서 남길 수
+있게 해 둔 화면이다. 개발자가 CLI 로 하는 일(`$CA` · `$CAD --debug`)과 같은 경로를 탄다 —
+디버그 모드는 `tests/debug/runner.session()` 을 그대로 부르고, 그 runner 는 운영 진입점
+`graph.ask()` 를 부른다.
+
+| 💬 대화형 에이전트 테스트 탭 | |
+|---|---|
+| 대상 고객 선택 | 브리핑질의·화면연계·수정 요청이 그 고객으로 간다. 화법·절차·메타 질문은 고객 없이도 답한다 |
+| 테스트 질문 리스트 | 갈래별(화법·절차·메타·브리핑질의·LMS·수정) 예시 질문. 누르면 바로 전송 |
+| 💡 추천 질문 칩 | 상황이 맞는 고객에게만 뜬다(지난 상담 · 열려 있는 세미나) — `suggest.py` |
+| **🔍 디버그 모드** | 답변 아래에 실행 트레이스. 노드 순서 · 도구 호출과 채택 카드 · compose 게이트(`verify_texts` → `relations` → `span`) 통과/폐기/**미실행** · 턴별 소요 시간 |
+| └ 폐기된 LLM 생성문까지 보기 | 게이트가 버린 문장의 원문. 「왜 이 답이 안 나갔나」 |
+| **🚩 이상해요** | 그 답변을 신고. 질문·답변 원문·근거 카드 id·intent·트레이스가 **자동으로 함께** 저장된다 → `chat_feedback.csv` |
+| ↪ 추천질문 · 되묻기 선택지 | 눌러서 이어간다(칩 UI 로 쓸 자리의 예행) |
+| ⬇ 대화 로그 내려받기 | 대화 전체를 마크다운으로. 신고 한 건에 담기 애매한 흐름을 그대로 넘길 때 |
+
+신고는 「📋 피드백 관리 보드」 탭 **2) 대화형 에이전트 신고** 에 쌓인다 — 결재 상태를 바꾸고
+CSV 로 내려받는다. 브리핑 산출물 피드백(`feedback_log.csv`)과 **파일이 다르다**: 재현에
+필요한 것이 다르기 때문이다(대화는 질문·트레이스가 있어야 같은 자리를 다시 밟는다).
+
+**«오늘»은 앱을 켠 시각에 고정된다.** 사이드바 「실행 조건」이 오늘·원장 기준일(`AS_OF`)·
+LLM 연결 여부를 항상 보여준다 — 답이 이상할 때 «에이전트가 틀렸다»와 «기준일이 어긋났다»를
+화면에서 갈라야 신고가 재현 가능해진다. 특정 날짜로 얼려 보려면
+`PENSION_TODAY=YYYY-MM-DD streamlit run app.py`.
+
+두 CSV 는 `.gitignore` 에 있다. 개발자에게 넘길 때는 화면의 내려받기 버튼을 쓴다.
+
 ## 최근에 들어온 것
 
 - **재계획.** 근거를 못 낸 호출을 `plan_misses` 로 계획에 싣고, 근거 0건인 채 끝내려 하면
@@ -120,7 +239,9 @@ src/
 ├─ pension_agent/          단일 패키지. 임포트는 전부 절대 경로, 경로를 아는 파일은 config.py 하나
 │  ├─ config.py            경로·데이터 위치의 단일 출처
 │  ├─ clock.py             «오늘»의 단일 출처 — 원장 스냅샷 기준일과는 다른 축
+│  ├─ env.py               .env 로딩 — 설정 환경변수의 단일 출처
 │  ├─ llm.py               프로바이더 전환식 클라이언트 (환경 이전 시 여기만)
+│  ├─ observability.py     Langfuse 관측 — LLM 호출을 트레이스로 묶어 보낸다 (키 없으면 꺼짐)
 │  ├─ verify.py            LLM 산출물의 재료 이탈 판정 — 두 에이전트 공통
 │  ├─ session_store.py     상담 세션·이력 (consult 가 쓰고 strategy 는 읽는다)
 │  ├─ tools.py             외부 연동 레지스트리 (LMS 발송 게이트)

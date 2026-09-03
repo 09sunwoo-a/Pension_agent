@@ -7,12 +7,15 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 
 **발표용 내부 데모다. 실데이터 전환 전이다.**
 
-- 고객은 시연용 목업 9케이스다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`,
-  `scripts/import_customers.py` 가 `customers.json` 으로 내리고 `customer.py` 가 Profile 로
-  매핑한다(고칠 값은 xlsx 에 넣고 재생성). 타겟 선정 룰베이스는 더미가 아니다 — 기획자가
+- 고객은 시연용 목업 12명이다 — 원본은 저장소 루트 `IRP_Agent_더미고객_9Cases_v3.xlsx`
+  9케이스와 `src/scripts/demo_cases.json` 3명(브리핑 에이전트 데모 골든 케이스,
+  DEMO_GOLDEN_CASES_V2). `scripts/import_customers.py` 가 둘을 합쳐 `customers.json` 으로
+  내리고 `customer.py` 가 Profile 로 매핑한다(고칠 값은 각 원본에 넣고 재생성 —
+  customers.json 을 직접 고치면 재생성 한 번에 사라진다). 타겟 선정 룰베이스는 더미가 아니다 — 기획자가
   행내 원문을 정규화해 확인해준 표다(`targets.json`). 원장 기준일은 `customer.AS_OF`(2026-08-24) 고정이고, 상담 시점의 «오늘»은
   `customer.today()`(실제 날짜 · `PENSION_TODAY` 로 고정 가능)로 갈라 둔다 — 잔여일수·경과일은
-  뒤쪽 기준, 안내 콘텐츠 일부는 지어낸 더미, 금리는 `market/rates_demo.json` 자리표시자다.
+  뒤쪽 기준, ⑨ 안내 콘텐츠(세미나 5 · 이벤트 4)는 연금사업부가 확인해준 「IRP 세미나·이벤트
+  DB」에서 왔지만 일정·링크는 시연값이고, 금리는 `market/rates_demo.json` 자리표시자다.
 - **화면에는 더미 표시를 붙이지 않는다**(발송문 포함). 발표 산출물에 딱지를 남기지 않기로
   했다. 대신 무엇이 더미인지는 `docs/DEMO_STATUS.md` 가 전담한다.
 - `src/app.py`(Streamlit)는 개발·테스트용 화면이다. 실서비스 프론트는 따로 만든다.
@@ -98,6 +101,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 |---|---|
 | 요건 기준 | `docs/REQUIREMENTS.md` — 전체 서비스 요건 앵커. 상위 기준은 `07_에이전트_기능정의/` |
 | 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/strategy_agent/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것 |
+| ⑨ 안내 콘텐츠 | `IRP_세미나이벤트_DB_v1.md` → `src/pension_agent/strategy_agent/data/assets.json` (손 저작 — 9건이라 생성기를 두지 않았다). 평가용 정답은 `data/outreach_golden.json` 에 따로 두고 **LLM 입력에 넣지 않는다** |
 | 데모 상태 | `docs/DEMO_STATUS.md` (생성물) — 무엇이 더미 **데이터**인가 |
 | 실서비스 위험 | `docs/PRODUCTION_RISKS.md` — 무엇이 더미 **구조**인가. 단일 프로세스라서 성립하고 실서비스에서 깨지는 자리 |
 | 지식 저작 | `src/AUTHORING.md` |

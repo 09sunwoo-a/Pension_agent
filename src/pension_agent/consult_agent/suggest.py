@@ -59,6 +59,41 @@ def history_chips(customer_id: str | None) -> list[str]:
     ]
 
 
+def outreach_chips(customer_id: str | None) -> list[str]:
+    """이 고객 상태에 걸린 세미나·이벤트가 열려 있으면 그 사실을 담은 질문을 돌려준다.
+
+    히스토리 칩과 같은 자세다 — 직원은 «지금 이 고객에게 맞는 세미나가 열려 있다»는 사실
+    자체를 모르면 물어볼 생각도 못 한다. 문구가 곧 알림이고, 누르면 계획 루프가 `outreach`
+    도구로 들어간다.
+
+    **관련도 0 인 폴백은 세지 않는다.** 화면 ⑨ 는 섹션을 비우지 않으려고 이 고객과 무관해도
+    임박 순으로 한 건을 세우는데(그건 화면 요건이다), 그걸 «있다»로 세면 이 칩이 어느
+    고객에게나 떠서 배경이 된다. 문구는 전부 코드 조립이다 — 건수와 종류는 계산값이고,
+    콘텐츠 이름은 DB 원문 그대로다.
+    """
+    if not customer_id:
+        return []
+    try:
+        from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+        from pension_agent.strategy_agent import situations as strategy_situations  # noqa: PLC0415
+        from pension_agent.strategy_agent import support  # noqa: PLC0415
+        profile = strategy_customer.get_profile(customer_id)
+        if profile is None:
+            return []
+        rows = support.relevant_outreach(strategy_situations.problem_situations(profile))
+    except Exception:
+        return []
+    if not rows:
+        return []
+    kinds = [k for k in ("이벤트", "세미나")
+             if any(r["content_type"] == k for r in rows)]
+    # 건수는 싣지 않는다 — 칩은 직원이 누르는 순간 직원의 질문이 되는데, 직원은 콘텐츠가
+    # 몇 건 열려 있는지 모르는 사람이다. 「2건 있어」는 직원이 알 수 없는 사실을 직원이
+    # 단정하는 꼴이라 어색하다. 알림은 **칩이 떴다는 사실**이 한다(조건이 맞는 고객에게만
+    # 뜬다 — 이 모듈 머리말). 종류만 실어 «무엇을 묻는 칩인가»가 보이게 한다.
+    return [f"이 고객한테 안내할 만한 {'나 '.join(kinds)} 있어?"]
+
+
 # ─────────────────────────────────────────────────────────────
 # 답변 끝 추천질문 — "이어서 물어보실 수 있어요"
 #
@@ -199,10 +234,20 @@ _NEXT: dict[str, tuple[tuple[tuple[str, ...], str, str], ...]] = {
                    "디폴트옵션 포트폴리오는 어떻게 구성돼 있어?"), "lineup", "추천펀드 디폴트옵션"),
                  (("이 고객 현황이 어떻게 돼?",
                    "이 고객 평가금액이랑 보유 상품이 뭐야?",
-                   "이 고객 왜 관리 대상이야?"), "customer", "")),
+                   "이 고객 왜 관리 대상이야?"), "customer", ""),
+                 (("이 고객한테 안내할 만한 세미나나 이벤트 있어?",
+                   "이 고객에게 보낼 만한 안내 콘텐츠가 뭐가 있어?",
+                   "이 고객한테 지금 안내할 이벤트가 있어?"), "outreach", "")),
     "customer": ((("이 고객한테 안내할 수 있는 상품 범위는 뭐야?",
                    "이 고객 투자성향으로 어디까지 안내할 수 있어?",
                    "이 고객에게 가능한 상품이 뭐가 있어?"), "suitable", ""),
+                 # 안내 콘텐츠 칩은 **이 고객 상태에 걸린 세미나·이벤트가 실제로 열려 있을
+                 # 때만** 뜬다(_has_material 의 outreach 분기 — 관련도 0 인 폴백은 세지
+                 # 않는다). 직원은 지금 어떤 세미나가 열려 있는지 모르면 물어볼 생각도
+                 # 못 한다 — 히스토리 칩과 같은 이유로, 칩 문구 자체가 알림이다.
+                 (("이 고객한테 안내할 만한 세미나나 이벤트 있어?",
+                   "이 고객에게 보낼 만한 안내 콘텐츠가 뭐가 있어?",
+                   "이 고객한테 지금 안내할 이벤트가 있어?"), "outreach", ""),
                  (("이 고객과 지난 상담에서 무슨 얘기 했지?",
                    "이 고객 상담 이력 있어?",
                    "이 고객과 전에 나눈 얘기가 뭐야?"), "history", ""),
@@ -215,9 +260,23 @@ _NEXT: dict[str, tuple[tuple[tuple[str, ...], str, str], ...]] = {
     "history": ((("지난 상담 내용 참고해서 오늘 뭐라고 말하면 좋을까?",
                   "지난번 얘기를 이어서 어떻게 말을 꺼내지?",
                   "그때 얘기를 다시 꺼내려면 뭐라고 하지?"), "pitch", ""),
+                # 지난 상담의 다음 걸음은 «다시 접점을 만드는 것»이다 — 열려 있는 세미나·
+                # 이벤트가 그 접점이고, 이 고객에게 걸린 것이 있을 때만 뜬다.
+                (("이 고객한테 안내할 만한 세미나나 이벤트 있어?",
+                  "이어서 안내할 만한 콘텐츠가 뭐가 있어?",
+                  "이 고객에게 보낼 만한 이벤트가 있어?"), "outreach", ""),
                 (("이 고객 지금 현황은 어때?",
                   "그 사이에 이 고객 상황이 어떻게 바뀌었어?",
                   "이 고객 지금 평가금액이 얼마야?"), "customer", "")),
+    # 안내 콘텐츠를 본 다음 걸음은 «어떻게 말을 얹을까»와 «그 김에 뭘 더 권할까»다.
+    # 발송 자체는 여기 없다 — 답변이 콘텐츠를 가리키면 발송 화면 연계 제안이 붙고
+    # (nodes/act.py::_propose_lms), 확인 대기 턴에는 추천질문이 아예 안 붙는다.
+    "outreach": ((("이 콘텐츠를 고객에게 어떻게 안내하지?",
+                   "고객에게 이 세미나를 뭐라고 소개하지?",
+                   "고객이 관심 없다고 하면 뭐라고 답하지?"), "pitch", ""),
+                 (("이 고객한테 안내할 수 있는 상품 범위는 뭐야?",
+                   "이 고객 성향으로 안내할 수 있는 게 뭐야?",
+                   "이 고객에게 가능한 상품이 뭐가 있어?"), "suitable", "")),
     # date 는 없다 — 「오늘 며칠이야」에서 이어질 자연스러운 다음 질문이 없다.
 }
 
@@ -298,6 +357,19 @@ def _has_material(lead: str, probes: tuple[str, ...], state: dict) -> bool:
             # LLM 을 쓴다. 재료의 유무를 가르는 것은 프로파일 존재이므로 그것만 본다.
             from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
             return strategy_customer.get_profile(state.get("customer_id") or "") is not None
+        if lead == "outreach":
+            # 도구를 그대로 부르지 않는다 — 그 안의 strategy_agent.propose() 가 LLM 을
+            # 쓴다(`customer` 를 프로파일 존재로만 재는 것과 같은 이유). 여기서 가르는 것은
+            # «이 고객 상태에 걸린 콘텐츠가 열려 있는가»이고, 그 판정은 규칙이라 LLM 이
+            # 필요 없다. **관련도 0 인 폴백은 세지 않는다** — 화면 ⑨ 는 섹션을 비우지 않으려
+            # 임박 순으로 한 건을 세우지만, 그걸 «있다»로 세면 칩이 어느 고객에게나 뜨고
+            # 그러면 배경이 되어 아무도 읽지 않는다(이 모듈 머리말).
+            from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+            from pension_agent.strategy_agent import situations as strategy_situations  # noqa: PLC0415
+            from pension_agent.strategy_agent import support  # noqa: PLC0415
+            profile = strategy_customer.get_profile(state.get("customer_id") or "")
+            return profile is not None and bool(
+                support.relevant_outreach(strategy_situations.problem_situations(profile)))
         if lead in _LEDGER_TOOLS:
             return any(tools.TOOLS[lead].run(state, q) is not None for q in probes)
     except Exception:

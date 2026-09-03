@@ -41,9 +41,12 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def _print_source(s: dict) -> None:
-    print(f"   · {s.get('doc') or '출처 미상 — 확인 필요'}")
-    tail = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
-    print(f"     — {s.get('title') or ''} [{s['id']}{tail}]")
+    # 표기는 운영 CLI 와 같은 공용 함수가 정한다(tools.source_lines) — 각자 복사해 갖고
+    # 있던 동안 출처 URL 변경이 운영 CLI 에만 적용되고 이 화면에는 빠졌다.
+    from pension_agent.consult_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
+
+    for line in source_lines(s):
+        print(line)
 
 
 def _print_answer(r: dict) -> None:

@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 
-from pension_agent.consult_agent.kb import KnowledgeBase, origin_of, role_texts
+from pension_agent.consult_agent.kb import KnowledgeBase, origin_of, role_texts, source_url
 
 # 고객 요건(customer.conditions() 의 코드) → 지식베이스에서 찾을 말.
 # 값은 "무엇을 하지 말라"가 아니라 **어디를 뒤질까**다 — 문장은 지식베이스가 갖고 있다.
@@ -101,7 +101,7 @@ def cautions_for(kb: KnowledgeBase, conditions: list[str]) -> list[dict[str, Any
                     continue
                 seen.add(key)
                 out.append({"cond": code, "text": text, "card": card["id"],
-                            "doc": origin_of(kb, card)})
+                            "doc": origin_of(kb, card), "url": source_url(kb, card)})
                 picked += 1
                 break
     return out
@@ -116,7 +116,8 @@ def sensitive_cards(kb: KnowledgeBase, conditions: list[str]) -> list[dict[str, 
     codes = {c.split(":")[0] for c in conditions or ()}
     if "low" not in codes:
         return []
-    return [{"card": c["id"], "title": c.get("title"), "doc": origin_of(kb, c)}
+    return [{"card": c["id"], "title": c.get("title"), "doc": origin_of(kb, c),
+             "url": source_url(kb, c)}
             for c in kb.pitches
             if "민감" in (c.get("title") or "") or
             ("지적" in (c.get("title") or "") and "없이" in (c.get("title") or ""))]

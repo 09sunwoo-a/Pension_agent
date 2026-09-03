@@ -49,8 +49,16 @@ from pension_agent.strategy_agent.support.objection import (  # noqa: F401
     _type_eligible,
 )
 from pension_agent.strategy_agent.support.outreach import (  # noqa: F401
+    AD_PREFIX,
+    KEYWORD_CONDS,
+    OPT_OUT,
+    conds_of,
+    lms_frame,
     next_event_and_seminar,
     outreach_candidates,
+    relevant_outreach,
+    rule_body,
+    schedule_text,
     _outreach_row,
 )
 from pension_agent.strategy_agent.support.resource import (  # noqa: F401

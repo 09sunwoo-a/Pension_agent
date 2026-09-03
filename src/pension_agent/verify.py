@@ -108,6 +108,32 @@ _DATE_DOT = re.compile(
 #: 127종을 여섯 표기로 바꿔 대조하니 105건이 그렇게 걸렸다).
 _CHUNK = (_DATE_KO, _DATE_ISO, _DATE_DOT, _DATE_MD)
 
+#: 기간 표기 — 원장의 «2026.03~04» 와 답변의 «2026년 3~4월»·«2026년 3월~4월».
+#:
+#: 끝점이 둘이라 위 패턴들과 모양이 다르고, **양쪽 다 이 표기를 몰라서** 카드의 기준시점을
+#: 말한 답변이 통째로 버려졌다(2026-09-02 실측 — 박정호 P2 가 근거 원문 덤프로 끝났다).
+#: 원장 쪽은 `_DATE_DOT` 이 «2026.03» 까지만 끊어 «~04» 를 맨숫자로 남겼고, 답변 쪽
+#: «2026년 3~4월» 은 `_DATE_KO`(연·월 사이에 «월» 을 요구한다)에 아예 안 걸려 3·4 가
+#: 맨숫자가 됐다. 그런데 `ANSWER_SHAPES["fact"]` 는 기준시점을 **쓰라고 요구**한다 —
+#: 시킨 대로 쓰면 죽고, 재작성해도 요구가 그대로라 또 쓰는 악순환이었다.
+#: (`_canon`·`_NUM`·`_measures`·`_CHUNK` 주석이 적어 둔 «표기가 판정을 뒤집는» 다섯 번째다.)
+#:
+#: **범위는 통짜 정규형 하나로 대조한다.** 끝점 둘을 따로 요구하면 `_judge` 의 집합 교차가
+#: «any» 라서 한쪽만 맞아도 통과하고, 그러면 «2026.03~04» 를 근거로 «2026년 3~9월» 이
+#: 나간다. 원장은 범위형과 끝점 둘을 함께 내고(답변이 «2026년 3월» 만 말하는 것도 참이다),
+#: 답변은 범위형만 요구한다.
+#:
+#: 좁히는 쪽 원칙은 `_DATE_DOT` 과 같다 — 연도는 (19|20)만 받고 달 범위를 본다. 열어 두면
+#: 화면번호·대표번호가 기간으로 읽힌다.
+_RANGE_DOT = re.compile(
+    r"(?<![\d.,])((?:19|20)\d{2})\.(\d{1,2})\s*~\s*(\d{1,2})(?!\d|[십백천만억원%])")
+_RANGE_KO = re.compile(
+    r"(?<!\d)((?:19|20)\d{2})\s*년\s*(\d{1,2})\s*월?\s*~\s*(\d{1,2})\s*월")
+
+#: 기간 패턴은 `_CHUNK` 보다 **먼저** 본다. 같은 자리에서 시작하므로(둘 다 연도부터다)
+#: 뒤에 두면 `_DATE_DOT`·`_DATE_KO` 가 앞 끝점만 집어가고 뒤 끝점이 맨숫자로 떨어진다.
+_RANGES = (_RANGE_DOT, _RANGE_KO)
+
 #: 정규형의 이름공간. 숫자 토큰과 절대 겹치지 않게 접두를 붙인다 — 접두가 없으면
 #: `_canon` 의 소수 끝자리 0 제거가 날짜에 닿아 "2026.10"(10월)이 "2026.1"(1월)이 된다.
 _DATE_TAG = "날짜:"
@@ -117,6 +143,22 @@ def _dform(year: str | None, month: str, day: str | None = None) -> str:
     """날짜 정규형. 연도를 모르면(예: "12월 31일") 자리를 비워 둔다."""
     out = f"{_DATE_TAG}{year or '____'}-{int(month):02d}"
     return out if day is None else f"{out}-{int(day):02d}"
+
+
+def _rform(year: str, first: str, last: str) -> str:
+    """기간 정규형. 끝점 둘을 한 덩이로 묶는다 — 따로 두면 한쪽만 맞아도 통과한다(_RANGES)."""
+    return f"{_DATE_TAG}{year}-{int(first):02d}~{int(last):02d}"
+
+
+def _ranges(text: str) -> list[tuple[re.Match, str, str, str]]:
+    """텍스트의 기간 표기 — (매치, 연, 시작 월, 끝 월). 달 범위를 벗어난 것은 빼고 낸다."""
+    out: list[tuple[re.Match, str, str, str]] = []
+    for pattern in _RANGES:
+        for m in pattern.finditer(text):
+            year, first, last = m.group(1), m.group(2), m.group(3)
+            if _valid(year, first, None) and _valid(year, last, None):
+                out.append((m, year, first, last))
+    return out
 
 
 def _date_parts(m: re.Match, pattern: re.Pattern) -> tuple[str | None, str, str | None]:
@@ -160,6 +202,13 @@ def _date_forms(text: str, this_year: int) -> set[str]:
     연도를 뺀 형태("9월 10일")는 **오늘 언저리의 날짜에서만** 낸다(위 BARE_YEAR_SPAN).
     """
     out: set[str] = set()
+    # 기간은 범위형과 **끝점 둘을 함께** 낸다. 답변이 «2026년 3월» 하나만 말하는 것도
+    # 원장이 «2026.03~04» 라면 참이기 때문이다(넓히는 쪽이라 끝점을 함께 담아도 된다 —
+    # 좁히는 쪽인 답변 요구는 `_chunk_dates` 가 범위형 하나로 묶는다).
+    for _m, year, first, last in _ranges(text):
+        out.add(_rform(year, first, last))
+        out.add(_dform(year, first))
+        out.add(_dform(year, last))
     for pattern in _CHUNK:
         for m in pattern.finditer(text):
             year, month, day = _date_parts(m, pattern)
@@ -217,6 +266,13 @@ def _chunk_dates(text: str) -> dict[int, tuple[int, list[str], set[str], str]]:
     이라는 오답이 "9월" 이 맞다는 이유로 통과한다.
     """
     out: dict[int, tuple[int, list[str], set[str], str]] = {}
+    # 기간 먼저 — 같은 자리에서 시작하므로 뒤로 미루면 `_CHUNK` 가 앞 끝점만 집어간다.
+    # 요구 형태는 **범위형 하나**다(끝점을 따로 담으면 한쪽만 맞아도 통과한다 — _RANGES).
+    for m, year, first, last in _ranges(text):
+        if m.start() in out:
+            continue
+        out[m.start()] = (m.end(), [year, first, last],
+                          {_rform(year, first, last)}, m.group())
     for pattern in _CHUNK:
         for m in pattern.finditer(text):
             year, month, day = _date_parts(m, pattern)
@@ -348,10 +404,21 @@ def allowed_from_texts(texts: Iterable[str]) -> tuple[set[str], set[str]]:
     return nums, set()
 
 
-def allowed_facts(facts: dict) -> tuple[set[str], set[str]]:
-    """LLM 이 인용할 수 있는 숫자·상품명 집합. 이 범위를 벗어난 표현은 환각으로 판정한다."""
+def allowed_facts(facts: dict, extra: Iterable[str] = ()) -> tuple[set[str], set[str]]:
+    """LLM 이 인용할 수 있는 숫자·상품명 집합. 이 범위를 벗어난 표현은 환각으로 판정한다.
+
+    ━━ `extra` — facts 스키마 밖의 재료 ━━
+    이 함수는 브리핑 facts 의 정해진 네 자리(customer·conditions·briefing·items)만 편다.
+    그 밖에도 **코드가 조회해 확정한 재료**가 있고, 그것을 쓰는 생성문은 여기 실어 주지
+    않으면 통과할 수 없다 — ⑨ 안내 콘텐츠(일정·링크)가 그 자리다. 콘텐츠 DB 에서 온 값을
+    재료로 세지 않은 동안 LMS 문구는 «9/10 16시»의 숫자를 재료 밖 수치로 판정받아 전부
+    폐기됐고, 화면에는 늘 규칙 폴백 문구가 떴다.
+
+    넓히는 것은 **호출부가 명시한 텍스트**뿐이다. facts 스키마를 늘리지 않는 이유는 이
+    함수를 쓰는 다른 생성문(코칭·해석·추천 사유)까지 그 값을 인용할 수 있게 되기 때문이다.
+    """
     prods: set[str] = set()
-    blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"])
+    blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"]) + list(extra)
     blob += [str(v) for k, v in facts["briefing"].items() if k != "source"]
     for it in facts["items"]:
         blob += [it["clause"], it["evidence"], it["amount"] or "", it["formula"], it["talk"]]
@@ -364,7 +431,8 @@ def allowed_facts(facts: dict) -> tuple[set[str], set[str]]:
 
 
 def verify(
-    sentence: str, facts: dict, known_products: set[str] = frozenset()
+    sentence: str, facts: dict, known_products: set[str] = frozenset(),
+    *, extra: Iterable[str] = (),
 ) -> tuple[bool, list[str]]:
     """재료에 없는 수치 또는 게이트 미통과·미등록 상품명이 포함되었는지 검사한다.
 
@@ -372,7 +440,7 @@ def verify(
     없는 상품)을 구분해 거부 사유를 더 정확히 남기기 위한 선택 인자다. 호출부가 넘기지 않으면
     모두 "미등록"으로 보고한다.
     """
-    nums, prods = allowed_facts(facts)
+    nums, prods = allowed_facts(facts, extra)
     return _judge(sentence, nums, prods, known_products)
 
 

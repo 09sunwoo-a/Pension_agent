@@ -3,14 +3,28 @@ import pandas as pd
 import csv
 import os
 import re
-from datetime import datetime
+from datetime import date, datetime
+
+# ── «오늘»을 프로세스 시작 시점에 못박는다. **pension_agent 임포트보다 먼저** 해야 한다.
+#
+# 두 가지를 동시에 막는 자리다.
+#  1) `customer.py` 는 임포트 시점에 PERSONAS 를 만들면서 잔여일수·경과일을 «오늘» 기준으로
+#     센다. 프로세스가 자정을 넘겨 살아 있으면 화면 상단의 D-day 와 대화 답변의 D-day 가
+#     갈린다 — 한 세션 안에서는 같은 날이어야 한다.
+#  2) 디버그 모드가 `tests.debug` 를 임포트하는데, `tests/__init__.py` 가
+#     `PENSION_TODAY` 를 **원장 스냅샷 기준일(2026-08-24)로 setdefault** 한다. 여기서
+#     먼저 채워두지 않으면 디버그 모드를 켠 순간 «오늘»이 조용히 과거로 밀리고, 그러면
+#     같은 질문의 답(만기 D-n, 연말까지 며칠)이 디버그 켜고/끄고에 따라 달라진다.
+# 밖에서 `PENSION_TODAY` 를 준 경우(특정 날짜로 얼려 보고 싶을 때)는 그것을 존중한다.
+os.environ.setdefault("PENSION_TODAY", date.today().isoformat())
 
 # 에이전트 모듈 임포트
-from pension_agent.strategy_agent.customer import PERSONAS
+from pension_agent.strategy_agent.customer import PERSONAS, AS_OF
 from pension_agent.strategy_agent.agent import propose
 from pension_agent.strategy_agent import engine
 from pension_agent.strategy_agent import sections
 
+from pension_agent import clock
 from pension_agent import llm
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import screens
@@ -26,6 +40,22 @@ if not os.path.exists(FEEDBACK_FILE):
         writer = csv.writer(f)
         writer.writerow(["Timestamp", "Customer", "Issue_Type", "Feedback", "Status"])
 
+# ── 대화형 에이전트 신고 로그. 브리핑 피드백(위)과 **파일을 나눈다.**
+#
+# 브리핑 피드백은 "이 고객 산출물이 이상하다"이고 대상이 고객 하나지만, 대화 신고는
+# "이 질문에 이렇게 답했다"이고 재현에 필요한 것이 다르다 — 질문·답변 원문·근거 카드·
+# 어느 게이트에서 갈렸는지(트레이스)가 함께 있어야 개발자가 같은 자리를 다시 밟는다.
+# 한 파일에 섞으면 컬럼의 절반이 늘 비고, 비어 있는 칸은 «없는 것»과 «해당 없음»이
+# 구분되지 않는다.
+CHAT_FEEDBACK_FILE = "chat_feedback.csv"
+CHAT_FEEDBACK_COLUMNS = [
+    "Timestamp", "Customer", "Question", "Answer", "Issue_Type", "Feedback",
+    "Sources", "Intent", "Trace", "Status",
+]
+if not os.path.exists(CHAT_FEEDBACK_FILE):
+    with open(CHAT_FEEDBACK_FILE, "w", encoding="utf-8", newline="") as f:
+        csv.writer(f).writerow(CHAT_FEEDBACK_COLUMNS)
+
 # 상태 유지를 위한 캐싱 (LLM 호출 비용 및 대기 시간 절약)
 @st.cache_data(show_spinner=False)
 def load_all_proposals(use_llm=True):
@@ -33,6 +63,21 @@ def load_all_proposals(use_llm=True):
 
 use_llm = st.sidebar.checkbox("LLM 문장 생성 적용", value=True)
 results = load_all_proposals(use_llm)
+
+# ── 실행 조건을 사이드바에 상시 노출한다. 답변이 이상할 때 «에이전트가 틀렸다»와
+# «기준일이 어긋났다»·«LLM 이 안 붙었다»를 화면에서 바로 갈라야 신고가 재현 가능해진다.
+with st.sidebar:
+    st.divider()
+    st.markdown("**실행 조건**")
+    st.caption(
+        f"오늘(상담 시점) · {clock.today():%Y-%m-%d}\n\n"
+        f"원장 기준일(AS_OF) · {AS_OF:%Y-%m-%d}\n\n"
+        f"LLM · {'연결됨' if llm.available() else '미설정'}"
+    )
+    st.caption(
+        "«오늘»은 앱을 켠 시각에 고정된다. 특정 날짜로 얼려 보려면 앱을 끄고 "
+        "`PENSION_TODAY=YYYY-MM-DD streamlit run app.py` 로 다시 켠다."
+    )
 
 # 6개의 탭으로 구성
 tab_cat, tab1, tab2, tab_chat, tab3, tab4 = st.tabs([
@@ -268,9 +313,17 @@ with tab2:
                 st.markdown(f"**[{sections.title('outreach')}]**")
                 for label, item in (("이벤트", outreach.get("event")), ("세미나", outreach.get("seminar"))):
                     if item:
-                        st.markdown(f"- **[{label}]** {item['name']} ({item['start_date']}~{item['end_date']})")
+                        st.markdown(f"- **[{label}]** {item['name']} — {item['schedule']}"
+                                    + (f" · 주관 {item['organizer']}" if item.get("organizer") else ""))
+                        # 추천 사유 — 콘텐츠 DB 가 추천대상을 저장하지 않으므로 «왜 이 고객에게
+                        # 이것인가»는 선별과 함께 생성된다(agent._select_outreach). 없으면 규칙
+                        # 순서로 뜬 것이고, 그 사유는 llm_skipped 가 아래에 밝힌다.
+                        if item.get("reason"):
+                            st.caption(f"추천 사유: {item['reason']}")
+                        if item.get("url"):
+                            st.caption(f"안내 링크: {item['url']}")
                         if item.get("lms_message"):
-                            st.caption(f"LMS 문구: {item['lms_message']}")
+                            st.caption("LMS 문구\n\n" + item["lms_message"].replace("\n", "  \n"))
 
             # ── §14 상담 이력
             if f.get("consult_history"):
@@ -345,15 +398,53 @@ with tab_chat:
             "LLM 이 반드시 필요해, 지금 상태로는 질문마다 오류 메시지가 표시됩니다."
         )
 
-    chat_customer = st.selectbox(
-        "브리핑질의·화면 연계·수정 요청 대상 고객",
-        ["(선택 안 함)"] + [f"{p.nm} ({p.id})" for p in PERSONAS],
-        key="chat_customer_select",
-    )
+    _col_customer, _col_debug = st.columns([3, 2])
+
+    with _col_customer:
+        chat_customer = st.selectbox(
+            "브리핑질의·화면 연계·수정 요청 대상 고객",
+            ["(선택 안 함)"] + [f"{p.nm} ({p.id})" for p in PERSONAS],
+            key="chat_customer_select",
+        )
     customer_id = chat_customer.split("(")[-1].rstrip(")") if chat_customer != "(선택 안 함)" else None
 
+    with _col_debug:
+        # ── 디버그 모드. 계측은 tests/debug 가 **운영 코드를 건드리지 않고 밖에서 감싸서**
+        # 한다(tests/debug/__init__.py). 켜면 답변마다 「어느 노드를 지났고 어느 게이트에서
+        # 생성문이 폐기됐는지」가 붙는다. 답이 갑자기 문어체가 되는 증상은 이것 없이는
+        # 화면에 아무 단서도 남지 않는다.
+        debug_mode = st.checkbox(
+            "🔍 디버그 모드 (실행 트레이스)", key="chat_debug_mode",
+            help="노드 순서 · 도구 호출 · compose 게이트(verify_texts → relations → span) "
+                 "통과/폐기/미실행을 답변 아래에 붙입니다. 답변은 그대로입니다 — 계측은 "
+                 "값을 통과시키기만 합니다.",
+        )
+        show_llm = st.checkbox(
+            "└ 폐기된 LLM 생성문까지 보기", key="chat_show_llm", disabled=not debug_mode,
+            help="게이트가 버린 문장의 원문. 「왜 이 답이 안 나갔나」를 볼 때 씁니다.",
+        )
+
+    #: 계측을 실제로 걸 수 있는가. 운영 코드에서 계측 대상 이름이 사라지면 트레이스는
+    #: 「덜 보는」 대신 크게 실패하도록 되어 있는데(trace.py), 그 실패를 답변 차단으로
+    #: 옮기지는 않는다 — 계측이 망가졌다고 상담 테스트까지 못 하게 만들 이유는 없다.
+    trace_broken = ""
+    if debug_mode:
+        try:
+            from tests.debug import runner as debug_runner
+            from tests.debug import trace as debug_trace
+            _missing = debug_trace.missing_targets()
+            if _missing:
+                trace_broken = "계측 대상이 사라졌습니다 — " + ", ".join(_missing)
+        except Exception as _exc:  # noqa: BLE001 — 화면은 죽지 않고 사유를 말한다
+            trace_broken = f"{type(_exc).__name__}: {_exc}"
+        if trace_broken:
+            st.error(
+                f"디버그 모드를 켤 수 없습니다({trace_broken}). "
+                "답변은 정상적으로 나오고 트레이스만 붙지 않습니다."
+            )
+
     if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = []  # [{"role": "user"/"assistant", "text": ...}]
+        st.session_state.chat_messages = []  # [{"role": "user"/"assistant", "text": ..., ...}]
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []  # graph.ask() 의 history(Turn 목록) — 후속질문 맥락
     if "chat_session_id" not in st.session_state:
@@ -363,9 +454,11 @@ with tab_chat:
         st.session_state.pending_question = None
 
     # ── 이 고객 관련 추천 질문 (consult_agent/suggest.py — 코드 조립, 상황 기반)
-    # 과거 상담이 있는 고객에게만 뜬다. 칩 문구 자체가 "지난 상담이 있었다"는 알림이고,
-    # 누르면 아래 pending_question 경로로 계획 루프(history 도구)를 탄다.
-    _chips = suggest.history_chips(customer_id)
+    # 상황이 맞는 고객에게만 뜬다. 칩 문구 자체가 알림이고("지난 상담이 있었다" ·
+    # "이 고객에게 맞는 세미나가 열려 있다"), 누르면 아래 pending_question 경로로 계획
+    # 루프(history · outreach 도구)를 탄다. 조건이 아니면 아무것도 안 뜬다 — 항상 뜨는
+    # 칩은 배경이 되어 아무도 읽지 않는다.
+    _chips = suggest.history_chips(customer_id) + suggest.outreach_chips(customer_id)
     if _chips:
         st.markdown("**💡 이 고객 관련 추천 질문**")
         _chip_cols = st.columns(len(_chips))
@@ -376,13 +469,13 @@ with tab_chat:
     QUESTION_GROUPS = {
         "화법 — 특정 상담 상황(situation)": [
             "사업자 고객인데 수수료 부담된다고 하시네요. 뭐라고 답변하죠?",
-            "고객이 주식이 더 나을 것 같다는데 어떻게 말하지?",
+            "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객한테 어떻게 말하지?",
             "이미 증권사에 IRP 만들어놨다고 하시는데요",
             "나중에 돈 필요하면 못 빼는거 아니냐고 하세요",
         ],
         "화법 — 직원 업무 절차(guide)": [
             "이탈 위험이 높은 고객을 어떻게 골라내나요",
-            "리밸런싱 콜은 어떤 순서로 하나요",
+            "리밸런싱은 한 번에 얼마씩 하는 게 좋아요?",
         ],
         "메타 질문(agent_help)": [
             "네가 답변할 수 있는 화법은 뭐가 있어?",
@@ -412,6 +505,27 @@ with tab_chat:
                 if cols[i % 2].button(q, key=f"qbtn-{group}-{i}", use_container_width=True):
                     st.session_state.pending_question = q
 
+    #: 신고 유형. 「무엇이 틀렸나」를 답변의 실패 방식으로 가른다 — 개발자가 이 값만 보고
+    #: 어느 층을 봐야 하는지 갈리도록(근거 선택 / 수치 / 말투 / 라우팅).
+    CHAT_ISSUE_TYPES = [
+        "사실·수치가 틀림",
+        "근거를 잘못 가져옴",
+        "질문을 못 알아들음(라우팅)",
+        "말투·형식이 이상함",
+        "답을 못 함(근거 없음이라 함)",
+        "기타",
+    ]
+
+    def _popover(label: str):
+        """접어두는 컨테이너. 구버전 streamlit 에는 popover 가 없어 expander 로 물러선다.
+
+        컨테이너 자체는 키를 받지 않는다 — 답변마다 같은 라벨로 여러 개가 서는데, 겹침을
+        막는 것은 **안에 있는 위젯의 키**다(아래 폼·입력에 idx 를 붙인 이유).
+        """
+        if hasattr(st, "popover"):
+            return st.popover(label)
+        return st.expander(label)
+
     def render_answer(text: str) -> None:
         """답변을 그리고, 화면 연계 URL 이 있으면 바로 누를 수 있는 링크로도 띄운다.
 
@@ -423,12 +537,93 @@ with tab_chat:
         for url in dict.fromkeys(SCREEN_LINK.findall(text)):
             st.link_button("🔗 단말 화면 열기", url)
 
-    for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
-            if msg["role"] == "assistant":
-                render_answer(msg["text"])
+    def render_sources(sources: list) -> None:
+        """근거는 원문 문서명으로 읽어준다(카드 id 는 역추적용으로 뒤에).
+
+        답이 나온 재료(근거)와 표현을 제한한 재료(주의)는 갈라 보여준다 — 섞으면 질문과
+        무관한 고객 상태 가드가 답의 근거처럼 보인다(consult_agent/nodes/plan.py::_sources).
+        """
+        for label, role in (("근거", "근거"), ("이 고객 상담에서 지켜야 할 것", "주의")):
+            picked = [s for s in sources or [] if s.get("role", "근거") == role]
+            if picked:
+                # 원천 문서에 게시글 URL 이 있으면(핫팁 등, doc.url) 문서명을 클릭해
+                # 원문으로 갈 수 있게 링크로 세운다. URL 은 문서 레지스트리가 가진
+                # 것만 쓴다 — 없으면 지금처럼 문서명 텍스트만 남는다.
+                st.caption(f"{label}\n\n" + "\n\n".join(
+                    "· " + (f"[{s.get('doc')}]({s['url']})" if s.get("url")
+                            else (s.get("doc") or "출처 미상 — 확인 필요"))
+                    + f" — {s.get('title') or ''} `{s['id']}`"
+                    for s in picked))
+
+    def render_report_form(msg: dict, idx: int) -> None:
+        """이 답변을 그대로 신고한다.
+
+        **재현에 필요한 것을 사람이 옮겨 적게 하지 않는다.** 질문·답변 원문·근거 카드 id·
+        intent·트레이스는 이미 화면이 들고 있으므로 그대로 저장하고, 사람은 «무엇이
+        이상한지»만 쓴다. 옮겨 적게 하면 대개 답변만 요약해 적고, 그러면 개발자는 같은
+        자리를 다시 밟지 못한다.
+        """
+        with _popover("🚩 이상해요"):
+            with st.form(f"chat-fb-form-{idx}", clear_on_submit=True):
+                issue = st.selectbox("어떤 문제인가요?", CHAT_ISSUE_TYPES, key=f"chat-fb-type-{idx}")
+                note = st.text_area(
+                    "무엇이 이상한지 편하게 적어주세요",
+                    placeholder="예: 세액공제 한도를 700만원이라고 했는데 900만원이 맞아요.",
+                    key=f"chat-fb-note-{idx}",
+                )
+                if st.form_submit_button("신고 저장"):
+                    if not note.strip():
+                        st.warning("무엇이 이상한지 한 줄이라도 적어주세요.")
+                    else:
+                        with open(CHAT_FEEDBACK_FILE, "a", encoding="utf-8", newline="") as fh:
+                            csv.writer(fh).writerow([
+                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                msg.get("customer") or "(선택 안 함)",
+                                msg.get("question", ""),
+                                msg.get("text", ""),
+                                issue,
+                                note.strip(),
+                                " ".join(s["id"] for s in msg.get("sources") or []),
+                                msg.get("intent") or "",
+                                msg.get("trace", ""),
+                                "새로운 의견",
+                            ])
+                        st.success("신고를 저장했습니다. 「📋 피드백 관리 보드」 탭 2)에서 볼 수 있어요.")
+
+    def render_assistant(msg: dict, idx: int) -> None:
+        """답변 한 건 — 본문 · 출처 · 추천질문 · 트레이스 · 신고. 새 답과 지난 답이
+        같은 함수를 지나야 화면이 갈리지 않는다."""
+        render_answer(msg["text"])
+        render_sources(msg.get("sources") or [])
+
+        # 되묻기로 끝난 턴이면 선택지를 버튼으로도 세운다. 본문에도 같은 선택지가
+        # 글로 실려 있지만(nodes/clarify.py::_render), 눌러서 이어가는 편이 테스트가
+        # 빠르다 — 골라 적다가 오타가 나면 그건 다른 질문이 된다.
+        for _oi, _opt in enumerate((msg.get("clarify") or {}).get("options") or []):
+            if st.button(_opt, key=f"clarify-{idx}-{_oi}"):
+                st.session_state.pending_question = _opt
+
+        # 답변 끝 추천질문은 본문에도 글로 붙어 있다(graph.FOLLOWUP_HEADER). 여기서는
+        # 누를 수 있는 칩으로 한 번 더 세운다 — 프론트가 칩 UI 로 쓸 자리의 예행이다.
+        _fups = msg.get("followups") or []
+        if _fups:
+            _fcols = st.columns(len(_fups))
+            for _fi, _fq in enumerate(_fups):
+                if _fcols[_fi].button(f"↪ {_fq}", key=f"fup-{idx}-{_fi}", use_container_width=True):
+                    st.session_state.pending_question = _fq
+
+        if msg.get("trace"):
+            with st.expander("🔍 실행 트레이스"):
+                st.code(msg["trace"], language="text")
+
+        render_report_form(msg, idx)
+
+    for _idx, _msg in enumerate(st.session_state.chat_messages):
+        with st.chat_message(_msg["role"]):
+            if _msg["role"] == "assistant":
+                render_assistant(_msg, _idx)
             else:
-                st.markdown(msg["text"])
+                st.markdown(_msg["text"])
 
     typed = st.chat_input("직원처럼 자연어로 질문해보세요")
     question = st.session_state.pending_question or typed
@@ -443,15 +638,31 @@ with tab_chat:
             # 단계별로 흘린다(문구는 전부 코드가 정한다 — consult_agent/progress.py).
             # 특히 마지막 검증 단계가 보이는 것이 핵심이다: 지연이 «생각이 느린 것»이 아니라
             # «근거 대조를 하는 것»으로 읽혀야 한다. 끝나면 접어서 답변만 남긴다.
+            trace_text = ""
+            _tr = None
             with st.status("답변을 준비하고 있어요…", expanded=True) as _status:
                 try:
-                    result = consult_graph.ask(
-                        question,
-                        history=st.session_state.chat_history,
-                        customer_id=customer_id,
-                        session_id=st.session_state.chat_session_id,
-                        on_progress=_status.write,
-                    )
+                    if debug_mode and not trace_broken:
+                        # 계측된 실행. runner 는 **운영 진입점 graph.ask() 를 그대로** 부른다
+                        # — 그래프를 직접 조립하면 그때부터는 화면에서 본 것과 같은 실행이
+                        # 아니다. Streamlit 은 턴마다 스크립트를 다시 도므로 앞 턴 히스토리를
+                        # 넘겨 «이어지는 대화»로 계측한다.
+                        with debug_runner.session(
+                            customer_id=customer_id,
+                            history=st.session_state.chat_history,
+                            session_id=st.session_state.chat_session_id,
+                            on_progress=_status.write,
+                        ) as (_ask_once, _traced):
+                            _tr = _traced
+                            result = _ask_once(question)
+                    else:
+                        result = consult_graph.ask(
+                            question,
+                            history=st.session_state.chat_history,
+                            customer_id=customer_id,
+                            session_id=st.session_state.chat_session_id,
+                            on_progress=_status.write,
+                        )
                     _status.update(label="답변 완료", state="complete", expanded=False)
                 except Exception as e:
                     msg = str(e)
@@ -462,25 +673,60 @@ with tab_chat:
                         answer = f"오류 발생: {type(e).__name__}: {e}"
                     result = {"answer": answer, "sources": [], "history": st.session_state.chat_history}
                     _status.update(label="답변을 만들지 못했어요", state="error", expanded=False)
-            render_answer(result["answer"])
-            # 근거는 원문 문서명으로 읽어준다(카드 id 는 역추적용으로 뒤에). 답이 나온
-            # 재료(근거)와 표현을 제한한 재료(주의)는 갈라 보여준다 — 섞으면 질문과 무관한
-            # 고객 상태 가드가 답의 근거처럼 보인다(consult_agent/nodes/plan.py::_sources).
-            for label, role in (("근거", "근거"), ("이 고객 상담에서 지켜야 할 것", "주의")):
-                picked = [s for s in result.get("sources") or []
-                          if s.get("role", "근거") == role]
-                if picked:
-                    st.caption(f"{label}\n\n" + "\n\n".join(
-                        f"· {s.get('doc') or '출처 미상 — 확인 필요'}"
-                        f" — {s.get('title') or ''} `{s['id']}`"
-                        for s in picked))
-        st.session_state.chat_history = result["history"]
-        st.session_state.chat_messages.append({"role": "assistant", "text": result["answer"]})
+                finally:
+                    # **터진 턴에도 트레이스를 남긴다.** 여기가 제일 필요한 자리다 —
+                    # 어느 노드까지 갔다가 무엇에서 터졌는지가 없으면 «오류 발생: …»
+                    # 한 줄만 신고에 남고, 그것만으로는 아무도 같은 자리를 못 밟는다.
+                    if _tr is not None and _tr.turns:
+                        trace_text = debug_trace.render(_tr, show_llm=show_llm, last_only=True)
 
-    if st.session_state.chat_messages and st.button("🗑 대화 초기화"):
-        st.session_state.chat_messages = []
-        st.session_state.chat_history = []
+        st.session_state.chat_history = result["history"]
+        # 신고 한 번으로 재현이 되려면 답변과 함께 «무엇으로 답했는가»가 남아야 한다.
+        st.session_state.chat_messages.append({
+            "role": "assistant",
+            "text": result["answer"],
+            "question": question,
+            "customer": chat_customer,
+            "sources": result.get("sources") or [],
+            "followups": result.get("followups") or [],
+            "clarify": result.get("clarify"),
+            "intent": result.get("intent"),
+            "trace": trace_text,
+        })
+        # 답변을 방금 그린 자리와 지난 답을 그리는 자리가 갈리지 않게 다시 그린다 —
+        # 출처·추천질문·신고 버튼이 새 답에만 없거나 지난 답에만 있는 사고를 막는다.
         st.rerun()
+
+    _c1, _c2 = st.columns([1, 3])
+    if st.session_state.chat_messages:
+        # 내보내기 — 신고 폼에 담기 애매한 «대화 전체의 흐름»을 그대로 넘길 자리.
+        _log = [
+            f"# 대화 로그 · {datetime.now():%Y-%m-%d %H:%M}",
+            f"고객: {chat_customer} · 오늘: {clock.today():%Y-%m-%d} · "
+            f"세션: {st.session_state.chat_session_id}",
+            "",
+        ]
+        for _m in st.session_state.chat_messages:
+            _log.append(("**직원**\n\n" if _m["role"] == "user" else "**에이전트**\n\n") + _m["text"])
+            if _m.get("sources"):
+                _log.append("근거: " + " ".join(s["id"] for s in _m["sources"]))
+            if _m.get("trace"):
+                _log.append("```\n" + _m["trace"] + "\n```")
+            _log.append("")
+        _c1.download_button(
+            "⬇ 대화 로그 내려받기", "\n".join(_log),
+            file_name=f"chat_{st.session_state.chat_session_id}.md",
+            mime="text/markdown", use_container_width=True,
+        )
+        if _c2.button("🗑 대화 초기화"):
+            # 세션 id 도 새로 뽑는다. 같은 id 를 유지하면 지운 대화가 상담이력(§14)에는
+            # 남아 다음 질문의 «지난번»에 섞인다 — 화면에서 지웠는데 답에는 남는다.
+            import uuid
+            st.session_state.chat_messages = []
+            st.session_state.chat_history = []
+            st.session_state.chat_session_id = f"streamlit-{uuid.uuid4().hex[:8]}"
+            st.rerun()
+
 
 
 # ==========================================
@@ -511,7 +757,8 @@ with tab3:
 # ==========================================
 with tab4:
     st.header("📋 피드백 관리 및 파이프라인 보드")
-    
+
+    st.write("## 1) AI 브리핑 산출물 피드백")
     st.write("### 📌 접수된 피드백 결재 (Triage)")
     st.caption("타당한 피드백만 '🤖 AI 작업 승인'으로 변경하고 저장하세요.")
 
@@ -591,3 +838,68 @@ with tab4:
             st.warning("'🤖 AI 작업 승인' 상태인 피드백이 없습니다.")
     else:
         st.info("아직 접수된 피드백이 없습니다.")
+
+
+    # ══════════════════════════════════════════
+    # 2) 대화형 에이전트 신고 (chat_feedback.csv)
+    #
+    # 브리핑 피드백과 파일을 나눈 이유는 위 CHAT_FEEDBACK_FILE 주석에 있다 — 재현에
+    # 필요한 것이 다르다. 여기서는 «어느 질문에 어떻게 답했고 어디서 갈렸나»를 한 줄에
+    # 펼쳐 두고, 자세히 볼 것은 아래에서 한 건씩 편다.
+    # ══════════════════════════════════════════
+    st.divider()
+    st.write("## 2) 대화형 에이전트 신고")
+    st.caption("💬 탭에서 「🚩 이상해요」로 남긴 답변들입니다. 질문·답변 원문과 트레이스가 함께 저장됩니다.")
+
+    chat_df = pd.read_csv(CHAT_FEEDBACK_FILE) if os.path.exists(CHAT_FEEDBACK_FILE) else pd.DataFrame(columns=CHAT_FEEDBACK_COLUMNS)
+    if chat_df.empty:
+        st.info("아직 신고된 답변이 없습니다.")
+    else:
+        chat_status_options = ["새로운 의견", "🤖 AI 작업 승인", "❌ 반려", "✅ 반영 완료"]
+        # 트레이스·답변 원문은 표에서 빼고 아래 상세에서 편다 — 표에 넣으면 한 행이
+        # 수십 줄이 되어 «몇 건이 밀려 있나»가 안 보인다.
+        edited_chat = st.data_editor(
+            chat_df.drop(columns=["Trace", "Sources"], errors="ignore"),
+            column_config={
+                "Timestamp": st.column_config.TextColumn("접수 시간", disabled=True),
+                "Customer": st.column_config.TextColumn("대상 고객", disabled=True),
+                "Question": st.column_config.TextColumn("질문", disabled=True, width="medium"),
+                "Answer": st.column_config.TextColumn("답변", disabled=True, width="large"),
+                "Issue_Type": st.column_config.TextColumn("이슈 유형", disabled=True),
+                "Feedback": st.column_config.TextColumn("신고 내용", disabled=True, width="medium"),
+                "Intent": st.column_config.TextColumn("intent", disabled=True),
+                "Status": st.column_config.SelectboxColumn(
+                    "결재 상태", options=chat_status_options, required=True),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="chat_feedback_editor",
+        )
+
+        _b1, _b2 = st.columns([1, 3])
+        if _b1.button("🔄 결재 상태 저장", key="chat_fb_save"):
+            # 표에서 뺀 컬럼(Trace·Sources)은 원본에서 되돌려 붙인다 — 저장하면서
+            # 재현 정보를 날리면 신고가 «불평»만 남는다.
+            merged = chat_df.copy()
+            merged["Status"] = edited_chat["Status"].values
+            merged.to_csv(CHAT_FEEDBACK_FILE, index=False)
+            st.success("대화 신고 결재 상태가 저장되었습니다.")
+        _b2.download_button(
+            "⬇ 신고 전체 CSV 내려받기",
+            chat_df.to_csv(index=False).encode("utf-8-sig"),
+            file_name="chat_feedback.csv", mime="text/csv",
+        )
+
+        st.write("### 🔎 신고 상세 (재현용)")
+        for _i, _row in chat_df.iloc[::-1].iterrows():
+            with st.expander(f"[{_row['Timestamp']}] {_row['Issue_Type']} · {str(_row['Question'])[:60]}"):
+                st.markdown(f"**고객** {_row['Customer']}  ·  **intent** `{_row.get('Intent') or '—'}`")
+                st.markdown(f"**질문**\n\n{_row['Question']}")
+                st.markdown(f"**답변**\n\n{_row['Answer']}")
+                st.markdown(f"**신고 내용**\n\n{_row['Feedback']}")
+                if str(_row.get("Sources") or "").strip():
+                    st.caption(f"근거 카드 · {_row['Sources']}")
+                if str(_row.get("Trace") or "").strip():
+                    st.code(str(_row["Trace"]), language="text")
+                else:
+                    st.caption("트레이스 없음 — 디버그 모드를 끈 채 신고된 건입니다.")

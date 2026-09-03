@@ -30,7 +30,9 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
+from pension_agent import observability
 from pension_agent.session_store import append_turn
+from pension_agent.strategy_agent import customer as CUST
 
 from pension_agent.consult_agent import progress, suggest
 
@@ -41,7 +43,6 @@ from pension_agent.consult_agent.nodes.lms import lms_link
 from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
-from pension_agent.consult_agent.nodes.workb import workb_note
 from pension_agent.consult_agent.routing import (
     LLM_DOWN, route_answer, route_confirm, route_intent, route_plan,
 )
@@ -65,7 +66,6 @@ def build_agent():
     # 없어 여기서만 통과했었다. 함수 이름(answer)은 그대로라 트레이스 계측은 안 변한다.
     g.add_node("compose", answer)
     g.add_node("lms_link", lms_link)
-    g.add_node("workb_note", workb_note)
     g.add_node("correction", correction)
     g.add_node(LLM_DOWN, llm_down)
     g.add_node("confirm_action", confirm_action)
@@ -74,8 +74,7 @@ def build_agent():
     g.add_edge(START, "understand")
     g.add_conditional_edges(
         "understand", route_intent,
-        ["agent_help", "plan", "lms_link", "workb_note", "correction",
-         "confirm_action", LLM_DOWN],
+        ["agent_help", "plan", "lms_link", "correction", "confirm_action", LLM_DOWN],
     )
     # 계획 루프 — LLM 이 도구를 고르고(plan), 코드가 상한에서 끊고(route_plan),
     # 모은 근거만으로 답을 낸다(answer). 능력 표면은 intent enum 이 아니라 tools.TOOLS 다.
@@ -90,7 +89,7 @@ def build_agent():
     g.add_conditional_edges("confirm_action", route_confirm,
                             {"compose": "compose", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_link", "workb_note", "correction", LLM_DOWN):
+    for node in ("agent_help", "lms_link", "correction", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 
@@ -98,10 +97,24 @@ def build_agent():
 _AGENT = None
 
 
+def _customer_name(customer_id: str | None) -> str | None:
+    """관측 표시용 고객 이름. 없으면 None — 답변 경로는 이 값을 쓰지 않는다.
+
+    이름을 못 찾아도 조용히 지나간다(로스터에 없는 id·원장 미적재). 관측이 답변을
+    막지 않는다는 규약이 여기에도 적용된다.
+    """
+    if not customer_id:
+        return None
+    try:
+        profile = CUST.get_profile(customer_id)
+    except Exception:                          # noqa: BLE001 — 표시용 값이 턴을 죽이지 않는다
+        return None
+    return getattr(profile, "nm", None)
+
+
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
-    employee_id: str | None = None,
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
@@ -113,8 +126,6 @@ def ask(
     customer_id: 현재 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능(브리핑 질의·수정·
     화면 연계)은 이것이 있어야 성립한다 — 없으면 "고객 화면을 먼저 열어달라"고 답한다
     (CLAUDE.md §3). 지식 질의응답·화법 코칭은 없이도 답한다.
-    employee_id: 로그인한 직원의 사번. WorkB 쪽지의 수신자다 — 없으면 환경변수
-    (`WORKB_EMP_NO`)로 떨어지고, 그것도 없으면 쪽지 발송을 제안하지 않는다.
     session_id: 상담 세션 구분자(REQUIREMENTS.md §14 상담이력 단위). 넘기지 않으면 "default"
     세션으로 기록된다 — 모든 턴은 intent 와 무관하게 이 진입점 한 곳에서 기록되므로, 새
     intent 가 추가돼도 상담이력 기록을 빠뜨릴 일이 없다.
@@ -125,11 +136,37 @@ def ask(
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    with progress.reporting(on_progress):
-        out = _AGENT.invoke(
-            {"question": question, "history": history or [], "customer_id": customer_id,
-             # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
-             "session_id": session_id, "employee_id": employee_id})
+    # 관측 트레이스 — 이 턴에서 나가는 LLM 호출(계획·판정·작성, 보통 4~7회)이 전부 이
+    # 하나에 묶인다. 키가 없으면 통째로 꺼진다(observability). session_id 를 넘겨 같은
+    # 상담의 턴들이 대시보드에서 한 줄로 이어지게 한다.
+    # user_id 는 **고객 id** 다. Langfuse 의 «user» 는 보통 최종 사용자를 뜻하지만, 여기서
+    # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
+    # 진입점에 함께 있는 안정된 id 는 이것뿐이다. 직원 id 는 아직 진입점이 받지 않는다.
+    #
+    # 이름은 **태그로도** 싣는다. 사람은 KB-PIN(171203-4815062)이 아니라 이름(김서연)으로
+    # 기억하는데, id 로만 두면 대시보드에서 그 고객을 부르려고 매번 원장을 뒤져야 한다.
+    # 두 진입점이 같은 꼴로 붙여야 브리핑과 대화 턴이 한 태그로 묶인다.
+    name = _customer_name(customer_id)
+    with observability.trace(
+        "consult.turn", input=question, session_id=session_id, user_id=customer_id,
+        metadata={"customer_id": customer_id, "customer": name},
+        tags=["consult", *observability.tag("고객", name)],
+    ) as span:
+        with progress.reporting(on_progress):
+            out = _AGENT.invoke(
+                {"question": question, "history": history or [], "customer_id": customer_id,
+                 # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
+                 "session_id": session_id})
+        evidence = out.get("evidence") or []
+        span.update(output=out.get("answer"), intent=out.get("intent"),
+                    tools=sorted({e["tool"] for e in evidence}))
+        # 턴 하나가 어떻게 끝났는지. 「되묻기가 몇 %인가 · 근거 0건이 몇 %인가 · LLM 이
+        # 죽은 턴이 있었나」를 대시보드가 집계한다 — 트레이스를 한 건씩 열어서는 못 센다.
+        observability.score(
+            "turn_outcome",
+            "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify") else "answer",
+            comment=out.get("llm_error"))
+        observability.score("evidence_count", len(evidence))
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

@@ -12,9 +12,6 @@ predicate 를 여기 모았다(노드 구현은 nodes/, 조립은 graph.py).
   agent_help      에이전트 자신에 대한 질문이라 지식 재료가 없다
   correction      답을 만드는 게 아니라 화면의 산문을 고치는 요청이다
   lms_link        재료 검색이 아니라 화면 연계 요청이다(§10)
-  workb_note      재료 검색이 아니라 «오늘의 타겟 고객을 쪽지로 보내라»는 행위 요청이다.
-                  고객 화면을 전제하지 않는다 — 목록이 로스터 전체라 열려 있는 고객과
-                  무관하고, 고객 창을 안 띄운 아침에 제일 먼저 쓰는 기능이다
   confirm_action  직전 턴의 제안에 대한 확인이라 근거를 모으지 않는다
   llm_down        LLM 이 죽어 분류조차 못 한 턴 (§11)
 
@@ -42,7 +39,7 @@ LLM_DOWN = "llm_down"
 # "가능 여부 즉시 확인"(고객 계좌 상태 플래그로 '이 제안 지금 되나'를 보는 기능, 미구현)과
 # strategy_agent 의 `capability` kind(시스템 기능 지원 여부, cap.lms_send)와 혼동되기 때문이다.
 INTENTS = (
-    DEFAULT_INTENT, "guide", "agent_help", "correction", "lms_link", "workb_note",
+    DEFAULT_INTENT, "guide", "agent_help", "correction", "lms_link",
     # 직전 턴이 제안한 화면 연계에 대한 확인 응답("네"/"아니오").
     "confirm_action",
 )
@@ -55,7 +52,6 @@ _INTENT_NODE = {
     "agent_help": "agent_help",
     "correction": "correction",
     "lms_link": "lms_link",
-    "workb_note": "workb_note",
     "confirm_action": "confirm_action",
     LLM_DOWN: LLM_DOWN,
 }

@@ -72,6 +72,9 @@ class KnowledgeBase:
     cards: list[dict] = field(default_factory=list)
     # 원천 문서 레지스트리(doc kind). 카드의 source.doc 가 이걸 가리킨다.
     docs_by_id: dict[str, dict] = field(default_factory=dict)
+    # 카드 id → 카드. **손으로 출처 dict 를 만드는 자리**가 원천 문서를 되짚는 데 쓴다
+    # (고객 재료의 ⑥⑦⑧ 카드 — tools.py). 검색 경로는 hit 에 카드가 실려 오므로 필요 없다.
+    cards_by_id: dict[str, dict] = field(default_factory=dict)
 
     @property
     def customer_types(self) -> list[str]:
@@ -302,6 +305,8 @@ def load_kb(data_dir: Path = DATA_DIR) -> KnowledgeBase:
         dropped = {c["id"] for c in kb.suppressed}
         kb.cards = [c for c in kb.cards if c["id"] not in dropped]
         kb.pitches = [c for c in kb.pitches if c["id"] not in dropped]
+    # 격리를 끝낸 **뒤에** 색인한다 — 앞에서 만들면 후보군에서 뺀 카드가 색인에 남는다.
+    kb.cards_by_id = {c["id"]: c for c in kb.cards}
     return kb
 
 
@@ -321,6 +326,35 @@ def source_label(kb: KnowledgeBase, card: dict) -> str | None:
         return None
     meta = ", ".join(x for x in (doc.get("dept"), doc.get("published")) if x)
     return f"{doc['title']} ({meta})" if meta else doc["title"]
+
+
+def source_url(kb: KnowledgeBase, card: dict) -> str | None:
+    """카드 원천 문서의 게시글 URL. 레지스트리에 없으면 None — 지어내지 않는다.
+
+    URL 은 문서 레지스트리(`doc.url` — 영업점 핫팁 게시글 등)가 가진 것만 쓴다.
+    출처 표기(문서명·부서·시점)와 같은 곳에서 한 번만 관리한다는 규약 그대로다.
+    """
+    doc = kb.docs_by_id.get(
+        (card.get("_source") or {}).get("doc") or card.get("_doc_ref") or "")
+    return (doc or {}).get("url") or None
+
+
+def card_source_meta(kb: KnowledgeBase, card_id: str) -> dict:
+    """카드 id 하나의 출처 표기 — 문서명(`doc`)과 게시글 URL(`url`). 카드가 없으면 빈 dict.
+
+    검색으로 온 재료는 `sources_of()` 가 hit 의 카드에서 둘을 함께 뽑는다. 문제는 **손으로
+    출처 dict 를 만드는 자리**다 — 고객 재료에 실리는 ⑥⑦⑧ 카드가 그렇다. strategy_agent 가
+    넘겨주는 항목에는 문서명(`source`)만 있고 URL 이 없어서, 출처에 URL 을 싣기로 한 변경
+    (`tools.source_lines`)이 그 재료에만 닿지 않았다 — 화면에는 ↗ 줄이 붙는 근거와 안 붙는
+    근거가 섞여 나오고, 직원은 왜 어떤 것만 원문으로 갈 수 있는지 알 수 없다.
+
+    출처 표기를 만드는 곳은 하나여야 한다(§3)는 규약 그대로, 손으로 만드는 자리도 여기서
+    되짚어 같은 함수(`origin_of`·`source_url`)를 쓴다.
+    """
+    card = kb.cards_by_id.get(card_id) or kb.facts.get(card_id)
+    if not card:
+        return {}
+    return {"doc": origin_of(kb, card), "url": source_url(kb, card)}
 
 
 def origin_of(kb: KnowledgeBase, card: dict) -> str:
@@ -505,7 +539,7 @@ def sources_of(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> list[dict]:
     보여주면 사내 json 안의 코드가 근거처럼 보인다 — 출처는 원본 문서 이름으로 말한다.
     """
     return [{"id": c["id"], "title": c.get("title") or c.get("label"),
-             "doc": origin_of(kb, c),
+             "doc": origin_of(kb, c), "url": source_url(kb, c),
              "score": round(s, 2), "page": c.get("page")} for s, c in hits]
 
 

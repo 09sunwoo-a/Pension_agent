@@ -335,7 +335,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(REQUIREMENTS.md ④).
         "top_holdings": top_reference_products(p),
         # 고객님께 안내해보세요 — 문제상황에 맞는 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨).
-        "outreach": next_event_and_seminar(situations),
+        "outreach": next_event_and_seminar(situations, name=p.nm),
         "items": [{
             "id": b["spec"]["id"], "title": b["spec"]["title"], "kind": b["spec"]["kind"],
             "actor": b["spec"]["actor"], "clause": b["clause"], "evidence": b["evidence"],
@@ -364,7 +364,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         "pools": {
             "objections": objection_candidates(p, selected, situations),
             "consult_resources": consult_resource_candidates(p, situations),
-            "outreach": outreach_candidates(situations),
+            "outreach": outreach_candidates(situations, name=p.nm),
         },
         # 상담 이력(REQUIREMENTS.md §14) — 세션 저장소가 유일한 읽기 경로다. 과거 상담
         # 기록(직원이 고객과 나눈 것)도 거기 들어와 있다: 목업은 scripts/seed_sessions.py

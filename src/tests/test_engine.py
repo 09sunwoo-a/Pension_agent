@@ -201,7 +201,8 @@ from pension_agent.strategy_agent import agent
 from pension_agent.strategy_agent.customer import PERSONAS
 
 BY_NAME = {p.nm: p for p in PERSONAS}
-check(len(PERSONAS) == 9, "목업 9케이스 적재", str(len(PERSONAS)))
+check(len(PERSONAS) == 12, "목업 고객 적재 (xlsx 9케이스 + 데모 골든 케이스 3명)",
+      str(len(PERSONAS)))
 
 # ── 배지 골든셋 ──────────────────────────────────────────────
 # 첫 화면 배지(원본 08_BADGES)는 기획자가 지식베이스 세그먼트를 읽고 9케이스에 부여한
@@ -407,14 +408,14 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 _saved = (agent.llm.available, agent.llm.generate)
 try:
     agent.llm.available = lambda: True
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "현 구성 양호", '
         '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
     agent.clear_briefing_cache()
     _r2 = agent.propose(_calm, use_llm=True)
     check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
           "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
     agent.clear_briefing_cache()
     _r3 = agent.propose(_calm, use_llm=True)
@@ -424,6 +425,40 @@ finally:
     agent.llm.available, agent.llm.generate = _saved
     # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
     agent.clear_briefing_cache()
+
+# ── 미리 만들어 둔 브리핑(briefing_store) ────────────────────────────
+# 프로세스 캐시는 프로세스가 끝나면 사라져서, 리허설이 매 실행 앞에서 브리핑 생성(LLM 11회)을
+# 다시 치른다. 파일로 남겨 그것을 건너뛰되, **입력이 달라진 저장분은 절대 읽지 않는다** —
+# 낡은 브리핑이 화면에 뜨는 것은 이 저장소가 가장 경계하는 «화면과 값이 갈리는» 실패의
+# 조용한 형태다(캐시라서 아무도 안 본다).
+import pathlib as _pathlib  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+from pension_agent import config as _config  # noqa: E402
+from pension_agent.strategy_agent import briefing_store as _store  # noqa: E402
+
+_saved_dir, _saved_fp = _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT
+_tmp = _pathlib.Path(_tempfile.mkdtemp(prefix="briefing-store-"))
+try:
+    # 디렉터리가 없으면 저장소는 통째로 꺼진 것이다 — 돌린 적 없는 사람에게는 무변경이다.
+    _config.BRIEFING_CACHE_DIR = _tmp / "none"
+    check(not _store.enabled(), "디렉터리가 없으면 브리핑 저장소는 꺼져 있다")
+
+    _config.BRIEFING_CACHE_DIR = _tmp
+    _store._FINGERPRINT = "fp-A"
+    _store.save("k1", {"sentence": "저장본"})
+    check((_store.load("k1") or {}).get("sentence") == "저장본", "저장한 브리핑을 다시 읽는다")
+
+    # 지식 카드·프롬프트·날짜 중 하나라도 바뀌면 지문이 달라진다.
+    _store._FINGERPRINT = "fp-B"
+    check(_store.load("k1") is None, "입력(지문)이 바뀐 저장분은 읽지 않는다")
+
+    _store._FINGERPRINT = "fp-A"
+    check(_store.load("없는키") is None, "저장된 적 없는 키는 None")
+finally:
+    _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT = _saved_dir, _saved_fp
+    _shutil.rmtree(_tmp, ignore_errors=True)
 
 # dorm=None 이어도 브리핑이 죽지 않는다 (김현수는 실제로 상담이력이 없어 dorm=None 이다).
 check(BY_NAME["김현수"].dorm is None, "김현수: 상담이력 없음 → dorm=None")
@@ -467,6 +502,27 @@ check("납입여력" not in _pb and "연금수령" in _pb, "연금개시 계좌:
 _pens.pension_started = False
 check("tax" in conditions(_pens), "미개시 계좌(대조군): tax 성립")
 check("납입여력" in engine.prepare(_pens)["briefing"], "미개시 계좌(대조군): 납입여력 노출")
+
+# 「납입여력」과 「세액공제_잔여한도」는 **다른 축이다.** 한때 브리핑이 같은 수(p.room)를
+# 두 이름으로 실었고 — 라벨은 1,800만원 납입한도를 가리키는데 값은 900만원 공제한도에서
+# 왔다 — 그러자 화면이 «잔여한도 500만원 · 납입여력도 500만원»으로 한 숫자를 두 근거처럼
+# 말했고, 대화형은 ISA 8,000만원 전환 질문에 그 500만원을 상한으로 답했다.
+_room = Profile(id="T2", nm="T2", ag=52, bal=45_000_000, rk="위험중립형", grade="보통위험",
+                port=[67, 33, 0, 0], ret=3.1, retPct=50, dopt="설정", room=500, dorm=0,
+                nchM=0, pension_paid_ytd=4_000_000, paid_ytd_total=4_000_000)
+check(_room.deposit_room == 14_000_000,
+      "납입여력은 1,800만원 − 당해 실납입액이다 (세액공제 잔여한도가 아니다)",
+      f"{_room.deposit_room:,}원")
+_rb = engine.prepare(_room)["briefing"]
+check("1,400만원" in _rb["납입여력"] and "500만원" in _rb["납입여력"],
+      "브리핑이 두 축을 한 줄에서 갈라 적는다 (납입 가능액 · 그중 공제 대상)", _rb["납입여력"])
+check(_rb["납입여력"].split("(")[0].strip() != f"{_room.room:,}만원",
+      "납입여력의 값이 세액공제 잔여한도와 같은 수가 아니다", _rb["납입여력"])
+# 실납입액 컬럼이 없으면 인정액으로 떨어진다 — 여력을 과대 산출하지 않는 방향이다.
+check(Profile(id="T3", nm="T3", ag=50, bal=1, rk="안정형", grade="낮은위험",
+              port=[100, 0, 0, 0], ret=0.0, retPct=50, dopt="설정", room=0, dorm=0,
+              nchM=0).deposit_room == 18_000_000,
+      "실납입액을 모르면 납입여력은 한도 전액이다(기본값 0)")
 
 
 # ─────────────────────────────────────────────────────────────

@@ -23,12 +23,21 @@ def _match_asset(message: str) -> dict[str, Any] | None:
     """이 문구가 어느 안내 콘텐츠에서 온 것인지 되짚는다.
 
     직원은 브리핑 ⑨ 에 뜬 문구를 그대로 복사해 온다. 그 문구가 더미 콘텐츠에서 왔다면
-    아래 게이트가 막아야 하는데, 게이트는 자산을 받아야 판정할 수 있다. LLM 이 문구를
-    다듬었을 수 있으므로 완전일치만 보지 않고 앞부분 일치도 함께 본다.
+    아래 게이트가 막아야 하는데, 게이트는 자산을 받아야 판정할 수 있다.
+
+    **되짚는 열쇠는 안내 링크(url)다.** 문구의 가운데 본문은 고객마다 LLM 이 다시 쓰지만
+    (agent._write_lms_messages) 링크는 코드가 조립하는 골격에 있어 바뀌지 않는다
+    (support/outreach.py::lms_frame). 예전에는 자산의 고정 문구와 앞부분을 대조했는데,
+    문구가 고객별 생성으로 바뀌면서 그 대조는 **LLM 이 문장을 다듬을수록 빗나갔다** —
+    게이트가 조용히 열리는 방향의 실패다. 링크가 없는 옛 자산을 위해 문구 대조도 남긴다.
     """
     from pension_agent.strategy_agent import support  # noqa: PLC0415 — 순환 임포트 회피
 
     norm = " ".join(message.split())
+    for a in support.ASSETS:
+        url = (a.get("url") or "").strip()
+        if url and url in norm:
+            return a
     for a in support.ASSETS:
         base = " ".join((a.get("lms_message") or "").split())
         if not base:
@@ -97,7 +106,39 @@ def register_consult_note(customer_id: str, note: str,
     return result
 
 
+#: 쪽지의 기본 수신인. 직원이 받는 사람을 말하지 않으면 **본인 쪽지함**이다 — 상담 요약을
+#: 남기려는 요청이지 누군가에게 전달하려는 요청이 아니기 때문이다. 다른 직원에게 보내는
+#: 것은 수신인 지정이 단말 연동 규격에 들어올 때 정한다(지금은 받지 않는다).
+MEMO_DEFAULT_TO = "본인"
+
+
+def send_memo(customer_id: str, text: str, *, to: str = MEMO_DEFAULT_TO,
+              session_id: str = "tool-log") -> dict[str, Any]:
+    """행내 쪽지 발송 — 상담 요약을 직원 본인의 쪽지함으로 보낸다. MCP 연동 전 스텁.
+
+    **대외 행위가 아니다.** 받는 사람이 직원 자신(행내 메신저)이라 고객에게 나가는 것이
+    없고, `register_consult_note` 와 같은 «내부 기록» 부류다 — 그래서 에이전트가 화면을
+    열어 주는 데서 멈추지 않고 보내는 것까지 한다. 그래도 보내고 나면 되돌릴 수 없으므로
+    (루트 CLAUDE.md 규칙 5) 부르는 쪽은 직원이 요약을 읽고 승낙한 뒤에만 부른다
+    (`consult_agent/nodes/act.py::confirm_action`) — 요약 문장은 LLM 이 쓴 것이라 직원이
+    보기 전에 나가면 안 된다.
+
+    문구는 여기서 만들지도 고치지도 않는다. 받은 텍스트를 그대로 보낸다 — 검증을 통과한
+    답변이 곧 쪽지 본문이고, 여기서 다듬으면 화면에 보여 준 것과 다른 쪽지가 나간다.
+    """
+    result = {"status": "stubbed",
+              "detail": f"쪽지를 보냈습니다(받는 사람: {to}) — 연동 전이라 세션 기록에만 남깁니다",
+              "to": to, "text": text}
+    append_turn(customer_id, session_id, {
+        "role": "tool",
+        "text": f"[쪽지 발송 · {to}] {' '.join(text.split())[:50]}",
+        "tool_calls": [{"name": "send_memo", "args": {"to": to, "text": text}, "result": result}],
+    })
+    return result
+
+
 TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
     "open_lms_screen": open_lms_screen,
     "register_consult_note": register_consult_note,
+    "send_memo": send_memo,
 }
