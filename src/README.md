@@ -94,13 +94,26 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 답이 왜 그랬지"를 로그로 되짚기 어렵다 — 트레이스 하나(브리핑 한 건 · 대화 한 턴) 아래
 그 호출들이 프롬프트·응답·토큰·소요시간과 함께 묶여 남는다.
 
-`.env` 에 키 두 개를 넣으면 켜진다. **없으면 통째로 꺼진다** — 테스트·시연은 그대로 돈다.
+**`src/.env`** 에 키 두 개를 넣으면 켜진다(저장소 루트가 아니라 `src/` 다).
+**없으면 통째로 꺼진다** — 테스트·시연은 그대로 돈다.
 
 ```bash
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_HOST=https://cloud.langfuse.com   # 자체 호스팅이면 그 주소
 ```
+
+**대시보드에 안 찍히면 먼저 이것을 돌린다** — 설정을 찍고 이벤트 한 건을 실제로 보낸다.
+
+```bash
+python -m pension_agent.observability
+```
+
+`.env` 를 읽었는지 · 키가 들어왔는지 · 어느 host 로 보내는지 · 전송이 성공했는지를
+한 번에 가른다. 흔한 원인 넷은 **`.env` 를 저장소 루트에 둠** · **키를 안 넣음** ·
+**host 지역이 다름**(Langfuse Cloud 는 EU `https://cloud.langfuse.com` · US
+`https://us.cloud.langfuse.com` 로 갈리고, 다른 지역 키로는 401 이 난다) ·
+**망이 막힘**이다.
 
 | 환경변수 | |
 |---|---|
@@ -112,7 +125,10 @@ LANGFUSE_HOST=https://cloud.langfuse.com   # 자체 호스팅이면 그 주소
 - **의존성을 늘리지 않는다.** langfuse SDK 대신 표준 라이브러리로 수집 API 를 부른다 —
   사내 genai 경로가 urllib 만 쓰는 것과 같은 이유다(망분리).
 - **에이전트를 세우지 않는다.** 전송은 백그라운드 워커가 하고, 큐가 차면 이벤트를 버리며,
-  전송 실패는 `observability.stats()` 에만 쌓인다. 관측이 죽어서 상담이 죽지 않는다.
+  전송 실패는 예외로 올라오지 않는다. 관측이 죽어서 상담이 죽지 않는다.
+- **삼키되 침묵하지는 않는다.** 첫 실패는 stderr 에 한 줄 남고(두 번째부터는 잠잠하다 —
+  턴마다 쌓이면 그게 다시 노이즈다), 원인은 `observability.last_error()` 에 남는다.
+  전부 보려면 `LANGFUSE_DEBUG=1`.
 - **프롬프트에는 고객 원장이 실린다.** 지금 고객은 시연용 목업이라 그대로 보내지만,
   실데이터 전환 때 정할 것은 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
 

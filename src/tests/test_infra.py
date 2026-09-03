@@ -583,6 +583,9 @@ try:
     _obs.flush(timeout=5.0)
     check(_obs.stats()["failed"] > _before,
           "observability: 전송 실패는 예외 대신 stats 에 쌓인다")
+    # 삼키되 침묵하지는 않는다 — 원인이 남아야 «전송이 깨졌다»와 «안 켜졌다»가 갈린다.
+    check("HTTP Error 500" in (_obs.last_error() or ""),
+          "observability: 실패 원인이 last_error 에 남는다", str(_obs.last_error()))
 finally:
     for _k, _v in _saved_env.items():
         if _v is None:
