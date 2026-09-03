@@ -24,7 +24,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from pension_agent.consult_agent import guard, progress, relations, tools
+from pension_agent.consult_agent import guard, progress, relations, screens, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
@@ -264,6 +264,16 @@ def _known_products() -> set[str]:
     return {r["name"] for r in engine.PRODUCTS} | KBMOD.product_names(KB)
 
 
+#: 근거 카드의 화면번호 스팬 꼴(`[04-12-646]`). 다른 `atomic` 스팬과 갈라 판정하기 위한 것이라
+#: 대괄호까지 포함해 본다 — 도구가 그 꼴로 선언한다(`tools._procedure_decls`).
+_SCREEN_SPAN = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
+
+#: 답변에서 화면번호를 찾는 꼴. **대괄호를 요구하지 않는다** — 직원이 읽는 문장에서는
+#: 「04-12-646 지급/해지조회」처럼 괄호 없이 쓰는 것이 정상이고, 표기 차이로 옳은 답변을
+#: 버리지 않는다(§6 「이름 표기도 같다」와 같은 자리).
+_SCREEN_IN_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}(?![0-9A-Za-z-])")
+
+
 def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     """이 근거의 원문 스팬이 답변에서 어떻게 어긋났는지 판정한다. 종류는 도구가 선언한다.
 
@@ -280,7 +290,26 @@ def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     따라 나오던 자리다). 판단은 값 스팬의 등장 여부로 하고, 걸 스팬이 없는 도구
     (화법·고객재료)는 판단할 수 없으므로 표시를 유지한다 — 잃는 쪽으로 기울지 않는다.
     """
+    # 화면번호는 **식별자**라 다른 스팬과 판정이 다르다(§12 gap 2). 이름을 정확히 부르거나
+    # 아예 안 부르거나이고, 흩어진 토큰으로 재면 안 된다 — 번호끼리 앞 마디를 공유하기
+    # 때문이다(`04-12-…`·`06-12-…`). 예전 규칙(스팬이 답변에 없는데 숫자가 겹치면 폐기)은
+    # 그래서 **답변이 화면번호를 일부만 인용하면 걸렸다**: 안 쓴 번호의 04·12 가 쓴 번호와
+    # 겹쳐 «숫자는 썼는데 원문을 안 실었다»로 오판됐다. 원장 화면이 일곱 개인 절차 답변이
+    # 여섯 개를 정확히 인용하고도 폐기돼 카드 원문이 덤프됐다(2026-09-02 실측 — 박정호 P3).
+    #
+    # 지금 재는 것은 «답변이 이 턴 근거에 **없는** 화면을 가리키는가» 하나다. 빠뜨린 것은
+    # 위반이 아니고(안 부른 것이다), 대괄호 유무는 같은 화면이다(`screens.normalize`).
+    # 지어낸 번호는 여기서도 걸리고 수치 검사에도 걸린다 — 마지막 마디가 원장에 없다.
+    known_screens = {screens.normalize(s) for s in found["atomic"] if _SCREEN_SPAN.fullmatch(s.strip())}
+    if known_screens:
+        for m in _SCREEN_IN_TEXT.finditer(answer):
+            said = screens.normalize(m.group())
+            if said not in known_screens:
+                return DISCARD, [(m.group(), [])]
+
     for span in found["atomic"]:
+        if _SCREEN_SPAN.fullmatch(span.strip()):
+            continue                      # 위에서 식별자 규칙으로 이미 판정했다
         if span not in answer and (numbers(span) & numbers(answer)):
             # 걸린 스팬을 함께 돌려준다 — DISCARD 처분에는 안 쓰이지만, 계측(trace)이 이걸
             # 실어야 리허설 로그가 «무엇을 그대로 안 실어서 잘렸나»를 말할 수 있다. 판정

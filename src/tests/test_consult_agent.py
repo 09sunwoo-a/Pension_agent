@@ -350,6 +350,67 @@ def check_knowledge_intents() -> bool:
     return ok
 
 
+def check_branch_answer_amount() -> int:
+    """되묻기 다음 턴이 «원래 질문»의 금액으로 계산하는가 · 화면번호를 일부만 써도 되는가.
+
+    둘 다 리허설에서 실제로 터진 것이다(2026-09-02 이수민·박정호).
+
+    ① `tax_credit` 이 이번 턴 질문에서만 금액을 뽑아, 되물은 갈래를 고르는 답의 수치를
+       납입액으로 읽었다. 「300만원 더 넣으면?」 → 총급여 구간 되묻기 → 「5,500만원
+       이하야」 에서 5,500만원을 납입액으로 읽고 잔여한도로 잘라 **1,485,000원**을 답했다.
+       물어본 300만원의 답(495,000원)이 아니고, 되묻기 선택지에 방금 495,000원이라 적어
+       놓고 그랬다. 기준서 §5 — 「원래 질문과 고른 갈래를 합쳐 답한다」.
+
+    ② `span` 게이트가 화면번호를 흩어진 토큰으로 재서, 답변이 **일부만 인용하면** 폐기했다.
+       번호끼리 앞 마디를 공유하기 때문이다(`04-12-…`·`06-12-…`). 원장 화면 일곱 개 중
+       여섯 개를 정확히 인용한 절차 답변이 그래서 덤프됐다(박정호 P3).
+    """
+    from pension_agent.consult_agent import tools
+    from pension_agent.consult_agent.nodes.plan import _span_verdict
+    from pension_agent.strategy_agent.customer import PERSONAS
+
+    ok = 0
+    cid = next((p.id for p in PERSONAS if p.room > 0), PERSONAS[0].id)
+
+    # ① 되묻기 다음 턴 — 원래 질문의 금액을 쓴다
+    clarified = [{"question": "300만원 더 넣으면 얼마 돌려받아?",
+                  "pending_clarify": {"question": "총급여 구간을 확인해 주세요",
+                                      "options": ["5,500만원 이하", "5,500만원 초과"]}}]
+    ev = tools._tax_credit({"customer_id": cid, "question": "5,500만원 이하야",
+                            "history": clarified}, "")
+    hit = ev is not None and "추가 납입액 300만원" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 되묻기 답: 갈래를 고른 말이 아니라 원래 질문의 금액으로 계산한다")
+    ok += hit
+
+    # 되묻기가 아니면 이번 질문에서 그대로 읽는다 — 넓히기만 하고 기존 동작을 바꾸지 않는다
+    ev = tools._tax_credit({"customer_id": cid, "question": "500만원 더 넣으면?",
+                            "history": []}, "")
+    hit = ev is not None and "추가 납입액 500만원" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 되묻기 답: 평범한 턴은 이번 질문의 금액을 그대로 쓴다")
+    ok += hit
+
+    # ② 화면번호 — 일부만 인용해도 통과, 근거에 없는 번호는 폐기
+    atomic = ["[06-12-501]", "[01-12-213]", "[04-12-641]", "[04-12-648]",
+              "[04-12-644]", "[06-12-626]", "[04-12-646]"]
+    found = {"atomic": atomic, "notices": [], "notice_scopes": [], "text": "", "allow": []}
+    passing = [a for a in (
+        "[06-12-501] 등록 후 [01-12-213] 로 입금하고 [04-12-646] 로 발굴합니다.",
+        "06-12-501 등록 후 01-12-213 으로 입금합니다.",          # 대괄호 없이도 같은 화면이다
+        "과세이연정보를 먼저 등록하고 60일 안에 입금합니다.",       # 아예 안 쓴 것은 위반이 아니다
+    ) if _span_verdict(found, a)[0] != "discard"]
+    hit = len(passing) == 3
+    print(f"{'✓' if hit else '✗'} 화면번호: 일부만 인용하거나 대괄호를 빼도 폐기되지 않는다")
+    ok += hit
+
+    blocked = [a for a in ("[04-12-640] 화면에서 조회하세요.",
+                           "[06-12-502] 후선 업무의뢰로 등록합니다.")
+               if _span_verdict(found, a)[0] == "discard"]
+    hit = len(blocked) == 2
+    print(f"{'✓' if hit else '✗'} 화면번호: 근거에 없는 번호는 여전히 폐기된다")
+    ok += hit
+    return ok
+
+
 def check_prompt_is_quotable() -> int:
     """프롬프트에 들어간 것은 인용도 허용된다 (§6).
 
@@ -4934,6 +4995,7 @@ def main() -> int:
         check_replan_on_empty()
         check_outreach()
         check_prompt_is_quotable()
+        check_branch_answer_amount()
         check_screen_registry()
         check_market_material()
         check_product_advice()
