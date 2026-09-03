@@ -33,8 +33,8 @@ $CAD --debug -c 198734-1205842                        # REPL — 턴마다 방�
 $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 키 없이 재현
 $CAD --list                                           # 시나리오 목록
 
-# ── 묶음 실행: 검토(독립 케이스 10개) · 시연 대본(docs/DEMO_SCENARIO.md)
-$CADR                                                 # 검토 10케이스 + 요약표
+# ── 묶음 실행: 검토(독립 케이스 11개) · 시연 대본(docs/DEMO_SCENARIO.md)
+$CADR                                                 # 검토 11케이스 + 요약표
 $CADR --brief                                         # 요약표만
 $CADR --demo                                          # 시연 대본 16턴 (청중이 보는 화면)
 $CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
