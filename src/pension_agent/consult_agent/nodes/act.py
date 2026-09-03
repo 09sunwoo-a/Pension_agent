@@ -107,7 +107,7 @@ def _propose_lms(state: AgentState) -> dict[str, Any] | None:
         if ev["tool"] != "outreach":
             continue
         for key, item in _lms_items(ev):
-            if item["name"] not in answer:
+            if not _mentions(answer, item["name"]):
                 continue          # 답변이 가리키지 않은 콘텐츠는 제안하지 않는다
             found = screens.lms_screen(KB)
             if not found:
@@ -119,6 +119,31 @@ def _propose_lms(state: AgentState) -> dict[str, Any] | None:
                     "content_id": item["id"], "content_kind": key,
                     "params": {"customer_id": state.get("customer_id") or ""}}
     return None
+
+
+#: 콘텐츠 등록 이름의 끝에 붙는 종류 낱말. 답변은 이 낱말을 떼고 부른다.
+_CONTENT_KINDS = ("이벤트", "세미나")
+
+
+def _mentions(answer: str, name: str) -> bool:
+    """답변이 이 콘텐츠 이름을 불렀는가 — 조건 ③ 「답변이 그 콘텐츠를 실제로 가리켰다」의 판정.
+
+    글자 그대로의 부분문자열 대조였던 동안 **제안이 엉뚱한 콘텐츠에 붙었다**(2026-09-03
+    실측, 확정본 E1): 등록 이름은 「IRP 추가입금하고 절세혜택 챙기기 **이벤트**」인데 답변은
+    끝의 «이벤트»를 떼고 「…챙기기 (9/30까지)」로 썼고, 같은 답변이 세미나 이름은 그대로
+    옮겼다. 그래서 이벤트는 «언급 안 함»으로 탈락하고 발송 제안이 세미나에 붙었으며, 승낙
+    턴이 ISA 만기 고객에게 자산배분 세미나 문자를 열었다. 답변이 이름을 부르는 방식(종류
+    낱말 생략·공백 차이)은 LLM 이 정하는 표현이라 지시로 고정할 수 없다 — 대조 쪽이 그
+    폭을 갖는다. 넓히는 것은 **끝의 종류 낱말과 공백**뿐이다. 이름의 앞부분을 잘라 부르는
+    것은 여전히 «가리킨 것»이 아니다(후보를 늘어놓기만 한 답변에 붙이지 않는다는 조건 ③).
+    """
+    stem = name.strip()
+    for kind in _CONTENT_KINDS:
+        if stem.endswith(kind):
+            stem = stem[: -len(kind)].strip()
+            break
+    squash = lambda s: re.sub(r"\s+", "", s)  # noqa: E731
+    return bool(stem) and squash(stem) in squash(answer)
 
 
 def _lms_items(ev: dict) -> list[tuple[str, dict]]:

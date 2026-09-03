@@ -623,7 +623,7 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 값이 없어서가 아니라 문제일 때만 실려서였다(engine/render.py::_account_state).
     lines += [f"· {k.replace('_', ' ')} {v}" for k, v in (facts.get("account_state") or {}).items()]
     if facts.get("conditions"):
-        lines.append(f"· 성립 요건: {', '.join(facts['conditions'])}")
+        lines.append(f"· 성립 요건: {', '.join(_cond_labels(facts['conditions']))}")
     # 「왜 이 고객이 관리 대상인가」 — 직원이 실제로 가장 많이 묻는 것인데 통째로 빠져
     # 있었다. 요건 코드(dor·mis…)만 있고 그 요건이 왜 문제인지, 어느 세그먼트에 걸렸는지,
     # 무엇을 근거로 뽑혔는지가 재료에 없어서 LLM 이 요건 이름만 풀어 쓰거나 지어냈다.
@@ -1469,6 +1469,18 @@ def cited_cards(state: AgentState) -> set[str]:
 # 레지스트리
 # ─────────────────────────────────────────────────────────────
 
+def _cond_labels(conditions: list[str]) -> list[str]:
+    """브리핑 산출의 성립 요건(`코드:이름`)에서 이름만. 화면(`app.py`)이 하는 것과 같은 처리.
+
+    코드(`isa`·`tax`·`add`)를 재료에 그대로 실었던 동안 답변이 그것을 옮겼다 — 「세액공제
+    활용 가능(tax)과 추가입금 여력 보유(add) 요건이 성립되어 있어서」(2026-09-03 실측,
+    확정본 E1). 재료에 있는 말은 답변에 그대로 나오고 생성 지시로는 못 막는다(CLAUDE.md
+    §5 「재료에 개발 용어를 쓰지 않는다」). 코드는 `customer.CONDS` 의 키일 뿐 직원에게
+    뜻이 없다.
+    """
+    return [c.split(":", 1)[1] if ":" in c else c for c in conditions]
+
+
 def _outreach(state: AgentState, query: str) -> Evidence | None:
     """⑨ 이 고객에게 안내할 세미나·이벤트 — 화면 ⑨ 와 **같은 산출**을 재료로 싣는다.
 
@@ -1544,7 +1556,7 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
             lines.append(f"  · {other['name']} — {other['schedule']}")
 
     for label, values in (("문제상황", [s["title"] for s in facts.get("problem_situations") or []]),
-                          ("성립 요건", facts.get("conditions") or [])):
+                          ("성립 요건", _cond_labels(facts.get("conditions") or []))):
         if values:
             lines.append(f"· {label}: {', '.join(values[:4])}")
     # 선별·문구가 LLM 산출이 아니면 그 사실을 재료에 남긴다 — 직원이 "AI 가 고른 것"으로

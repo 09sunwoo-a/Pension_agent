@@ -580,6 +580,39 @@ def check_outreach() -> int:
     print(f"{'✓' if hit else '✗'} 콘텐츠를 가리키지 않은 답변에는 제안이 붙지 않는다")
     ok += hit
 
+    # ④ 답변이 등록 이름 끝의 종류 낱말(«이벤트»·«세미나»)을 떼고 불러도 그 콘텐츠를
+    # 가리킨 것이다. 글자 그대로 대조하던 동안 확정본 E1 에서 「…절세혜택 챙기기 (9/30까지)」가
+    # «언급 안 함»으로 탈락하고, 같은 답변이 그대로 옮긴 세미나 이름에 제안이 붙었다 —
+    # 승낙 턴이 ISA 만기 고객에게 자산배분 세미나 문자를 열었다(2026-09-03 실측).
+    event = ev["meta"]["lms"].get("event")
+    seminar = ev["meta"]["lms"].get("seminar")
+    _stem = event["name"].removesuffix("이벤트").strip() if event else ""
+    both = f"{_stem} (9/30까지)를 안내해보세요. 세미나는 «{seminar['name']}» 가 있어요." \
+        if event and seminar else ""
+    pending = act.offer({**state, "evidence": [ev], "answer": both}).get("pending_action") \
+        if both else None
+    hit = bool(pending) and pending["content_id"] == event["id"]
+    print(f"{'✓' if hit else '✗'} 종류 낱말을 뗀 이벤트 이름도 가리킨 것으로 보고, "
+          f"둘 다 불렀으면 이벤트를 먼저 제안한다")
+    ok += hit
+
+    # 이름의 앞부분만 잘라 부른 것은 여전히 «가리킨 것»이 아니다 — 넓힌 것은 끝의 종류
+    # 낱말과 공백뿐이다.
+    half = _stem[: max(len(_stem) // 2, 1)] if _stem else ""
+    hit = bool(half) and not act.offer({**state, "evidence": [ev],
+                                        "answer": f"{half}… 같은 게 있어요."}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 이름을 앞부분만 잘라 부른 답변에는 붙지 않는다")
+    ok += hit
+
+    # 재료에 요건 코드(isa·tax·add)가 실리면 답변이 그대로 옮긴다(§5 「재료에 개발 용어를
+    # 쓰지 않는다」) — 실측: 「세액공제 활용 가능(tax)과 추가입금 여력 보유(add) 요건」.
+    import re as _re
+    _code = _re.compile(r"(?<![A-Za-z])[a-z]{3}:")
+    _cust = tools.run("customer", {"customer_id": cid}, "현황")
+    hit = not _code.search(text) and bool(_cust) and not _code.search(_cust["text"])
+    print(f"{'✓' if hit else '✗'} outreach·customer 재료의 성립 요건에 요건 코드가 실리지 않는다")
+    ok += hit
+
     # 이번 턴이 안내 콘텐츠를 안 다뤘으면(원장에 outreach 근거가 없으면) 붙지 않는다.
     hit = not act.offer({**state, "evidence": [],
                          "answer": f"«{name}» 라는 세미나가 있어요."}).get("pending_action")
