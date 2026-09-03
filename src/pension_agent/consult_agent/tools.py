@@ -937,7 +937,7 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     raw = generate(ADEQUACY_PROMPT.format(question=question, cards=cards, kind=kind,
                                           query=query or question,
                                           history_block=format_history(history)),
-                   max_tokens=ADEQUACY_MAX_TOKENS)
+                   max_tokens=ADEQUACY_MAX_TOKENS, name="consult.adequacy")
     m = re.search(r"\[.*\]", raw, re.S)
     try:
         kept = json.loads(m.group()) if m else []
@@ -1074,6 +1074,21 @@ def _date(state: AgentState, query: str) -> Evidence | None:
 # 총급여 구간은 원장에 없다(demo_status §4 — 목업 9명 전원 미확인). 코드는 브리핑에서
 # 보수적으로 낮은 쪽을 쓰지만(과대산출 회피), 계산기가 그 값 하나만 내놓으면 16.5% 구간
 # 고객에게 "왜 적게 나와?" 가 된다. 두 경우를 다 싣고 어느 쪽인지는 직원이 가른다.
+#
+# ━━ «어디에 넣는 금액인가»를 재료가 적는다 ━━
+# "300만원 더 넣으면 얼마 돌려받아?" 의 300만원은 어느 계좌에 넣는 돈인지가 **질문에**
+# 없다. 그렇다고 갈래가 있는 것은 아니다 — 열려 있는 고객의 계좌가 개인형IRP 이고, 이
+# 계산의 여력(잔여한도)도 그 원장에서 온다. **정해져 있는 것을 «가정하면» 으로 말하지
+# 않는다**(§4 "제도·요건을 임의로 넓히거나 추정하지 않는다" 와 같은 자리 — 확정된 값을
+# 추측처럼 적으면 직원은 확인해야 할 것이 있는 줄 안다). 갈래가 없으므로 되묻지도 않는다.
+#
+# 재료가 그 자리를 비워 두면 답변도 비운다 — 직원은 어느 계좌에 넣는 300만원인지 적히지
+# 않은 금액을 고객에게 옮기게 된다. 그래서 계좌를 한 줄로 못박아 싣는다.
+#
+# 한도 쪽은 반대로 **계좌를 가리지 않는다.** 세액공제 한도 900만원은 IRP 단독이 아니라
+# 연금저축과 함께 쓰는 한도라(fact.k04.f2 "연금저축 세액공제 포함") 잔여한도가 그만큼
+# 줄어 있을 수 있다. 그것도 함께 적는다 — 「IRP 에 900만원까지 넣을 수 있다」로 읽히면
+# 안 된다.
 # ─────────────────────────────────────────────────────────────
 
 #: 공제율의 근거 카드. 세율·한도·아래 단서가 전부 여기서 온다.
@@ -1131,15 +1146,18 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
     # 축이 필요한 턴에 빠진다 — 이 고객에게 성립한 상태인지는 코드가 이미 아는 값이다(§8).
     isa_card = KB.facts.get(ISA_FACT_ID)
     isa_used = bool(p.isa) and isa_card is not None and _isa_convertible(p.isa)
-    # 축이 둘이면 **각 블록이 자기가 무엇을 세는지 밝혀야 한다.** 안 밝히면 직원이 말한
-    # 금액(「8천만원」)이 두 블록에서 다른 뜻으로 쓰이는데 화면에서는 분간되지 않는다 —
-    # 위는 «현금을 더 납입한 금액», 아래는 «ISA 에서 옮긴 금액»이다.
-    axis = " · 연금계좌에 현금을 더 납입하는 경우" if isa_used else ""
+    # 전제를 밝히는 축이 **둘**이다. 하나는 «어디에 넣나»(IRP 냐 연금저축이냐 — 아래 f3
+    # 갈래), 다른 하나는 «어디서 온 돈인가»(현금이냐 ISA 만기자금이냐). 둘 다 밝히지 않으면
+    # 직원이 말한 금액(「8천만원」)이 블록마다 다른 뜻으로 쓰이는데 화면에서는 분간되지 않는다.
+    axis = " · 현금을 더 납입하는 경우" if isa_used else ""
     lines = [f"■ 세액공제 환급 예상액 — {p.nm} 고객{axis} (시스템 계산 — 검색 결과가 아니다)",
-             f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)}",
+             "· 어디에 넣는 금액인가: 이 고객의 **개인형IRP 계좌 추가 납입**이다",
+             f"· 당해 납입액 {_won(paid)} · 세액공제 한도 {_won(cap)} · 잔여한도 {_won(room)} "
+             f"— 한도와 잔여한도는 연금저축 납입분까지 합산한 값이다(원장 값)",
              f"· 계산에 쓴 추가 납입액 {_won(extra)}"
              + ("" if said else " (질문에 금액이 없어 잔여한도로 계산했다)")]
 
+    cards = [card]
     notices: list[str] = []
     if gain <= 0:
         # 이 블록은 환급 «금액»을 새로 단정하지 않으므로 결정세액 단서가 무관하다
@@ -1166,12 +1184,11 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
 
     if isa_used:
         lines += _isa_rollover_lines(p, said)
+        cards.append(isa_card)
     if gain > 0 or isa_used:
         # 환급 «금액»을 단정하는 갈래에만 붙는다(§7). 두 축이 다 나와도 단서는 하나다 —
         # 같은 카드의 같은 문장이라 두 번 실으면 화면에 같은 경고가 겹쳐 선다.
         notices.append(_caveat(card))
-
-    cards = [card, isa_card] if isa_used else [card]
     return _ev("tax_credit", query, "\n".join(lines),
                KBMOD.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
                scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
