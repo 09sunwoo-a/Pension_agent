@@ -551,8 +551,9 @@ try:
     check(bool(_traces) and all(t["body"]["id"] == _inside for t in _traces)
           and any(t["body"].get("output") == "답" for t in _traces),
           "observability: 트레이스가 열릴 때와 닫힐 때 같은 id 로 나간다")
-    check(any(t["body"].get("sessionId") == "sess-x" for t in _traces),
-          "observability: 상담 세션 id 가 트레이스에 실린다")
+    check(all(t["body"].get("sessionId") == "sess-x" for t in _traces),
+          "observability: 상담 세션 id 가 여는·닫는 이벤트 양쪽에 실린다",
+          str([t["body"].get("sessionId") for t in _traces]))
 
     # span 중첩 — 트레이스가 평면이 아니라 실행 구조를 닮은 트리가 된다
     _sent.clear()

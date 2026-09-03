@@ -603,7 +603,8 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
                 "briefing.generate",
                 input={"customer_id": p.id, "customer": p.nm,
                        "use_llm": use_llm, "top_n": top_n},
-                user_id=p.id, metadata={"customer_id": p.id}, tags=["briefing"],
+                user_id=p.id, metadata={"customer_id": p.id, "customer": p.nm},
+                tags=["briefing", *observability.tag("고객", p.nm)],
             ) as span:
                 out = _propose(p, use_llm=use_llm, top_n=top_n)
                 out["facts"]["summaries"] = engine.section_summaries(
