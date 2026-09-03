@@ -94,7 +94,7 @@ def clarify(state: AgentState) -> dict[str, Any]:
         question=state["question"],
     )
     try:
-        raw = generate(prompt, max_tokens=CLARIFY_MAX_TOKENS)
+        raw = generate(prompt, max_tokens=CLARIFY_MAX_TOKENS, name="consult.clarify")
     except LLMError as exc:
         # 판정을 못 돌린 것과 되묻지 않기로 한 것은 다르지만, 결과는 같아야 한다 —
         # 여기서 LLM 이 죽었으면 답을 쓸 LLM 도 죽었다. compose 가 같은 안내로 끝낸다(§11).

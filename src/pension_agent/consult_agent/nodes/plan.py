@@ -158,6 +158,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
                 question=question,
             ),
             max_tokens=PLAN_MAX_TOKENS,
+            name="consult.plan",
         )
     except LLMError as exc:
         # LLM 이 없거나 죽으면 계획을 세울 수 없다. **왜 못 했는지를 남긴다** — 예전에는
@@ -498,7 +499,8 @@ def compose(state: AgentState) -> dict[str, Any]:
     known = _known_products()
     appends: list[str] = []
     try:
-        answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
+        answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM,
+                          name="consult.compose").strip()
         for attempt in range(COMPOSE_RETRIES + 1):
             if not answer:
                 break
@@ -515,7 +517,8 @@ def compose(state: AgentState) -> dict[str, Any]:
             progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
             retry = prompt + COMPOSE_RETRY_BLOCK.format(
                 faults="\n".join(f"- {f}" for f in faults[:FAULTS_SHOWN]))
-            answer = generate(retry, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
+            answer = generate(retry, max_tokens=1500, system=COMPOSE_SYSTEM,
+                              name="consult.compose.retry").strip()
     except LLMError as exc:
         # 재료는 모았는데 문장을 못 쓴 것이다. 아래 폴백(근거 원문 그대로 싣기)으로 흘려보내면
         # 완성된 답변처럼 보이는 카드 덩어리가 나간다 — LLM 이 죽었을 때 다른 단계가 내는

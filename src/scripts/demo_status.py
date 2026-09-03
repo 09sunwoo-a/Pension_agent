@@ -197,10 +197,9 @@ def build() -> tuple[str, dict[str, int]]:
          "실제 콘텐츠 캘린더가 붙으면 이 자리가 사라진다"),
         ("customer.PERSONAS",
          f"{len(customer.PERSONAS)}명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx "
-         f"+ scripts/demo_cases.json)"
+         "9케이스 + scripts/demo_cases.json 3명)"
          if customer.PERSONAS else "0명 (비어 있음 — customers.json 미생성)",
-         "시연용 목업 — 9케이스 xlsx + 브리핑 데모 골든 케이스 3명. "
-         "scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체"),
+         "시연용 목업. scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체"),
         ("data/portfolios.json", f"{len(engine.PORTFOLIOS)}건",
          "채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체. "
          "교체할 원문은 05_시황_상품_기반지식/02_상품/01_퇴직연금펀드_포트폴리오 다(대화형에는 "

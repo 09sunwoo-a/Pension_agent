@@ -36,7 +36,7 @@ $CAD --list                                           # 시나리오 목록
 # ── 묶음 실행: 검토(독립 케이스 10개) · 시연 대본(docs/DEMO_SCENARIO.md)
 $CADR                                                 # 검토 10케이스 + 요약표
 $CADR --brief                                         # 요약표만
-$CADR --demo                                          # 시연 대본 13턴 (청중이 보는 화면)
+$CADR --demo                                          # 시연 대본 16턴 (청중이 보는 화면)
 $CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
 $CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
 $CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
@@ -86,6 +86,35 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 을 찍는다. **앞에서 끊기면 뒤는 아예 안 불리고, 그게 진단의 핵심이다.**
 
 없는 고객 id 는 시작할 때 끊는다 — 그냥 두면 «재료 0건»이 되어 오타와 구분되지 않는다.
+
+### 관측 (Langfuse)
+
+`--debug` 트레이스가 **한 턴을 이 화면에서** 보는 것이라면, Langfuse 는 **여러 실행을
+쌓아 두고 나중에** 보는 것이다. 브리핑 한 건이 LLM 11회, 대화 한 턴이 4~7회라 "어제 그
+답이 왜 그랬지"를 로그로 되짚기 어렵다 — 트레이스 하나(브리핑 한 건 · 대화 한 턴) 아래
+그 호출들이 프롬프트·응답·토큰·소요시간과 함께 묶여 남는다.
+
+`.env` 에 키 두 개를 넣으면 켜진다. **없으면 통째로 꺼진다** — 테스트·시연은 그대로 돈다.
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-lf-...
+LANGFUSE_SECRET_KEY=sk-lf-...
+LANGFUSE_HOST=https://cloud.langfuse.com   # 자체 호스팅이면 그 주소
+```
+
+| 환경변수 | |
+|---|---|
+| `LANGFUSE_ENABLED=0` | 키가 있어도 끈다 |
+| `LANGFUSE_CAPTURE_CONTENT=0` | 프롬프트·응답 본문을 보내지 않고 길이만 남긴다 |
+| `LANGFUSE_ENVIRONMENT` | 기본 `demo`. 시연/스테이징/운영 구분 |
+| `LANGFUSE_RELEASE` · `LANGFUSE_MAX_CHARS` · `LANGFUSE_TIMEOUT` · `LANGFUSE_DEBUG` | 버전 태그 · 본문 상한(20000자) · 전송 타임아웃(10초) · 전송 실패를 stderr 로 |
+
+- **의존성을 늘리지 않는다.** langfuse SDK 대신 표준 라이브러리로 수집 API 를 부른다 —
+  사내 genai 경로가 urllib 만 쓰는 것과 같은 이유다(망분리).
+- **에이전트를 세우지 않는다.** 전송은 백그라운드 워커가 하고, 큐가 차면 이벤트를 버리며,
+  전송 실패는 `observability.stats()` 에만 쌓인다. 관측이 죽어서 상담이 죽지 않는다.
+- **프롬프트에는 고객 원장이 실린다.** 지금 고객은 시연용 목업이라 그대로 보내지만,
+  실데이터 전환 때 정할 것은 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
 
 ### 평가 대시보드 (`streamlit run app.py`) — 기획자용 테스트 환경
 
@@ -156,7 +185,9 @@ src/
 ├─ pension_agent/          단일 패키지. 임포트는 전부 절대 경로, 경로를 아는 파일은 config.py 하나
 │  ├─ config.py            경로·데이터 위치의 단일 출처
 │  ├─ clock.py             «오늘»의 단일 출처 — 원장 스냅샷 기준일과는 다른 축
+│  ├─ env.py               .env 로딩 — 설정 환경변수의 단일 출처
 │  ├─ llm.py               프로바이더 전환식 클라이언트 (환경 이전 시 여기만)
+│  ├─ observability.py     Langfuse 관측 — LLM 호출을 트레이스로 묶어 보낸다 (키 없으면 꺼짐)
 │  ├─ verify.py            LLM 산출물의 재료 이탈 판정 — 두 에이전트 공통
 │  ├─ session_store.py     상담 세션·이력 (consult 가 쓰고 strategy 는 읽는다)
 │  ├─ tools.py             외부 연동 레지스트리 (LMS 발송 게이트)
