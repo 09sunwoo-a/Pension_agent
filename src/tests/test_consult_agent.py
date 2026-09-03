@@ -3626,31 +3626,47 @@ def check_history_material() -> int:
 
 
 def check_memo() -> int:
-    """이번 상담 요약 → 쪽지(§3 «이번 상담 대화» 재료 · §10 쪽지 제안).
-
-    확정본 마지막 턴 「대화 내용 요약해서 쪽지로 보내줘」→「응, 보내줘」의 코드 경로.
+    """이번 턴의 재료 → WorkB 쪽지(§3 «이번 상담 대화» 재료 · §10 쪽지 제안·발송).
 
       ① `transcript` 는 **이번 세션만** 싣고 `history` 는 이번 세션을 뺀다 — 둘이 겹치면 방금
          한 말이 «지난 상담»이 되고, 둘 다 비면 요약할 재료가 없다.
       ② 기록에 붙은 제안 문구·도구 실행 줄은 재료에서 뗀다(안내가 아니라 화면 장치).
-      ③ 제안은 «쪽지»를 말한 요약 턴에만 붙는다 — 요약만 부탁한 턴에는 안 붙는다(§3).
-      ④ 승낙하면 제안한 턴의 본문 **그대로** 보내고 기록에 남긴다. 거절하면 보내지 않는다.
-      ⑤ 본문은 코드가 조립한다(memo.compose) — 머리말(성명·날짜)과 고객 주요 정보 표는 원장
-         값이고 요약 항목만 LLM 답변이다. 화면에 보이는 본문과 나가는 쪽지가 같고, 승낙 턴은
-         본문을 반복하지 않는다.
+      ③ 제안은 «쪽지»를 말한 턴에만 붙는다. **고객 화면은 조건이 아니다** — 화면 유무는
+         재료를 가르지(그 고객 / 오늘의 타겟 목록) 쪽지를 막지 않는다.
+      ④ 받는 사람은 코드가 정한다 — 기본은 본인이고, **사번을 적었을 때만** 타인이다.
+      ⑤ 본문·제목은 LLM 이 가이드라인 안에서 쓰고, 코드가 화면 답변과 **같은 검사**에 건다.
+         걸리면 보내지 않고 사유를 말한다(폴백 없음). 꼴(HTML)은 코드가 만든다.
+      ⑥ 승낙하면 제안한 턴의 초안 그대로 보내고 기록에 남긴다. 거절하면 보내지 않는다.
     """
+    import os
     import tempfile
     from pathlib import Path
 
-    from pension_agent import session_store
+    from pension_agent import session_store, workb
     from pension_agent import tools as REG
     from pension_agent.consult_agent import memo, prompts
     from pension_agent.consult_agent.nodes import act
     from pension_agent.consult_agent.nodes import clarify as CL
-    from pension_agent.strategy_agent import engine
-    from pension_agent.strategy_agent import customer as CUST
+
+    def _dead(*a, **kw):
+        raise LLMError("no key")
+
+    #: 가짜 작성기 — 규격(JSON)만 맞추고 재료 안 값만 쓴다. 실제 문장은 LLM 이 쓴다.
+    def _writer(title: str, body: str):
+        return lambda prompt, **kw: json.dumps({"title": title, "body": body},
+                                               ensure_ascii=False)
 
     ok = 0
+    orig_gen, orig_sender = memo.generate, workb.SENDER
+    orig_env = os.environ.get(workb.EMP_NO_ENV)
+    os.environ[workb.EMP_NO_ENV] = "3902172"
+    outbox: list[tuple] = []
+
+    async def _send(ids, title, body):
+        outbox.append((ids, title, body))
+        return '{"success": true}'
+
+    workb.use_sender(_send)
     with tempfile.TemporaryDirectory() as tmp:
         orig_dir = session_store.SESSION_DATA_DIR
         session_store.SESSION_DATA_DIR = Path(tmp)
@@ -3673,20 +3689,39 @@ def check_memo() -> int:
                                              "session_id": "s-new"}, "요약")
 
             summary = "직원이 과세이연 등록 절차를 물었고, [06-12-501] 등록부터 60일 내 입금까지 안내했어요."
-            offered = act.offer({**state, "answer": summary, "evidence": [found]})
+            turn = {**state, "answer": summary, "evidence": [found]}
+
+            memo.generate = _writer("과세이연 등록 상담 정리",
+                                    "과세이연 등록 절차를 확인했어요.\n- 후선업무 의뢰등록부터 시작")
+            offered = act.offer(turn)
             pending = offered.get("pending_action")
-            plain = act.offer({**state, "question": "지금까지 대화 내용 요약해줘",
-                               "answer": summary, "evidence": [found]})
-            shut = act.offer({**state, "customer_id": None, "answer": summary, "evidence": [found]})
+            plain = act.offer({**turn, "question": "지금까지 대화 내용 요약해줘"})
+            shut = act.offer({**turn, "customer_id": None})
+            noev = act.offer({**turn, "evidence": []})
+            other = act.offer({**turn, "question": "이 내용 사번 3902173한테 쪽지로 보내줘"})
+
+            # 검증에 걸리는 초안 — 원장에 없는 수치를 쓴다. 보내지 않고 사유를 말한다.
+            memo.generate = _writer("한도 정리", "세액공제 한도는 1,234만원이에요.")
+            screened = act.offer(turn)
+            # LLM 미연결 — «보냈다»로 접지 않는다.
+            memo.generate = _dead
+            down = act.offer(turn)
+            memo.generate = _writer("과세이연 등록 상담 정리", "확인한 내용을 남겨둡니다.")
+
             history = [{"question": state["question"], "pending_action": pending}]
             yes = act.confirm_action({"question": "응, 보내줘", "history": history, "customer_id": "CM"})
-            sent = [t for s in session_store.list_sessions("CM") for t in s["turns"]
+            sent = [t for s2 in session_store.list_sessions("CM") for t in s2["turns"]
                     if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
             no = act.confirm_action({"question": "아니 괜찮아", "history": history, "customer_id": "CM"})
-            sent_after_no = [t for s in session_store.list_sessions("CM") for t in s["turns"]
+            sent_after_no = [t for s2 in session_store.list_sessions("CM") for t in s2["turns"]
                              if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
         finally:
             session_store.SESSION_DATA_DIR = orig_dir
+            memo.generate, workb.SENDER = orig_gen, orig_sender
+            if orig_env is None:
+                os.environ.pop(workb.EMP_NO_ENV, None)
+            else:
+                os.environ[workb.EMP_NO_ENV] = orig_env
 
     # ① 시점으로 갈린다.
     hit = (bool(found) and "과세이연 등록은 어떻게 해?" in found["text"]
@@ -3715,43 +3750,88 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 고객 전제 도구이고 갈래가 없으며 답의 형태 요구가 등록돼 있다")
     ok += hit
 
-    # ③ 제안 조건 — «쪽지»를 말한 요약 턴에만. 본문은 머리말 + 답변이고, 화면 답변이 곧 본문이다.
-    body = (pending or {}).get("text") or ""
+    # ③ 제안 조건 — «쪽지»를 말한 턴 · 재료가 있는 턴. 고객 화면은 조건이 아니다.
     hit = (bool(pending) and pending["kind"] == "memo"
-           and body.startswith(memo.MEMO_TITLE) and summary in body and "CM 고객님" in body
-           and memo.KEY_INFO_HEADER not in body            # 프로파일 없는 고객 — 표를 지어내지 않는다
-           and pending["to"] == REG.MEMO_DEFAULT_TO
-           and offered["answer"].startswith(body) and "쪽지로 보낼까요" in offered["answer"]
+           and not plain.get("pending_action") and not noev.get("pending_action")
+           and bool(shut.get("pending_action")))
+    print(f"{'✓' if hit else '✗'} «쪽지»를 말하고 재료가 있는 턴에만 붙는다 — 고객 화면은 조건이 아니다")
+    ok += hit
+
+    # ④ 받는 사람 — 코드가 정한다. 사번을 적었을 때만 타인이고, 금액 7자리는 사번이 아니다.
+    hit = (act.employee_no("사번 3902172로 보내줘") == "3902172"
+           and act.employee_no("3902172한테 쪽지 보내줘") == "3902172"
+           and act.employee_no("3902172님께 보내줘") == "3902172"
+           and act.employee_no("잔액이 5000000원인 고객 쪽지로 보내줘") is None
+           and act.employee_no("쪽지로 보내줘") is None)
+    print(f"{'✓' if hit else '✗'} 수신자 사번은 «사번» 이나 사람 조사가 붙었을 때만 읽는다(금액과 갈린다)")
+    ok += hit
+
+    hit = (pending["recipients"] == ["3902172"] and pending["to"] == REG.MEMO_DEFAULT_TO
+           and (other.get("pending_action") or {}).get("recipients") == ["3902173"]
+           and "3902173" in (other.get("pending_action") or {}).get("to", ""))
+    print(f"{'✓' if hit else '✗'} 기본은 본인이고, 사번을 적으면 그 사번으로 간다")
+    ok += hit
+
+    # ⑤ LLM 이 쓰고 코드가 검사한다 — 걸리면 «보내지 않고 사유». 꼴은 코드가 만든다.
+    hit = (pending["title"] == "과세이연 등록 상담 정리"
+           and "쪽지" not in pending["title"] and not any(c.isdigit() for c in pending["title"])
+           and "<br>" in pending["html"] and "<b>" not in pending["text"]
+           and offered["answer"].startswith("[제목] 과세이연 등록 상담 정리")
            and offered["answer"].endswith("(네 / 아니오)"))
-    print(f"{'✓' if hit else '✗'} 쪽지를 말한 요약 턴에 «쪽지로 보낼까요?»가 붙고 화면 답변이 곧 쪽지 본문이다")
+    print(f"{'✓' if hit else '✗'} 제목·본문은 LLM 이 쓰고 HTML 은 코드가 만든다(화면에는 평문을 보여준다)")
     ok += hit
 
-    hit = not plain.get("pending_action") and not shut.get("pending_action")
-    print(f"{'✓' if hit else '✗'} 요약만 부탁했거나 고객 화면이 닫혀 있으면 제안하지 않는다")
+    hit = (not screened.get("pending_action") and "보내지 않았어요" in screened["answer"]
+           and "1,234" in screened["answer"] and screened["answer"].startswith(summary))
+    print(f"{'✓' if hit else '✗'} 근거 밖 수치가 있으면 보내지 않고 걸린 자리를 말한다(폴백 없음)")
     ok += hit
 
-    # ④ 승낙 → 그대로 보내고 기록. 답변은 한 줄 — 본문을 반복하지 않는다. 거절 → 보내지 않는다.
+    hit = not down.get("pending_action") and "쓰지 못했어요" in down["answer"]
+    print(f"{'✓' if hit else '✗'} LLM 이 죽으면 초안을 «보냈다»로 접지 않는다")
+    ok += hit
+
+    # 꼴 변환 — 태그는 이스케이프하고 마크다운 표는 걷어낸다(WorkB 가 렌더하지 않는다).
+    made = memo.to_html("[고객 주요 정보]\n  들여쓴 줄\n\n<script>")
+    hit = ("<b>[고객 주요 정보]</b>" in made and "&nbsp;&nbsp;들여쓴 줄" in made
+           and "<script>" not in made and "&lt;script&gt;" in made
+           and made.count("<br>") == 3
+           and memo._clean_body("| 항목 | 값 |\n|---|---|\n| 잔액 | 1원 |") == "항목 · 값\n잔액 · 1원")
+    print(f"{'✓' if hit else '✗'} 평문 → 쪽지 HTML: 소제목만 굵게 · 들여쓰기 보존 · 태그 이스케이프")
+    ok += hit
+
+    # ⑥ 승낙 → 초안 그대로 발송. 답변은 한 줄 — 본문을 반복하지 않는다. 거절 → 보내지 않는다.
     hit = (yes["pending_action"] is None and "쪽지를 보냈어요" in yes["answer"]
-           and summary not in yes["answer"] and "\n" not in yes["answer"].strip()
-           and len(sent) == 1 and sent[0]["tool_calls"][0]["args"]["text"] == body
-           and sent[0]["tool_calls"][0]["args"]["to"] == REG.MEMO_DEFAULT_TO)
-    print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 제안한 본문 그대로 보내고 상담이력에 남긴다 — 답변은 한 줄이다")
+           and "\n" not in yes["answer"].strip()
+           and len(sent) == 1 and len(outbox) == 1
+           and outbox[0] == (["3902172"], pending["title"], pending["html"])
+           and sent[0]["tool_calls"][0]["args"]["title"] == pending["title"])
+    print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 초안 그대로 WorkB 로 보내고 상담이력에 남긴다")
     ok += hit
 
-    # ⑤ 본문 조립 — 실제 페르소나면 고객 주요 정보 표 6행이 붙고, 값은 화면 산출과 같은 문자열이다.
+    hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1
+    print(f"{'✓' if hit else '✗'} '아니' 면 보내지 않는다")
+    ok += hit
+
+    # 코드가 붙이는 값 표 — 화면 유무가 무엇을 붙일지 가른다(종류가 아니라 화면이다).
+    from pension_agent.strategy_agent import customer as CUST, engine
     who = CUST.PERSONAS[0]
     facts = engine.prepare(who)
-    built = memo.compose(who.id, "- 물은 것 — 안내 요지")
-    rows = [ln for ln in built.splitlines() if ln.startswith("| ") and not ln.startswith("| 항목")]
-    d = CUST.today()
-    hit = (built.startswith(f"{memo.MEMO_TITLE}\n{who.nm} 고객님 ({d.year}년 {d.month}월 {d.day}일)")
-           and "- 물은 것 — 안내 요지" in built
-           and built.index("- 물은 것") < built.index(memo.KEY_INFO_HEADER)
-           and len(rows) == 6
-           and f"| 평가금액 | {facts['customer']['평가금액']} |" in built
-           and f"| 세액공제 잔여한도 | {facts['account_state']['세액공제_잔여한도']} |" in built
-           and not any(":" in ln.split("|")[2] and ln.startswith("| 관리 사유") for ln in rows))
-    print(f"{'✓' if hit else '✗'} 쪽지 본문은 머리말(성명·오늘) → 요약 → 고객 주요 정보 표 6행이고 값은 화면 산출 그대로다")
+    _kt, _kwhat = memo.table_for({"customer_id": who.id}, [])
+    _tt, _twhat = memo.table_for({}, [{"tool": "targets"}])
+    hit = (memo.KEY_INFO_HEADER in _kt and _kt.count("<tr>") == 6
+           and str(facts["customer"]["평가금액"]) in _kt
+           and str(facts["account_state"]["세액공제_잔여한도"]) in _kt
+           and ":" not in _kt.split("관리 사유")[1].split("</tr>")[0]   # 요건 코드는 뺀다
+           and _tt.startswith("<table ") and who.nm not in _twhat
+           and not memo.table_for({}, [])[0])                          # 재료가 없으면 안 붙인다
+    print(f"{'✓' if hit else '✗'} 값 표는 화면이 가른다 — 고객이 열렸으면 그 고객, 아니면 오늘의 목록")
+    ok += hit
+
+    # 꼬리말의 «선정 기준» 줄은 목록 표에만 붙는다 — 고객 한 명을 담은 쪽지에는 고를 목록이 없다.
+    _foot_one, _foot_two = memo._footer_html(rule=False), memo._footer_html(rule=True)
+    hit = (CUST.AS_OF.isoformat() in _foot_one and memo.today().isoformat() in _foot_one
+           and workb.FOOTER_RULE not in _foot_one and workb.FOOTER_RULE in _foot_two)
+    print(f"{'✓' if hit else '✗'} 기준일 안내는 늘 붙고 «선정 기준»은 목록 쪽지에만 붙는다")
     ok += hit
 
     shape = prompts.ANSWER_SHAPES["transcript"]
@@ -3759,12 +3839,9 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지한다")
     ok += hit
 
-    hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1
-    print(f"{'✓' if hit else '✗'} '아니' 면 보내지 않는다")
-    ok += hit
-
-    hit = "send_memo" in REG.TOOL_REGISTRY and "쪽지로 보내줘" in prompts.ROUTE_PROMPT
-    print(f"{'✓' if hit else '✗'} 발송 스텁이 레지스트리에 있고, 쪽지 요청이 lms_link 로 새지 않게 라우팅 기준이 있다")
+    hit = ("send_memo" in REG.TOOL_REGISTRY and "쪽지로 보내줘" in prompts.ROUTE_PROMPT
+           and prompts.MEMO_SELF_GUIDE != prompts.MEMO_OTHER_GUIDE)
+    print(f"{'✓' if hit else '✗'} 발송이 레지스트리에 있고, 가이드라인이 받는 사람으로 갈린다")
     ok += hit
     return ok
 

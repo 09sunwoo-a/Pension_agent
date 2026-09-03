@@ -1,18 +1,24 @@
 """도구(tool) 레지스트리 — 대화형 에이전트(consult_agent)가 부르는 부수효과 함수들.
 
-MCP 연동 전 스텁이고, 호출 사실만 세션이력에 남긴다. MCP 도구가 준비되면 함수 **본문만**
-실제 클라이언트 호출로 교체하면 된다 — 레지스트리 키와 시그니처는 그대로 유지하므로,
-이 함수를 부르는 노드 쪽은 변경할 필요가 없다.
+`open_lms_screen`·`register_consult_note` 는 아직 스텁이고 호출 사실만 세션이력에 남긴다.
+단말·CRM 연동이 붙으면 함수 **본문만** 교체한다 — 레지스트리 키와 시그니처는 그대로라
+부르는 노드 쪽은 바뀌지 않는다. `send_memo` 는 스텁이 아니다(아래).
 
-━━ 발송하지 않는다 ━━
+━━ 고객에게는 발송하지 않는다 ━━
 예전에는 `send_lms` 가 "발송"이었다(스텁이지만 이름과 규약이 그랬다). 지금 에이전트는
-**화면을 열어줄 뿐 작업을 대신 수행하지 않는다**(consult_agent/CLAUDE.md §10) — 문자를
-보낼지는 직원이 발송 화면에서 정한다. 그래서 남은 것은 발송이 아니라 **그 화면에 문구를
-채워도 되는지의 판정**이다.
+**고객에게 나가는 것은 화면을 열어줄 뿐 대신 수행하지 않는다**(consult_agent/CLAUDE.md §10)
+— 문자를 보낼지는 직원이 발송 화면에서 정한다. 그래서 남은 것은 발송이 아니라 **그 화면에
+문구를 채워도 되는지의 판정**이다.
+
+**행내 쪽지(`send_memo`)만 예외이고, 그것이 예외인 이유가 경계 그 자체다** — 받는 사람이
+고객이 아니라 행원이라 대외 행위가 아니다. 그래도 보내고 나면 되돌릴 수 없으므로(루트
+규칙 5) 승낙 없이 나가는 길이 없고, 더미 게이트도 여기 그대로 있다.
 """
 
 from __future__ import annotations
 
+import html
+import re
 from typing import Any, Callable
 
 
@@ -106,33 +112,63 @@ def register_consult_note(customer_id: str, note: str,
     return result
 
 
-#: 쪽지의 기본 수신인. 직원이 받는 사람을 말하지 않으면 **본인 쪽지함**이다 — 상담 요약을
+#: 쪽지의 받는 사람을 화면에 밝히는 기본 표기. 기본은 **직원 본인**이다 — 상담을 정리해
 #: 남기려는 요청이지 누군가에게 전달하려는 요청이 아니기 때문이다. 다른 직원에게 보내는
-#: 것은 수신인 지정이 단말 연동 규격에 들어올 때 정한다(지금은 받지 않는다).
+#: 것은 직원이 **사번을 적었을 때만**이다(`consult_agent/nodes/act.py::employee_no`).
 MEMO_DEFAULT_TO = "본인"
 
+#: 쪽지 본문에서 안내 링크를 되짚기 위해 걷어내는 것 — HTML 태그와 실체참조. 본문이 HTML 이
+#: 된 뒤로 링크의 `&` 가 `&amp;` 로 적히는데, 그대로 대조하면 게이트가 **조용히 열린다**.
+_TAG = re.compile(r"<[^>]+>")
 
-def send_memo(customer_id: str, text: str, *, to: str = MEMO_DEFAULT_TO,
+
+def _plain(markup: str) -> str:
+    return html.unescape(_TAG.sub(" ", markup or ""))
+
+
+def send_memo(customer_id: str, text: str, *, title: str,
+              recipients: list[str] | None = None, to: str = MEMO_DEFAULT_TO,
               session_id: str = "tool-log") -> dict[str, Any]:
-    """행내 쪽지 발송 — 상담 요약을 직원 본인의 쪽지함으로 보낸다. MCP 연동 전 스텁.
+    """행내 WorkB 쪽지 발송. 본문·제목은 여기서 만들지도 고치지도 않는다.
 
-    **대외 행위가 아니다.** 받는 사람이 직원 자신(행내 메신저)이라 고객에게 나가는 것이
-    없고, `register_consult_note` 와 같은 «내부 기록» 부류다 — 그래서 에이전트가 화면을
-    열어 주는 데서 멈추지 않고 보내는 것까지 한다. 그래도 보내고 나면 되돌릴 수 없으므로
-    (루트 CLAUDE.md 규칙 5) 부르는 쪽은 직원이 요약을 읽고 승낙한 뒤에만 부른다
-    (`consult_agent/nodes/act.py::confirm_action`) — 요약 문장은 LLM 이 쓴 것이라 직원이
-    보기 전에 나가면 안 된다.
+    **되돌릴 수 없는 행위다**(루트 CLAUDE.md 규칙 5). 부르는 쪽은 직원이 초안을 읽고
+    승낙한 뒤에만 부른다(`consult_agent/nodes/act.py::confirm_action`) — 본문은 LLM 이 쓴
+    글이라 직원이 보기 전에 나가면 무엇이 나갔는지 아무도 모른다.
 
-    문구는 여기서 만들지도 고치지도 않는다. 받은 텍스트를 그대로 보낸다 — 검증을 통과한
-    답변이 곧 쪽지 본문이고, 여기서 다듬으면 화면에 보여 준 것과 다른 쪽지가 나간다.
+    ━━ 더미 게이트 ━━
+    본문이 아직 실제 콘텐츠로 확정되지 않은 안내 문구(`dummy: true`)에서 왔으면 거부한다.
+    `open_lms_screen` 과 같은 판정이고, 쪽지에도 필요한 이유는 **받는 사람이 다른 직원일 수
+    있기 때문**이다 — 지어낸 일정이 적힌 쪽지를 받은 행원이 그것을 고객에게 옮기는 것은 한
+    걸음 차이다. 본인에게 보내는 쪽지에도 같게 적용한다: 갈래를 나누면 그 분기가 곧 구멍이 된다.
+
+    ━━ 「판정 못 함」을 성공으로 접지 않는다 ━━
+    WorkB 는 실패를 `isError` 로 세우지 않고 본문에 `{"success": false, ...}` 로 담아
+    보낸다(`workb.parse_result`). 그래서 어댑터가 성공이라고 한 것만 보고 보고하면 거부당한
+    호출이 «발송 완료»로 화면에 뜬다. 클라이언트가 아직 주입되지 않았으면 `not_connected`
+    이고, 그것도 성공이 아니다 — 부르는 쪽이 「보냈어요」라고 말하지 않는다.
     """
-    result = {"status": "stubbed",
-              "detail": f"쪽지를 보냈습니다(받는 사람: {to}) — 연동 전이라 세션 기록에만 남깁니다",
-              "to": to, "text": text}
+    from pension_agent import workb  # noqa: PLC0415 — strategy_agent 임포트를 지연시킨다
+
+    ids = [r for r in (recipients or []) if r]
+    asset = _match_asset(_plain(text))
+    if asset is not None and asset.get("dummy"):
+        result: dict[str, Any] = {
+            "status": "blocked",
+            "detail": ("더미 콘텐츠가 실린 쪽지는 보낼 수 없습니다 — 실제 콘텐츠로 교체한 뒤"
+                       "(자산의 dummy 표시 제거) 다시 시도하세요"),
+            "asset_id": asset.get("id"), "to": to, "recipients": ids, "title": title,
+        }
+    elif not ids:
+        result = {"status": "failed", "detail": "받는 사람 사번이 없습니다",
+                  "to": to, "recipients": ids, "title": title}
+    else:
+        result = {**workb.send_note_sync(ids, workb.Note(title=title, body=text)), "to": to}
     append_turn(customer_id, session_id, {
         "role": "tool",
-        "text": f"[쪽지 발송 · {to}] {' '.join(text.split())[:50]}",
-        "tool_calls": [{"name": "send_memo", "args": {"to": to, "text": text}, "result": result}],
+        "text": f"[쪽지 발송 · {to}] {title}",
+        "tool_calls": [{"name": "send_memo",
+                        "args": {"to": to, "recipients": ids, "title": title, "text": text},
+                        "result": result}],
     })
     return result
 

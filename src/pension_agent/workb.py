@@ -3,11 +3,17 @@
 직원이 "오늘 타겟 고객 쪽지로 보내줘" 라고 하면 보내는 그 글이다. 여기가 만드는 것은
 **본문 텍스트 하나**이고, 실제 발송은 MCP 클라이언트가 한다(`send_note` — 아직 미연결).
 
-━━ 본문은 LLM 이 쓰지 않는다 ━━
-이 쪽지에 실리는 것은 전부 코드가 이미 아는 값이다 — 요건 이름은 `customer.CONDS`,
-수치는 원장 필드, 순서는 `target_list` 다. 문장을 LLM 에 맡기면 그 순간 «원장에 없는 수치가
-직원 받은편지함에 남는» 경로가 하나 생기고, 화면 답변과 달리 쪽지는 verify 를 거치지도
-못한다(보내고 나면 되돌릴 수 없다). CLAUDE.md 2번 규칙의 «코드 = 사실» 쪽에 통째로 둔다.
+━━ 여기는 «꼴과 발송»이다 ━━
+**무엇을 쓸지는 `consult_agent/memo.py` 가 정한다**(대화 중 직원이 부탁하는 쪽지 — LLM 이
+가이드라인 안에서 쓰고 코드가 검사한다). 여기 있는 것은 그 아래 층이다: 표의 속성, 고객
+id 마스킹, 길이 상한, 그리고 MCP 발송과 응답 판정. 두 층을 갈라 두는 이유는 **꼴과 발송은
+쪽지 종류와 무관하게 같아야 하기 때문**이다 — 마스킹이나 상한이 종류마다 갈리면 한쪽만
+가리고 한쪽만 잘리는 상태가 곧 생긴다.
+
+`daily_targets_note` 는 그 위에 남은 유일한 «코드가 통째로 쓰는» 쪽지다(오늘의 타겟 목록).
+실리는 것이 전부 코드가 이미 아는 값이라(요건 이름은 `customer.CONDS`, 수치는 원장 필드,
+순서는 `target_list`) 문장을 맡길 자리가 없다. 표는 `targets_table` 하나이고, memo 도 그것을
+그대로 붙인다.
 
 ━━ 값은 요건 옆에 붙인다 ━━
 "장기 미접촉"만 적으면 직원은 결국 화면을 열어봐야 한다. 무엇 때문에 걸렸는지(322일)를
@@ -132,7 +138,7 @@ DETAIL: dict[str, Callable[[Profile], str | None]] = {
 }
 
 
-def _cond_text(target: Target, cond: str) -> str:
+def cond_text(target: Target, cond: str) -> str:
     """요건 한 건의 표기 — 「요건 이름 + 걸린 값」. 이름은 CONDS 원문 그대로 쓴다."""
     name = CONDS.get(cond, cond)
     try:
@@ -164,7 +170,7 @@ def _block(no: int, target: Target) -> str:
     rest = len(target.conds) - len(shown)
     lines = [f"{no}. {p.nm} ({_customer_id(p.id)})",
              f"   {' · '.join(attrs)} · 평가금액 {won(p.bal)}"]
-    lines += [f"   - {_cond_text(target, c)}" for c in shown]
+    lines += [f"   - {cond_text(target, c)}" for c in shown]
     if rest > 0:
         lines.append(f"   … 외 {rest}건")
     return "\n".join(lines)
@@ -177,8 +183,12 @@ def _block(no: int, target: Target) -> str:
 #: 꼬리말. **원장 기준일을 반드시 적는다** — 평가금액·보유 현황은 원장이 찍힌 날의 값이고,
 #: 요건의 잔여일수·경과일은 오늘 기준이다(customer.AS_OF vs clock.today). 둘이 갈린다는
 #: 사실을 쪽지가 말하지 않으면 직원은 전부 오늘 값으로 읽는다.
-FOOTER = ("※ 평가금액·보유 현황은 {as_of} 원장 기준이고, 잔여일수·경과일은 {today} 기준입니다.\n"
-          "※ 선정 기준은 사후관리 타겟 룰베이스입니다. 상세 근거는 에이전트 화면에서 확인하세요.")
+#: 두 줄을 갈라 둔다 — 앞줄(기준일)은 원장 값을 실은 **모든** 쪽지에 필요하고, 뒷줄
+#: (선정 기준)은 **목록** 쪽지에만 뜻이 있다. 한 상수로 묶여 있으면 고객 한 명을 담은
+#: 쪽지에도 "선정 기준은…"이 따라붙는다(consult_agent/memo.py 가 골라 쓴다).
+FOOTER_ASOF = "※ 평가금액·보유 현황은 {as_of} 원장 기준이고, 잔여일수·경과일은 {today} 기준입니다."
+FOOTER_RULE = "※ 선정 기준은 사후관리 타겟 룰베이스입니다. 상세 근거는 에이전트 화면에서 확인하세요."
+FOOTER = f"{FOOTER_ASOF}\n{FOOTER_RULE}"
 
 #: 타겟이 한 명도 없을 때. 빈 쪽지를 보내지 않는다 — 받는 쪽이 «장애인지 진짜 0명인지»를
 #: 가릴 수 있어야 한다.
@@ -247,7 +257,7 @@ def render(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, i
 #: 표 스타일. 뜻을 나르지 않는 장식이라 걷혀도 정보가 사라지지 않는다.
 #: 정렬은 옛 `align` 속성과 인라인 스타일에 **둘 다** 적는다 — 위생처리기가 style 을
 #: 걷어내도 정렬은 남는다(표 선을 border 속성으로도 그어 두는 것과 같은 이유).
-_TABLE = ('border="1" cellspacing="0" cellpadding="9" '
+TABLE = ('border="1" cellspacing="0" cellpadding="9" '
           'style="border-collapse:collapse;font-size:13px;line-height:1.7"')
 _TH = 'align="center" style="background:#f4f4f4;text-align:center;white-space:nowrap"'
 _TD_NO = 'align="center" style="text-align:center;white-space:nowrap"'
@@ -266,7 +276,7 @@ def _row(no: int, target: Target) -> str:
     attrs = " · ".join([f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else []))
     shown = target.conds[:MAX_CONDS]
     rest = len(target.conds) - len(shown)
-    conds = "<br>".join(_esc(_cond_text(target, c)) for c in shown)
+    conds = "<br>".join(_esc(cond_text(target, c)) for c in shown)
     if rest > 0:
         conds += f"<br><span {_MUTED}>외 {rest}건</span>"
     return (f"<tr><td {_TD_NO}>{no}</td>"
@@ -276,29 +286,40 @@ def _row(no: int, target: Target) -> str:
             f"<td>{conds}</td></tr>")
 
 
+#: 표의 열. 「구분」은 순번이다 — `#` 로 두면 무슨 칸인지 안 읽힌다(실물 확인 후 교체).
+COLS = ("구분", "고객", "평가금액", "선정 요건")
+
+
+def targets_table(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, int]:
+    """표 하나(`<table>…</table>`)와 «실린 고객 수». 머리말·꼬리말은 붙이지 않는다.
+
+    표만 따로 내는 이유는 **쓰는 곳이 둘**이기 때문이다 — 목록만 있는 쪽지(`daily_targets_note`)와,
+    LLM 이 쓴 본문 아래에 값 표로 붙는 쪽지(`consult_agent/memo.py`). 표를 두 번 만들면
+    한쪽만 마스킹하거나 한쪽만 잘라내는 상태가 곧 생긴다.
+    """
+    thead = "<tr>" + "".join(f"<th {_TH}>{_esc(c)}</th>" for c in COLS) + "</tr>"
+    rows = [_row(i, t) for i, t in enumerate(targets, 1)]
+    # 표의 열고 닫는 태그는 «머리»와 «꼬리»에 붙여 둔다 — 행 단위로 덜어내도 표가 깨지지
+    # 않아야 하고, 그러려면 잘라내기가 보는 조각이 곧 행이어야 한다.
+    return _fit(f"<table {TABLE}>{thead}", rows, "</table>",
+                joiner="", cut=lambda n: f'<tr><td colspan="{len(COLS)}" {_MUTED}>'
+                                         f'{_esc(CUT_LINE.format(n=n))}</td></tr>',
+                max_chars=max_chars)
+
+
 def render_html(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[str, int]:
     """HTML 본문과 «실린 고객 수».
 
     상한 판정은 **태그를 포함한 문자열 길이**로 한다 — 서버가 받는 것이 그 문자열이기
     때문이다. 그래서 같은 인원이라도 텍스트보다 훨씬 길다(대략 두 배 반).
     """
-    head = f"<p><b>{_esc(_head(len(targets)))}</b></p>"
-    foot = ('<p style="color:#777;font-size:12px">'
-            + _esc(_foot()).replace("\n", "<br>") + "</p>")
+    head = f"<b>{_esc(_head(len(targets)))}</b>"
+    foot = f"<span {_MUTED}>{_esc(_foot()).replace(chr(10), '<br>')}</span>"
     if not targets:
-        return f"{head}<p>{_esc(EMPTY_BODY)}</p>{foot}", 0
-
-    cols = ("구분", "고객", "평가금액", "선정 요건")
-    thead = "<tr>" + "".join(f"<th {_TH}>{_esc(c)}</th>" for c in cols) + "</tr>"
-    rows = [_row(i, t) for i, t in enumerate(targets, 1)]
-
-    # 표의 열고 닫는 태그는 «머리»와 «꼬리»에 붙여 둔다 — 행 단위로 덜어내도 표가 깨지지
-    # 않아야 하고, 그러려면 잘라내기가 보는 조각이 곧 행이어야 한다.
-    body, shown = _fit(f"{head}<table {_TABLE}>{thead}", rows, f"</table>{foot}",
-                       joiner="", cut=lambda n: f'<tr><td colspan="{len(cols)}" {_MUTED}>'
-                                                f'{_esc(CUT_LINE.format(n=n))}</td></tr>',
-                       max_chars=max_chars)
-    return body, shown
+        return f"{head}<br><br>{_esc(EMPTY_BODY)}<br><br>{foot}", 0
+    # 표 바깥의 머리·꼬리가 차지하는 만큼을 상한에서 뺀다 — 표만 상한에 맞추면 합쳐서 넘친다.
+    table, shown = targets_table(targets, max_chars=max_chars - len(head) - len(foot) - 8)
+    return f"{head}<br>{table}<br>{foot}", shown
 
 
 #: 어느 형식으로 보낼까. **기본은 텍스트다** — 뷰어가 무엇까지 렌더하는지 아직 실물로
@@ -317,9 +338,11 @@ class Note:
 
     title: str
     body: str
-    count: int      # 목록에 오른 고객 수(잘라내기 전)
-    shown: int      # 본문에 실제로 실린 수
-    truncated: bool
+    # 아래 셋은 «잘라내기가 있는» 쪽지(목록)에만 뜻이 있다. 대화 쪽 쪽지는 블록 단위로
+    # 덜어낼 것이 없어 기본값 그대로다 — 0/0/False 는 «잘라낸 것이 없다»는 뜻이다.
+    count: int = 0      # 목록에 오른 고객 수(잘라내기 전)
+    shown: int = 0      # 본문에 실제로 실린 수
+    truncated: bool = False
 
 
 def daily_targets_note(*, fmt: str = "", max_chars: int = MAX_CHARS) -> Note:

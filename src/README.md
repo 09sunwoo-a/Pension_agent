@@ -170,6 +170,27 @@ python -m pension_agent.observability
 - **프롬프트에는 고객 원장이 실린다.** 지금 고객은 시연용 목업이라 그대로 보내지만,
   실데이터 전환 때 정할 것은 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
 
+### WorkB 쪽지 발송 붙이기
+
+직원이 「쪽지로 보내줘」라고 하면 에이전트가 초안을 세우고, 승낙하면 행내 메신저(WorkB)로
+보낸다. **보내는 쪽은 주입받는다** — 행내 MCP 클라이언트(`mcp_sdk`)는 저장소 밖 패키지라
+여기서 임포트하면 그 패키지 없이는 테스트도 임포트도 안 되기 때문이다(망분리 밖에서는 설치도
+못 한다). 앱 시작 시 한 번 등록한다:
+
+```python
+from pension_agent import workb
+workb.use_sender(MCPClient(emp_no).send_message)   # send(recipients: list[str], title, body)
+```
+
+등록하지 않으면 **보내지 않고 «미연결»이라고 답한다** — 조용히 성공처럼 끝나지 않는다.
+받는 사람은 로그인 사번(`AgentState["employee_id"]`)이고, 없으면 `WORKB_EMP_NO` 환경변수,
+그것도 없으면 발송을 제안하지 않는다. 다른 직원에게 보내는 것은 직원이 **사번을 적었을
+때만**이다(「사번 3902172한테 쪽지로 보내줘」).
+
+| 환경변수 | |
+|---|---|
+| `WORKB_EMP_NO` | 로그인 사번이 없을 때의 수신자 사번(개발·시연용 폴백) |
+
 ### 평가 대시보드 (`streamlit run app.py`) — 기획자용 테스트 환경
 
 기획자가 **키보드만으로** 대화형 에이전트를 두드려 보고, 이상한 답을 그 자리에서 남길 수

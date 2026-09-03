@@ -733,6 +733,18 @@ check("<style" not in _html and "class=" not in _html,
 check("http://" not in _html and "https://" not in _html,
       "workb[html]: 바깥 자원을 부르지 않는다 — 막히면 표가 무너진다")
 # 행 단위로 덜어내도 표가 깨지지 않아야 한다.
+# WorkB 쪽지 뷰어는 **인라인 style 을 걷어낸다**(2026-09-03 실물 확인). 그래서 여백·크기를
+# style 로 만들려는 시도는 무효였고, 블록 요소도 뷰어가 자기 간격을 얹는다 — 남는 것은
+# <br>·<b>·표의 옛 속성뿐이다. 여기가 다시 늘면 화면에서 조용히 어긋난다.
+check(not any(t in _html for t in ("<p ", "<p>", "<div", "<h1", "<h2", "<ul", "<li")),
+      "workb[html]: 블록 요소를 쓰지 않는다 — 뷰어가 자기 간격을 얹는다")
+
+# 표를 만드는 곳은 하나다. 둘이 되면 한쪽만 마스킹하거나 한쪽만 잘라내는 상태가 곧 생긴다.
+_bare, _bare_shown = workb.targets_table(_targets)
+check(_bare.startswith("<table ") and _bare.endswith("</table>") and _bare in _html
+      and _bare_shown == len(_targets),
+      "workb.targets_table: 표만 따로 내고, 목록 쪽지는 그 표를 그대로 쓴다")
+
 _cut_html = workb.render_html(_targets, max_chars=1200)[0]
 check(_cut_html.count("<table") == _cut_html.count("</table") == 1,
       "workb[html]: 잘라내도 표가 열고 닫힌다")
