@@ -41,6 +41,8 @@ $CADR --demo --debug                                  # + 「무엇을 찾아봤
 $CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
 $CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
 $CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
+$CADR --final                                         # 중간점검 시연 확정본 (docs/DEMO_FINAL.md — 기획자 확정 3고객 + 이벤트 턴)
+$CADR --final 이수민 --debug                           # 고객 골라서
 
 # ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
 python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다

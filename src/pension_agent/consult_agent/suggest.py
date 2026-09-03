@@ -85,9 +85,13 @@ def outreach_chips(customer_id: str | None) -> list[str]:
         return []
     if not rows:
         return []
-    kinds = [k for k in ("세미나", "이벤트")
+    kinds = [k for k in ("이벤트", "세미나")
              if any(r["content_type"] == k for r in rows)]
-    return [f"이 고객한테 안내할 만한 {'·'.join(kinds)} {len(rows)}건 있어. 뭐가 좋을까?"]
+    # 건수는 싣지 않는다 — 칩은 직원이 누르는 순간 직원의 질문이 되는데, 직원은 콘텐츠가
+    # 몇 건 열려 있는지 모르는 사람이다. 「2건 있어」는 직원이 알 수 없는 사실을 직원이
+    # 단정하는 꼴이라 어색하다. 알림은 **칩이 떴다는 사실**이 한다(조건이 맞는 고객에게만
+    # 뜬다 — 이 모듈 머리말). 종류만 실어 «무엇을 묻는 칩인가»가 보이게 한다.
+    return [f"이 고객한테 안내할 만한 {'나 '.join(kinds)} 있어?"]
 
 
 # ─────────────────────────────────────────────────────────────

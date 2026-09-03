@@ -9,6 +9,7 @@
     python -m tests.debug.reps --demo --time    # + 턴별 소요 시간 (리허설 진단용 — 시연에서는 끈다)
     python -m tests.debug.reps --scenario           # 고객별 대표 시나리오 5종 전부
     python -m tests.debug.reps --scenario 김서연     # 이름(또는 번호)으로 골라서 — 옵션은 --demo 와 동일
+    python -m tests.debug.reps --final              # 중간점검 시연 확정본 (docs/DEMO_FINAL.md — 기획자 확정 3고객 + 이벤트 턴)
 
 왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
 이어진다(멀티턴 재현이 목적이다). 대표 질문 11개는 서로 독립이어야 하므로 케이스마다
@@ -95,7 +96,7 @@ CASES: tuple[tuple[int, str, str | None, tuple[str, ...]], ...] = (
      "188406-7352194", ("고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",)),
 
     (11, "제안·연계 — outreach 재료를 다룬 턴에 «발송 화면 열까요?»가 붙고, 승낙 턴이 딥링크·문구를 주나 (§10)",
-     "188406-7352194", ("이 고객한테 안내할 만한 세미나·이벤트 있어? 뭐가 좋을까?", "응, 열어줘")),
+     "188406-7352194", ("이 고객한테 안내할 만한 이벤트나 세미나 있어?", "응, 열어줘")),
 )
 
 
@@ -121,10 +122,10 @@ DEMO: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
         # 이후 턴이 «이 고객은 가입자부담금 계좌»라고 원장에 없는 속성을 굳힌다(3차 리허설).
         ("T9",  "우리 수수료가 얼마고, 증권사는 무료라는데 뭐라고 답하지?"),   # 복합 — 핵심
         ("T10", "그럼 이 고객한테 뭘 권할 수 있어?"),                   # 적합성 «범위»
-        # 실화면에서는 추천 질문 칩이다(suggest.outreach_chips — 건수는 오늘 날짜의 계산값.
-        # 8/24 고정에서 송도윤은 3건). 답변이 콘텐츠 이름을 인용해야 «발송 화면 열까요?»가
+        # 실화면에서는 추천 질문 칩이다(suggest.outreach_chips — 종류는 오늘 날짜의 계산값.
+        # 8/24 고정에서 송도윤은 이벤트·세미나). 답변이 콘텐츠 이름을 인용해야 «발송 화면 열까요?»가
         # 붙는다(act._propose_lms 조건 ③) — 안 붙으면 T11b 가 공중에 뜬다.
-        ("T11", "이 고객한테 안내할 만한 세미나·이벤트 3건 있어. 뭐가 좋을까?"),
+        ("T11", "이 고객한테 안내할 만한 이벤트나 세미나 있어?"),
         ("T11b", "응, 열어줘"),                                       # 발송 화면 딥링크 + 문구
         ("T12", "타행 IRP 수수료는 우리보다 싼가?"),                    # 없다고 말한다
     )),
@@ -173,15 +174,44 @@ SCENARIOS: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] 
         ("S2", "지난 상담에서 무슨 얘기 했지?"),                # 실화면에서는 추천 질문 칩
         ("S3", "고객이 '그 돈 그냥 둬도 되지 않나요' 하는데 뭐라고 하지?"),
         ("S4", "그럼 이 고객한테 뭘 권할 수 있어?"),
-        # 실화면에서는 안내 콘텐츠 칩(suggest.outreach_chips — 건수는 오늘 날짜의 계산값).
+        # 실화면에서는 안내 콘텐츠 칩(suggest.outreach_chips — 종류는 오늘 날짜의 계산값).
         # 답변이 콘텐츠 이름을 인용해야 «발송 화면 열까요?»가 붙는다(act._propose_lms ③).
-        ("S5", "이 고객한테 안내할 만한 세미나·이벤트 3건 있어. 뭐가 좋을까?"),
+        ("S5", "이 고객한테 안내할 만한 이벤트나 세미나 있어?"),
         ("S5b", "응, 열어줘"),                                        # 발송 화면 딥링크 + 문구
     )),
     (5, "정민석 — 같은 질문, 다른 답 (기존 9케이스)", "181245-3097614", (
         ("J1", "이 고객한테 뭘 권할 수 있어?"),                 # 핵심 장면 — S4 직후의 대비축
         ("J2", "고객이 원금 잃는 건 싫다는데, 그래도 권해야 해?"),
         ("J3", "예금만 하겠다는 고객, 뭐라고 설득하지?"),
+    )),
+)
+
+
+#: 중간점검 시연 확정본 — `docs/DEMO_FINAL.md`. 기획자가 `SCENARIOS` 에서 세 고객을 추려
+#: 문구·순서를 확정한 ①~⑧ 에, 안내 콘텐츠 → 발송 화면 연계(E1·E2)를 김서연 뒤에 더한
+#: 것이다. 번호는 기획자 문서의 것을 그대로 쓴다(E 는 이 저장소가 더한 턴). 실행 경로·
+#: 화면은 --demo 와 같다. 골라 돌리기: `--final 이수민` / `--final 2 3`.
+FINAL: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
+    (1, "김서연 — 제도 적용 (타행 ISA 8,000만원 만기 예정)", "171203-4815062", (
+        ("①", "ISA 만기자금을 IRP로 옮기면 뭐가 좋아?"),
+        ("②", "8천만원 전부는 부담스럽다는데, 일부만 옮겨도 돼?"),
+        # ↑ 공제율이 갈리는 총급여 구간을 되물을 수 있다 — 되물으면 E1 로 넘어가기 전에
+        # 「5,500만원 초과야」로 닫는다(DEMO_FINAL.md). 여기서는 다음 질문으로 바로 간다.
+        # 실화면에서는 안내 콘텐츠 칩(suggest.outreach_chips — 김서연은 이벤트만 걸린다, 8/24·9/2
+        # 모두 같다). 답변이 이벤트 이름을 인용해야 «발송 화면 열까요?»가 붙는다(act._propose_lms ③).
+        ("E1", "이 고객한테 안내할 만한 이벤트 있어?"),
+        ("E2", "응, 열어줘"),                                          # 발송 화면 딥링크 + 문구
+    )),
+    (2, "이수민 — 상담 판단 및 화법 (예금 7,000만원 만기 + 현금성 1,000만원 대기)", "175926-3048171", (
+        ("③", "이 고객한테 뭘 권할 수 있어?"),
+        ("④", "고객이 '그 돈 그냥 둬도 되지 않나요?' 하는데 뭐라고 하지?"),
+        ("⑤", "디폴트옵션 등록하면 지금 있는 1,000만원도 알아서 굴러가?"),
+        # ↑ 등록만으로 기존 현금성자산은 이동하지 않는다 — 교체매매 세트(방법론 83)
+    )),
+    (3, "박정호 — 상담기억에서 업무 실행까지 (퇴직급여 1.5억 일반계좌 수령)", "168450-7293815", (
+        ("⑥", "지난 상담에서 무슨 얘기 했지?"),                    # 실화면에서는 추천 질문 칩
+        ("⑦", "다시 IRP로 되돌릴 수 있어?"),                        # ⑥ 맥락(퇴직금 통장 수령)을 잇는다
+        ("⑧", "과세이연 등록은 어떻게 해?"),                        # proc.041 — 5단계 + 화면번호
     )),
 )
 
@@ -374,23 +404,25 @@ def main(argv: list[str]) -> int:
     리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
     demo = "--demo" in argv
     scenario = "--scenario" in argv
+    final = "--final" in argv
     brief = "--brief" in argv
     debug = "--debug" in argv
     show_llm = "--show-llm" in argv
     timing = "--time" in argv
     picked = {a for a in argv if a[0].isdigit()}
-    #: --scenario 에서만 쓴다 — 고객 이름으로 블록을 고른다(`--scenario 김서연 정민석`).
+    #: --scenario · --final 에서만 쓴다 — 고객 이름으로 블록을 고른다(`--scenario 김서연 정민석`).
     names = {a for a in argv if not a.startswith("--") and not a[0].isdigit()}
 
     unknown = [a for a in argv if a.startswith("--")
-               and a not in ("--demo", "--scenario", "--brief", "--debug", "--show-llm", "--time")]
+               and a not in ("--demo", "--scenario", "--final", "--brief", "--debug",
+                             "--show-llm", "--time")]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
-        print("  옵션: --demo · --scenario [고객명·번호] · --brief · --debug · --show-llm · "
-              "--time · 케이스 번호")
+        print("  옵션: --demo · --scenario [고객명·번호] · --final [고객명·번호] · --brief · "
+              "--debug · --show-llm · --time · 케이스 번호")
         return 1
-    if demo and scenario:
-        print("--demo 와 --scenario 는 함께 쓸 수 없습니다 — 도는 대본이 다릅니다.")
+    if demo + scenario + final > 1:
+        print("--demo · --scenario · --final 은 함께 쓸 수 없습니다 — 도는 대본이 다릅니다.")
         return 1
 
     if not LLM.available():
@@ -401,9 +433,10 @@ def main(argv: list[str]) -> int:
         return 1
 
     # 모드의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
-    # 트레이스를 기본으로 붙이는가. --scenario 는 도는 목록만 다르고 화면·실행 경로는
-    # --demo 리허설과 같다 — 다른 경로로 돌면 시연을 예행한 것이 아니다.
-    blocks = SCENARIOS if scenario else DEMO if demo else CASES
+    # 트레이스를 기본으로 붙이는가. --scenario · --final 은 도는 목록만 다르고 화면·실행
+    # 경로는 --demo 리허설과 같다 — 다른 경로로 돌면 시연을 예행한 것이 아니다.
+    blocks = FINAL if final else SCENARIOS if scenario else DEMO if demo else CASES
+    scenario = scenario or final      # 블록 고르기(이름·번호)는 둘이 같다
     demo = demo or scenario
     trace_by_default = not demo
 
@@ -492,7 +525,13 @@ def main(argv: list[str]) -> int:
         if i == 0:
             print("  " + "  ".join("─" * w for w in widths))
     print("\n  도구 뒤의 ✗ 는 그 호출이 자료를 못 찾은 것 — 다음 칸에서 다른 도구로 옮겨갔는지가 요점입니다.")
-    if scenario:
+    if final:
+        print("  리허설에서 볼 것: ② 가 되묻기로 끝나는가(끝나면 「5,500만원 초과야」로 닫는다) ·")
+        print("                    E1 에 «발송 화면 열까요?»가 붙고 E2 가 딥링크·문구를 주는가 ·")
+        print("                    ③ 이 만기 7천만·대기 1천만·디폴트옵션 미등록을 함께 보는가 ·")
+        print("                    ⑤ 가 «이동하지 않는다»로 답하는가 · ⑦ 이 환급 전 제한까지 말하는가 ·")
+        print("                    ⑧ 이 5단계와 화면번호를 순서대로 주는가.")
+    elif scenario:
         print("  리허설에서 볼 것: K3 이 되묻기로 끝나는가 · P4 가 순서 경고를 세우는가 ·")
         print("                    L3 이 «이동하지 않는다»로 답하는가 · S2 가 10개월 전 기록을 꺼내는가 ·")
         print("                    S5 에 «발송 화면 열까요?»가 붙고 S5b 가 딥링크·문구를 주는가 ·")
