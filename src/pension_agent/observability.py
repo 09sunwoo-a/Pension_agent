@@ -345,10 +345,20 @@ _IDLE = threading.Condition()
 
 _STATS = {"queued": 0, "sent": 0, "dropped": 0, "failed": 0}
 
+#: 마지막 전송 실패의 원인. 전송은 백그라운드라 예외를 호출부로 올릴 수 없어서, 진단은
+#: 이 값과 아래 «첫 실패 한 줄»이 전담한다.
+_LAST_ERROR: str | None = None
+_warned = False
+
 
 def stats() -> dict[str, int]:
     """보낸/버린/실패한 이벤트 수. 관측이 도는지 확인할 때 본다."""
     return dict(_STATS)
+
+
+def last_error() -> str | None:
+    """마지막 전송 실패 원인. 실패가 없었으면 None."""
+    return _LAST_ERROR
 
 
 def _emit(event_type: str, body: dict) -> None:
@@ -420,12 +430,23 @@ def _send(batch: list[dict]) -> None:
             resp.read()
         _STATS["sent"] += len(batch)
     except Exception as exc:                              # noqa: BLE001 — 관측 실패는 삼킨다
+        global _LAST_ERROR, _warned
         _STATS["failed"] += len(batch)
         detail = ""
         if isinstance(exc, urllib.error.HTTPError):
             with contextlib.suppress(Exception):
-                detail = exc.read().decode("utf-8", "replace")[:500]
-        _debug(f"전송 실패: {type(exc).__name__}: {exc} {detail}")
+                detail = " " + exc.read().decode("utf-8", "replace")[:300]
+        _LAST_ERROR = f"{type(exc).__name__}: {exc}{detail}"
+        # **첫 실패는 반드시 한 줄 알린다.** 삼키는 것은 «에이전트를 세우지 않기» 위해서지
+        # «아무 말도 하지 않기» 위해서가 아니다 — 조용히 실패하면 «전송이 깨졌다»와 «애초에
+        # 안 켜졌다»가 화면에서 구별되지 않고, 그 상태로 대시보드만 들여다보게 된다.
+        # 두 번째부터는 잠잠하다(턴마다 같은 줄이 쌓이면 그게 다시 노이즈다). 전부 보려면
+        # LANGFUSE_DEBUG=1.
+        if not _warned or conf().debug:
+            _warned = True
+            print(f"[langfuse] 전송 실패 — {_LAST_ERROR}\n"
+                  f"[langfuse]   host={c.host} · 진단: python -m pension_agent.observability",
+                  file=sys.stderr)
 
 
 def _batch_metadata(c: _Conf) -> dict:
@@ -448,3 +469,70 @@ def flush(timeout: float = 5.0) -> bool:
 def _debug(message: str) -> None:
     if conf().debug:
         print(f"[langfuse] {message}", file=sys.stderr)
+
+
+# ─────────────────────────────────────────────────────────────
+# 자가진단 — python -m pension_agent.observability
+#
+# 「대시보드에 안 찍힌다」의 원인은 넷이다: 키가 없다 · `.env` 를 다른 데 뒀다 ·
+# 호스트가 틀렸다(Langfuse Cloud 는 EU·US 주소가 다르다) · 망이 막혔다. 전송은 백그라운드라
+# 실패가 호출부로 올라오지 않으므로, 넷을 한 번에 갈라주는 자리를 따로 둔다.
+# ─────────────────────────────────────────────────────────────
+
+def _mask(value: str) -> str:
+    return f"{value[:8]}…{value[-4:]}" if len(value) > 14 else ("설정됨" if value else "없음")
+
+
+def selftest() -> int:
+    """설정을 찍고 이벤트 한 건을 실제로 보낸다. 0 이면 성공."""
+    from pension_agent import config  # noqa: PLC0415 — 진단 출력에만 쓴다
+
+    env.load()
+    c = conf()
+    public = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    secret = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    dotenv = config.DOTENV
+    print(f".env            {dotenv} ({'있음' if dotenv.exists() else '없음 — 여기에 둬야 읽는다'})")
+    print(f"PUBLIC_KEY      {_mask(public)}")
+    print(f"SECRET_KEY      {_mask(secret)}")
+    print(f"host            {c.host}")
+    print(f"본문 전송       {'예' if c.capture_content else '아니오 (CAPTURE_CONTENT=0)'}")
+    print(f"켜짐            {c.enabled}")
+
+    if not c.enabled:
+        if not (public and secret):
+            print("\n❌ 키가 없어 꺼져 있습니다. src/.env 에 LANGFUSE_PUBLIC_KEY ·"
+                  " LANGFUSE_SECRET_KEY 를 넣으십시오(저장소 루트가 아니라 src/ 입니다).")
+        else:
+            print("\n❌ LANGFUSE_ENABLED 로 꺼져 있습니다.")
+        return 1
+
+    print("\n이벤트 한 건 전송 중…")
+    with trace("observability.selftest", input="ping", tags=["selftest"]) as tr:
+        now = time.time()
+        record_generation("observability.selftest", model="(selftest)",
+                          input="ping", output="pong", start=now, end=now)
+        tr.update(output="pong")
+    flush(timeout=15.0)
+
+    print(f"결과            {stats()}")
+    if _LAST_ERROR:
+        print(f"\n❌ 전송 실패 — {_LAST_ERROR}")
+        # 인증 문제와 «못 닿음»을 갈라 말한다. 프록시·터널 오류에도 403 이 섞여 오므로
+        # 숫자만 보고 «키가 틀렸다»고 말하면 엉뚱한 곳을 뒤지게 된다 — HTTP 응답으로
+        # 온 401·403 만 인증으로 읽는다.
+        if _LAST_ERROR.startswith("HTTPError") and ("401" in _LAST_ERROR or "403" in _LAST_ERROR):
+            print("   · 키가 이 host 의 것인지 확인하십시오. Langfuse Cloud 는 지역마다"
+                  " 주소가 다릅니다 — EU https://cloud.langfuse.com ·"
+                  " US https://us.cloud.langfuse.com. 다른 지역 키로는 401 이 납니다.")
+            print("   · PUBLIC/SECRET 을 바꿔 넣지 않았는지도 함께 보십시오.")
+        else:
+            print(f"   · {c.host} 에 이 컴퓨터에서 닿는지 확인하십시오(사내망·프록시·방화벽).")
+        return 1
+    print("\n✅ 전송 성공 — Langfuse 의 Tracing 에서 «observability.selftest» 를 찾으십시오.")
+    print("   안 보이면 대시보드의 프로젝트와 기간 필터를 확인하십시오.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(selftest())
