@@ -4521,8 +4521,8 @@ def check_all_kinds_reachable() -> int:
     쓰이는 경로가 없던 것이 이 변경의 동기 중 하나였다(guard 가 caution 8건만 썼다).
     market 23장은 적재 경로 자체가 없어 통째로 닿지 않던 자리다(check_market_material).
 
-    두 경로를 다 본다. 이 종류들은 trigger_examples 가 제목과 거의 같아서 n-gram 폴백이
-    화법보다 약하다 — 사실상 LLM 선택이 주 경로다.
+    두 경로를 다 본다. 2026-09-04 까지 이 종류들은 trigger_examples 가 제목과 거의 같아서
+    n-gram 폴백이 화법보다 약했다 — 지금은 본문 절이 입구다(check_trigger_entrances).
     """
     ok = 0
     hit = ({"fact", "procedure", "segment", "method", "fieldtip", "market", "lineup"}
@@ -4556,6 +4556,71 @@ def check_all_kinds_reachable() -> int:
     tip = next(c for c in tools.KB.cards if c["_kind"] == "fieldtip")
     hit = "본부 공식 지침이 아닙니다" in tools._render_fieldtip(tip)
     print(f"{'✓' if hit else '✗'} fieldtip 근거에 '본부 지침 아님' 표시")
+    ok += hit
+    return ok
+
+
+def check_trigger_entrances() -> int:
+    """카드의 검색 입구(trigger_examples)가 목록 한 줄에 정보를 더하는가 (CLAUDE.md §3).
+
+    LLM 카드 목록 한 줄은 제목 뒤에 예상질문 2개까지만 싣는다(kb._card_line). 변환기가 첫
+    칸에 제목을 그대로 넣던 동안(2026-09-04 이전, 633장 중 388장) 정보 칸은 하나뿐이었고,
+    fieldtip 은 제목 하나뿐이었고, 절 자르기가 「1,800만원」의 쉼표에서 끊겨 팩트 11장의
+    입구가 「연간 납입한도는 1」로 잘렸다. 세 결함의 재발을 막는다.
+    """
+    import re
+    from pension_agent.knowledge.similarity import ngram_sim
+    ok = 0
+    cards = tools.KB.cards
+
+    # ① 제목을 예상질문 첫 칸에 중복해 싣지 않는다(pitch 는 원문 발화라 애초에 제목이 아니다).
+    dup = [c["id"] for c in cards
+           if (c.get("trigger_examples") or [""])[0] == (c.get("title") or c.get("label"))]
+    hit = not dup
+    print(f"{'✓' if hit else '✗'} 예상질문 첫 칸이 제목의 중복이 아니다"
+          + ("" if hit else f" — {dup[:3]} 외 {len(dup)}장"))
+    ok += hit
+
+    # ② 숫자 자릿수 쉼표에서 잘린 입구가 없다 — 본문 절이 숫자로 끝나면서 원문에서는 그 뒤에
+    #    ",digit" 이 이어지는 경우.
+    def body_of(c):
+        return " ".join(str(c.get(k) or "") for k in ("value", "situation", "action",
+                                                       "condition_text", "summary"))
+    cut = [(c["id"], t) for c in cards for t in (c.get("trigger_examples") or [])
+           if re.search(r"\d$", t) and (t + ",") in body_of(c)
+           and re.search(re.escape(t) + r",\d", body_of(c))]
+    hit = not cut
+    print(f"{'✓' if hit else '✗'} 숫자 사이 쉼표에서 잘린 예상질문이 없다"
+          + ("" if hit else f" — {cut[:2]}"))
+    ok += hit
+
+    # ③ 종류마다 제목과 뚜렷이 다른 입구가 있다(screen·channel 은 패턴이 제목을 품으므로 제외).
+    for kind in ("fact", "segment", "method", "procedure", "fieldtip", "market", "lineup"):
+        weak = [c["id"] for c in cards if c["_kind"] == kind
+                and not [e for e in (c.get("trigger_examples") or [])
+                         if ngram_sim(c.get("title") or "", e) <= 0.6]]
+        hit = not weak
+        print(f"{'✓' if hit else '✗'} {kind} — 제목 밖의 검색 단서가 전 카드에 있다"
+              + ("" if hit else f" — {weak[:3]} 외 {len(weak)}장"))
+        ok += hit
+
+    # ④ 보강표는 실재하는 카드만 가리키고, 그 카드의 주제어를 담는다(지어낸 입구 금지).
+    from scripts.kb_build import config as kb_config
+    from scripts.kb_build.build_kb import useful_trigger
+    by_id = {c["id"]: c for c in cards}
+    bad = [(cid, e[:20]) for cid, extras in kb_config.TRIGGER_EXTRA.items() for e in extras
+           if cid not in by_id or not useful_trigger(e, by_id[cid].get("title") or "")]
+    hit = not bad
+    print(f"{'✓' if hit else '✗'} TRIGGER_EXTRA 는 실재 카드의 주제어만 담는다"
+          + ("" if hit else f" — {bad[:3]}"))
+    ok += hit
+
+    # ⑤ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
+    card = next(c for c in cards if c["_kind"] == "method")
+    from pension_agent.consult_agent import kb as KBMOD
+    _, with_title = KBMOD.score_parts(card, utterance=card["title"])
+    hit = with_title >= 4.0
+    print(f"{'✓' if hit else '✗'} 제목 그대로의 질문이 n-gram 점수 상한을 받는다 ({with_title:.2f})")
     ok += hit
     return ok
 
@@ -5359,6 +5424,7 @@ def main() -> int:
         check_order_flipped()
         check_tool_loop()
         check_all_kinds_reachable()
+        check_trigger_entrances()
         check_atomic_spans()
         check_origin()
         check_plan_failure()

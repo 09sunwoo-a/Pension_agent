@@ -413,9 +413,11 @@ def score_parts(
 
     if utterance:
         utterance = _expand_synonyms(utterance)
-        topical_s += (
-            max((_sim(utterance, ex) for ex in pitch.get("trigger_examples", [])), default=0.0) * 4.0
-        )
+        # 제목도 예상질문과 같은 방식으로 잰다. 예전에는 변환기가 제목을 trigger_examples 첫
+        # 칸에 그대로 넣어 이 점수에 실렸는데, 그 칸은 LLM 카드 목록에서 정보를 더하지
+        # 못하는 중복이라 변환기에서 뺐다(build_kb.triggers_of). 폴백 점수는 여기서 지킨다.
+        entrances = list(pitch.get("trigger_examples") or []) + [pitch.get("title") or ""]
+        topical_s += max((_sim(utterance, ex) for ex in entrances if ex), default=0.0) * 4.0
         flat = re.sub(r"[^0-9a-zA-Z가-힣]", "", utterance)
         for kw in list(tags.get("topics", [])) + [pitch["title"]]:
             k = re.sub(r"[^0-9a-zA-Z가-힣]", "", kw)
