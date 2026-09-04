@@ -253,16 +253,40 @@ def current_trace_id() -> str | None:
     return _TRACE_ID.get()
 
 
-def tag(kind: str, value: Any) -> list[str]:
-    """«분류:값» 태그 한 장. 값이 없으면 빈 목록이라 아무것도 붙지 않는다.
-
-    꼴을 여기서 정하는 이유는 **진입점이 둘이기 때문**이다 — 브리핑과 대화 턴이 같은
-    고객을 다른 꼴로 적으면 대시보드에서 한 태그로 묶이지 않고, 그 어긋남은 화면에
-    «태그가 두 개 보인다»로만 나타나서 알아채기 어렵다.
-
-        tags=["consult", *observability.tag("고객", name)]
-    """
+def _tag(kind: str, value: Any) -> list[str]:
+    """«분류:값» 태그 한 장. 값이 없으면 빈 목록이라 아무것도 붙지 않는다."""
     return [f"{kind}:{value}"] if value else []
+
+
+def customer_ref(customer_id: str | None, name: str | None) -> dict:
+    """관측에 실을 «누구인가» — user_id·태그·메타데이터를 한 벌로 만든다.
+
+        who = observability.customer_ref(p.id, p.nm)
+        with observability.trace("briefing.generate", user_id=who["user_id"],
+                                 metadata=who["metadata"],
+                                 tags=["briefing", *who["tags"]]) as tr:
+
+    **user_id 에 이름을 함께 넣는 이유**는 대시보드의 Users 목록이 `userId` 문자열
+    하나만 보여주기 때문이다 — 이름을 담을 칸이 따로 없다. id 만 두면 목록이
+    `171203-4815062` 열두 줄이 되고, 누가 누구인지 매번 원장을 뒤져야 한다. id 를
+    떼지 않는 것은 그것이 안정된 식별자이고 동명이인이 갈려야 하기 때문이다.
+
+    **꼴을 여기서 정하는 이유는 진입점이 둘이기 때문**이다. 브리핑과 대화 턴이 같은
+    고객을 다른 꼴로 적으면 대시보드에서 두 사람으로 갈리는데, 그 어긋남은 화면에
+    «줄이 두 개 보인다»로만 나타나 알아채기 어렵다.
+
+    **`LANGFUSE_CAPTURE_CONTENT=0` 이면 이름을 뺀다.** 그 스위치는 «개인정보를 외부로
+    내보내지 않는다»는 약속이다. 본문만 가리고 이름을 user_id·태그로 내보내면 그
+    약속이 거짓이 되고, 그건 이 저장소가 가장 경계하는 실패다(루트 CLAUDE.md 절대규칙
+    1 — 표시가 거짓말하는 상태). id 는 남는다 — 그것 없이는 묶을 방법이 없다.
+    """
+    if not conf().capture_content:
+        name = None
+    label = f"{name}({customer_id})" if name and customer_id else (name or customer_id)
+    meta: dict[str, Any] = {}
+    _put_if(meta, "customer_id", customer_id)
+    _put_if(meta, "customer", name)
+    return {"user_id": label, "metadata": meta, "tags": _tag("고객", name)}
 
 
 # ─────────────────────────────────────────────────────────────

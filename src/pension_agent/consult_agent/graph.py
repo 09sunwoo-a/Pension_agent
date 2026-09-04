@@ -139,18 +139,15 @@ def ask(
     # 관측 트레이스 — 이 턴에서 나가는 LLM 호출(계획·판정·작성, 보통 4~7회)이 전부 이
     # 하나에 묶인다. 키가 없으면 통째로 꺼진다(observability). session_id 를 넘겨 같은
     # 상담의 턴들이 대시보드에서 한 줄로 이어지게 한다.
-    # user_id 는 **고객 id** 다. Langfuse 의 «user» 는 보통 최종 사용자를 뜻하지만, 여기서
+    # 관측의 «누구인가» — 고객이다. Langfuse 의 user 는 보통 최종 사용자를 뜻하지만,
     # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
-    # 진입점에 함께 있는 안정된 id 는 이것뿐이다. 직원 id 는 아직 진입점이 받지 않는다.
-    #
-    # 이름은 **태그로도** 싣는다. 사람은 KB-PIN(171203-4815062)이 아니라 이름(김서연)으로
-    # 기억하는데, id 로만 두면 대시보드에서 그 고객을 부르려고 매번 원장을 뒤져야 한다.
-    # 두 진입점이 같은 꼴로 붙여야 브리핑과 대화 턴이 한 태그로 묶인다.
-    name = _customer_name(customer_id)
+    # 진입점에 함께 있는 안정된 id 는 이것뿐이다(직원 id 는 아직 진입점이 받지 않는다).
+    # 표기 꼴은 브리핑 쪽과 어긋나면 안 되므로 `customer_ref` 한 곳이 정한다.
+    who = observability.customer_ref(customer_id, _customer_name(customer_id))
     with observability.trace(
-        "consult.turn", input=question, session_id=session_id, user_id=customer_id,
-        metadata={"customer_id": customer_id, "customer": name},
-        tags=["consult", *observability.tag("고객", name)],
+        "consult.turn", input=question, session_id=session_id,
+        user_id=who["user_id"], metadata=who["metadata"],
+        tags=["consult", *who["tags"]],
     ) as span:
         with progress.reporting(on_progress):
             out = _AGENT.invoke(
