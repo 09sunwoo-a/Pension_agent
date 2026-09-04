@@ -303,11 +303,19 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
 def _observe(name: str, started: float, prompt: str, system: str | None, max_tokens: int,
              temperature: float, x_client_user: str, *, meta: dict, output: str | None,
              error: str | None) -> None:
-    """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability)."""
+    """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability).
+
+    **system 이 있는 호출은 채팅 메시지 꼴로 싣는다.** Langfuse 는 `[{role, content}, …]`
+    를 대화로 알아보고 역할별로 갈라 렌더하지만, 그 밖의 dict 는 JSON 한 덩어리로
+    직렬화해 보여준다 — `\\n`·`\\"` 가 이스케이프된 채 한 칸에 들어차서 프롬프트를 읽을
+    수 없다. 대시보드에서 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
+    system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
+    """
     observability.record_generation(
         name,
         model=meta.get("model") or _default_model_label(),
-        input={"system": system, "prompt": prompt} if system else prompt,
+        input=([{"role": "system", "content": system},
+                {"role": "user", "content": prompt}] if system else prompt),
         output=output,
         usage=meta.get("usage"),
         start=started,
