@@ -1,15 +1,28 @@
-"""대표 질문 11개 — 실 LLM 으로 한 번 돌려 **답변과 트레이스를 나란히** 본다.
+"""대본을 실 LLM 으로 한 번 돌려 **답변과 트레이스를 나란히** 본다.
 
     cd src
-    python -m tests.debug.reps              # 전체 (답변 + 근거 + 트레이스)
-    python -m tests.debug.reps --brief      # 요약표만 — 이것만 붙여넣어도 진단이 된다
-    python -m tests.debug.reps 4 7          # 케이스 골라서
-    python -m tests.debug.reps --demo       # 시연 대본 순서대로 (docs/DEMO_SCENARIO.md)
-    python -m tests.debug.reps --demo --debug   # 대본 + 재료→답변 로그 (시연에서 띄울 것)
-    python -m tests.debug.reps --demo --time    # + 턴별 소요 시간 (리허설 진단용 — 시연에서는 끈다)
-    python -m tests.debug.reps --scenario           # 고객별 대표 시나리오 5종 전부
-    python -m tests.debug.reps --scenario 김서연     # 이름(또는 번호)으로 골라서 — 옵션은 --demo 와 동일
-    python -m tests.debug.reps --final              # 중간점검 시연 확정본 (docs/DEMO_FINAL.md — 기획자 확정 3고객 + 이벤트 턴)
+    python -m tests.debug.reps --help       # 대본·옵션 전부
+
+**인자는 두 축뿐이다** — 첫째는 «어떤 대본을 도나»(위치 인자 하나), 둘째는 «얼마나 보여
+주나»(`--` 옵션). 예전에는 대본도 `--demo`·`--scenario`·`--final` 이라 옵션처럼 생겼는데
+셋은 함께 쓸 수 없는 배타 선택이었고, 표시 옵션과 한 줄에 섞여 어느 것이 무엇인지 갈리지
+않았다. 지금은 대본이 이름이다.
+
+    python -m tests.debug.reps                     # cases — 검토 11케이스 (기본)
+    python -m tests.debug.reps cases 4 7           # 케이스 골라서
+    python -m tests.debug.reps demo                # 전체 시연 대본  (docs/DEMO_SCENARIO.md)
+    python -m tests.debug.reps library 김서연       # 시나리오 라이브러리 (docs/DEMO_CUSTOMER_SCENARIOS.md)
+    python -m tests.debug.reps review              # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
+    python -m tests.debug.reps review@v5 이수민     # 그 판으로 · 고객 골라서
+    python -m tests.debug.reps --versions          # 중간점검본 판 이력
+    python -m tests.debug.reps --diff v5 v6        # 두 판의 질문 차이와 바꾼 이유
+
+표시 옵션(겹쳐 쓸 수 있다): `--brief` 요약표만 · `--why` 턴마다 «무엇을 찾아봤나 → LLM 이
+썼다» · `--show-llm` 폐기된 생성문까지(`--why` 를 켠다) · `--time` 턴별 소요 시간.
+
+`--why` 는 예전 이름이 `--debug` 였다. 같은 이름이 `python -m tests.debug` 에서는 **전체
+트레이스**(노드·게이트 트리)를 뜻해 두 CLI 에서 다른 것을 가리켰다 — 이름이 같으면 뜻도
+같아야 한다. `--show-llm`(폐기된 생성문)은 두 CLI 에서 뜻이 같아 이름을 그대로 둔다.
 
 왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
 이어진다(멀티턴 재현이 목적이다). 대표 질문 11개는 서로 독립이어야 하므로 케이스마다
@@ -26,9 +39,9 @@
 (회귀는 `tests/test_consult_agent.py` 가 이미 315건 재고 있다). 여기는 사람이 읽고
 판단하는 자리라, 요약표는 «무엇이 일어났나»만 찍는다.
 
-`--demo` 는 검토가 아니라 **리허설**이다. `docs/DEMO_SCENARIO.md` 의 대본을 그 순서로,
-고객 블록마다 한 세션으로 돌린다 — 후속 질문(T2·T3b·T8b·T11b)이 앞 턴을 이어받아야
-대본대로이기 때문이다. 화면에 나가는 것만 보여주고, `--debug` 를 붙이면 턴마다
+`cases` 말고 셋(`demo`·`library`·`review`)은 검토가 아니라 **리허설**이다. 문서의 대본을
+그 순서로, 고객 블록마다 한 세션으로 돌린다 — 후속 질문(T2·T3b·T8b·T11b)이 앞 턴을
+이어받아야 대본대로이기 때문이다. 화면에 나가는 것만 보여주고, `--why` 를 붙이면 턴마다
 **어떤 재료가 들어가서 LLM 이 뭐라고 썼는지**를 짧게 붙인다(`_log`) — 시연에서 «지어낸 게
 아니다»를 보여주는 자리다. 검토용의 전체 트레이스(노드·게이트 트리)는 진단 도구라
 청중에게 띄울 것이 아니다.
@@ -50,205 +63,19 @@ import pathlib
 import shutil
 import sys
 import tempfile
+import textwrap
 import time
 import unicodedata
 from contextlib import contextmanager
 
 from pension_agent import config
 from pension_agent import llm as LLM
+from tests.debug import scenarios as SCEN
 from tests.debug import trace as TR
 from tests.debug.runner import session
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
-
-
-#: (번호, 무엇을 보나, 고객, 질문들). 고객 id 는 `strategy_agent/customers.json` 의 9케이스.
-CASES: tuple[tuple[int, str, str | None, tuple[str, ...]], ...] = (
-    (1, "단일 도구 — fact 한 번으로 끝나나 (기준선)",
-     None, ("IRP 세액공제 한도가 얼마야?",)),
-
-    (2, "단일 도구 — screen 을 고르나 · 화면 연계 제안이 붙나",
-     None, ("IRP 계좌 해지는 몇 번 화면에서 하지?",)),
-
-    (3, "단일 도구 — channel(비대면) 과 screen(단말) 을 갈라 보나",
-     None, ("고객이 스타뱅킹에서 직접 추가납입 하려면 어디로 들어가?",)),
-
-    (4, "복합 — 고객 재료 + 화법. 성향-운용 불일치(공격투자형인데 예금 92%)",
-     "181245-3097614", ("이 고객 예금만 들고 있는데 뭐라고 말해야 하지?",)),
-
-    (5, "복합 — suitable(적합성 범위) 을 부르나. 특정 상품을 짚되 권유 표현 없이 답하나 (gap 27)",
-     "165932-8741205", ("이 고객한테 뭘 추천해주면 좋을까?",)),
-
-    (6, "복합 — 빗나가도 다른 도구로 갈아타나 (gap 23 · plan_misses/plan_retry)",
-     "162754-9483106", ("이 고객은 왜 관리 대상으로 뜬 거야?",)),
-
-    (7, "후속 질문 — 2턴째가 1턴 맥락을 이어받나 (gap 1·21)",
-     "198734-1205842", ("이 고객 만기 언제야?", "그냥 두면 어떻게 돼?")),
-
-    (8, "모호 — 답 대신 되묻나. 되묻기 턴에 근거가 붙나 (gap 22)",
-     None, ("수수료 얼마야?",)),
-
-    (9, "지식베이스 밖 — 지어내지 않고 없다고 하나 (재료 0건 경로)",
-     None, ("타행 IRP 수수료는 우리보다 싼가?",)),
-
-    (10, "가드·반론 — 고객 대사에 화법으로 답하고 하지 말 것이 걸리나 (§8)",
-     "188406-7352194", ("고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",)),
-
-    (11, "제안·연계 — outreach 재료를 다룬 턴에 «발송 화면 열까요?»가 붙고, 승낙 턴이 딥링크·문구를 주나 (§10)",
-     "188406-7352194", ("이 고객한테 안내할 만한 이벤트나 세미나 있어?", "응, 열어줘")),
-)
-
-
-#: 시연 대본 — `docs/DEMO_SCENARIO.md`. 고객 블록마다 한 세션이므로 블록 안에서는 맥락이
-#: 이어진다(T2 는 T1 을, T3b 는 T3 을 이어받는다). 블록이 갈리는 자리가 곧 시연에서
-#: 「고객 화면을 바꾸는」 자리다.
-DEMO: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
-    (0, "0막 기본기 — 출처 · 후속 질문 · 화면 연계", None, (
-        ("T1",  "IRP 세액공제 한도가 얼마야?"),                       # 근거가 있다
-        ("T2",  "총급여 6천만원이면 얼마 돌려받아?"),                  # 맥락을 이어받는다
-        ("T3",  "IRP 계좌 해지는 몇 번 화면에서 하지?"),               # 연계 제안
-        ("T3b", "응, 열어줘"),                                         # 딥링크
-    )),
-    (1, "1~2막 상담 전·중 — 송도윤(방치현금 54% · ISA 만기 · 322일 미접촉)",
-     "188406-7352194", (
-        ("T4",  "이 고객 왜 관리 대상이야?"),                          # 타겟 근거
-        ("T5",  "지난번엔 무슨 얘기 했지?"),                            # 상담 이력
-        ("T6",  "이 고객한테 하면 안 되는 게 뭐야?"),                   # 금지·주의
-        ("T7",  "고객이 '그 돈 그냥 둬도 되지 않나요' 하는데 뭐라고 하지?"),   # 반론 대응
-        ("T8",  "수수료 얼마야?"),                                     # 되묻기
-        ("T8b", "사용자부담금(퇴직금), 대면이요"),                     # 되물은 선택지를 고른다 —
-        # 이 고객 원장과 맞는 갈래다(퇴직급여 5.2억 · 개인부담금 0원). 가입자부담금을 고르면
-        # 이후 턴이 «이 고객은 가입자부담금 계좌»라고 원장에 없는 속성을 굳힌다(3차 리허설).
-        ("T9",  "우리 수수료가 얼마고, 증권사는 무료라는데 뭐라고 답하지?"),   # 복합 — 핵심
-        ("T10", "그럼 이 고객한테 뭘 권할 수 있어?"),                   # 적합성 «범위»
-        # 실화면에서는 추천 질문 칩이다(suggest.outreach_chips — 종류는 오늘 날짜의 계산값.
-        # 8/24 고정에서 송도윤은 이벤트·세미나). 답변이 콘텐츠 이름을 인용해야 «발송 화면 열까요?»가
-        # 붙는다(act._propose_lms 조건 ③) — 안 붙으면 T11b 가 공중에 뜬다.
-        ("T11", "이 고객한테 안내할 만한 이벤트나 세미나 있어?"),
-        ("T11b", "응, 열어줘"),                                       # 발송 화면 딥링크 + 문구
-        ("T12", "타행 IRP 수수료는 우리보다 싼가?"),                    # 없다고 말한다
-    )),
-    (2, "3막 대조 — 정민석(공격투자형인데 원리금보장 100%)",
-     "181245-3097614", (
-        ("T13", "이 고객한테는 뭘 권할 수 있어?"),                      # 같은 질문, 다른 답
-    )),
-)
-
-
-#: 고객별 대표 시나리오 — `docs/DEMO_CUSTOMER_SCENARIOS.md`. 고객마다 한 세션이라 블록
-#: 안에서는 맥락이 이어진다(K4 는 K3 의 되묻기에 답하는 턴이다). 실행 경로·화면은 --demo
-#: 리허설과 같고, 도는 목록만 다르다. 골라 돌리기: `--scenario 김서연` / `--scenario 1 5`.
-SCENARIOS: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
-    (1, "김서연 — 타행 ISA 8,000만원 · 되묻기 (골든 케이스 01)", "171203-4815062", (
-        ("K1", "이 고객 어떤 상황이야?"),
-        ("K2", "ISA 만기자금을 IRP로 옮기면 뭐가 좋아?"),
-        ("K3", "고객이 8천만원 전부는 부담스럽다는데, 일부만 옮기면 세액공제는 어떻게 돼?"),
-        # ↑ 핵심 장면 — 공제율이 갈리는 미확인 값(총급여 구간)을 답 대신 되묻는다
-        # 되물은 갈래를 고르는 답은 **금액 없이** 쓴다. `tax_credit` 는 계획 LLM 의 질의가
-        # 아니라 직원이 친 말에서 금액을 뽑으므로(tools._tax_credit 머리말), "5,500만원
-        # 초과야"라고 쓰면 그 5,500만원을 «추가 납입액»으로 읽는다.
-        ("K4", "초과야"),
-        ("K5", "입금은 몇 번 화면에서 해?"),
-        ("K5b", "응, 열어줘"),                                  # 화면 연계 승낙 → 딥링크
-    )),
-    (2, "박정호 — 퇴직금 1.5억 통장 수령 · 순서 경고 (골든 케이스 03)", "168450-7293815", (
-        # P1 은 세션 저장소에 8/20 기록이 있어야 성립한다 — 없으면 칩도 재료도 0건이다
-        # (scripts/seed_sessions.py). 실화면에서는 타이핑하지 말고 추천 질문 칩을 누른다.
-        ("P1", "지난 상담에서 무슨 얘기 했지?"),
-        ("P2", "퇴직금을 이미 통장으로 받았다는데, 지금이라도 IRP로 되돌릴 수 있어?"),
-        ("P3", "절차가 어떻게 돼? 서류는 뭐가 필요해?"),
-        # P3 이 화면번호를 인용하면 연계 제안이 붙고, P4 는 승낙이 아니라 새 질문이라
-        # 그 제안이 무효가 된다(기준서 §10). 정상 동작이다 — 딥링크는 K5b 에서 본다.
-        # ↓ 핵심 장면 — 환급 완료 전 지급·연금설계 등록 제한과의 선후 충돌을 먼저 세운다.
-        # 「권할까?」였을 때는 계획이 화법 축으로만 가서(customer → playbook → pitch) 순서
-        # 경고가 든 카드 둘(fact.k04.f47 · proc.043)이 원장에 없었다 — 답변이 그 얘기를 할
-        # 수 없었다. 「걸리는 거 없어?」가 계획을 제약 확인 축으로 돌린다. 환급·과세이연을
-        # 직원이 먼저 말하지 않으므로 찾아내는 것은 여전히 에이전트 몫이다.
-        ("P4", "이 고객 연금개시 요건도 충족했던데, 개시까지 같이 진행하면 걸리는 거 없어?"),
-    )),
-    # 이수민은 **날짜를 탄다** — 만기 2026-09-26 이고 만기 요건(mat)은 30일 전부터 선다.
-    # tests/__init__.py 의 고정값(2026-08-24)은 D-33 이라 요건이 안 서고, L1·L2 가 「만기
-    # 임박」·「지금이 그 구간」을 말하지 못한다. PENSION_TODAY=2026-09-01 이상으로 돈다.
-    (3, "이수민 — 만기 임박 · 디폴트옵션 미등록 (골든 케이스 05)", "175926-3048171", (
-        ("L1", "이 고객 왜 관리 대상이야?"),
-        ("L2", "만기 전에 미리 정해둘 방법 있어?"),
-        ("L3", "디폴트옵션을 등록하면 지금 있는 현금 1,000만원도 자동으로 굴러가?"),
-        # ↑ 핵심 장면 — 등록만으로 기존 현금성자산은 이동하지 않는다(교체매매 세트)
-        ("L4", "고객이 원치 않는 상품에 강제 가입되는 거 아니냐고 하면?"),
-        ("L4b", "네"),          # 고객 상태에 걸린 화법 제안을 승낙 → 화면 ⑥⑦⑧ 의 나머지 후보
-        ("L5", "300만원 더 넣으면 얼마 돌려받아?"),             # 계산기 — 잔여한도 900만·납입 0
-    )),
-    (4, "송도윤 — 복합 3종 · 10개월 전 기록이 명분 (기존 9케이스)", "188406-7352194", (
-        ("S1", "이 고객 왜 관리 대상이야?"),
-        ("S2", "지난 상담에서 무슨 얘기 했지?"),                # 실화면에서는 추천 질문 칩
-        ("S3", "고객이 '그 돈 그냥 둬도 되지 않나요' 하는데 뭐라고 하지?"),
-        ("S4", "그럼 이 고객한테 뭘 권할 수 있어?"),
-        # S5 도 실화면에서는 칩이다(suggest.outreach_chips) — 직원은 지금 어떤 세미나가
-        # 열려 있는지 모르면 물어볼 생각조차 못 하므로 칩이 떴다는 것 자체가 알림이다.
-        ("S5", "이 고객한테 안내할 만한 이벤트나 세미나 있어?"),   # 칩 문구 그대로
-        # 승낙해도 나가는 것은 **발송 화면 딥링크와 넣을 문구**뿐이다. 보낼지는 직원이 그
-        # 화면에서 정한다(기준서 §10 — 되돌릴 수 없는 대외 행위는 수행하지 않는다).
-        ("S5b", "네"),
-        ("S6", "타행 IRP 수수료는 우리보다 싼가?"),             # 없는 것은 없다고 한다
-    )),
-    (5, "정민석 — 같은 질문, 다른 답 (기존 9케이스)", "181245-3097614", (
-        ("J1", "이 고객한테 뭘 권할 수 있어?"),                 # 핵심 장면 — S4 직후의 대비축
-        ("J2", "고객이 원금 잃는 건 싫다는데, 그래도 권해야 해?"),
-        ("J3", "예금만 하겠다는 고객, 뭐라고 설득하지?"),
-    )),
-)
-
-
-#: 중간점검 시연 확정본 — `docs/DEMO_FINAL.md`. 기획자가 `SCENARIOS` 에서 세 고객을 추려
-#: 문구·순서를 확정한 ①~⑧ 에, 안내 콘텐츠 → 발송 화면 연계(E1·E2)를 김서연 뒤에 더한
-#: 것이다. 번호는 기획자 문서의 것을 그대로 쓴다(E 는 이 저장소가 더한 턴). 실행 경로·
-#: 화면은 --demo 와 같다. 골라 돌리기: `--final 이수민` / `--final 2 3`.
-FINAL: tuple[tuple[int, str, str | None, tuple[tuple[str, str], ...]], ...] = (
-    (1, "김서연 — 제도 적용 (타행 ISA 8,000만원 만기 예정)", "171203-4815062", (
-        # ① 은 브리핑 확정본(Case 01 S2·S4)이 이미 60일·300만원·일부 전환을 말하고 있어
-        # 겹치지 않는 질문으로 바꿨다(2026-09-03) — 중도인출 사유·세율은 브리핑에 없다.
-        ("①", "고객이 IRP에 넣으면 55세까지 못 빼는 거 아니냐고 걱정하는데, 중간에 뺄 수 있어?"),
-        ("②", "8천만원 전부는 부담스럽다는데, 일부만 옮겨도 돼?"),
-        # ↑ 공제율이 갈리는 총급여 구간을 되물을 수 있다 — 되물으면 E1 로 넘어가기 전에
-        # 「초과야」로 닫는다(DEMO_FINAL.md — 금액을 붙이면 계산기가 납입액으로 읽는다). 여기서는 다음 질문으로 바로 간다.
-        # 실화면에서는 안내 콘텐츠 칩(suggest.outreach_chips — 김서연은 이벤트만 걸린다, 8/24·9/2
-        # 모두 같다). 답변이 이벤트 이름을 인용해야 «발송 화면 열까요?»가 붙는다(act._propose_lms ③).
-        ("E1", "이 고객한테 안내할 만한 이벤트 있어?"),
-        ("E2", "응, 열어줘"),                                          # 발송 화면 딥링크 + 문구
-    )),
-    (2, "이수민 — 상담 판단 및 화법 (예금 7,000만원 만기 + 현금성 1,000만원 대기)", "175926-3048171", (
-        # ③ 은 브리핑 확정본(Case 05 S3)이 상품 실명까지 세워 둔 자리라 겹치지 않는 질문으로
-        # 바꿨다(2026-09-03). 처음 바꾼 「국민은행의 디폴트옵션 수익률 얼마나 나오냐」는 계획이
-        # lineup 만 불러 9종 표를 받고 되묻기(위험등급 3개 선택지)로 끝났다(같은 날 실측) —
-        # 타행 비교로 다시 바꿨다. 재료는 fact.k04.f60·f61(타행 대비 수익률, 26.1Q).
-        ("③", "고객이 다른 은행 대비 국민은행 개인형 IRP 수익률 얼마냐고 물어보시는데"),
-        ("④", "고객이 '그 돈 그냥 둬도 되지 않나요?' 하는데 뭐라고 하지?"),
-        ("⑤", "디폴트옵션 등록하면 지금 있는 1,000만원도 알아서 굴러가?"),
-        # ↑ 등록만으로 기존 현금성자산은 이동하지 않는다 — 교체매매 세트(방법론 83)
-    )),
-    (3, "박정호 — 상담기억에서 업무 실행까지 (퇴직급여 1.5억 일반계좌 수령)", "168450-7293815", (
-        ("⑥", "지난 상담에서 무슨 얘기 했지?"),                    # 실화면에서는 추천 질문 칩
-        # 기획자 확정본은 「다시 IRP로 되돌릴 수 있어?」였다 — ⑥ 맥락에 기대 퇴직금·통장을
-        # 뺀 문구인데, 계획이 «되돌리다»를 계좌 이전으로 읽어 proc.053(신규 개설 vs 계약이전
-        # 가입일 승계)로 되물으며 끝났다(2026-09-03 실측). 어느 갈래를 골라도 60일 재입금
-        # 답에 닿지 않는다. 대상을 문구에 되살린다(라이브러리 P2 와 같은 뜻, A 등급 실측).
-        # ⑦ 은 두 번 바뀌었다. 확정본 「다시 IRP로 되돌릴 수 있어?」가 proc.053 으로 되물으며
-        # 끝나 「통장으로 받은 퇴직금, 지금이라도 IRP로 되돌릴 수 있어?」로 고쳤고(2026-09-03
-        # 실측 A 등급), 그 답(60일 재입금·환급)이 브리핑 확정본 Case 03 S2·S4 와 그대로 겹쳐
-        # 다시 바꿨다 — 재취업 예정 고객의 계좌 3단 분리(m.096)는 브리핑 S2 가 «재취업 예정이
-        # 있는지» 확인 항목으로만 두고 답이 없다. 60일·환급·과세이연 절차는 브리핑 화면이 말한다.
-        ("⑦", "고객이 재취업 예정이래. 계좌는 어떻게 나눠 두는 게 좋아?"),
-        # ⑧ 「과세이연 등록은 어떻게 해?」(proc.041 — 5단계 + 화면번호)는 브리핑 확정본 Case 03
-        # S3·S5 가 같은 5단계와 화면 4개를 그대로 보여주고 있어 뺐다(2026-09-03). 라이브러리
-        # P3 에 남아 있다.
-        # 상담 마무리 — 이번 세션의 대화(transcript 도구)를 요약하고, 코드가 머리말·고객 주요
-        # 정보 표를 붙여 쪽지 본문으로 만든 뒤(memo.compose) 「쪽지로 보낼까요?」를 붙인다
-        # (act._propose_memo). 승낙하면 본인 쪽지함으로 보내고 한 줄로 답한다(연동 전 스텁).
-        ("M1", "대화 내용 요약해서 쪽지로 보내줘"),
-        ("M2", "응, 보내줘"),
-    )),
-)
 
 
 def _tools(turn: TR.Turn) -> str:
@@ -434,31 +261,183 @@ def _print_source_line(s: dict) -> None:
         print(line)
 
 
-def main(argv: list[str]) -> int:
-    """검토(`CASES`)와 리허설(`--demo`)이 **같은 실행 경로**를 쓰고 화면만 갈린다 —
-    리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
-    demo = "--demo" in argv
-    scenario = "--scenario" in argv
-    final = "--final" in argv
-    brief = "--brief" in argv
-    debug = "--debug" in argv
-    show_llm = "--show-llm" in argv
-    timing = "--time" in argv
-    picked = {a for a in argv if a[0].isdigit()}
-    #: --scenario · --final 에서만 쓴다 — 고객 이름으로 블록을 고른다(`--scenario 김서연 정민석`).
-    names = {a for a in argv if not a.startswith("--") and not a[0].isdigit()}
+#: 대본 이름 → (도는 목록, 문서). `review` 는 판이 있어 목록을 그때 만든다(`SCEN.review_blocks`).
+SCRIPTS: dict[str, tuple[object, str]] = {
+    "cases":   (SCEN.CASES,   "(문서 없음 — 케이스마다 `sees` 한 줄이 존재 이유다)"),
+    "demo":    (SCEN.DEMO,    "docs/DEMO_SCENARIO.md"),
+    "library": (SCEN.LIBRARY, "docs/DEMO_CUSTOMER_SCENARIOS.md"),
+    "review":  (None,         "docs/DEMO_REVIEW.md"),
+}
 
-    unknown = [a for a in argv if a.startswith("--")
-               and a not in ("--demo", "--scenario", "--final", "--brief", "--debug",
-                             "--show-llm", "--time")]
+DISPLAY_FLAGS = ("--brief", "--why", "--show-llm", "--time")
+
+#: 대본마다 «리허설에서 볼 것». 요약표 아래에 그대로 찍는다 — 표만 보고는 무엇이
+#: 어긋난 것인지 알 수 없어서다. `review` 것은 **지금 판**(`SCEN.LATEST`) 기준이다.
+CHECKS: dict[str, tuple[str, ...]] = {
+    "review": (
+        "  리허설에서 볼 것: ① 이 중도인출 사유와 세율(16.5%)로 답하는가 ·",
+        "                    ② 가 되묻기로 끝나는가(끝나면 「초과야」로 닫는다) ·",
+        "                    E1 에 «발송 화면 열까요?»가 붙고 E2 가 딥링크·문구를 주는가 ·",
+        "                    ③ 이 타행 대비 당행 IRP 수익률(26.1Q)을 기준시점·«1위»의 한정과 함께 말하는가 ·",
+        "                    ④ 가 «예금으로 두겠다»는 반론에 예금 편중 대비 화법으로 답하는가 ·",
+        "                    ⑤ 가 «이동하지 않는다»로 답하는가 · ⑦ 이 계좌 3단 분리로 답하는가 ·",
+        "                    M1 이 코드블록 안에 머리말(박정호 고객님·날짜) → ⑥⑦ 요약 항목 → [고객 주요 정보] 표로 나오고",
+        "                    코드블록 밖에 «쪽지로 보낼까요?»가 붙는가 · 항목 줄 아닌 도입 문장이 본문에 없는가 ·",
+        "                    M2 가 «쪽지를 보냈어요 — 받는 사람: 본인.» 한 줄로 끝나는가(본문 반복 없음).",
+        "  ※ 이수민은 PENSION_TODAY=2026-09-01 이상이라야 만기 요건이 선다.",
+    ),
+    "library": (
+        "  리허설에서 볼 것: K3 이 되묻기로 끝나는가 · K5b 가 딥링크를 주는가 ·",
+        "                    P4 도구 줄에 procedure·fact 가 찍히고 순서 경고를 세우는가 ·",
+        "                    L3 이 «이동하지 않는다»로 답하는가 ·",
+        "                    L4b 가 화법 제안을 승낙받아 카드를 보여주는가 ·",
+        "                    S2 가 10개월 전 기록을 꺼내는가 · S5b 가 발송 «화면»을 여는가 ·",
+        "                    S6 이 «없다»로 끝나는가 · J1 이 S4 와 같은 질문에 다른 답을 내는가.",
+        "  ※ 이수민(3번)은 PENSION_TODAY=2026-09-01 이상이라야 만기 요건이 선다.",
+    ),
+    "demo": (
+        "  리허설에서 볼 것: T9 가 도구를 여러 개 부르는가 · T10 이 suitable 을 부르는가 ·",
+        "                    T3 에 연계가 붙는가 · T11 에 «발송 화면 열까요?»가 붙는가 ·",
+        "                    T12 가 «없다»로 끝나는가 ·",
+        "                    T9 가 «비대면 전환 시 면제»(F53)를 대면 0.38% 와 모순 없이 잇는가.",
+    ),
+}
+
+#: 예전 이름 → 지금 이름. 그냥 «모르는 옵션»으로 끊으면 어디로 갔는지 알 수 없다.
+RENAMED = {
+    "--demo": "대본 이름 demo",
+    "--scenario": "대본 이름 library",
+    "--final": "대본 이름 review",
+    "--debug": "--why  (전체 트레이스를 뜻하는 `python -m tests.debug --debug` 와 갈랐다)",
+}
+
+
+def _usage() -> None:
+    print("""사용법: python -m tests.debug.reps [대본[@판]] [고객명·번호 …] [표시옵션 …]
+
+  대본 — 하나만 고른다 (없으면 cases)
+    cases              검토 11케이스. 케이스마다 새 세션 · 전체 트레이스를 붙인다
+    demo               전체 시연 대본            docs/DEMO_SCENARIO.md
+    library            고객별 시나리오 5종        docs/DEMO_CUSTOMER_SCENARIOS.md
+    review             중간점검 시연본 지금 판     docs/DEMO_REVIEW.md
+    review@v3          중간점검본의 그 판
+
+  골라 돌리기 — 블록 번호나 고객 이름을 뒤에 붙인다
+    cases 4 7 · library 김서연 정민석 · review 이수민
+
+  표시옵션 — 겹쳐 쓸 수 있다
+    --brief            요약표만 (붙여넣기 좋은 형태)
+    --why              턴마다 «무엇을 찾아봤나 → LLM 이 몇 자 썼나»
+    --show-llm         폐기된 생성문까지 (--why 를 함께 켠다)
+    --time             턴별 소요 시간 (리허설 진단용 — 시연에서는 끈다)
+
+  중간점검본의 판
+    --versions         판 이력 — 무엇을 왜 바꿨나
+    --diff [판] [판]    두 판의 질문 차이 (생략하면 직전 판과 지금 판)""")
+
+
+def _print_versions() -> int:
+    print(f"\n중간점검 시연본 판 이력 — 지금 도는 판은 {SCEN.LATEST} "
+          f"({SCRIPTS['review'][1]})\n")
+    for v in SCEN.REVIEW:
+        turns = sum(len(b[3]) for b in SCEN.review_blocks(v.name))
+        print(f"  {v.name}  {v.date}  {v.summary}")
+        print(f"       턴 {turns}개" + (f" · 직전 판에서 {len(v.edits)}건 바꿈" if v.edits else ""))
+    print(f"\n  무엇을 왜 바꿨는지: python -m tests.debug.reps --diff "
+          f"{SCEN.REVIEW[-2].name if len(SCEN.REVIEW) > 1 else SCEN.LATEST} {SCEN.LATEST}")
+    print(f"  그 판으로 돌리기:   python -m tests.debug.reps review@{SCEN.REVIEW[0].name}")
+    return 0
+
+
+def _print_diff(older: str, newer: str) -> int:
+    names = SCEN.version_names()
+    lo, hi = sorted((names.index(older), names.index(newer)))
+    print(f"\n중간점검 시연본 — {names[lo]} → {names[hi]}\n")
+    if lo == hi:
+        print("  같은 판입니다.")
+        return 0
+    for v in SCEN.REVIEW[lo + 1:hi + 1]:
+        before = SCEN.questions_of(names[names.index(v.name) - 1])
+        print(f"  {v.name}  {v.date}  {v.summary}")
+        for e in v.edits:
+            print(f"    [{e.op}] {e.label}")
+            if e.op in ("고침", "뺌"):
+                print(f"       전: {before.get(e.label, '(없음)')}")
+            if e.op in ("고침", "더함"):
+                print(f"       후: {e.question}")
+            for i, line in enumerate(textwrap.wrap(e.why, 76)):
+                print(("       왜: " if i == 0 else "           ") + line)
+        print()
+    print(f"  {names[hi]} 의 질문 구성")
+    for _, sees, _, turns in SCEN.review_blocks(names[hi]):
+        print(f"    {sees}")
+        for label, question in turns:
+            print(f"      {label}  {question}")
+    return 0
+
+
+def _versions_in(argv: list[str]) -> list[str]:
+    return [a for a in argv if a in SCEN.version_names()]
+
+
+def main(argv: list[str]) -> int:
+    """검토(`cases`)와 리허설(나머지 셋)이 **같은 실행 경로**를 쓰고 화면만 갈린다 —
+    리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
+    if "-h" in argv or "--help" in argv:
+        _usage()
+        return 0
+
+    if "--versions" in argv:
+        return _print_versions()
+
+    if "--diff" in argv:
+        picked_versions = _versions_in(argv)
+        if len(picked_versions) > 2:
+            print(f"--diff 는 판 둘까지입니다: {' '.join(picked_versions)}")
+            return 1
+        every = SCEN.version_names()
+        older, newer = {
+            0: (every[-2] if len(every) > 1 else every[0], SCEN.LATEST),
+            1: (picked_versions[0] if picked_versions else "", SCEN.LATEST),
+            2: tuple(picked_versions[:2]),
+        }[len(picked_versions)]
+        return _print_diff(older, newer)
+
+    flags = [a for a in argv if a.startswith("-")]
+    renamed = [a for a in flags if a in RENAMED]
+    if renamed:
+        print("이름이 바뀐 옵션입니다:")
+        for a in renamed:
+            print(f"  {a}  →  {RENAMED[a]}")
+        print()
+        _usage()
+        return 1
+    unknown = [a for a in flags if a not in DISPLAY_FLAGS]
     if unknown:
-        print(f"모르는 옵션입니다: {' '.join(unknown)}")
-        print("  옵션: --demo · --scenario [고객명·번호] · --final [고객명·번호] · --brief · "
-              "--debug · --show-llm · --time · 케이스 번호")
+        print(f"모르는 옵션입니다: {' '.join(unknown)}\n")
+        _usage()
         return 1
-    if demo + scenario + final > 1:
-        print("--demo · --scenario · --final 은 함께 쓸 수 없습니다 — 도는 대본이 다릅니다.")
+
+    brief = "--brief" in argv
+    show_llm = "--show-llm" in argv
+    why = "--why" in argv or show_llm       # 폐기 생성문은 그 로그 안에 붙는다
+    timing = "--time" in argv
+
+    # 첫 위치 인자가 대본 이름이면 그것이 대본이고, 아니면 cases 다. 나머지 위치 인자는
+    # 블록을 고르는 값(번호 또는 고객 이름)이다.
+    positional = [a for a in argv if not a.startswith("-")]
+    script, version = "cases", ""
+    if positional and positional[0].partition("@")[0] in SCRIPTS:
+        script, _, version = positional.pop(0).partition("@")
+    if version and script != "review":
+        print(f"판(@{version})은 review 에만 있습니다 — {script} 는 판이 없는 대본입니다.")
         return 1
+    if version and version not in SCEN.version_names():
+        print(f"그런 판이 없습니다: {version}  (있는 판: {' · '.join(SCEN.version_names())})")
+        return 1
+
+    picked = {a for a in positional if a[0].isdigit()}
+    names = {a for a in positional if not a[0].isdigit()}
 
     if not LLM.available():
         print("LLM 이 설정돼 있지 않습니다 — 이 스크립트는 실 LLM 으로 도는 것이 목적입니다.")
@@ -467,32 +446,44 @@ def main(argv: list[str]) -> int:
         print("  anthropic: ANTHROPIC_API_KEY")
         return 1
 
-    # 모드의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
-    # 트레이스를 기본으로 붙이는가. --scenario · --final 은 도는 목록만 다르고 화면·실행
-    # 경로는 --demo 리허설과 같다 — 다른 경로로 돌면 시연을 예행한 것이 아니다.
-    blocks = FINAL if final else SCENARIOS if scenario else DEMO if demo else CASES
-    scenario = scenario or final      # 블록 고르기(이름·번호)는 둘이 같다
-    demo = demo or scenario
-    trace_by_default = not demo
+    # 대본의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
+    # 트레이스를 기본으로 붙이는가. 리허설 셋은 도는 목록만 다르고 화면·실행 경로가 같다 —
+    # 다른 경로로 돌면 시연을 예행한 것이 아니다.
+    blocks = SCEN.review_blocks(version or None) if script == "review" else SCRIPTS[script][0]
+    rehearsal = script != "cases"     # cases 만 라벨 없는 독립 케이스다
+    trace_by_default = not rehearsal
+
+    # 아무 블록도 못 고른 값은 여기서 끊는다 — 그냥 두면 대본을 오타 냈을 때(`revew`) 그
+    # 문자열이 «고객 이름»으로 읽혀 한 블록도 안 돌고 빈 요약표만 나온다.
+    missed = ([p for p in picked if not any(str(b[0]) == p for b in blocks)]
+              + [n for n in names if not any(n in b[1] for b in blocks)])
+    if missed:
+        print(f"{script} 대본에 없는 값입니다: {' '.join(missed)}")
+        print("  이 대본의 블록:")
+        for b in blocks:
+            print(f"    {b[0]}  {b[1]}")
+        return 1
+
+    if rehearsal and not brief:
+        where = f"review@{version or SCEN.LATEST}" if script == "review" else script
+        print(f"\n대본: {where}  ({SCRIPTS[script][1]})")
 
     rows: list[list[str]] = []
     with _fixtures_intact():
         for no, sees, customer, turns in blocks:
-            if picked and not demo and str(no) not in picked:
-                continue
-            if scenario and (picked or names) and str(no) not in picked \
+            if (picked or names) and str(no) not in picked \
                     and not any(n in sees for n in names):
                 continue
-            labelled = (turns if demo else
+            labelled = (turns if rehearsal else
                         tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
-            if demo and not brief:
+            if rehearsal and not brief:
                 print(f"\n{'━' * 70}\n{sees}"
                       + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))
 
             # 시연 리허설에서는 화면이 대기 중에 보여주는 진행 줄("⋯ ○○을 찾고 있어요")까지
             # 대본에 나와야 한다 — 응답 대기를 UX 로 보완한 것 자체가 시연 포인트다.
             # ask() 가 도는 동안 콜백이 그 자리에서 찍으므로 질문 줄과 답변 사이에 흐른다.
-            show_progress = demo and not brief
+            show_progress = rehearsal and not brief
             on_progress = (lambda text: print(f"   ⋯ {text}")) if show_progress else None
             with session(customer_id=customer, on_progress=on_progress) as (ask, tr):
                 # 고객 화면을 **여는 순간**을 재현한다 — 실서비스·Streamlit 화면은 브리핑을
@@ -505,11 +496,11 @@ def main(argv: list[str]) -> int:
                 # `python -m scripts.prebuild_briefings` 를 한 번 돌려 두면 여기서 읽어 쓴다 —
                 # 건너뛰는 것이 아니라 같은 자리에서 같은 산출을 읽는 것이라, 리허설이
                 # 예행하는 경로는 그대로다.
-                if demo and customer:
+                if rehearsal and customer:
                     from pension_agent.strategy_agent import agent as SA        # noqa: PLC0415
-                    from pension_agent.strategy_agent import customer as SC    # noqa: PLC0415
+                    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
                     t0 = time.monotonic()
-                    prof = SC.get_profile(customer)
+                    prof = CUST.get_profile(customer)
                     if prof is not None:
                         SA.propose(prof)
                     if timing and not brief:
@@ -520,7 +511,7 @@ def main(argv: list[str]) -> int:
                               "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
                     if not brief:
-                        if demo:
+                        if rehearsal:
                             print(f"\n{'─' * 70}\n[{label}] > {question}\n")
                         else:
                             who = f"  [고객 {customer}]" if customer else ""
@@ -540,7 +531,7 @@ def main(argv: list[str]) -> int:
                             print()   # 진행 줄과 답변을 가른다
                         _print_answer(result)
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1], took))
-                    if demo and debug and not brief:
+                    if rehearsal and why and not brief:
                         print()
                         print(_log(tr.turns[-1], result, show_llm=show_llm))
                 else:
@@ -560,28 +551,11 @@ def main(argv: list[str]) -> int:
         if i == 0:
             print("  " + "  ".join("─" * w for w in widths))
     print("\n  도구 뒤의 ✗ 는 그 호출이 자료를 못 찾은 것 — 다음 칸에서 다른 도구로 옮겨갔는지가 요점입니다.")
-    if final:
-        print("  리허설에서 볼 것: ① 이 중도인출 사유와 세율(16.5%)로 답하는가 ·")
-        print("                    ② 가 되묻기로 끝나는가(끝나면 「초과야」로 닫는다) ·")
-        print("                    E1 에 «발송 화면 열까요?»가 붙고 E2 가 딥링크·문구를 주는가 ·")
-        print("                    ③ 이 타행 대비 당행 IRP 수익률(26.1Q)을 기준시점·«1위»의 한정과 함께 말하는가 ·")
-        print("                    ⑤ 가 «이동하지 않는다»로 답하는가 · ⑦ 이 계좌 3단 분리로 답하는가 ·")
-        print("                    M1 이 코드블록 안에 머리말(박정호 고객님·날짜) → ⑥⑦ 요약 항목 → [고객 주요 정보] 표로 나오고")
-        print("                    코드블록 밖에 «쪽지로 보낼까요?»가 붙는가 · 항목 줄 아닌 도입 문장이 본문에 없는가 ·")
-        print("                    M2 가 «쪽지를 보냈어요 — 받는 사람: 본인.» 한 줄로 끝나는가(본문 반복 없음).")
-    elif scenario:
-        print("  리허설에서 볼 것: K3 이 되묻기로 끝나는가 · K5b 가 딥링크를 주는가 ·")
-        print("                    P4 도구 줄에 procedure·fact 가 찍히고 순서 경고를 세우는가 ·")
-        print("                    L3 이 «이동하지 않는다»로 답하는가 ·")
-        print("                    L4b 가 화법 제안을 승낙받아 카드를 보여주는가 ·")
-        print("                    S2 가 10개월 전 기록을 꺼내는가 · S5b 가 발송 «화면»을 여는가 ·")
-        print("                    S6 이 «없다»로 끝나는가 · J1 이 S4 와 같은 질문에 다른 답을 내는가.")
-        print("  ※ 이수민(3번)은 PENSION_TODAY=2026-09-01 이상이라야 만기 요건이 선다.")
-    elif demo:
-        print("  리허설에서 볼 것: T9 가 도구를 여러 개 부르는가 · T10 이 suitable 을 부르는가 ·")
-        print("                    T3 에 연계가 붙는가 · T11 에 «발송 화면 열까요?»가 붙는가 ·")
-        print("                    T12 가 «없다»로 끝나는가 ·")
-        print("                    T9 가 «비대면 전환 시 면제»(F53)를 대면 0.38% 와 모순 없이 잇는가.")
+    for line in CHECKS.get(script, ()):
+        print(line)
+    if script == "review" and version and version != SCEN.LATEST:
+        print(f"  ※ 지금 돈 것은 {version} 이고 위 체크는 {SCEN.LATEST} 기준입니다 — "
+              f"차이는 `--diff {version} {SCEN.LATEST}`.")
     return 0
 
 
