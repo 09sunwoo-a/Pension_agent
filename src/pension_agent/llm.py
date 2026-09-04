@@ -305,17 +305,20 @@ def _observe(name: str, started: float, prompt: str, system: str | None, max_tok
              error: str | None) -> None:
     """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability).
 
-    **system 이 있는 호출은 채팅 메시지 꼴로 싣는다.** Langfuse 는 `[{role, content}, …]`
-    를 대화로 알아보고 역할별로 갈라 렌더하지만, 그 밖의 dict 는 JSON 한 덩어리로
-    직렬화해 보여준다 — `\\n`·`\\"` 가 이스케이프된 채 한 칸에 들어차서 프롬프트를 읽을
-    수 없다. 대시보드에서 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
-    system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
+    **input 은 언제나 문자열 하나다.** 대시보드가 값을 그리는 방식이 최상위 타입으로
+    갈리기 때문이다 — 최상위가 문자열이면 줄바꿈이 살아 본문으로 읽히고, dict·list 로
+    싸면 그 안의 문자열은 한 줄 JSON 으로 직렬화돼 `\\n`·`\\"` 가 글자 그대로 찍힌다.
+    실제로 `{"system":…, "prompt":…}` 도 `[{role, content}, …]` 도 프롬프트가 한 칸에
+    들어차 읽을 수 없었다. 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
+
+    그래서 system 이 있으면 역할을 **머리말 텍스트로** 표시해 한 문자열로 잇는다.
+    (Langfuse 의 Formatted 뷰는 `[{role, content}, …]` 를 역할별로 갈라 그리지만,
+    그 뷰가 아닌 화면에서는 위와 같이 뭉개진다 — 뷰를 가리지 않는 쪽을 택했다.)
     """
     observability.record_generation(
         name,
         model=meta.get("model") or _default_model_label(),
-        input=([{"role": "system", "content": system},
-                {"role": "user", "content": prompt}] if system else prompt),
+        input=(f"[system]\n{system}\n\n[user]\n{prompt}" if system else prompt),
         output=output,
         usage=meta.get("usage"),
         start=started,
