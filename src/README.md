@@ -137,9 +137,13 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 
 | 대시보드에서 | 쓰는 것 |
 |---|---|
-| **Users** 탭 → 그 고객 행 | `userId` = 고객 id (`171203-4815062`) |
-| **Tracing** → Filter → `Tags` = `고객:김서연` | 이름으로 찾을 때. KB-PIN 을 외우지 않아도 된다 |
-| **Tracing** → Filter → `User ID` = 고객 id | 위 Users 탭과 같은 것을 필터로 |
+| **Users** 탭 → 그 고객 행 | `userId` = `김서연(171203-4815062)`. **이름이 목록에 그대로 뜬다** — 그 탭은 이 문자열 하나만 보여주고 이름을 담을 칸이 따로 없어서 id 와 함께 넣는다 |
+| **Tracing** → Filter → `Tags` = `고객:김서연` | 이름으로 거를 때 |
+| **Tracing** → Filter → `User ID` | 위 Users 탭과 같은 것을 필터로 |
+
+`LANGFUSE_CAPTURE_CONTENT=0` 이면 **이름이 전부 빠지고 id 만 남는다**(`user_id` · 태그 ·
+메타데이터). 그 스위치는 «개인정보를 내보내지 않는다»는 약속이라, 본문만 가리고 이름을
+태그로 내보내면 약속이 거짓이 된다.
 
 브리핑(`briefing.generate`)과 대화 턴(`consult.turn`)이 **같은 id · 같은 태그**로 붙으므로
 셋 중 무엇으로 걸러도 그 고객의 브리핑 한 건과 대화 턴들이 한 목록에 선다. 한 상담만
