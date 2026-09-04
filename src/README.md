@@ -33,16 +33,19 @@ $CAD --debug -c 198734-1205842                        # REPL — 턴마다 방�
 $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 키 없이 재현
 $CAD --list                                           # 시나리오 목록
 
-# ── 묶음 실행: 검토(독립 케이스 11개) · 시연 대본(docs/DEMO_SCENARIO.md)
-$CADR                                                 # 검토 11케이스 + 요약표
+# ── 묶음 실행: 첫 인자가 «어떤 대본», --옵션이 «얼마나 보여주나» ($CADR --help)
+$CADR                                                 # cases — 검토 11케이스 + 요약표
 $CADR --brief                                         # 요약표만
-$CADR --demo                                          # 시연 대본 16턴 (청중이 보는 화면)
-$CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
-$CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
-$CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
-$CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
-$CADR --final                                         # 중간점검 시연 확정본 (docs/DEMO_FINAL.md — 기획자 확정 3고객 + 이벤트 턴)
-$CADR --final 이수민 --debug                           # 고객 골라서
+$CADR demo                                            # 시연 대본 16턴 (docs/DEMO_SCENARIO.md)
+$CADR demo --why                                      # + 「무엇을 찾아봤나 → LLM 이 썼다」
+$CADR demo --why --show-llm                           # + 폐기된 생성문까지 (왜 잘렸나)
+$CADR library                                         # 고객별 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
+$CADR library 김서연 정민석 --why                      # 이름·번호로 골라서 (옵션은 대본과 무관하게 같다)
+$CADR review                                          # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
+$CADR review 이수민 --why                              # 고객 골라서
+$CADR --versions                                      # 중간점검본 판 이력 — 무엇을 왜 바꿨나
+$CADR --diff v5 v6                                    # 두 판의 질문 차이
+$CADR review@v3                                       # 옛 판 그대로 돌려보기
 
 # ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
 python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다
@@ -76,12 +79,22 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 `tests/debug/` 는 파이프라인을 **밖에서 감싸서 보기만** 한다 — 값은 그대로 통과시키고
 운영 코드는 고치지 않는다.
 
-| 옵션 | |
-|---|---|
-| `--debug` | 답변 아래에 트레이스 (REPL 에서는 방금 턴만) |
-| `--show-llm` | compose 가 LLM 에게 받은 문장을 폐기됐어도 그대로 |
-| `--script N` | 캔드 LLM 시나리오 — API 키 없이 돈다 (`--list` 로 7종 확인) |
-| `--any-customer` | 이 체크아웃에 없는 고객 id 로도 진행(경고만) |
+**두 CLI 의 옵션은 이름이 같으면 뜻도 같다.** `$CAD`(턴 하나를 파고든다)와
+`$CADR`(대본을 묶어 돌린다)는 보는 단위가 달라 붙는 옵션도 다르다.
+
+| 옵션 | $CAD | $CADR |
+|---|---|---|
+| `--debug` | 답변 아래에 **전체 트레이스** (REPL 에서는 방금 턴만) | 없다 — 트레이스는 `cases` 에 기본으로 붙는다 |
+| `--why` | 없다 | 턴마다 «무엇을 찾아봤나 → LLM 이 몇 자 썼나» 한 묶음 |
+| `--show-llm` | compose 가 LLM 에게 받은 문장을 폐기됐어도 그대로 | 같다 (`--why` 를 함께 켠다) |
+| `--brief` · `--time` | 없다 | 요약표만 · 턴별 소요 시간 |
+| `--script N` | 캔드 LLM 시나리오 — API 키 없이 돈다 (`--list` 로 7종 확인) | 없다 |
+| `--any-customer` | 이 체크아웃에 없는 고객 id 로도 진행(경고만) | 없다 |
+
+`$CADR` 의 `--why` 는 예전 이름이 `--debug` 였다 — 같은 이름이 두 CLI 에서 다른 것
+(전체 트레이스 / 재료 한 줄 로그)을 가리켜 갈랐다. 대본 선택도 예전에는
+`--demo`·`--scenario`·`--final` 이라 옵션처럼 생겼는데, 지금은 첫 인자에 이름으로 쓴다
+(`demo` · `library` · `review`). 예전 이름을 넣으면 바뀐 이름을 알려주고 멈춘다.
 
 트레이스는 노드 순서·상태 변화, LLM 호출 자리(understand·plan·clarify·tools·select),
 그리고 compose 게이트 `verify_texts`(원장 밖 수치) → `relations`(근거와의 관계) → `span`

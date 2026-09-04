@@ -156,7 +156,7 @@ def main(argv: list[str]) -> int:
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
         print("  이 CLI 의 옵션: --debug · --show-llm · --script N · --any-customer · -c/--customer")
-        print("  시연 대본을 돌리려면 다른 모듈입니다: python -m tests.debug.reps --demo --debug")
+        print("  시연 대본을 돌리려면 다른 모듈입니다: python -m tests.debug.reps demo --why")
         return 1
 
     questions = argv or ([scenario.question] if scenario else [])
