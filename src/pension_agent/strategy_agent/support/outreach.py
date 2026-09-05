@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from pension_agent.strategy_agent.customer import today as _today
+from pension_agent.clock import today as _today
 from pension_agent.strategy_agent.support.matching import ASSETS
 
 # ─────────────────────────────────────────────────────────────
