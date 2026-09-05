@@ -128,6 +128,92 @@ check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임�
 
 
 # ─────────────────────────────────────────────────────────────
+# env — 실행 환경(프로파일) 선택 · 값의 우선순위 (env.py 머리말 ①~④)
+#
+# 환경이 셋(행내·로컬·aiden)이라 파일을 환경마다 하나씩 두고 env.py 가 고른다. 고정하는 것:
+#   · 실제 환경변수 PENSION_ENV > .env 의 PENSION_ENV= 줄 > 프로파일 파일이 하나뿐이면 그것
+#   · 여럿 있고 지정이 없으면 고르지 않는다(짐작하지 않는다)
+#   · 값은 실제 환경변수 > .env.<프로파일> > .env — 프로파일이 공통을 덮는다
+# ─────────────────────────────────────────────────────────────
+
+import os  # noqa: E402
+import tempfile  # noqa: E402
+
+from pension_agent import env as _env  # noqa: E402
+
+_ENV_KEYS = ("PENSION_ENV", "LLM_PROVIDER", "LLM_MODEL", "LLM_DOTENV", "PENSION_TEST_MARK")
+_saved_profile_env = {k: os.environ.get(k) for k in _ENV_KEYS}
+
+
+def _clear_env():
+    for k in _ENV_KEYS:
+        os.environ.pop(k, None)
+
+
+try:
+    with tempfile.TemporaryDirectory() as _td:
+        _root = Path(_td)
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] is None and _env.active()["files"] == [],
+              "env: 파일이 하나도 없으면 프로파일 없음·읽은 파일 없음", str(_env.active()))
+
+        # ③ 프로파일 파일이 하나뿐이면 지정 없이 그것이 잡힌다 (행내 머신에 .env.bank 만 두는 경우)
+        (_root / ".env.bank").write_text("LLM_PROVIDER=genai\nLLM_MODEL=bank-model\n", encoding="utf-8")
+        (_root / ".env.bank.example").write_text("LLM_PROVIDER=xxx\n", encoding="utf-8")   # 견본은 세지 않는다
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] == "bank" and os.environ.get("LLM_PROVIDER") == "genai",
+              "env: 프로파일 파일이 하나뿐이면 그것이 잡힌다(견본 .example 은 세지 않는다)", str(_env.active()))
+        check(os.environ.get("PENSION_ENV") == "bank", "env: 잡힌 프로파일 이름을 PENSION_ENV 로 남긴다")
+
+        # 여럿 있고 지정이 없으면 고르지 않는다
+        (_root / ".env.local").write_text("LLM_PROVIDER=anthropic\n", encoding="utf-8")
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] is None and "LLM_PROVIDER" not in os.environ,
+              "env: 프로파일 파일이 여럿인데 지정이 없으면 고르지 않는다", _env.active()["how"])
+
+        # ② .env 의 PENSION_ENV= 줄이 기본을 정한다. 프로파일 값이 공통 값을 덮는다.
+        (_root / ".env").write_text("PENSION_ENV=local\nLLM_MODEL=common-model\nPENSION_TEST_MARK=shared\n",
+                                    encoding="utf-8")
+        (_root / ".env.local").write_text("LLM_PROVIDER=anthropic\nLLM_MODEL=local-model\n", encoding="utf-8")
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] == "local" and os.environ.get("LLM_PROVIDER") == "anthropic",
+              "env: .env 의 PENSION_ENV= 줄로 기본 프로파일을 고정한다", str(_env.active()))
+        check(os.environ.get("LLM_MODEL") == "local-model", "env: 같은 키는 프로파일 파일이 공통 파일을 덮는다",
+              os.environ.get("LLM_MODEL"))
+        check(os.environ.get("PENSION_TEST_MARK") == "shared", "env: 공통 파일의 나머지 값은 그대로 들어온다")
+
+        # ① 실제 환경변수 PENSION_ENV 가 .env 의 줄보다 앞선다 (잠깐 바꿔 돌릴 때)
+        _clear_env()
+        os.environ["PENSION_ENV"] = "bank"
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] == "bank" and os.environ.get("LLM_MODEL") == "bank-model",
+              "env: 실제 환경변수 PENSION_ENV 가 .env 의 줄보다 앞선다", str(_env.active()))
+
+        # 실제 환경변수는 어느 파일도 덮지 못한다
+        _clear_env()
+        os.environ["LLM_MODEL"] = "from-shell"
+        _env.load(force=True, root=_root)
+        check(os.environ.get("LLM_MODEL") == "from-shell", "env: 실제 환경변수는 파일이 덮지 못한다")
+
+        # 지정한 프로파일 파일이 없으면 그 사실을 남긴다(조용히 넘어가지 않는다)
+        _clear_env()
+        os.environ["PENSION_ENV"] = "aiden"
+        _env.load(force=True, root=_root)
+        check("파일이 없다" in _env.active()["how"], "env: 지정한 프로파일 파일이 없으면 그 사실을 남긴다",
+              _env.active()["how"])
+finally:
+    _clear_env()
+    for _k, _v in _saved_profile_env.items():
+        if _v is not None:
+            os.environ[_k] = _v
+    _env.load(force=True)
+
+
+# ─────────────────────────────────────────────────────────────
 # 수치 토큰화 — 뒤따르는 쉼표를 숫자에 붙이지 않는다
 #
 # `_NUM` 이 `\d[\d,]*` 이던 시절, "만기 D-17, 4,050만원"에서 `17,` 을 통째로 집었다.

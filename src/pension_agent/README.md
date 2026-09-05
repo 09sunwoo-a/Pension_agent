@@ -86,4 +86,27 @@ export LLM_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-설정 파일은 `src/.env` 하나다(`config.DOTENV`). 실제 환경변수가 있으면 그쪽이 이긴다.
+설정 파일은 `src/.env`(공통) + `src/.env.<프로파일>`(환경별) 이다. 실제 환경변수가 있으면
+그쪽이 이긴다.
+
+### 실행 환경 셋 — 파일 하나씩
+
+LLM 을 쓸 수 있는 환경이 셋이고 환경마다 프로바이더·엔드포인트·키가 다르다. 한 파일에 세
+벌을 넣고 주석을 바꿔 가며 쓰지 않는다 — **환경마다 파일 하나**다(`env.py` 머리말).
+
+| 프로파일 | 환경 | 파일 | 프로바이더 |
+|---|---|---|---|
+| `bank` | 행내(망분리) | `src/.env.bank` | genai — `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL` |
+| `local` | 개발 PC | `src/.env.local` | anthropic — `ANTHROPIC_API_KEY` |
+| `aiden` | 행내·외부 중간, Sonnet | `src/.env.aiden` | anthropic — `ANTHROPIC_BASE_URL` + 키 (게이트웨이가 OpenAI 호환이면 genai 로) |
+
+어느 파일을 읽을지는 이 순서로 정한다: 실제 환경변수 `PENSION_ENV` → `src/.env` 안의
+`PENSION_ENV=` 줄 → `.env.<이름>` 파일이 하나뿐이면 그것. 행내 머신에는 `.env.bank` 만
+두면 아무것도 지정하지 않아도 그쪽이 잡힌다. 여러 개를 두는 개발 PC 는 `.env` 에
+`PENSION_ENV=local` 로 기본을 고정하고, 잠깐 바꿔 돌릴 때만 `PENSION_ENV=aiden python -m …`
+으로 앞에 붙인다. 프로파일 파일이 공통 파일을 덮는다.
+
+```bash
+cp .env.example .env && cp .env.aiden.example .env.aiden   # 견본을 복사해 채운다
+python -m pension_agent.env                                # 어느 파일·프로바이더가 잡혔나
+```

@@ -12,7 +12,9 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 ```bash
 cd src
 pip install -r requirements.txt
-cp .env.example .env      # 사내 게이트웨이 URL·키 (pension_agent/llm.py 가 읽음)
+cp .env.example .env                 # 공통 설정 (기본 프로파일 이름 등)
+cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
+python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
