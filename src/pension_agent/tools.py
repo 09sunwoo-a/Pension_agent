@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 
 from pension_agent.session_store import append_turn
+from pension_agent.strategy_agent import support
 
 
 def _match_asset(message: str) -> dict[str, Any] | None:
@@ -31,8 +32,6 @@ def _match_asset(message: str) -> dict[str, Any] | None:
     문구가 고객별 생성으로 바뀌면서 그 대조는 **LLM 이 문장을 다듬을수록 빗나갔다** —
     게이트가 조용히 열리는 방향의 실패다. 링크가 없는 옛 자산을 위해 문구 대조도 남긴다.
     """
-    from pension_agent.strategy_agent import support  # noqa: PLC0415 — 순환 임포트 회피
-
     norm = " ".join(message.split())
     for a in support.ASSETS:
         url = (a.get("url") or "").strip()

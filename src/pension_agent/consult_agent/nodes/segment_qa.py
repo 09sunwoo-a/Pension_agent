@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from pension_agent.consult_agent.kb import origin_of, role_texts
+from pension_agent.knowledge.kb import origin_of, role_texts
 from pension_agent.consult_agent.select import pick
 from pension_agent.consult_agent.state import KB
 from pension_agent.strategy_agent import customer as strategy_customer

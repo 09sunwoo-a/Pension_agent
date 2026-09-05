@@ -38,7 +38,7 @@ def _texts(field) -> list[str]:
 
     여기서는 **역할을 가리지 않는다.** 이 값은 답변에 표시할 문장이 아니라 "이 카드가
     무엇에 대한 것인가"를 재는 검색용 blob 이라, 저작 메모도 단서로는 쓸모가 있다.
-    역할로 걸러야 하는 표시 경로는 `consult_agent/kb.py::role_texts` 를 쓴다.
+    역할로 걸러야 하는 표시 경로는 `knowledge/kb.py::role_texts` 를 쓴다.
     """
     return [e["text"] if isinstance(e, dict) else e
             for e in (field or []) if e and (not isinstance(e, dict) or e.get("text"))]

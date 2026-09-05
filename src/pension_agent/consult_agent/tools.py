@@ -51,7 +51,7 @@ from pension_agent.consult_agent import progress
 from pension_agent.consult_agent import relations as REL
 from pension_agent.consult_agent.nodes import facts_qa, pitch as PITCHMOD, procedure_qa, segment_qa
 from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
-from pension_agent.consult_agent.kb import retrieve
+from pension_agent.knowledge.kb import retrieve
 from pension_agent.consult_agent.select import llm_pick, pick
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate

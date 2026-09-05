@@ -15,7 +15,7 @@ facts_qa 와 같은 이유로 즉답 노드를 지웠다(§11 · 그 파일 주�
 from __future__ import annotations
 
 from pension_agent.consult_agent import marks
-from pension_agent.consult_agent.kb import origin_of, role_texts
+from pension_agent.knowledge.kb import origin_of, role_texts
 from pension_agent.consult_agent.select import pick
 from pension_agent.consult_agent.state import KB
 
