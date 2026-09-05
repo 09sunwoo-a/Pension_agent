@@ -2476,7 +2476,8 @@ def check_screen_registry() -> int:
     ok += hit
 
     # 기준시점이 코드에 박혀 있지 않은가 — 두 곳에 있으면 원문이 바뀔 때 갈린다.
-    src = pathlib.Path(tools.__file__).read_text(encoding="utf-8")
+    src = "".join(f.read_text(encoding="utf-8")
+                  for f in pathlib.Path(tools.__file__).parent.glob("*.py"))  # tools/ 패키지 전체
     hit = "2025.03.31" not in src and not hasattr(tools, "CHANNEL_MARK")
     print(f"{'✓' if hit else '✗'} 기준시점·경고 문구가 코드 상수로 남아 있지 않다")
     ok += hit
@@ -5222,7 +5223,7 @@ def check_origin() -> int:
 
     from tests.debug import __main__ as dbg_main
     from tests.debug import reps as dbg_reps
-    ops_src = pathlib.Path(tools.__file__).with_name("__main__.py").read_text(encoding="utf-8")
+    ops_src = pathlib.Path(tools.__file__).parent.with_name("__main__.py").read_text(encoding="utf-8")
     hit = ("source_lines" in ops_src
            and "source_lines" in inspect.getsource(dbg_main._print_source)
            and "source_lines" in inspect.getsource(dbg_reps._print_source_line))
