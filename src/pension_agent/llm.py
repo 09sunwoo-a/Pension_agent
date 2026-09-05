@@ -17,7 +17,8 @@
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
 ━━ 실행 환경(프로파일) ━━
-환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(Sonnet). 환경마다 `src/.env.<이름>`
+환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(OpenAI 호환 게이트웨이의 Sonnet, genai
+경로). 환경마다 `src/.env.<이름>`
 한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
 잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
 
@@ -31,7 +32,6 @@
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
   GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
   ANTHROPIC_API_KEY anthropic 프로바이더용 (테스트 경로)
-  ANTHROPIC_BASE_URL anthropic 호환 게이트웨이를 거칠 때(aiden). 비우면 api.anthropic.com
   IRP_AGENT_MODEL   anthropic 모델. 기본 claude-sonnet-5
 
 ━━ 관측 ━━
@@ -246,9 +246,7 @@ def _generate_anthropic(prompt: str, system: str | None, max_tokens: int,
     if _anthropic_client is None:
         from anthropic import Anthropic  # noqa: PLC0415 — genai 전용 환경엔 미설치일 수 있음
 
-        # aiden 처럼 Anthropic 호환 게이트웨이를 거치는 환경은 base_url 만 다르다. SDK 도
-        # 같은 환경변수를 읽지만, 어느 값이 쓰이는지 이 파일에서 보이게 명시한다.
-        _anthropic_client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL") or None)
+        _anthropic_client = Anthropic()
     kwargs: dict = {
         "model": ANTHROPIC_MODEL,
         "max_tokens": max_tokens,

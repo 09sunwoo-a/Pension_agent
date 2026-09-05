@@ -4,7 +4,7 @@
 쓴다 — 망분리 환경에 코드를 들여올 때 설치할 것이 늘지 않아야 한다.
 
 ━━ 파일 셋 ━━
-LLM 을 쓸 수 있는 환경이 셋이고(행내 genai · 로컬 anthropic · aiden 의 Sonnet), 환경마다
+LLM 을 쓸 수 있는 환경이 셋이고(행내 genai · 로컬 anthropic · aiden 의 OpenAI 호환 Sonnet), 환경마다
 프로바이더·엔드포인트·키가 다르다. 한 파일(`src/.env`)에 세 벌을 넣고 주석을 바꿔 가며
 쓰면 어느 줄이 살아 있는지 보이지 않는다. 그래서 **환경마다 파일 하나**다.
 
@@ -12,7 +12,7 @@ LLM 을 쓸 수 있는 환경이 셋이고(행내 genai · 로컬 anthropic · a
                         기본 프로파일 이름(`PENSION_ENV=local`)
     src/.env.bank       행내  — genai 게이트웨이 (LLM_BASE_URL · LLM_API_KEY · LLM_MODEL)
     src/.env.local      로컬  — anthropic (ANTHROPIC_API_KEY)
-    src/.env.aiden      aiden — Sonnet 에 닿는 경로 (ANTHROPIC_BASE_URL + 키)
+    src/.env.aiden      aiden — OpenAI 호환 게이트웨이의 Sonnet (genai 와 같은 키 셋, 값만 다름)
 
 전부 gitignore 다(비밀). 저장소에는 `*.example` 만 있다 — 복사해서 채운다.
 

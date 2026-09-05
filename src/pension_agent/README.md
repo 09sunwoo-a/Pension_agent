@@ -98,7 +98,7 @@ LLM 을 쓸 수 있는 환경이 셋이고 환경마다 프로바이더·엔드�
 |---|---|---|---|
 | `bank` | 행내(망분리) | `src/.env.bank` | genai — `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL` |
 | `local` | 개발 PC | `src/.env.local` | anthropic — `ANTHROPIC_API_KEY` |
-| `aiden` | 행내·외부 중간, Sonnet | `src/.env.aiden` | anthropic — `ANTHROPIC_BASE_URL` + 키 (게이트웨이가 OpenAI 호환이면 genai 로) |
+| `aiden` | 행내·외부 중간, Sonnet | `src/.env.aiden` | genai — OpenAI 호환 게이트웨이. `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL`(Sonnet 슬러그) |
 
 어느 파일을 읽을지는 이 순서로 정한다: 실제 환경변수 `PENSION_ENV` → `src/.env` 안의
 `PENSION_ENV=` 줄 → `.env.<이름>` 파일이 하나뿐이면 그것. 행내 머신에는 `.env.bank` 만
