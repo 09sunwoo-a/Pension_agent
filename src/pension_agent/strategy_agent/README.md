@@ -135,7 +135,7 @@ LLM 설정은 이 폴더가 아니라 **`src/.env`** 에 둔다(`pension_agent/l
 | ⑤ 적합 상품·포트폴리오 | `recommendation` | LLM(폐쇄 후보군에서 선택 + verify) |
 | ⑥ 이렇게 말해보세요 | `talking_points` | 코드로 2개 보장 + LLM 스크립트(선택적) |
 | ⑦ 예상 반론 및 대응 | `objections` | 코드로 2개 보장(저작 우선, 부족 시 폴백) |
-| ⑧ 상담에 참고하세요 | `consult_resources` | consult_agent.kb.retrieve() 재사용 |
+| ⑧ 상담에 참고하세요 | `consult_resources` | knowledge.kb.retrieve() 재사용 |
 | ⑨ 고객님께 안내해보세요 | `outreach` | 코드(가장 임박한 이벤트·세미나) |
 | §14 상담 이력 | `consult_history` | `pension_agent.session_store` 읽기 전용 |
 
@@ -160,7 +160,7 @@ strategy_agent/
 ├─ customer.py          고객 프로파일 · 요건 판정 · 검증용 페르소나 · get_profile()
 ├─ situations.py        문제상황 정의 — 06/01 고객세그먼트를 요건 판정 결과와 대조
 ├─ support/             ⑥~⑨ 규칙 계층. 공개 이름은 __init__.py 가 전부 재노출한다
-│  ├─ kb.py             근거 대조용 지식베이스 적재 (지연 로딩)
+│  ├─ kb.py             근거 대조용 지식베이스 (knowledge/kb.py 를 지연 적재)
 │  ├─ matching.py       문제상황 → 지식 카드 — ⑥⑦⑧ 공통 후보군 산출
 │  ├─ talking.py        ⑥ 이렇게 말해보세요
 │  ├─ objection.py      ⑦ 예상 반론 및 대응 화법

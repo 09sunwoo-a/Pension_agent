@@ -113,6 +113,19 @@ check(not any("sys.path" in (f.read_text(encoding="utf-8"))
               for f in Path(pension_agent.__file__).parent.rglob("*.py")),
       "패키지 안에 sys.path 조작이 남아 있지 않다")
 
+# 에이전트 사이의 의존은 한 방향이다 — knowledge ← strategy_agent ← consult_agent (루트 CLAUDE.md
+# 「구조 규칙」). 예전에는 strategy_agent.support 가 consult_agent.kb 를 거꾸로 임포트했고, 그
+# 간선 하나 때문에 공용 모듈에 순환 회피용 지연 임포트가 늘었다. 공용 카드 지식베이스를
+# knowledge/kb.py 로 옮겨 없앤 간선이 다시 생기지 않게 여기서 고정한다.
+_PKG = Path(pension_agent.__file__).parent
+_ONE_WAY = (*_PKG.glob("*.py"), *_PKG.joinpath("knowledge").rglob("*.py"),
+            *_PKG.joinpath("market").rglob("*.py"), *_PKG.joinpath("strategy_agent").rglob("*.py"))
+_back_edges = sorted(
+    str(f.relative_to(_PKG)) for f in _ONE_WAY
+    if any(line.lstrip().startswith(("from pension_agent.consult_agent", "import pension_agent.consult_agent"))
+           for line in f.read_text(encoding="utf-8").splitlines()))
+check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임포트하지 않는다", str(_back_edges))
+
 
 # ─────────────────────────────────────────────────────────────
 # 수치 토큰화 — 뒤따르는 쉼표를 숫자에 붙이지 않는다

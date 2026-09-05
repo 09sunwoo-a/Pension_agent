@@ -79,7 +79,7 @@
 
 분류는 변환기 규칙(`build_kb.role_entries` — 저작 표지·굵기) → 빌드 리포트 검토 →
 `config.py` 예외표(혼합 칸을 사람이 가름) 순서다. 소비 코드는 선언만 본다
-(`consult_agent/kb.py::role_texts`).
+(`knowledge/kb.py::role_texts`).
 
 **적용 조건(`applies`) 축은 아직이다** — caution 이 답변의 주제·고객 상태에 걸릴 때만
 붙는 판정이 없어, 지금은 그 카드가 근거로 쓰이면 무조건 표시된다(consult §12 gap 7).
@@ -248,7 +248,7 @@
 - `kinds.json` 에 종류 선언(`consumed: retrieval`)
 - `consult_agent/kb.py` 의 `_KIND_ORDER` · `_BUCKET_LETTER` — 버킷 카탈로그에 들어가야
   LLM 이 고를 후보 목록에 보인다
-- `consult_agent/tools.py` 의 도구 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
+- `consult_agent/tools/` 의 도구 모듈 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
 
 `tests/test_consult_agent.py::check_hier_index` 의 버킷 커버리지 검사가 두 번째를 잡는다.
 

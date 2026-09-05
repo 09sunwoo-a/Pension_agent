@@ -1017,7 +1017,7 @@ LLM 이 미설정이거나 죽어 있으면 **답변을 만들지 않고 "LLM �
 ```bash
 cd src
 python -m tests.test_consult_agent           # 라우팅·도구 루프·가드 (LLM 키 불필요)
-python -m pension_agent.consult_agent.kb     # 지식베이스 점검 리포트 — ERROR 0건 유지
+python -m pension_agent.knowledge.kb         # 지식베이스 점검 리포트 — ERROR 0건 유지
 ```
 
 지식베이스 원문·경로·공용 인프라를 함께 건드렸으면 루트 `CLAUDE.md` 의 전체 명령을 돈다.

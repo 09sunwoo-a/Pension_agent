@@ -61,7 +61,7 @@ python -m tests.test_infra             # 공용 인프라 · 임포트 경계
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
 python -m scripts.kb_build.test_paths  # 경로 · locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증
-python -m pension_agent.consult_agent.kb                          # 지식베이스 리포트
+python -m pension_agent.knowledge.kb                              # 지식베이스 리포트
 
 # ── 재생성 (생성물은 손으로 고치지 않는다 — 생성기를 고친다)
 python -m scripts.kb_build.build_kb [--activate]   # 06_주제별_추출지식 → 카드
@@ -285,7 +285,7 @@ src/
   저작 시점에 연결된 `pitch_refs`/`objection_refs` 를 실시간 조회한다.
 - **⑥~⑨ 는 문제상황에서 출발한다.** "왜 관리 대상인가"를 먼저 확정하고 그 사유에 맞는
   화법·반론·자료를 모은다. 사유가 없는 고객은 비운다 — 만들어내지 않는다.
-- **출처는 원본 문서 이름으로 말한다.** `consult_agent/kb.py::origin_of()` 한 곳에서만
+- **출처는 원본 문서 이름으로 말한다.** `knowledge/kb.py::origin_of()` 한 곳에서만
   만들고, 못 찾으면 "확인 필요"라고 한다. 적재 json 의 이름표로 물러서지 않는다.
 - **되돌릴 수 없는 행위는 사람이 정한다.** 에이전트는 제안(`act.offer`)하고, 발송은 확인을
   한 턴 거친다(`act.confirm_action`). 편집 가능 범위도 코드가 못박는다

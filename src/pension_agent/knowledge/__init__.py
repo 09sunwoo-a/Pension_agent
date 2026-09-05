@@ -3,6 +3,7 @@
     kinds.json      레코드 종류 레지스트리(선언형). 검증·저작 프롬프트가 여기서 나온다
     schema.py       종류 구동 검증 + 저작 프롬프트 생성기 (CLI)
     store.py        통합 레코드 로더 (`{meta, records:[{id, kind, fields}]}` 단일 규격)
+    kb.py           카드 지식베이스 — 적재·시효성·출처·검색 (두 에이전트 공용)
     similarity.py   n-gram 유사도 — 검색 채점의 기초
     checks.py       범용 무결성 검증 (ID 중복 · 깨진 참조 · 사실충돌)
     data/           공용 지식 카드 (kb_build 산출물)
