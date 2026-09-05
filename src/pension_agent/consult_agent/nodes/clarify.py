@@ -69,7 +69,9 @@ def settled_block(state: AgentState) -> str:
     되묻기는 «질문·대화 맥락·열린 고객 화면 어디에도 정할 근거가 없을 때»만이다(§5). 그런데
     판정 컨텍스트에는 `_NO_BRANCH` 재료가 빠져 있어 **열린 고객 화면을 아예 못 봤다**(§12
     gap 30). 갈래를 만들지 않는 재료가 갈래를 **정해 주는** 일은 한다 — 「수수료 얼마야?」의
-    부담금 종류(이 고객은 퇴직급여 5.2억·개인부담금 0원), 「뭐라고 말하면 좋아?」의 고객 상태.
+    거래채널(대면/비대면은 원장 값이다), 「뭐라고 말하면 좋아?」의 고객 상태. 원장이 모르는
+    축은 그대로 갈래다 — 부담금 종류(사용자/가입자)는 원장에 갈라 실려 있지 않고, 소득구간은
+    비어 있으면 「구간 미확인」으로 실린다.
 
     두 재료를 싣는다. ① 원장에 이미 실린 `_NO_BRANCH` 재료의 본문(고객 브리핑·상담 기록·
     오늘 날짜) — 작성(compose)이 보는 것과 같은 텍스트다. ② 그 도구가 안 불린 턴을 위해
@@ -90,6 +92,13 @@ def settled_block(state: AgentState) -> str:
         except Exception:  # noqa: BLE001 — 프로파일이 없으면 블록이 비는 것이 맞다
             profile = None
         if profile is not None:
+            from pension_agent.strategy_agent.engine.render import _customer_header, won  # noqa: PLC0415
+            # 화면 상단과 같은 식별 항목 — 거래채널(대면/비대면)·소득구간·투자성향·평가금액.
+            # 소득구간이 비어 있으면 「구간 미확인」으로 실린다 — 그것은 갈래로 남는다(K3).
+            header = _customer_header(profile)
+            lines.append("· 고객: " + " · ".join(
+                f"{k} {header[k]}" for k in ("평가금액", "투자성향", "거래채널", "소득구간") if k in header))
+            lines.append(f"· 당해 연금계좌 납입액: {won(profile.paid_ytd_total)}")
             conds = SC.conditions(profile)
             if conds:
                 lines.append("· 성립 요건: " + ", ".join(SC.CONDS.get(c, c) for c in conds))
