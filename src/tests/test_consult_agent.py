@@ -2136,9 +2136,9 @@ def check_clarify_settled() -> int:
         prompt = seen[-1] if seen else ""
         settled = prompt.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in prompt else ""
         hit = ("만기예금 보유" in settled and "디폴트옵션 설정" in settled
-               and "거래채널 대면" in settled and "소득구간 구간 미확인" in settled)
+               and "거래채널 대면" in settled and "소득구간" not in settled)
         print(f"{'✓' if hit else '✗'} 판정 프롬프트에 성립 요건·계좌 상태·거래채널이 «정해진 것»으로 실린다"
-              " (모르는 값은 미확인으로)")
+              " — 모르는 값(소득구간)은 싣지 않는다")
         ok += hit
         hit = bool(settled) and "만기예금 보유" not in prompt.split("<근거>")[-1].split("</근거>")[0]
         print(f"{'✓' if hit else '✗'} 정해진 것은 <근거>(갈래 후보) 밖에 실린다")

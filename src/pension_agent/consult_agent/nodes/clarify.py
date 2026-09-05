@@ -71,7 +71,7 @@ def settled_block(state: AgentState) -> str:
     gap 30). 갈래를 만들지 않는 재료가 갈래를 **정해 주는** 일은 한다 — 「수수료 얼마야?」의
     거래채널(대면/비대면은 원장 값이다), 「뭐라고 말하면 좋아?」의 고객 상태. 원장이 모르는
     축은 그대로 갈래다 — 부담금 종류(사용자/가입자)는 원장에 갈라 실려 있지 않고, 소득구간은
-    비어 있으면 「구간 미확인」으로 실린다.
+    비어 있으면 **블록에 넣지 않는다**(「미확인」을 넣으면 판정이 정해진 것으로 읽는다).
 
     두 재료를 싣는다. ① 원장에 이미 실린 `_NO_BRANCH` 재료의 본문(고객 브리핑·상담 기록·
     오늘 날짜) — 작성(compose)이 보는 것과 같은 텍스트다. ② 그 도구가 안 불린 턴을 위해
@@ -93,11 +93,17 @@ def settled_block(state: AgentState) -> str:
             profile = None
         if profile is not None:
             from pension_agent.strategy_agent.engine.render import _customer_header, won  # noqa: PLC0415
-            # 화면 상단과 같은 식별 항목 — 거래채널(대면/비대면)·소득구간·투자성향·평가금액.
-            # 소득구간이 비어 있으면 「구간 미확인」으로 실린다 — 그것은 갈래로 남는다(K3).
+            # 화면 상단과 같은 식별 항목 — 거래채널(대면/비대면)·투자성향·평가금액. **모르는 값은
+            # 싣지 않는다** — 소득구간이 비어 있으면(`income_bracket` None → 「구간 미확인」) 이 블록에
+            # 넣지 않는다. 「이미 정해진 것」 안에 「미확인」이 있으면 판정이 그 축까지 정해진 것으로
+            # 읽어 되묻지 않는다(2026-09-05 리허설 K3: 총급여 구간을 되물어야 하는 자리에서 두 구간을
+            # 다 적고 답했다). 여기 없는 축은 갈래로 남는다.
             header = _customer_header(profile)
-            lines.append("· 고객: " + " · ".join(
-                f"{k} {header[k]}" for k in ("평가금액", "투자성향", "거래채널", "소득구간") if k in header))
+            if profile.income_bracket:
+                header_keys = ("평가금액", "투자성향", "거래채널", "소득구간")
+            else:
+                header_keys = ("평가금액", "투자성향", "거래채널")
+            lines.append("· 고객: " + " · ".join(f"{k} {header[k]}" for k in header_keys if k in header))
             lines.append(f"· 당해 연금계좌 납입액: {won(profile.paid_ytd_total)}")
             conds = SC.conditions(profile)
             if conds:
@@ -114,8 +120,9 @@ def settled_block(state: AgentState) -> str:
     if not lines:
         return ""
     return ("<이미 정해진 것>\n열려 있는 고객에 대해 코드가 원장에서 계산한 값이다. 갈래가 아니다 —\n"
-            "이 축(어느 고객인가 · 고객 상태 · 계좌 상태 · 보유 금액)으로는 되묻지 않는다.\n"
+            "여기 적힌 축(어느 고객인가 · 고객 상태 · 계좌 상태 · 보유 금액 · 거래채널)으로는 되묻지 않는다.\n"
             "근거가 고객 상태별로 갈리면 여기 적힌 상태에 해당하는 쪽이 이미 정해진 것이다.\n"
+            "여기 없는 값(예: 총급여 구간)은 모르는 값이다 — 그 값으로 답이 갈리면 되묻는다.\n"
             + "\n".join(lines) + "\n</이미 정해진 것>\n")
 
 
