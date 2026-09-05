@@ -49,7 +49,65 @@ MIN_OPTIONS = 2
 #: 열려 있는 고객 하나의 것이라, 되물어서 좁힐 갈래가 지식베이스에 없다.
 #: 오늘 날짜(date)도 같다. 갈래가 아니라 하나뿐인 값이라, 되묻는 것은 좁히는 게 아니라
 #: 「오늘이 며칠인지」를 직원에게 되묻는 꼴이 된다.
-_NO_BRANCH = frozenset({"customer", "history", "transcript", "date"})
+#: `playbook` 도 같다 — 이 고객의 문제상황에 걸린 카드를 코드가 골라 온 것이라, 카드끼리
+#: 대상 고객 상태가 달라 보여도 그 축은 원장이 이미 정했다. 2026-09-04 gemma 실측: 만기
+#: 임박 고객(원리금보장 32.4%)에게 「만기 임박+디폴트옵션 미등록 고객에게」와 「원리금보장
+#: 100% 운용 고객에게」 화법 2장이 왔고, 판정이 그 둘을 갈래로 읽어 **직원에게 고객 상태를
+#: 되물었다.** 카드 안에 다른 축의 갈래(절차 방향 등)가 있어도 여기서는 세지 않는다 —
+#: 그 경우 작성이 전제를 밝히고 답한다(§5 ①).
+_NO_BRANCH = frozenset({"customer", "history", "transcript", "date", "playbook"})
+
+#: «이미 정해진 것» 블록에 싣는 계좌 상태 항목. `render._account_state` 의 키 중 되묻기가
+#: 갈래로 오독할 수 있는 축만 고른다 — 전부 원장 값이거나 코드가 이미 계산한 것이다.
+_SETTLED_STATE_KEYS = ("디폴트옵션", "연금개시", "연금개시요건", "세액공제_잔여한도",
+                       "판매중단_보유상품", "ISA_만기자금")
+
+
+def settled_block(state: AgentState) -> str:
+    """판정 프롬프트의 «이미 정해진 것» — 열려 있는 고객에 대해 코드가 아는 값 (CLAUDE.md §5).
+
+    되묻기는 «질문·대화 맥락·열린 고객 화면 어디에도 정할 근거가 없을 때»만이다(§5). 그런데
+    판정 컨텍스트에는 `_NO_BRANCH` 재료가 빠져 있어 **열린 고객 화면을 아예 못 봤다**(§12
+    gap 30). 갈래를 만들지 않는 재료가 갈래를 **정해 주는** 일은 한다 — 「수수료 얼마야?」의
+    부담금 종류(이 고객은 퇴직급여 5.2억·개인부담금 0원), 「뭐라고 말하면 좋아?」의 고객 상태.
+
+    두 재료를 싣는다. ① 원장에 이미 실린 `_NO_BRANCH` 재료의 본문(고객 브리핑·상담 기록·
+    오늘 날짜) — 작성(compose)이 보는 것과 같은 텍스트다. ② 그 도구가 안 불린 턴을 위해
+    코드가 프로파일에서 직접 계산한 상태(성립 요건·문제상황·계좌 상태) — 브리핑 산출과
+    같은 함수를 부르므로 화면과 다른 값을 말할 수 없다(§3). 어느 쪽도 LLM 호출이 없다.
+
+    갈래 후보(<근거>)와 **분리해** 싣는다. 근거에 섞으면 판정이 그것을 갈래 재료로 읽는다.
+    고객이 열려 있지 않으면 빈 문자열이다.
+    """
+    lines: list[str] = []
+    customer_id = state.get("customer_id")
+    if customer_id:
+        try:
+            from pension_agent.strategy_agent import customer as SC  # noqa: PLC0415
+            from pension_agent.strategy_agent.engine.render import _account_state  # noqa: PLC0415
+            from pension_agent.strategy_agent.situations import problem_situations  # noqa: PLC0415
+            profile = SC.get_profile(customer_id)
+        except Exception:  # noqa: BLE001 — 프로파일이 없으면 블록이 비는 것이 맞다
+            profile = None
+        if profile is not None:
+            conds = SC.conditions(profile)
+            if conds:
+                lines.append("· 성립 요건: " + ", ".join(SC.CONDS.get(c, c) for c in conds))
+            sits = problem_situations(profile, conds)
+            if sits:
+                lines.append("· 문제상황: " + " / ".join(f"{s['no']}. {s['title']}" for s in sits))
+            account = _account_state(profile)
+            lines.append("· 계좌 상태: " + " · ".join(
+                f"{k.replace('_', ' ')} {account[k]}" for k in _SETTLED_STATE_KEYS if k in account))
+    for e in state.get("evidence") or []:
+        if e["tool"] in _NO_BRANCH and e["tool"] != "playbook" and e.get("text"):
+            lines.append(e["text"])
+    if not lines:
+        return ""
+    return ("<이미 정해진 것>\n열려 있는 고객에 대해 코드가 원장에서 계산한 값이다. 갈래가 아니다 —\n"
+            "이 축(어느 고객인가 · 고객 상태 · 계좌 상태 · 보유 금액)으로는 되묻지 않는다.\n"
+            "근거가 고객 상태별로 갈리면 여기 적힌 상태에 해당하는 쪽이 이미 정해진 것이다.\n"
+            + "\n".join(lines) + "\n</이미 정해진 것>\n")
 
 
 def asked_last_turn(history: list[dict] | None) -> bool:
@@ -90,6 +148,7 @@ def clarify(state: AgentState) -> dict[str, Any]:
 
     prompt = CLARIFY_PROMPT.format(
         context="\n\n".join(e["text"] for e in evidence),
+        settled_block=settled_block(state),
         history_block=format_history(state.get("history")),
         question=state["question"],
     )

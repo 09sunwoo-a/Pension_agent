@@ -1309,8 +1309,13 @@ def check_playbook_material() -> int:
 
     # 그 턴에는 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자라 판정할 질문이 없다(§10).
     from pension_agent.consult_agent.nodes import clarify as _CL
+    # 대조군은 지식베이스 검색 재료로 둔다 — 승낙 턴의 재료는 고객 상태에 걸린 카드(playbook)
+    # 라서 그것만으로는 의도와 무관하게 판정이 돌지 않는다(지워진 gap 30).
+    kb_evidence = [{"tool": "procedure", "query": "q", "text": "실물이전 절차", "atomic": [],
+                    "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
     hit = not _CL.applicable({**out, "intent": "confirm_action"}) \
-        and _CL.applicable({**out, "intent": "situation", "question": "실물이전 절차"})
+        and _CL.applicable({**out, "intent": "situation", "question": "실물이전 절차",
+                            "evidence": kb_evidence})
     print(f"{'✓' if hit else '✗'} 승낙 턴은 되묻기 판정을 돌리지 않는다")
     ok += hit
 
@@ -2095,6 +2100,73 @@ def check_miss_recovery() -> int:
 #: 옮기는 변경(예: 작성과 동시 실행)이 답을 바꾸지 않았다고 말할 수 있다.
 #:
 #: (질문, 도구, 판정, 되묻기로 끝나야 하나, 근거에 있어야 할 갈래 표시)
+def check_clarify_settled() -> int:
+    """되묻기 판정이 열린 고객 화면의 값을 본다 — 갈래가 아니라 «정해진 것»으로 (§5 · gap 30).
+
+    2026-09-04 gemma 실측: 만기 임박 고객(원리금보장 32.4%)을 열고 「뭐라고 말하면 좋아?」를
+    물으니, 고객 상태에 걸린 화법 2장(「만기 임박+디폴트옵션 미등록 고객에게」·「원리금보장
+    100% 운용 고객에게」)을 갈래로 읽어 **직원에게 고객 상태를 되물었다.** 상태 코드는 코드가
+    원장에서 계산한 값이다(§3 「축을 가르는 것은 코드다」).
+    """
+    from pension_agent.consult_agent.nodes import clarify as CL
+
+    ok = 0
+    cid = "198734-1205842"          # 이준호 — 성립 요건 mat(만기예금 보유) 하나, 디폴트옵션 설정
+    playbook = [{"tool": "playbook", "query": "q",
+                 "text": "만기 임박+디폴트옵션 미등록 고객에게 → … / 원리금보장 100% 운용 고객에게 → …",
+                 "atomic": [], "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
+    fact = [{"tool": "fact", "query": "q", "text": "세액공제 한도 900만원 / 연금저축 단독 600만원",
+             "atomic": [], "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
+    customer = [{"tool": "customer", "query": "q", "text": "■ 고객 — 퇴직급여 5.2억 · 개인부담금 0원",
+                 "atomic": [], "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
+
+    # ① 고객 상태에 걸린 카드(playbook)만 있는 턴은 판정을 돌리지 않는다 — 그 카드를 고른
+    #    기준(어느 상태인가)은 코드가 이미 정했다.
+    hit = not CL.applicable({"question": "뭐라고 말하면 좋아?", "customer_id": cid, "evidence": playbook})
+    print(f"{'✓' if hit else '✗'} playbook 근거만 있는 턴은 되묻기 판정을 돌리지 않는다")
+    ok += hit
+
+    # ② 고객이 열려 있으면 판정 프롬프트에 코드가 아는 상태가 «이미 정해진 것»으로 실린다 —
+    #    <근거> 밖에. 고객 도구가 안 불린 턴에도(재료는 fact 만) 실린다.
+    seen: list[str] = []
+    orig = CL.generate
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"ask": null}')[1]
+    try:
+        CL.clarify({"question": "이 고객 세액공제 얼마나 더 받아?", "customer_id": cid, "evidence": fact})
+        prompt = seen[-1] if seen else ""
+        settled = prompt.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in prompt else ""
+        hit = "만기예금 보유" in settled and "디폴트옵션 설정" in settled
+        print(f"{'✓' if hit else '✗'} 판정 프롬프트에 성립 요건·계좌 상태가 «정해진 것»으로 실린다")
+        ok += hit
+        hit = bool(settled) and "만기예금 보유" not in prompt.split("<근거>")[-1].split("</근거>")[0]
+        print(f"{'✓' if hit else '✗'} 정해진 것은 <근거>(갈래 후보) 밖에 실린다")
+        ok += hit
+
+        # ③ 원장에 이미 실린 고객 재료 본문도 같은 블록에 온다(gap 30 — T8 부담금 종류).
+        seen.clear()
+        CL.clarify({"question": "수수료 얼마야?", "customer_id": cid, "evidence": customer + fact})
+        prompt = seen[-1] if seen else ""
+        settled = prompt.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in prompt else ""
+        hit = "개인부담금 0원" in settled
+        print(f"{'✓' if hit else '✗'} 원장의 고객 재료 본문이 «정해진 것»에 실린다")
+        ok += hit
+
+        # ④ 고객이 없으면 블록도 없다 — 지식 질의응답의 판정은 그대로다.
+        seen.clear()
+        CL.clarify({"question": "실물이전 어떻게 해?", "evidence": fact})
+        hit = bool(seen) and "<이미 정해진 것>" not in seen[-1]
+        print(f"{'✓' if hit else '✗'} 고객이 열려 있지 않으면 «정해진 것» 블록이 없다")
+        ok += hit
+    finally:
+        CL.generate = orig
+
+    # ⑤ 블록은 LLM 없이 만들어진다 — 프로파일이 없는 id 면 비고, 예외를 내지 않는다.
+    hit = CL.settled_block({"customer_id": "000000-0000000", "evidence": []}) == ""
+    print(f"{'✓' if hit else '✗'} 없는 고객 id 는 빈 블록이고 예외가 아니다")
+    ok += hit
+    return ok
+
+
 _CLARIFY_GOLDEN = (
     # ① 진짜 갈래 — 근거에 신청 경로가 셋이라 어느 쪽인지 정해야 답이 갈린다.
     ("계약이전 어떻게 신청해?", "procedure",
@@ -5396,6 +5468,7 @@ def main() -> int:
         check_turn_cost()
         check_miss_recovery()
         check_clarify_golden()
+        check_clarify_settled()
         check_answer_parallel()
         check_replan_on_empty()
         check_outreach()
