@@ -22,6 +22,8 @@
   LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
+  LLM_RETRY_ATTEMPTS  429 재시도 횟수(첫 호출 포함). 기본 3
+  LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0. 무료 쿼터로 리허설을 돌릴 때 4~5
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
   GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
@@ -45,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -72,6 +75,25 @@ MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 #: 429 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
 RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "3"))
+#: 호출 사이 최소 간격(초). 기본 0 — 두지 않는다. 무료 쿼터(gemma)로 리허설처럼 턴을 몰아
+#: 돌리면 분당 한도에 걸려 재시도 6회로도 429 가 남는다(2026-09-05 실측 — 브리핑 11연쇄 +
+#: 턴마다 4~7회, 답변·되묻기 판정은 동시 호출). 재시도는 이미 걸린 뒤의 처방이고 이것은
+#: 걸리지 않게 하는 처방이다. 프로세스 안의 모든 호출(스레드 포함)이 한 시계를 본다.
+MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0") or 0)
+_throttle_lock = threading.Lock()
+_last_call_at = 0.0
+
+
+def _throttle() -> None:
+    """MIN_INTERVAL 이 설정돼 있으면 직전 호출로부터 그 간격이 지날 때까지 기다린다."""
+    global _last_call_at
+    if MIN_INTERVAL <= 0:
+        return
+    with _throttle_lock:
+        wait = _last_call_at + MIN_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_at = time.monotonic()
 
 # ── gemma (외부 사전점검) ──
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
@@ -279,6 +301,7 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
             "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오."
             % PROVIDER
         )
+    _throttle()
     started = time.time()
     try:
         if PROVIDER == "anthropic":
