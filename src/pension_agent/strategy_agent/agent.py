@@ -36,6 +36,9 @@ from pension_agent import llm, observability
 from pension_agent.strategy_agent import sections
 from pension_agent.strategy_agent import support
 from pension_agent.strategy_agent.customer import PERSONAS, Profile
+# 요건 판정 — 관측 태그에 그대로 옮긴다. 이름이 흔해 별칭을 붙인다
+# (`facts["conditions"]` 는 사람이 읽는 문구이고 이쪽은 코드다).
+from pension_agent.strategy_agent.customer import conditions as target_conditions
 from pension_agent.strategy_agent.prompts import (
     COACH_PROMPT,
     COACH_SYSTEM,
@@ -629,7 +632,9 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
             # 관측 트레이스 — 한 건 만드는 데 LLM 을 11번 부른다. 어느 단계가 무엇을 받고
             # 무엇을 뱉었는지 되짚으려면 그 11번이 한 묶음이어야 한다(observability).
             # 캐시·저장소에서 꺼내 쓴 경우는 생성이 아니므로 트레이스를 만들지 않는다.
-            who = observability.customer_ref(p.id, p.nm)
+            # 대화 쪽과 같은 판정·같은 태그 꼴을 쓴다 — 어긋나면 같은 고객의 브리핑과
+            # 대화 턴이 대시보드에서 다른 축으로 갈린다.
+            who = observability.customer_ref(p.id, p.nm, target_conditions(p))
             with observability.trace(
                 "briefing.generate",
                 input={"customer_id": p.id, "customer": p.nm,
