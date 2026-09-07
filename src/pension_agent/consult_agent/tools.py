@@ -34,6 +34,10 @@ atomic 이 비어 있는 도구(pitch·customer)는 수치 집합 검사만 걸�
 Evidence 또는 None. None 은 "이 도구로는 근거를 못 찾았다"는 뜻이고, 루프는 다른 도구를
 시도하거나 원장이 빈 채로 끝낸다(→ 정직한 '없음' 답변). 도구가 억지로 뭔가 만들어내는
 경로는 두지 않는다.
+
+**도구가 죽은 것은 «못 찾았다»가 아니다.** 세 번째 결과가 `ToolFailure` 다 — 확인한 0건과
+확인하지 못한 것은 다른 사건이고, 뒤를 앞으로 접으면 지식베이스에 있는 자료를 «없습니다»로
+답하게 된다(§11 이 LLM 미연결에 대해 막는 것과 같은 사고). `run()` 이 그 경계를 세운다.
 """
 
 from __future__ import annotations
@@ -1728,15 +1732,44 @@ _NEEDS_CUSTOMER = frozenset({"customer", "history", "transcript", "suitable", "t
 def usable(state: AgentState | None = None) -> list[str]:
     """이 턴에 실제로 부를 수 있는 도구 이름. 고객 화면이 닫혀 있으면 고객 전제 도구는
     빠진다(§3). 카탈로그와 재계획의 '아직 안 써 본 도구'가 같은 목록을 봐야 한다 —
-    갈리면 카탈로그에 없는 도구를 다시 시도하라고 말하게 된다."""
+    갈리면 카탈로그에 없는 도구를 다시 시도하라고 말하게 된다.
+
+    **이번 턴에 죽은 도구도 빠진다.** 고장은 질의를 바꿔 고쳐지는 것이 아니라서, 다시
+    보여주면 계획이 같은 도구를 다시 골라 한 바퀴를 버린다(빗나간 호출은 «말을 바꿔라»가
+    답이지만 고장은 아니다 — PLAN_MISSES_BLOCK 과 여기가 갈리는 이유다). 재계획의
+    '아직 안 써 본 도구'에서도 같은 이유로 빠져야 하므로 판정은 여기 한 곳이다.
+    """
     opened = bool((state or {}).get("customer_id"))
-    return [t.name for t in TOOLS.values() if opened or t.name not in _NEEDS_CUSTOMER]
+    broken = {f["tool"] for f in ((state or {}).get("plan_failed") or [])}
+    return [t.name for t in TOOLS.values()
+            if (opened or t.name not in _NEEDS_CUSTOMER) and t.name not in broken]
 
 
 def catalog(state: AgentState | None = None) -> str:
     """계획 프롬프트에 실리는 도구 목록. 쓸 수 없는 도구는 애초에 보여주지 않는다 —
     고객 화면이 닫혀 있는데 customer 를 제안하게 두면 한 스텝을 낭비한다."""
     return "\n".join(f"- {TOOLS[n].name}: {TOOLS[n].desc}" for n in usable(state))
+
+
+class ToolFailure(Exception):
+    """도구가 죽었다 — **«확인했는데 0건»이 아니라 «확인하지 못함»이다**.
+
+    예전에는 이 자리에서 `None` 을 돌려줬다(= 빗나간 호출). 그러면 렌더러·매핑에서 난
+    예외 하나가 계획에는 «질의가 빗나갔다»로, 원장이 빈 채 끝난 턴에는 «지식베이스에서
+    찾지 못했습니다»로 나갔다 — 자료는 멀쩡히 있는데 없다고 답하는 것이고, §11 이 LLM
+    미연결에 대해 막는 실패와 정확히 같은 모양이다(찾아보고 없는 것과 찾아보지도 못한
+    것을 같은 문장으로 말하면 안 된다).
+
+    `LLMError` 와 갈라 두는 이유는 **처분이 다르기 때문**이다. LLM 이 죽으면 그 턴에는
+    아무것도 할 수 없어 루프를 끊지만, 도구 하나가 죽은 것은 나머지 도구로 답이 나올 수
+    있다 — 루프는 계속되고(`nodes/plan.py::plan_step`), 그 도구만 이번 턴의 능력 표면에서
+    빠진다(`usable`). 원장이 끝내 비었을 때만 답이 갈린다.
+    """
+
+    def __init__(self, tool: str, reason: str):
+        super().__init__(f"{tool}: {reason}")
+        self.tool = tool
+        self.reason = reason
 
 
 def run(name: str, state: AgentState, query: str) -> Evidence | None:
@@ -1749,6 +1782,10 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
 
     LLM 이 고른 질의가 항상 낫다고 볼 이유가 없다는 것이 이 재시도의 근거다. 지식베이스에
     답이 있는데 질의를 잘못 골라 "없습니다"로 끝나는 것이 가장 나쁜 실패다.
+
+    도구가 죽으면 `ToolFailure` 를 올린다 — 0건과 같은 값으로 접지 않는다(그 클래스 머리말).
+    **재검색으로 넘어가지도 않는다**: 두 번째 질의는 «검색이 빗나갔을 때» 건지는 장치이고,
+    터진 코드는 말을 바꾼다고 돌아오지 않는다.
     """
     tool = TOOLS.get(name)
     if tool is None:
@@ -1769,9 +1806,12 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
                 # 도구가 죽은 것과 **LLM 이 죽은 것**은 다른 사건이다. 뒤를 앞으로 접으면
                 # "찾아봤는데 재료가 없다"로 나가고, 그게 §11 이 막으려는 바로 그 답이다.
                 raise
-            except Exception:
+            except Exception as exc:
+                # 도구 하나가 죽어도 루프는 다음 도구로 간다 — 다만 그 사실을 **0건과 같은
+                # 값으로 접지 않는다**. 접으면 이 턴의 답이 «찾아봤는데 자료가 없습니다»가
+                # 된다(ToolFailure 머리말). 사유를 실어 올리고 처분은 계획 루프가 한다.
                 sp.update(output=None, found=False, failed=True)
-                return None  # 도구 하나가 죽어도 루프는 다음 도구로 간다
+                raise ToolFailure(name, f"{type(exc).__name__}: {exc}") from exc
             if found is not None:
                 # 원문 재검색으로 건졌는지도 남긴다 — 계획이 고른 질의가 얼마나 빗나가는지가
                 # 이 한 칸에 쌓인다(재검색이 잦으면 계획 프롬프트를 봐야 한다는 신호다).

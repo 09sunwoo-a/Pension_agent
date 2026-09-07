@@ -60,9 +60,39 @@ NO_EVIDENCE = (
 TRIED = "\n\n찾아본 곳: {calls}\n다른 말로 다시 물어보시면 찾을 수도 있어요."
 
 
+#: 재료를 **읽지 못한** 턴의 답. NO_EVIDENCE 와 절대 같은 말을 하면 안 된다 — 찾아보고
+#: 없는 것과 도구가 죽어 확인하지 못한 것은 다른 사건이고, 뒤를 앞으로 말하면 지식베이스에
+#: 있는 자료를 없다고 답하는 셈이 된다(LLM_FAILED 와 같은 자리 · §11). 문장 꼴을 LLM_FAILED
+#: 에 맞춘 것도 같은 이유다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 진단이 어렵다.
+TOOL_FAILED = (
+    "지금은 답변을 만들 수 없어요 — {what} 자료를 읽는 데 실패했습니다. "
+    "지식베이스에 자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reasons})"
+)
+
+
+def _failed_label(name: str) -> str:
+    """죽은 도구를 직원이 읽는 말로. 문구는 도구 선언에서 온다(progress.py ①)."""
+    tool = tools.TOOLS.get(name)
+    return (tool.progress if tool and tool.progress else name)
+
+
+def _tool_failed(state: AgentState) -> str:
+    """도구가 죽어 재료를 못 읽은 턴의 답. 무엇이 왜 실패했는지를 함께 남긴다 —
+    진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유)."""
+    failed = [f for f in (state.get("plan_failed") or []) if f.get("tool")]
+    return TOOL_FAILED.format(
+        what=" · ".join(dict.fromkeys(_failed_label(f["tool"]) for f in failed)),
+        reasons="; ".join(f.get("reason") or "원인 미상" for f in failed))
+
+
 def _no_evidence(state: AgentState) -> str:
-    """근거 0건 답변. 무엇을 찾아봤는지 함께 말한다."""
-    calls = [c for c in (state.get("plan_calls") or []) if c]
+    """근거 0건 답변. 무엇을 찾아봤는지 함께 말한다.
+
+    죽은 호출은 «찾아본 곳»에 세지 않는다 — 그 도구는 지식베이스를 보지도 못했으므로,
+    거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
+    """
+    dead = {f.get("tool") for f in (state.get("plan_failed") or [])}
+    calls = [c for c in (state.get("plan_calls") or []) if c and c.split(":", 1)[0] not in dead]
     if not calls:
         return NO_EVIDENCE
     return NO_EVIDENCE + TRIED.format(calls=" · ".join(calls))
@@ -204,6 +234,14 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         # 도구 안에서 LLM 이 죽었다(카드 선택·적합성 판정). 이걸 "근거를 못 찾았다"로
         # 접으면 있는 자료를 없다고 답하게 된다 — 계획 실패와 같은 사건으로 다룬다.
         return {"plan_done": True, "llm_error": f"{type(exc).__name__}: {exc}"}
+    except tools.ToolFailure as exc:
+        # 도구가 죽었다. **루프는 끊지 않는다** — LLM 이 죽은 것과 달리 나머지 도구로 답이
+        # 나올 수 있고, 죽은 도구는 다음 바퀴의 카탈로그에서 빠진다(tools.usable). 빗나간
+        # 호출로 접지 않는 이유는 그쪽의 처방이 «질의의 말을 바꿔라»여서다 — 고장에는
+        # 그 말이 틀렸고, 원장이 끝내 비었을 때 답도 갈린다(compose).
+        return {**alive, "plan_calls": calls + [signature],
+                "plan_failed": [*(state.get("plan_failed") or []),
+                                {"tool": exc.tool, "reason": exc.reason}]}
     update: dict[str, Any] = {**alive, "plan_calls": calls + [signature]}
     if found is not None:
         update["evidence"] = evidence + [found]
@@ -504,11 +542,17 @@ def compose(state: AgentState) -> dict[str, Any]:
     """
     evidence: list[tools.Evidence] = list(state.get("evidence") or [])
     if not evidence:
-        # 재료가 없는 이유가 둘이다. 찾아봤는데 없는 것(NO_EVIDENCE)과 LLM 이 깨져 찾아보지도
-        # 못한 것(LLM_FAILED). 둘을 같은 문장으로 답하면 있는 자료를 없다고 말하게 된다.
+        # 재료가 없는 이유가 셋이다. 찾아봤는데 없는 것(NO_EVIDENCE) · LLM 이 깨져 찾아보지도
+        # 못한 것(LLM_FAILED) · **도구가 죽어 읽지 못한 것**(TOOL_FAILED). 뒤의 둘을 앞으로
+        # 말하면 있는 자료를 없다고 답하게 된다 — 셋을 갈라 답한다.
         failure = state.get("llm_error")
-        return {"answer": LLM_FAILED.format(reason=failure) if failure else _no_evidence(state),
-                "sources": []}
+        if failure:
+            answer = LLM_FAILED.format(reason=failure)
+        elif state.get("plan_failed"):
+            answer = _tool_failed(state)
+        else:
+            answer = _no_evidence(state)
+        return {"answer": answer, "sources": []}
 
     # 「하지 말 것」 — 고객 화면이 열려 있으면 **코드가** 그 고객 상태를 읽어 붙인다.
     # LLM 이 customer 도구를 불렀는지에 의존하지 않는다(§8). 지식베이스에 금지 문장이
