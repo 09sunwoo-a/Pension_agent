@@ -240,6 +240,11 @@ def _summary(delta: dict) -> dict:
     out = {k: v for k, v in delta.items()
            if k in ("intent", "plan_done", "llm_error", "clarify", "judge_verdict",
                     "plan_retry")}
+    # 게이트가 표시한 갈래(tools.record_branches). 이게 안 보이면 «판정이 왜 되물었나»를
+    # 되짚을 수 없다 — 갈래 블록은 판정 프롬프트에 실리는 가장 센 신호인데, 트레이스에는
+    # 판정 «결과»만 있고 그 입력이 없었다.
+    if delta.get("branches"):
+        out["branches"] = " / ".join(b.get("axis", "?") for b in delta["branches"])
     # 전제·빠진 대상은 블록 통째로 찍으면 트레이스 한 줄이 열 줄이 된다. 판정이 무엇을
     # 정했는지만 남긴다 — 답변 원문에 그 전제가 실제로 실렸는지는 답변을 보면 된다.
     if delta.get("judge_note"):
