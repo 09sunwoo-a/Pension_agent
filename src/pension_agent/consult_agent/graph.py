@@ -167,10 +167,17 @@ def ask(
                     tags=[*tags, *observability.tag("intent", out.get("intent"))])
         # 턴 하나가 어떻게 끝났는지. 「되묻기가 몇 %인가 · 근거 0건이 몇 %인가 · LLM 이
         # 죽은 턴이 있었나」를 대시보드가 집계한다 — 트레이스를 한 건씩 열어서는 못 센다.
+        # **도구가 죽어 재료를 못 읽은 턴은 정상 턴으로 세지 않는다**(tool_failed). 이걸
+        # 'answer' 로 세면 대시보드에서는 답이 나간 턴처럼 보이는데 화면에는 실패 안내가
+        # 떠 있다 — 고장이 지표에서 사라지는 방향의 실패다. 재료를 얻은 턴의 부분 고장은
+        # 여기 안 뜨고 도구 span(`failed`)에만 남는다.
+        failed = out.get("plan_failed") or []
         observability.score(
             "turn_outcome",
-            "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify") else "answer",
-            comment=out.get("llm_error"))
+            "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify")
+            else "tool_failed" if failed and not evidence else "answer",
+            comment=out.get("llm_error")
+            or ("; ".join(f.get("reason") or "" for f in failed) if failed else None))
         observability.score("evidence_count", len(evidence))
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).

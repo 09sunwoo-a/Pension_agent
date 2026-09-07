@@ -36,6 +36,27 @@ class Evidence(TypedDict):
     meta: dict           # 도구별 부가 정보. 근거 자체가 아닌 것만 담는다
 
 
+class ToolFailure(Exception):
+    """도구가 죽었다 — **«확인했는데 0건»이 아니라 «확인하지 못함»이다**.
+
+    예전에는 `tools.run` 이 이 자리에서 `None` 을 돌려줬다(= 빗나간 호출). 그러면 렌더러·
+    매핑에서 난 예외 하나가 계획에는 «질의가 빗나갔다»로, 원장이 빈 채 끝난 턴에는
+    «지식베이스에서 찾지 못했습니다»로 나갔다 — 자료는 멀쩡히 있는데 없다고 답하는 것이고,
+    §11 이 LLM 미연결에 대해 막는 실패와 정확히 같은 모양이다(찾아보고 없는 것과 찾아보지도
+    못한 것을 같은 문장으로 말하면 안 된다).
+
+    `LLMError` 와 갈라 두는 이유는 **처분이 다르기 때문**이다. LLM 이 죽으면 그 턴에는
+    아무것도 할 수 없어 루프를 끊지만, 도구 하나가 죽은 것은 나머지 도구로 답이 나올 수
+    있다 — 루프는 계속되고(`nodes/plan.py::plan_step`), 그 도구만 이번 턴의 능력 표면에서
+    빠진다(`tools.usable`). 원장이 끝내 비었을 때만 답이 갈린다.
+    """
+
+    def __init__(self, tool: str, reason: str):
+        super().__init__(f"{tool}: {reason}")
+        self.tool = tool
+        self.reason = reason
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str

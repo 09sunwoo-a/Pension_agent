@@ -5375,6 +5375,58 @@ def check_plan_failure() -> int:
         hit = plan.PLAN_MAX_TOKENS >= 200
         print(f"{'✓' if hit else '✗'} 계획 응답 토큰 상한 {plan.PLAN_MAX_TOKENS}")
         ok += hit
+
+        # ── 도구가 **죽은** 턴. 위 LLM 실패와 같은 사고의 세 번째 갈래다(지워진 gap 35).
+        # 예전에는 tools.run 이 예외를 삼키고 None 을 돌려줘서, 렌더러에서 난 KeyError 하나가
+        # 계획에는 «질의가 빗나갔다»로, 답에는 «지식베이스에서 찾지 못했습니다»로 나갔다.
+        orig_run = plan.tools.run
+
+        def crash(name, state, query):
+            raise tools.ToolFailure(name, "KeyError: 'as_of'")
+
+        plan.tools.run = crash
+        try:
+            state, answer = drive(lambda p, **kw: '{"tool": "screen", "query": "운용현황"}')
+        finally:
+            plan.tools.run = orig_run
+
+        hit = (bool(state.get("plan_failed"))
+               and plan.NO_EVIDENCE not in answer
+               and "지식베이스에 자료가 없다는 뜻이 아니" in answer
+               and "KeyError" in answer)
+        print(f"{'✓' if hit else '✗'} 도구가 죽은 것을 '근거 없음'으로 둔갑시키지 않는다")
+        ok += hit
+
+        # 고장은 LLM 이 죽은 것과 **다르게** 기록된다 — 둘을 한 칸에 접으면 «LLM 을 고쳐라»와
+        # «도구를 고쳐라»가 같은 말이 되고, 계획 루프의 처분(루프 유지 vs 중단)도 갈릴 수 없다.
+        hit = not state.get("llm_error")
+        print(f"{'✓' if hit else '✗'} 도구 고장을 LLM 실패로 기록하지 않는다")
+        ok += hit
+
+        # 죽은 도구는 이번 턴의 능력 표면에서 빠진다 — 다시 보여주면 계획이 같은 도구를
+        # 다시 골라 바퀴를 버린다(빗나간 호출과 처방이 다른 자리).
+        broken = {"plan_failed": [{"tool": "screen", "reason": "KeyError"}]}
+        hit = "screen" not in tools.usable(broken) and "screen" in tools.usable({})
+        print(f"{'✓' if hit else '✗'} 죽은 도구는 이번 턴 카탈로그에서 빠진다")
+        ok += hit
+
+        # 죽은 호출은 '찾아본 곳'에도 서지 않는다 — 지식베이스를 보지도 못했으므로
+        # 거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
+        tried = plan._no_evidence({"plan_calls": ["screen:운용현황", "fact:수수료"],
+                                   "plan_failed": [{"tool": "screen", "reason": "KeyError"}]})
+        hit = "fact:수수료" in tried and "screen:운용현황" not in tried
+        print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
+        ok += hit
+
+        # 답이 갈리는 것은 **원장이 끝내 비었을 때**다. LLM 실패 안내와 같은 꼴로 끝나야
+        # 한다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 그 자체가 진단을 어렵게 한다.
+        notice = plan.compose({"question": "q", "evidence": [],
+                               "plan_failed": [{"tool": "screen", "reason": "x"}]})["answer"]
+        hit = (notice.startswith("지금은 답변을 만들 수 없어요")
+               and plan.LLM_FAILED.format(reason="x") != notice
+               and "단말 화면번호" in notice)     # 도구 선언의 말로 무엇이 실패했는지 밝힌다
+        print(f"{'✓' if hit else '✗'} 실패 안내가 무엇을 못 읽었는지 밝힌다")
+        ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
     return ok
