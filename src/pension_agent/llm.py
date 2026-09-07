@@ -159,13 +159,21 @@ def _usage(prompt_tokens: Any, completion_tokens: Any, total_tokens: Any = None)
 def _post_json(req: urllib.request.Request) -> dict:
     """urlopen + JSON 파싱. genai·gemma 경로가 함께 쓴다.
 
-    429(Too Many Requests)만 스스로 재시도한다 — 속도 제한이라 잠깐 쉬면 풀리는
-    에러인데, 이 코드는 몰아서 부르는 자리가 많다(브리핑 1회 = 11연쇄 호출,
-    app.py 기동 시 고객 선생성, 대화 한 턴 4~7회 + compose·되묻기 동시 호출). 행내
-    게이트웨이(genai)에서도, 무료 쿼터의 generativelanguage(gemma)에서도 실제로 429 로
-    턴이 통째로 죽었다. 서버가 Retry-After 를 주면 그 값(상한 30초)을, 없으면 2·4초
-    백오프를 쓴다. 그 밖의 HTTP 에러는 재시도하지 않는다 — 401·500 은 기다려도 안
-    풀리고, 같은 요청을 반복하면 진단만 늦어진다.
+    **429 와 5xx 를 재시도한다.** 둘 다 «서버 사정이라 잠깐 쉬면 풀리는» 에러이고, 이 코드는
+    몰아서 부르는 자리가 많다(브리핑 1회 = 11연쇄 호출, app.py 기동 시 고객 선생성, 대화
+    한 턴 4~7회 + compose·판정 동시 호출). 행내 게이트웨이(genai)에서도, 무료 쿼터의
+    generativelanguage(gemma)에서도 실제로 429 로 턴이 통째로 죽었다.
+
+    5xx 는 예전에 재시도 대상이 아니었다 — 「401·500 은 기다려도 안 풀린다」는 전제였는데,
+    **실측이 그 전제를 뒤집었다**(2026-09-07 · gemma-4-31b-it): 리허설 대본 한 블록의 11턴
+    중 10턴이 `HTTP 500` 으로 죽었고, 같은 프롬프트를 그대로 다시 던지면 200 으로 통과했다.
+    그 상태에서는 실 LLM 리허설이 «에이전트가 무엇을 답하나»가 아니라 «오늘 엔드포인트가
+    살아 있나»를 재게 된다. 401·403·404 처럼 **요청이 잘못된** 에러는 그대로 올린다 —
+    같은 요청을 반복해도 결과가 같고, 반복하면 진단만 늦어진다.
+
+    재시도해도 계속 실패하면 `LLMError` 다. 그 예외를 삼켜 "자료가 없다"로 답하지 않는 것은
+    호출부의 규약이고(consult_agent/CLAUDE.md §11), 여기서는 **원인을 문장에 남기는 것**까지
+    한다 — 429 와 5xx 는 직원이 할 일이 다르다(기다린다 / 잠시 후 다시 시도한다).
     """
     last: urllib.error.HTTPError | None = None
     for attempt in range(RETRY_ATTEMPTS):
@@ -173,20 +181,30 @@ def _post_json(req: urllib.request.Request) -> dict:
             with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            if exc.code != 429:
+            if not _retryable(exc.code):
                 raise
             last = exc
             if attempt == RETRY_ATTEMPTS - 1:
                 break
-            retry_after = (exc.headers.get("Retry-After") or "").strip()
-            try:
-                wait = min(float(retry_after), 30.0)
-            except ValueError:
-                wait = 2.0 * (attempt + 1)
-            time.sleep(wait)
-    raise LLMError(
-        f"HTTP 429 Too Many Requests — {RETRY_ATTEMPTS}회 시도 후에도 속도 제한. "
-        "호출 간격을 두거나 쿼터를 확인하십시오.") from last
+            time.sleep(_backoff(exc, attempt))
+    code = last.code if last else 0
+    detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
+              else "서버 오류. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다).")
+    raise LLMError(f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail}") from last
+
+
+def _retryable(code: int) -> bool:
+    """다시 던지면 결과가 달라질 수 있는 에러인가. 429 와 5xx 만 그렇다."""
+    return code == 429 or 500 <= code < 600
+
+
+def _backoff(exc: urllib.error.HTTPError, attempt: int) -> float:
+    """다음 시도까지 쉴 초. 서버가 Retry-After 를 주면 그 값(상한 30초)을 존중한다."""
+    retry_after = (exc.headers.get("Retry-After") or "").strip()
+    try:
+        return min(float(retry_after), 30.0)
+    except ValueError:
+        return 2.0 * (attempt + 1)
 
 
 def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
