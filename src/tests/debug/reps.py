@@ -14,11 +14,19 @@
     python -m tests.debug.reps library 김서연       # 시나리오 라이브러리 (docs/DEMO_CUSTOMER_SCENARIOS.md)
     python -m tests.debug.reps review              # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
     python -m tests.debug.reps review@v5 이수민     # 그 판으로 · 고객 골라서
+    python -m tests.debug.reps qa 김현수 윤가영      # 고객 12명 예상질문 (docs/QA_CUSTOMER_QUESTIONS.md)
     python -m tests.debug.reps --versions          # 중간점검본 판 이력
     python -m tests.debug.reps --diff v5 v6        # 두 판의 질문 차이와 바꾼 이유
 
 표시 옵션(겹쳐 쓸 수 있다): `--brief` 요약표만 · `--why` 턴마다 «무엇을 찾아봤나 → LLM 이
-썼다» · `--show-llm` 폐기된 생성문까지(`--why` 를 켠다) · `--time` 턴별 소요 시간.
+썼다» · `--show-llm` 폐기된 생성문까지(`--why` 를 켠다) · `--time` 턴별 소요 시간 ·
+`--pause=N` 턴 사이 N초 대기(분당 한도가 있는 키로 길게 돌릴 때) · `--retry-down=N`
+«LLM 호출 실패»로 끝난 턴을 같은 질문으로 N번까지 다시 묻는다(외부 API 의 간헐 5xx).
+
+`qa` 는 다른 리허설과 한 가지가 다르다 — 턴마다 **«기대»** 한 줄(`scenarios.QA_EXPECT`)이
+질문 아래 붙는다. 코드가 아는 값(원장·상담 기록·성립 요건·열려 있는 콘텐츠)으로만 적은
+것이라, 읽는 사람은 «그 값이 그 뜻으로 답에 들어 있는가»만 보면 된다. 채점은 여전히
+하지 않는다(아래 「채점하지 않는다」).
 
 `--why` 는 예전 이름이 `--debug` 였다. 같은 이름이 `python -m tests.debug` 에서는 **전체
 트레이스**(노드·게이트 트리)를 뜻해 두 CLI 에서 다른 것을 가리켰다 — 이름이 같으면 뜻도
@@ -267,9 +275,22 @@ SCRIPTS: dict[str, tuple[object, str]] = {
     "demo":    (SCEN.DEMO,    "docs/DEMO_SCENARIO.md"),
     "library": (SCEN.LIBRARY, "docs/DEMO_CUSTOMER_SCENARIOS.md"),
     "review":  (None,         "docs/DEMO_REVIEW.md"),
+    "qa":      (SCEN.QA,      "docs/QA_CUSTOMER_QUESTIONS.md"),
 }
 
 DISPLAY_FLAGS = ("--brief", "--why", "--show-llm", "--time")
+#: 값을 받는 옵션 — `--pause=20`. 턴 사이 대기(초). 무료 gemma 키는 분당 토큰 한도가 있어
+#: 고객 카드가 큰 턴이 연달아 가면 429 로 턴이 죽는다(DEMO_CUSTOMER_SCENARIOS 「그밖에」).
+PAUSE_FLAG = "--pause="
+#: `--retry-down=2`. 턴이 «LLM 호출 실패» 안내로 끝나면 같은 질문을 그만큼 다시 묻는다.
+#: 실화면에서 직원이 그 안내(「잠시 후 다시 시도해주세요」)를 보고 다시 묻는 것과 같은
+#: 경로다 — 실패한 턴도 기록·맥락에 남고, 다음 턴이 그 위에 선다. llm.py 는 429 만 스스로
+#: 재시도하고 5xx 는 올리므로(test_infra 「다른 HTTP 에러는 재시도하지 않는다」), 외부 API
+#: 가 간헐 500 을 내는 날(2026-09-07 gemma 실측 — 7턴 중 2턴) 대본이 그 자리에서 비는 것을
+#: 여기서 메운다. 재시도해도 실패하면 그대로 남긴다(요약표에 «LLM 실패 안내»로 찍힌다).
+RETRY_DOWN_FLAG = "--retry-down="
+#: 다시 묻기 전 대기(초). 간헐 오류는 바로 다시 부르면 같은 답을 받는다.
+RETRY_DOWN_WAIT = 15.0
 
 #: 대본마다 «리허설에서 볼 것». 요약표 아래에 그대로 찍는다 — 표만 보고는 무엇이
 #: 어긋난 것인지 알 수 없어서다. `review` 것은 **지금 판**(`SCEN.LATEST`) 기준이다.
@@ -301,6 +322,13 @@ CHECKS: dict[str, tuple[str, ...]] = {
         "                    T12 가 «없다»로 끝나는가 ·",
         "                    T9 가 «비대면 전환 시 면제»(F53)를 대면 0.38% 와 모순 없이 잇는가.",
     ),
+    "qa": (
+        "  볼 것: 턴마다 붙은 «기대»의 값이 그 뜻으로 답에 들어 있는가 ·",
+        "         상태 질문(JH7 잔여한도 0 · GY6 미설정 · DY1 요건 미충족 · SY7 콘텐츠 없음)이 «없다·아니다»로 답해지는가 ·",
+        "         다건 질문(MS2 · SH2)이 한 건만 답하지 않는가 · 기록 없는 고객(HS6 · SE5 · SM7)이 «기록 없음» 한 줄로 끝나는가 ·",
+        "         계산 턴(JM3 · JW4 · DY4 · PJ2 · SM5)이 «어느 계좌에» «어느 재원으로»를 적고 한도 축을 섞지 않는가.",
+        "  ※ 기대는 PENSION_TODAY=2026-09-07 기준이다(scenarios.QA 머리말). 다른 날짜면 잔여일수·ISA 상태가 달라진다.",
+    ),
 }
 
 #: 예전 이름 → 지금 이름. 그냥 «모르는 옵션»으로 끊으면 어디로 갔는지 알 수 없다.
@@ -321,15 +349,18 @@ def _usage() -> None:
     library            고객별 시나리오 5종        docs/DEMO_CUSTOMER_SCENARIOS.md
     review             중간점검 시연본 지금 판     docs/DEMO_REVIEW.md
     review@v3          중간점검본의 그 판
+    qa                 고객 12명 예상질문 (턴마다 «기대» 표시)   docs/QA_CUSTOMER_QUESTIONS.md
 
   골라 돌리기 — 블록 번호나 고객 이름을 뒤에 붙인다
-    cases 4 7 · library 김서연 정민석 · review 이수민
+    cases 4 7 · library 김서연 정민석 · review 이수민 · qa 김현수 윤가영
 
   표시옵션 — 겹쳐 쓸 수 있다
     --brief            요약표만 (붙여넣기 좋은 형태)
     --why              턴마다 «무엇을 찾아봤나 → LLM 이 몇 자 썼나»
     --show-llm         폐기된 생성문까지 (--why 를 함께 켠다)
     --time             턴별 소요 시간 (리허설 진단용 — 시연에서는 끈다)
+    --pause=N          턴 사이 N초 대기 (분당 한도가 있는 키로 길게 돌릴 때)
+    --retry-down=N     «LLM 호출 실패»로 끝난 턴을 같은 질문으로 N번까지 다시 묻는다 (간헐 5xx)
 
   중간점검본의 판
     --versions         판 이력 — 무엇을 왜 바꿨나
@@ -412,16 +443,28 @@ def main(argv: list[str]) -> int:
         print()
         _usage()
         return 1
-    unknown = [a for a in flags if a not in DISPLAY_FLAGS]
+    valued = {PAUSE_FLAG: 0.0, RETRY_DOWN_FLAG: 0.0}     # 값을 받는 옵션과 기본값
+    unknown = [a for a in flags if a not in DISPLAY_FLAGS
+               and not any(a.startswith(k) for k in valued)]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}\n")
         _usage()
         return 1
+    for a in flags:
+        for key in valued:
+            if a.startswith(key):
+                try:
+                    valued[key] = float(a[len(key):])
+                except ValueError:
+                    print(f"{key} 뒤에는 숫자를 씁니다: {a}")
+                    return 1
 
     brief = "--brief" in argv
     show_llm = "--show-llm" in argv
     why = "--why" in argv or show_llm       # 폐기 생성문은 그 로그 안에 붙는다
     timing = "--time" in argv
+    pause = valued[PAUSE_FLAG]
+    retry_down = int(valued[RETRY_DOWN_FLAG])
 
     # 첫 위치 인자가 대본 이름이면 그것이 대본이고, 아니면 cases 다. 나머지 위치 인자는
     # 블록을 고르는 값(번호 또는 고객 이름)이다.
@@ -510,15 +553,34 @@ def main(argv: list[str]) -> int:
                         print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 · {how} — "
                               "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
+                    if pause and i:
+                        # 턴 사이 대기 — 같은 세션 안에서만 쉰다. 블록 첫 턴은 화면을 여는
+                        # 자리라 이미 시간이 흘렀다.
+                        time.sleep(pause)
                     if not brief:
                         if rehearsal:
                             print(f"\n{'─' * 70}\n[{label}] > {question}\n")
+                            # qa 대본만 «기대»가 있다 — 질문 바로 아래 붙여, 답을 읽을 때
+                            # 무엇을 확인할지가 답보다 먼저 보이게 한다.
+                            expect = SCEN.QA_EXPECT.get(label) if script == "qa" else None
+                            if expect:
+                                print(f"   기대: {expect}\n")
                         else:
                             who = f"  [고객 {customer}]" if customer else ""
                             print(f"\n{'═' * 70}\n[{label}] {sees}{who}\n> {question}\n")
                     asked = time.monotonic()
                     try:
                         result = ask(question)
+                        # LLM 실패 안내로 끝난 턴은 같은 질문을 다시 묻는다(--retry-down).
+                        # 실패한 턴도 트레이스·기록에 남고, 요약표에는 마지막 시도가 찍힌다.
+                        for attempt in range(retry_down):
+                            if not any(n.name == "llm_down" for n in tr.turns[-1].nodes):
+                                break
+                            if not brief:
+                                print(f"   ⟳ LLM 호출 실패 — {RETRY_DOWN_WAIT:.0f}초 뒤 같은 질문을 "
+                                      f"다시 묻는다 ({attempt + 1}/{retry_down})")
+                            time.sleep(RETRY_DOWN_WAIT)
+                            result = ask(question)
                     except Exception as exc:                       # noqa: BLE001 — 한 턴이 죽어도
                         print(f"   실행 중단 — {type(exc).__name__}: {exc}")    # 나머지는 돈다
                         rows.append([label, "—", "—", "", "—", f"예외 {type(exc).__name__}", sees])

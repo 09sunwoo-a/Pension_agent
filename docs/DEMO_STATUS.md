@@ -45,6 +45,18 @@
 | 퇴직연금 | EVT-002 |
 
 
+### 발송 자료 미등록 전략 — 2건
+
+`clause_if_asset`(자료를 첨부해 보내는 문구)를 선언했지만 `assets.json` 에 고객 발송
+승인(`customer_facing: true`) 자료가 없어 자료 없는 문구(`clause`)로 내려가는 전략이다.
+자료를 등록하면 그 전략의 실행 문구가 첨부 문구로 바뀐다.
+
+| 전략 | 자료 있을 때의 문구 |
+|---|---|
+| st.chn_retain | {asset} LMS로 선발송하고 유선 접촉 |
+| st.dor_contact | {asset} 공유하고 유선 접촉 |
+
+
 ## 2. 데모 금리표 — 6종
 
 `market.current()` 가 자리표시자다 (`as_of` 2026-08, `dummy` True). 실제 피드가 붙으면 `market/__init__.py` 의 본문만

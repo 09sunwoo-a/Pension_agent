@@ -408,6 +408,29 @@ def check_branch_answer_amount() -> int:
     hit = len(blocked) == 2
     print(f"{'✓' if hit else '✗'} 화면번호: 근거에 없는 번호는 여전히 폐기된다")
     ok += hit
+
+    # ③ 아는 화면은 **원장 전체**로 본다 — 근거 한 건씩 재면 다른 근거의 화면이 «없는 화면»이
+    #    된다. 실측(2026-09-07, 오세훈 SH5 · 박정호 PJ5): 절차 카드([06-12-622] → [02-12-221])와
+    #    화면 카드([02-12-221])가 함께 실린 턴에서 답변이 절차 본문의 [06-12-622] 를 인용하자
+    #    화면 카드 근거 차례에서 폐기됐고, 절차 원문 2건이 저작 메모까지 그대로 덤프됐다.
+    from pension_agent.consult_agent.nodes import plan as PLAN
+    _blank = {"notices": [], "notice_scopes": [], "related": [], "marks": [],
+              "sources": [], "meta": {}, "query": ""}
+    _proc_text = "■ 연금개시는 [06-12-622] 세액 미공제 한도 등록 → [02-12-221] 연금지급 등록의 2단계"
+    _scr_text = "■ [02-12-221] 개인형IRP 연금지급  (지급·과세이연·연금)"
+    # 실제 도구(_ev)처럼 본문을 수치 검사 허용 텍스트(allow)에도 싣는다.
+    proc_ev = {**_blank, "tool": "procedure", "atomic": ["[06-12-622]", "[02-12-221]"],
+               "text": _proc_text, "allow": [_proc_text]}
+    scr_ev = {**_blank, "tool": "screen", "atomic": ["[02-12-221]"],
+              "text": _scr_text, "allow": [_scr_text]}
+    both = [proc_ev, scr_ev]
+    passed = not PLAN._screen("먼저 06-12-622 에서 등록하고, 02-12-221 에서 연금지급을 등록해요.",
+                              both, "연금개시 절차", set())[0]
+    faults = PLAN._screen("먼저 06-12-999 에서 등록해요.", both, "연금개시 절차", set())[0]
+    hit = passed and bool(faults)
+    print(f"{'✓' if hit else '✗'} 화면번호: 원장의 다른 근거가 아는 번호는 통과하고, 어느 근거에도 "
+          f"없는 번호는 폐기된다")
+    ok += hit
     return ok
 
 
@@ -627,6 +650,17 @@ def check_outreach() -> int:
     print(f"{'✓' if hit else '✗'} 이름을 앞부분만 잘라 부른 답변에는 붙지 않는다")
     ok += hit
 
+    # 이름을 바꿔 썼어도 **그 콘텐츠의 링크를 인용했으면** 가리킨 것이다(2026-09-07 실측,
+    # 김서연 SE6 — 「ISA 만기자금, IRP로 이어가는 절세 이벤트」를 「…IRP 이전 절세 이벤트」로
+    # 써서 제안이 빠졌고 다음 턴 승낙이 공중에 떴다). 링크는 원문 스팬이라 바꿔 쓸 수 없다.
+    url = (event or {}).get("url") or ""
+    paraphrased = f"ISA 만기자금 IRP 이전 절세 행사가 있어요. ▶ {url}" if url else ""
+    pending = act.offer({**state, "evidence": [ev], "answer": paraphrased}).get("pending_action") \
+        if paraphrased else None
+    hit = bool(url) and bool(pending) and pending["content_id"] == event["id"]
+    print(f"{'✓' if hit else '✗'} 이름을 바꿔 써도 링크를 인용한 답변에는 그 콘텐츠의 제안이 붙는다")
+    ok += hit
+
     # 재료에 요건 코드(isa·tax·add)가 실리면 답변이 그대로 옮긴다(§5 「재료에 개발 용어를
     # 쓰지 않는다」) — 실측: 「세액공제 활용 가능(tax)과 추가입금 여력 보유(add) 요건」.
     import re as _re
@@ -649,6 +683,45 @@ def check_outreach() -> int:
     hit = all(ev["meta"]["lms"][k]["message"] == facts["outreach"][k]["lms_message"]
               for k in ev["meta"]["lms"])
     print(f"{'✓' if hit else '✗'} 대화가 싣는 문구가 브리핑 ⑨ 의 문구와 같다")
+    ok += hit
+
+    # ⑤ 요건에 맞는 콘텐츠와 임박 순 폴백을 재료가 가른다.
+    #
+    # 회귀 대상(2026-09-07 실측, 최서윤): 이 고객 요건에 걸린 콘텐츠가 0건인데 화면 ⑨ 의
+    # 임박순 폴백 2건이 요건에 맞는 것과 같은 모양으로 실렸고, 답변이 그것을 «이 고객에게
+    # 적합»으로 세우고 사유까지 붙였다. 그 답 끝에 발송 화면 제안이 붙어 고객과 무관한
+    # 문자가 나가는 경로가 됐다. 판정은 추천 질문 칩과 같은 함수(relevant_outreach)다.
+    from pension_agent.strategy_agent import support as strategy_support
+    from pension_agent.strategy_agent import situations as strategy_situations
+    none_cid = next((p.id for p in PERSONAS if not strategy_support.relevant_outreach(
+        strategy_situations.problem_situations(p))), None)
+    hit = none_cid is not None
+    print(f"{'✓' if hit else '✗'} 요건에 걸린 콘텐츠가 0건인 고객이 시연 로스터에 있다"
+          + (f" ({none_cid})" if none_cid else ""))
+    ok += hit
+    if none_cid:
+        none_state = {"customer_id": none_cid, "question": "이 고객한테 안내할 만한 세미나나 이벤트 있어?"}
+        none_ev = tools.run("outreach", none_state, "안내할 세미나 이벤트")
+        none_text = (none_ev or {}).get("text", "")
+        hit = (bool(none_ev) and "지금 안내할 것 0건" in none_text
+               and "요건 일치: 없음" in none_text and "추천 사유:" not in none_text
+               and "요건에 맞는 콘텐츠는 없다" in none_text)
+        print(f"{'✓' if hit else '✗'} 걸린 콘텐츠 0건이면 재료가 «0건»과 «요건 일치: 없음»을 적고 "
+              f"추천 사유를 싣지 않는다")
+        ok += hit
+        # 폴백 문구로는 발송 화면을 제안하지 않는다 — 답변이 이름을 그대로 불러도.
+        fb_name = (facts_none := strategy_agent.propose(
+            strategy_customer.get_profile(none_cid))["facts"].get("outreach") or {})
+        fb_name = next((v["name"] for v in fb_name.values() if v), "")
+        hit = (bool(none_ev) and not none_ev["meta"]["lms"]
+               and not act.offer({**none_state, "evidence": [none_ev],
+                                  "answer": f"«{fb_name}» 를 안내해보세요."}).get("pending_action"))
+        print(f"{'✓' if hit else '✗'} 폴백 콘텐츠에는 발송 화면 제안이 붙지 않는다")
+        ok += hit
+        del facts_none
+    # 요건에 맞는 고객(PERSONAS[0])은 «요건 일치: <요건 이름>»이 붙고 추천 사유가 남는다.
+    hit = "요건 일치: " in text and "요건 일치: 없음" not in text and "지금 안내할 것 2건" in text
+    print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 «요건 일치: <요건 이름>»이 붙는다")
     ok += hit
     return ok
 
@@ -911,6 +984,13 @@ def check_briefing_shared() -> int:
     orig_gen, orig_avail = SA.llm.generate, SA.llm.available
     profile = CUST.PERSONAS[0]
 
+    # 파일 저장소(briefing_cache/)를 끈다 — `scripts.prebuild_briefings` 를 돌린 체크아웃에는
+    # 저장분이 있어 첫 호출이 LLM 0회로 그것을 읽고, «한 번만 만든다»의 1회차가 0 이 된다.
+    # 여기서 재는 것은 프로세스 캐시이지 파일 저장소가 아니다(test_engine 의 같은 격리).
+    from pension_agent import config as _cfg
+    saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir / "__off__"   # 없는 디렉터리 = 꺼짐
+
     SA.clear_briefing_cache()
     SA.llm.available = lambda: True
     # 부를 때마다 다른 문장을 내는 LLM — 캐시가 없으면 두 호출이 갈린다.
@@ -975,6 +1055,7 @@ def check_briefing_shared() -> int:
         SA.clear_briefing_cache()
     print(f"{'✓' if hit else '✗'} 캐시가 상한({SA._BRIEFING_MAX})에서 오래된 것부터 밀어낸다")
     ok += hit
+    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir
     return ok
 
 
@@ -2969,6 +3050,38 @@ def check_suitable_shape() -> int:
 
     hit = "자료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
     print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
+    ok += hit
+
+    # 재료가 말하는 수와 보여주는 목록은 같아야 한다 — 12명 전원.
+    #
+    # 회귀 대상(2026-09-07 실측, 오세훈·박정호): 제외 목록을 5건에서 자르던 상한 때문에
+    # 안정추구형(제외 6건) 재료가 «안내할 수 없는 상품 6종»이라 쓰고 5건만 실었다. LLM 이
+    # 목록을 세어 «5종»이라 쓰자 verify 가 원장에 없는 수로 답을 버리고 이 블록을 덤프했다.
+    import re as _re
+    from pension_agent.strategy_agent.customer import PERSONAS
+    _head = _re.compile(r"^── 안내할 수 (있는|없는) 상품 (\d+)종")
+    mismatch: list[str] = []
+    for p in PERSONAS:
+        ev = tools._suitable({"customer_id": p.id}, "q")
+        if not ev:
+            continue
+        section, said, listed = None, {}, {}
+        for line in ev["text"].splitlines():
+            m = _head.match(line)
+            if m:
+                section = m.group(1)
+                said[section] = int(m.group(2))
+                listed.setdefault(section, 0)
+            elif line.startswith("── "):
+                section = None
+            elif section and line.startswith("· ") and not line.startswith("· [포트폴리오]"):
+                listed[section] += 1
+        for section, n in said.items():
+            if listed.get(section) != n:
+                mismatch.append(f"{p.nm}:{section} {n}종 ≠ 목록 {listed.get(section)}줄")
+    hit = not mismatch
+    print(f"{'✓' if hit else '✗'} 머리말의 종수와 목록 줄 수가 12명 전원에서 같다"
+          + (f" ({', '.join(mismatch)})" if mismatch else ""))
     ok += hit
     return ok
 

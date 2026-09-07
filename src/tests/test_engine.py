@@ -322,6 +322,12 @@ check(_tax is not None, "박지민: 세액공제 전략 성립")
 if _tax:
     check(_tax["amount"] == engine.won(3_000_000), "박지민: 세액공제 대상액 = 잔여 한도 300만원",
           str(_tax["amount"]))
+# «확인 필요»는 직원이 고객과 확인할 항목만이다. 저작자에게 하는 말(자료 미등록 — assets.json
+# 확인)이 여기 섞이면 대화형 customer 재료로 실려 «하면 안 되는 것» 답변에 그대로 나간다
+# (2026-09-07 실측, 송도윤). 자료 미등록은 docs/DEMO_STATUS.md 가 센다.
+check(not any(("assets.json" in n or "customer_facing" in n)
+              for p in PERSONAS for n in FACTS[p.nm]["needs_confirm"]),
+      "확인 필요 목록에 저작자용 문장(assets.json·customer_facing)이 없다")
 check(any("총급여 구간 미확인" in n for n in FACTS["한지우"]["needs_confirm"]),
       "한지우: 소득 구간 미확인이 확인 항목으로 노출")
 
@@ -406,6 +412,13 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 # **입력이 바뀐 셈인 스텁 교체 때마다 캐시를 비운다.** 실행 중에 LLM 이 바뀌는 것은
 # 테스트에서만 있는 일이라, 이 호출이 필요한 것도 여기뿐이다.
 _saved = (agent.llm.available, agent.llm.generate)
+# 파일 저장소(briefing_store)도 끈다 — `scripts.prebuild_briefings` 를 한 번이라도 돌린
+# 체크아웃에는 `briefing_cache/` 가 있어 저장소가 켜지고, 그러면 첫 스텁이 만든 브리핑이
+# 파일로 남아 두 번째 스텁의 propose 가 **그 파일을 읽는다**(프로세스 캐시만 비워서는
+# 안 지워진다). 재료 이탈 검사가 «LLM판단 · rejected 없음»으로 갈리는 것이 그 증상이다.
+from pension_agent import config as _cfg  # noqa: E402
+_saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+_cfg.BRIEFING_CACHE_DIR = _cfg.BRIEFING_CACHE_DIR / "__off__"   # 없는 디렉터리 = 꺼짐
 try:
     agent.llm.available = lambda: True
     agent.llm.generate = lambda prompt, system="", **kw: (
@@ -423,6 +436,7 @@ try:
           "재료 이탈 산출은 폴백(tier=미매칭)", str(_r3["rejected"])[:40])
 finally:
     agent.llm.available, agent.llm.generate = _saved
+    _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
     # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
     agent.clear_briefing_cache()
 

@@ -432,6 +432,12 @@ def followup_questions(out: dict) -> list[str]:
             # pitch → pitch(반론 후속)만 예외다: 같은 재료의 **다른 카드**가 답한다.
             if lead in used and not (lead == "pitch" and found["tool"] == "pitch"):
                 continue
+            # 안내 콘텐츠 재료가 폴백뿐이면(이 고객 요건에 맞는 것이 0건 — tools._outreach 가
+            # 그때 meta.lms 를 비운다) «이 콘텐츠를 어떻게 안내하지»는 성립하지 않는다 —
+            # 안내하지 않을 콘텐츠를 안내하는 법을 묻게 된다. 상품 범위 칩은 그대로 둔다.
+            if found["tool"] == "outreach" and lead == "pitch" \
+                    and not (found.get("meta") or {}).get("lms"):
+                continue
             question = _phrase(variants, topic, len(history))
             if not question or _norm(question) in asked or _norm(question) in seen:
                 continue

@@ -77,7 +77,6 @@ from pension_agent.consult_agent.tools.market import (  # noqa: F401
     _render_market,
 )
 from pension_agent.consult_agent.tools.suitability import (  # noqa: F401
-    BLOCKED_MAX,
     _suitable,
 )
 from pension_agent.consult_agent.tools.briefing import (  # noqa: F401

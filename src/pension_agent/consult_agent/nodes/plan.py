@@ -276,8 +276,26 @@ _SCREEN_SPAN = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*
 _SCREEN_IN_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}(?![0-9A-Za-z-])")
 
 
-def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
+def _ledger_screens(evidence: Iterable[tools.Evidence]) -> set[str]:
+    """이번 턴 원장 **전체**가 아는 화면번호(정규형). 근거 한 건이 아니라 합집합이다.
+
+    화면번호 판정은 «답변이 원장에 없는 화면을 가리키는가»인데, 근거 한 건씩 재면 다른
+    근거가 아는 화면이 «없는 화면»이 된다. 실측(2026-09-07 — 오세훈 SH5 · 박정호 PJ5):
+    원장에 절차 카드([06-12-622] → [02-12-221] 2단계)와 화면 카드([02-12-221] 한 장)가 함께
+    있었고, 답변이 절차 본문의 [06-12-622] 를 인용하자 **화면 카드 근거를 재는 차례에서**
+    «이 근거에 없는 화면»으로 답이 통째로 버려졌다. 절차 근거 차례에서는 통과한 번호다.
+    """
+    return {screens.normalize(s) for e in evidence for s in e["atomic"]
+            if _SCREEN_SPAN.fullmatch(s.strip())}
+
+
+def _span_verdict(found: tools.Evidence, answer: str,
+                  known_screens: set[str] | None = None) -> tuple[str, list[str]]:
     """이 근거의 원문 스팬이 답변에서 어떻게 어긋났는지 판정한다. 종류는 도구가 선언한다.
+
+    `known_screens` — 화면번호 판정에 쓸 «원장이 아는 화면» 집합. 호출부(`_screen`)가
+    원장 전체의 합집합(`_ledger_screens`)을 넘긴다. 넘기지 않으면 이 근거 것만 본다
+    (근거 하나로 재는 검사용).
 
     · `atomic` — 값 + 조건이 붙은 한 덩이. 그 숫자를 쓰면서 원문을 안 실었다 → **DISCARD**.
       블록을 덧붙이는 복구로는 안 된다. 틀린 문장이 옳은 블록 옆에 그대로 남기 때문이다.
@@ -299,10 +317,13 @@ def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     # 겹쳐 «숫자는 썼는데 원문을 안 실었다»로 오판됐다. 원장 화면이 일곱 개인 절차 답변이
     # 여섯 개를 정확히 인용하고도 폐기돼 카드 원문이 덤프됐다(2026-09-02 실측 — 박정호 P3).
     #
-    # 지금 재는 것은 «답변이 이 턴 근거에 **없는** 화면을 가리키는가» 하나다. 빠뜨린 것은
+    # 지금 재는 것은 «답변이 이 턴 원장에 **없는** 화면을 가리키는가» 하나다. 빠뜨린 것은
     # 위반이 아니고(안 부른 것이다), 대괄호 유무는 같은 화면이다(`screens.normalize`).
     # 지어낸 번호는 여기서도 걸리고 수치 검사에도 걸린다 — 마지막 마디가 원장에 없다.
-    known_screens = {screens.normalize(s) for s in found["atomic"] if _SCREEN_SPAN.fullmatch(s.strip())}
+    # 아는 화면은 원장 전체로 본다(`_ledger_screens` 머리말) — 이 근거만 보면 다른 근거의
+    # 화면이 «없는 화면»이 된다.
+    if known_screens is None:
+        known_screens = _ledger_screens([found])
     if known_screens:
         for m in _SCREEN_IN_TEXT.finditer(answer):
             said = screens.normalize(m.group())
@@ -467,7 +488,8 @@ def _screen(answer: str, evidence: list[tools.Evidence],
     if broken:
         return [f"자료가 「틀린 표현」으로 적어둔 것을 그대로 말함: {b}" for b in broken], []
 
-    verdicts = [_span_verdict(e, answer) for e in evidence]
+    ledger_screens = _ledger_screens(evidence)
+    verdicts = [_span_verdict(e, answer, ledger_screens) for e in evidence]
     if any(v == DISCARD for v, _ in verdicts):
         spans = [span for e, (v, detail) in zip(evidence, verdicts) if v == DISCARD
                  for span, _ in detail]

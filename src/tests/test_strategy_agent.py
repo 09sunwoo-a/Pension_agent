@@ -21,6 +21,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "dummy")  # llm.available() 만 통과시킨다
+# 브리핑 파일 저장소(briefing_cache/)를 끈다 — `scripts.prebuild_briefings` 를 돌린 체크아웃에서는
+# 스텁 LLM 으로 만든 propose() 산출 대신 저장분이 읽혀 «폴백·거부» 검사 두 건이 갈린다
+# (test_engine · test_consult_agent 와 같은 격리). 스텁을 재는 스위트는 파일 저장소를 보지 않는다.
+os.environ.setdefault("PENSION_BRIEFING_CACHE", "0")
 
 from pension_agent.strategy_agent import agent as A
 from pension_agent.strategy_agent import engine
