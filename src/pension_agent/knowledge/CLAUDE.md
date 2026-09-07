@@ -79,7 +79,7 @@
 
 분류는 변환기 규칙(`build_kb.role_entries` — 저작 표지·굵기) → 빌드 리포트 검토 →
 `config.py` 예외표(혼합 칸을 사람이 가름) 순서다. 소비 코드는 선언만 본다
-(`consult_agent/kb.py::role_texts`).
+(`knowledge/kb.py::role_texts`).
 
 **적용 조건(`applies`) 축은 아직이다** — caution 이 답변의 주제·고객 상태에 걸릴 때만
 붙는 판정이 없어, 지금은 그 카드가 근거로 쓰이면 무조건 표시된다(consult §12 gap 7).
@@ -146,7 +146,7 @@
 | 카드→고객군 (§4) | `segments` (method·procedure·fieldtip·pitch 에 선언됨) | **0/317 — 전부 빈칸** |
 | 고객군→상태 코드 (§4) | `segment.conds` / `exclusions` | 20/86 · 3/86 |
 | 공통 주제 어휘 | `tags.topics` | 채워짐(fieldtip 10건만 빈 리스트) |
-| 질문→카드 입구 | `trigger_examples` | 화법 102건 중 **90건이 1개뿐** — 원문에 인용문이 하나씩만 있어서다. 표현이 조금만 달라도 검색이 못 찾는다(본문에 답이 있어도) |
+| 질문→카드 입구 | `trigger_examples` — 변환기가 본문 절에서 뽑는다(`build_kb.triggers_of`), 규칙이 못 뽑는 카드만 `config.TRIGGER_EXTRA` 에 사람이 적는다(19장) | 화법 102건 중 **90건이 1개뿐** — 원문에 인용문이 하나씩만 있어서다(대사의 고객 발화 8줄은 전부 "어떻게 하면 되나요?" 류라 못 쓴다, 2026-09-04 확인). 다른 종류는 2026-09-04 재측정: 제목 밖 단서가 없는 카드 139→71장, 남은 71장은 screen 67(«화면번호» 패턴)·pitch 3·channel 1 |
 | 카드↔카드 (§5) | 없음 — "→ F2" 텍스트 | 0건 — 화법 102건 전부 근거 미연결(`kb` 리포트 WARN "supporting_facts 없음") |
 | 값↔조건 — 표 (§1) | `market.tables`·`lineup.tables` — 05 원문의 마크다운 표를 행 단위로 편 것 | market·lineup **23장 중 표를 가진 9장**(표 16개·행 138개). 행마다 `keys`(이름 칸)·`cells`(나머지 칸)·`values`(짧은 값 칸) |
 | 시효성 (consult §9) | `market`·`lineup` 의 `as_of` · `volatile` — 05 원문·폴더 README 에서 읽는다 | market·lineup **23/23** · screen·channel 은 확인 필요 화면·전 채널. 화법은 별도 축(`rate_slots`·`claim_condition`) |
@@ -248,7 +248,7 @@
 - `kinds.json` 에 종류 선언(`consumed: retrieval`)
 - `consult_agent/kb.py` 의 `_KIND_ORDER` · `_BUCKET_LETTER` — 버킷 카탈로그에 들어가야
   LLM 이 고를 후보 목록에 보인다
-- `consult_agent/tools.py` 의 도구 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
+- `consult_agent/tools/` 의 도구 모듈 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
 
 `tests/test_consult_agent.py::check_hier_index` 의 버킷 커버리지 검사가 두 번째를 잡는다.
 
