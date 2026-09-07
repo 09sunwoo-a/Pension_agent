@@ -406,6 +406,13 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 # **입력이 바뀐 셈인 스텁 교체 때마다 캐시를 비운다.** 실행 중에 LLM 이 바뀌는 것은
 # 테스트에서만 있는 일이라, 이 호출이 필요한 것도 여기뿐이다.
 _saved = (agent.llm.available, agent.llm.generate)
+# 파일 저장소(briefing_store)도 끈다 — `scripts.prebuild_briefings` 를 한 번이라도 돌린
+# 체크아웃에는 `briefing_cache/` 가 있어 저장소가 켜지고, 그러면 첫 스텁이 만든 브리핑이
+# 파일로 남아 두 번째 스텁의 propose 가 **그 파일을 읽는다**(프로세스 캐시만 비워서는
+# 안 지워진다). 재료 이탈 검사가 «LLM판단 · rejected 없음»으로 갈리는 것이 그 증상이다.
+from pension_agent import config as _cfg  # noqa: E402
+_saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+_cfg.BRIEFING_CACHE_DIR = _cfg.BRIEFING_CACHE_DIR / "__off__"   # 없는 디렉터리 = 꺼짐
 try:
     agent.llm.available = lambda: True
     agent.llm.generate = lambda prompt, system="", **kw: (
@@ -423,6 +430,7 @@ try:
           "재료 이탈 산출은 폴백(tier=미매칭)", str(_r3["rejected"])[:40])
 finally:
     agent.llm.available, agent.llm.generate = _saved
+    _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
     # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
     agent.clear_briefing_cache()
 

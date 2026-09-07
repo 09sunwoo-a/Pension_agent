@@ -43,6 +43,8 @@ $CADR library                                         # 고객별 시나리오 5
 $CADR library 김서연 정민석 --why                      # 이름·번호로 골라서 (옵션은 대본과 무관하게 같다)
 $CADR review                                          # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
 $CADR review 이수민 --why                              # 고객 골라서
+PENSION_TODAY=2026-09-07 $CADR qa                     # 고객 12명 예상질문 83턴 — 턴마다 «기대» 표시 (docs/QA_CUSTOMER_QUESTIONS.md)
+PENSION_TODAY=2026-09-07 $CADR qa 김현수 윤가영 --why --pause=20   # 고객 골라서 · 턴 사이 20초(분당 한도 키)
 $CADR --versions                                      # 중간점검본 판 이력 — 무엇을 왜 바꿨나
 $CADR --diff v5 v6                                    # 두 판의 질문 차이
 $CADR review@v3                                       # 옛 판 그대로 돌려보기
