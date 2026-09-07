@@ -2919,6 +2919,38 @@ def check_suitable_shape() -> int:
     hit = "자료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
     print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
     ok += hit
+
+    # 재료가 말하는 수와 보여주는 목록은 같아야 한다 — 12명 전원.
+    #
+    # 회귀 대상(2026-09-07 실측, 오세훈·박정호): 제외 목록을 5건에서 자르던 상한 때문에
+    # 안정추구형(제외 6건) 재료가 «안내할 수 없는 상품 6종»이라 쓰고 5건만 실었다. LLM 이
+    # 목록을 세어 «5종»이라 쓰자 verify 가 원장에 없는 수로 답을 버리고 이 블록을 덤프했다.
+    import re as _re
+    from pension_agent.strategy_agent.customer import PERSONAS
+    _head = _re.compile(r"^── 안내할 수 (있는|없는) 상품 (\d+)종")
+    mismatch: list[str] = []
+    for p in PERSONAS:
+        ev = tools._suitable({"customer_id": p.id}, "q")
+        if not ev:
+            continue
+        section, said, listed = None, {}, {}
+        for line in ev["text"].splitlines():
+            m = _head.match(line)
+            if m:
+                section = m.group(1)
+                said[section] = int(m.group(2))
+                listed.setdefault(section, 0)
+            elif line.startswith("── "):
+                section = None
+            elif section and line.startswith("· ") and not line.startswith("· [포트폴리오]"):
+                listed[section] += 1
+        for section, n in said.items():
+            if listed.get(section) != n:
+                mismatch.append(f"{p.nm}:{section} {n}종 ≠ 목록 {listed.get(section)}줄")
+    hit = not mismatch
+    print(f"{'✓' if hit else '✗'} 머리말의 종수와 목록 줄 수가 12명 전원에서 같다"
+          + (f" ({', '.join(mismatch)})" if mismatch else ""))
+    ok += hit
     return ok
 
 

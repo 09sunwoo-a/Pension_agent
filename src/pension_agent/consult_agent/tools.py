@@ -518,9 +518,11 @@ def _market_like(kind: str, label: str) -> Callable[[AgentState, str], Evidence 
 # 능력 표면은 도구 목록이므로(§3) 없는 도구는 없는 능력이다.
 # ─────────────────────────────────────────────────────────────
 
-#: 제외 상품을 몇 건까지 싣나. "왜 이건 없어?" 에 답하려면 사유가 필요하고, 열두 줄이
-#: 늘어서면 정작 통과 목록이 묻힌다.
-BLOCKED_MAX = 5
+# 제외 상품은 **전부** 싣는다. 예전에는 5건에서 잘랐는데(통과 목록이 묻힌다는 이유), 머리말은
+# «안내할 수 없는 상품 6종»이라 쓰고 목록은 5건만 실리는 고객(안정추구형 — 제외 6건)이
+# 생겼다. LLM 이 목록을 세어 «5종»이라 쓰면 verify 가 원장에 없는 수로 답을 통째로 버리고
+# 이 블록을 덤프한다(2026-09-07 실측 — 오세훈·박정호 두 번). 재료가 말하는 수와 보여주는
+# 목록은 같아야 한다. 카탈로그가 12종이라 제외 목록이 길어질 일도 없다.
 
 
 def _suitable(state: AgentState, query: str) -> Evidence | None:
@@ -568,7 +570,7 @@ def _suitable(state: AgentState, query: str) -> Evidence | None:
         lines.append(f"· [포트폴리오] {pf['name']} — {pf.get('description') or ''}".rstrip())
     if blocked:
         lines += ["", f"── 안내할 수 없는 상품 {len(blocked)}종 (왜 목록에 없는지)"]
-        lines += [f"· {r['name']} — {why}" for r, why in blocked[:BLOCKED_MAX]]
+        lines += [f"· {r['name']} — {why}" for r, why in blocked]
     else:
         # **0건일 때 침묵하지 않는다.** 재료가 아무 말도 안 하면 답변 형태가 요구하는
         # 「안내할 수 없는 상품」을 LLM 이 통과 목록에서 만들어 채운다(실측: 정민석 —
