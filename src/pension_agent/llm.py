@@ -16,12 +16,20 @@
            LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
+━━ 실행 환경(프로파일) ━━
+환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(OpenAI 호환 게이트웨이의 Sonnet, genai
+경로). 환경마다 `src/.env.<이름>`
+한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
+잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
+
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
   LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
   LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
+  LLM_RETRY_ATTEMPTS  429 재시도 횟수(첫 호출 포함). 기본 3
+  LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0. 무료 쿼터로 리허설을 돌릴 때 4~5
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
   GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
@@ -45,6 +53,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -72,6 +81,25 @@ MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 #: 429 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
 RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "3"))
+#: 호출 사이 최소 간격(초). 기본 0 — 두지 않는다. 무료 쿼터(gemma)로 리허설처럼 턴을 몰아
+#: 돌리면 분당 한도에 걸려 재시도 6회로도 429 가 남는다(2026-09-05 실측 — 브리핑 11연쇄 +
+#: 턴마다 4~7회, 답변·되묻기 판정은 동시 호출). 재시도는 이미 걸린 뒤의 처방이고 이것은
+#: 걸리지 않게 하는 처방이다. 프로세스 안의 모든 호출(스레드 포함)이 한 시계를 본다.
+MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0") or 0)
+_throttle_lock = threading.Lock()
+_last_call_at = 0.0
+
+
+def _throttle() -> None:
+    """MIN_INTERVAL 이 설정돼 있으면 직전 호출로부터 그 간격이 지날 때까지 기다린다."""
+    global _last_call_at
+    if MIN_INTERVAL <= 0:
+        return
+    with _throttle_lock:
+        wait = _last_call_at + MIN_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_call_at = time.monotonic()
 
 # ── gemma (외부 사전점검) ──
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
@@ -276,9 +304,11 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "
-            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오."
+            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오. "
+            "어느 .env 가 읽혔는지는 python -m pension_agent.env 로 봅니다."
             % PROVIDER
         )
+    _throttle()
     started = time.time()
     try:
         if PROVIDER == "anthropic":
@@ -303,11 +333,19 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
 def _observe(name: str, started: float, prompt: str, system: str | None, max_tokens: int,
              temperature: float, x_client_user: str, *, meta: dict, output: str | None,
              error: str | None) -> None:
-    """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability)."""
+    """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability).
+
+    **system 이 있는 호출은 채팅 메시지 꼴로 싣는다.** Langfuse 는 `[{role, content}, …]`
+    를 대화로 알아보고 역할별로 갈라 렌더하지만, 그 밖의 dict 는 JSON 한 덩어리로
+    직렬화해 보여준다 — `\\n`·`\\"` 가 이스케이프된 채 한 칸에 들어차서 프롬프트를 읽을
+    수 없다. 대시보드에서 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
+    system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
+    """
     observability.record_generation(
         name,
         model=meta.get("model") or _default_model_label(),
-        input={"system": system, "prompt": prompt} if system else prompt,
+        input=([{"role": "system", "content": system},
+                {"role": "user", "content": prompt}] if system else prompt),
         output=output,
         usage=meta.get("usage"),
         start=started,

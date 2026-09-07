@@ -4,7 +4,7 @@
 "pitch_agent") 화법 검색을 넘어 지식 질의응답·고객 브리핑 질의·화면 연계·상담이력
 기록(§14, 모든 턴 공통)·브리핑 수정 요청까지 다루는 자리로 커졌다.
 
-**무엇을 할 수 있는지는 도구 목록(`tools.py::TOOLS`)이 정한다.** 새 종류의 재료로 답하게
+**무엇을 할 수 있는지는 도구 목록(`tools/__init__.py::TOOLS`)이 정한다.** 새 종류의 재료로 답하게
 하려면 도구 하나를 추가한다 — 의도 enum·분기표·노드를 함께 늘리지 않는다. 있어야 할
 동작의 기준은 이 폴더의 `CLAUDE.md` 이고, 구현이 그 문서와 어긋나면 구현이 틀린 것이다.
 
@@ -60,7 +60,7 @@ $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 저장된 시나�
 $CAD --list                                                 # 시나리오 목록
 
 python -m tests.test_consult_agent               # API 키 없이 검색·라우팅 검증
-python -m pension_agent.consult_agent.kb         # 지식베이스 점검 리포트
+python -m pension_agent.knowledge.kb             # 지식베이스 점검 리포트
 ```
 
 `-c`/`--customer`를 넘기지 않으면 고객 관련 기능(브리핑 질의·수정·화면 연계)은 "고객 화면을
@@ -110,8 +110,9 @@ consult_agent/
 ├── __main__.py         REPL — python -m pension_agent.consult_agent -c <KB-PIN>
 ├── state.py            AgentState/Turn · 대화이력 포맷 · 공용 지식베이스(KB)
 ├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
-├── kb.py               지식베이스 로드 · 검색 · 계층 인덱스(버킷)
-├── tools.py            도구 레지스트리(에이전트가 할 수 있는 일 목록) · 근거(Evidence) 규약 · 원장 helper
+├── kb.py               LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
+├── tools/              도구 패키지 — __init__ 레지스트리(에이전트가 할 수 있는 일 목록) · base 근거(Evidence) 규약
+│                       · 도구별 모듈(cards·market·briefing·history·pitch·dates·tax_credit·playbook·outreach…) · ledger 원장 helper
 ├── select.py           카드 선택 — LLM 버킷→카드 2단, LLM 이 0건일 때만 n-gram (종류 무관)
 ├── guard.py            「하지 말 것」 — 지식베이스에 있는 금지 문장만 띄운다
 ├── marks.py            재료 성격 표시 — 신뢰 등급 · 내부용 주의 (§7)
@@ -138,7 +139,7 @@ consult_agent/
 돌려주는 즉답 노드였는데, 그 경로를 §11 에 따라 지우면서 검색·조립 함수만 남았고 도구가
 쓴다. 같은 재료를 두 경로로 답하면 프롬프트·검증·표시 규약이 갈린다.
 
-답변에 붙는 `sources[].doc` 은 `kb.py::origin_of()` 가 만든 **원본 문서명**이고,
+답변에 붙는 `sources[].doc` 은 `knowledge/kb.py::origin_of()` 가 만든 **원본 문서명**이고,
 CLI·Streamlit 이 카드 id 대신 이걸 읽어준다(출처 문자열 규칙은 `CLAUDE.md`).
 
 지식 카드는 이 폴더가 아니라 `../knowledge/data/` 에 있다 — strategy_agent 도 함께 읽는
@@ -161,7 +162,7 @@ CLI·Streamlit 이 카드 id 대신 이걸 읽어준다(출처 문자열 규칙�
 루트 `CLAUDE.md` 절대 규칙 3).
 
 지식베이스(`state.KB`)는 `state.py`에서 한 번만 적재해 모든 노드가 가져다 쓴다(순환 임포트
-없이 한 방향으로만 의존). `tools.py`의 `customer` 도구와 `nodes/correction.py`는 `strategy_agent`
+없이 한 방향으로만 의존). `tools/briefing.py`의 `customer` 도구와 `nodes/correction.py`는 `strategy_agent`
 (engine·agent·customer)를 그냥 임포트한다 — 패키지화 전에는 두 에이전트가 `prompts`/`llm`
 같은 동명 모듈을 갖고 sys.modules 를 놓고 경합해서 전용 로더가 필요했지만, 지금은 완전정규화
 이름이라 경합 자체가 없다.
@@ -206,7 +207,7 @@ flowchart TD
     llm_down --> __end__
     lms_link --> __end__
     offer --> __end__
-    tools[["자료 도구 17종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이 고객 상태에 걸린 참고자료<br/>&nbsp;&nbsp;&nbsp;&nbsp;안내할 이벤트·세미나<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
+    tools[["자료 도구 19종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이번 상담 대화 기록<br/>&nbsp;&nbsp;&nbsp;&nbsp;이 고객 상태에 걸린 참고자료 · 안내할 이벤트·세미나<br/>오늘의 목록: 오늘의 타겟 고객 목록<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
     plan -. "필요한 자료를 골라 조회" .-> tools
     gates[["답변 점검 — 근거를 벗어난 답변은 화면에 내보내지 않는다<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]
     compose -. "내보내기 전 검사" .-> gates
@@ -307,11 +308,15 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 - **카드 선택은 LLM 이 1차, n-gram 이 폴백이다.** 원래는 반대였는데, n-gram 은 문자 유사도라
   "주제어만 겹치는 확신 있는 오답"을 만들고 그걸 게이트로 사후에 걸러내는 구조였다. 애초에
   의미로 고르면 그 오답이 생기지 않으므로 순서를 뒤집었다. n-gram 은 버리지 않았다 —
-  **LLM 이 살아서 0건을 냈을 때만** 돈다(LLM 장애는 폴백이 아니라 무응답이다, §11). 단 `method`·`fieldtip` 은 `trigger_examples`가 제목과 거의
-  같아서 n-gram 폴백이 약하다 — 이 종류에서는 LLM 선택이 사실상 주 경로다.
+  **LLM 이 살아서 0건을 냈을 때만** 돈다(LLM 장애는 폴백이 아니라 무응답이다, §11).
+  `trigger_examples` 는 두 경로 모두의 입구다 — LLM 카드 목록 한 줄에는 앞 2개만 실리고
+  (`kb._card_line`), n-gram 폴백은 전부와 제목을 함께 잰다(`kb.score_parts`). 2026-09-04 까지
+  pitch 를 뺀 모든 종류가 첫 칸에 제목을 그대로 넣어 목록의 정보 칸이 하나뿐이었고,
+  `fieldtip` 은 제목 하나뿐이었다. 지금은 변환기가 제목을 넣지 않고 본문 절로 채운다
+  (`build_kb.triggers_of` · `CLAUDE.md` §3 「재료를 고르는 길」).
 - LLM 실패 시 폴백 동작, 후보 범위·오답 차단 등 검증 규칙은 `CLAUDE.md` 의
   「답변 검증」·「불변 조건」 참고.
-- `retrieve`는 `stage`/`customer_type`으로 먼저 후보를 좁힌 뒤 채점 — 챕터 간 같은 라벨(예: "수수료 비교"가 퇴직금·계약이전에 둘 다 있음)이 섞이지 않음. 세부 로직·근거는 `nodes/pitch.py`/`kb.py` 코드 주석 참고.
+- `retrieve`는 `stage`/`customer_type`으로 먼저 후보를 좁힌 뒤 채점 — 챕터 간 같은 라벨(예: "수수료 비교"가 퇴직금·계약이전에 둘 다 있음)이 섞이지 않음. 세부 로직·근거는 `nodes/pitch.py`/`knowledge/kb.py` 코드 주석 참고.
 - 후속 질문은 `ask()`가 돌려준 `history`를 다음 호출에 그대로 넘기면 됨(세션 유지는 호출자 책임, 최근 4턴만 반영).
 
 ---
@@ -363,8 +368,8 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 
 | 위치 | 값 | 의미 |
 |---|---|---|
-| `tools.py` `PITCH_TOP_K` | 3 | 프롬프트에 넣을 화법 카드 수. 늘리면 맥락↑ 토큰↑ |
-| `kb.py` `MIN_TOPICAL` | 0.5 | 낮추면 fallback이 줄고 오답이 늘어남 (실측: 유관 0.55~2.1 / 무관 0.00~0.42) |
+| `tools/pitch.py` `PITCH_TOP_K` | 3 | 프롬프트에 넣을 화법 카드 수. 늘리면 맥락↑ 토큰↑ |
+| `knowledge/kb.py` `MIN_TOPICAL` | 0.5 | 낮추면 fallback이 줄고 오답이 늘어남 (실측: 유관 0.55~2.1 / 무관 0.00~0.42) |
 
 ---
 
@@ -406,7 +411,9 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 - **더미 게이트**: `pension_agent/tools.py::open_lms_screen` 은 발송하지 않고, **더미 콘텐츠에서
   온 문구를 발송 화면에 채우는 것을 거부한다** — 채워 넣으면 직원이 그대로 보낼 수 있기
   때문이다. MCP 연동이 준비되면 함수 **본문만** 교체하면 된다(레지스트리 키·시그니처 불변).
-  `register_consult_note`(상담 이력 등록)도 같은 레지스트리에 있다.
+  `register_consult_note`(상담 이력 등록)와 `send_memo`(이번 상담 요약을 직원 본인 쪽지함으로
+  보내는 스텁 — 고객에게 나가는 것이 아니라 에이전트가 보내는 것까지 한다. 승낙 뒤에만
+  불린다)도 같은 레지스트리에 있다.
 - **브리핑 수정**: 편집 가능 항목은 `strategy_agent.agent.EDITABLE_FIELDS`(AI브리핑
   문장·근거해설·카드 한줄혜택 — 전부 LLM 이 쓴 산문)로 코드가 못박아둔다. 수치·상품명·전략
   선정처럼 시스템이 계산한 값을 고쳐달라는 요청은 조용히 수용하지 않고 명확히 거절한다.

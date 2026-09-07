@@ -341,8 +341,10 @@ def instrument(trace: Trace):
 
     real_span = P._span_verdict
 
-    def span_wrapper(found, answer):
-        verdict, gaps = real_span(found, answer)
+    def span_wrapper(found, answer, *args, **kwargs):
+        # 인자를 그대로 넘긴다 — 판정 함수가 «원장이 아는 화면» 집합을 세 번째 인자로 받는다
+        # (plan._ledger_screens). 래퍼가 그것을 떨어뜨리면 계측을 건 실행만 다른 판정을 한다.
+        verdict, gaps = real_span(found, answer, *args, **kwargs)
         trace.add_gate(Gate(name="span", passed=verdict != P.DISCARD,
                             detail=[verdict, *[label for label, _ in gaps]]))
         return verdict, gaps

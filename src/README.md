@@ -12,7 +12,9 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 ```bash
 cd src
 pip install -r requirements.txt
-cp .env.example .env      # 사내 게이트웨이 URL·키 (pension_agent/llm.py 가 읽음)
+cp .env.example .env                 # 공통 설정 (기본 프로파일 이름 등)
+cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
+python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
@@ -33,14 +35,21 @@ $CAD --debug -c 198734-1205842                        # REPL — 턴마다 방�
 $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 키 없이 재현
 $CAD --list                                           # 시나리오 목록
 
-# ── 묶음 실행: 검토(독립 케이스 10개) · 시연 대본(docs/DEMO_SCENARIO.md)
-$CADR                                                 # 검토 10케이스 + 요약표
+# ── 묶음 실행: 첫 인자가 «어떤 대본», --옵션이 «얼마나 보여주나» ($CADR --help)
+$CADR                                                 # cases — 검토 11케이스 + 요약표
 $CADR --brief                                         # 요약표만
-$CADR --demo                                          # 시연 대본 16턴 (청중이 보는 화면)
-$CADR --demo --debug                                  # + 「무엇을 찾아봤나 → LLM 이 썼다」
-$CADR --demo --debug --show-llm                       # + 폐기된 생성문까지 (왜 잘렸나)
-$CADR --scenario                                      # 고객별 대표 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
-$CADR --scenario 김서연 정민석 --debug                 # 이름·번호로 골라서 (옵션은 --demo 와 동일)
+$CADR demo                                            # 시연 대본 16턴 (docs/DEMO_SCENARIO.md)
+$CADR demo --why                                      # + 「무엇을 찾아봤나 → LLM 이 썼다」
+$CADR demo --why --show-llm                           # + 폐기된 생성문까지 (왜 잘렸나)
+$CADR library                                         # 고객별 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
+$CADR library 김서연 정민석 --why                      # 이름·번호로 골라서 (옵션은 대본과 무관하게 같다)
+$CADR review                                          # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
+$CADR review 이수민 --why                              # 고객 골라서
+PENSION_TODAY=2026-09-07 $CADR qa                     # 고객 12명 예상질문 83턴 — 턴마다 «기대» 표시 (docs/QA_CUSTOMER_QUESTIONS.md)
+PENSION_TODAY=2026-09-07 $CADR qa 김현수 윤가영 --why --pause=20   # 고객 골라서 · 턴 사이 20초(분당 한도 키)
+$CADR --versions                                      # 중간점검본 판 이력 — 무엇을 왜 바꿨나
+$CADR --diff v5 v6                                    # 두 판의 질문 차이
+$CADR review@v3                                       # 옛 판 그대로 돌려보기
 
 # ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
 python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다
@@ -56,7 +65,7 @@ python -m tests.test_infra             # 공용 인프라 · 임포트 경계
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
 python -m scripts.kb_build.test_paths  # 경로 · locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증
-python -m pension_agent.consult_agent.kb                          # 지식베이스 리포트
+python -m pension_agent.knowledge.kb                              # 지식베이스 리포트
 
 # ── 재생성 (생성물은 손으로 고치지 않는다 — 생성기를 고친다)
 python -m scripts.kb_build.build_kb [--activate]   # 06_주제별_추출지식 → 카드
@@ -74,12 +83,22 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 `tests/debug/` 는 파이프라인을 **밖에서 감싸서 보기만** 한다 — 값은 그대로 통과시키고
 운영 코드는 고치지 않는다.
 
-| 옵션 | |
-|---|---|
-| `--debug` | 답변 아래에 트레이스 (REPL 에서는 방금 턴만) |
-| `--show-llm` | compose 가 LLM 에게 받은 문장을 폐기됐어도 그대로 |
-| `--script N` | 캔드 LLM 시나리오 — API 키 없이 돈다 (`--list` 로 7종 확인) |
-| `--any-customer` | 이 체크아웃에 없는 고객 id 로도 진행(경고만) |
+**두 CLI 의 옵션은 이름이 같으면 뜻도 같다.** `$CAD`(턴 하나를 파고든다)와
+`$CADR`(대본을 묶어 돌린다)는 보는 단위가 달라 붙는 옵션도 다르다.
+
+| 옵션 | $CAD | $CADR |
+|---|---|---|
+| `--debug` | 답변 아래에 **전체 트레이스** (REPL 에서는 방금 턴만) | 없다 — 트레이스는 `cases` 에 기본으로 붙는다 |
+| `--why` | 없다 | 턴마다 «무엇을 찾아봤나 → LLM 이 몇 자 썼나» 한 묶음 |
+| `--show-llm` | compose 가 LLM 에게 받은 문장을 폐기됐어도 그대로 | 같다 (`--why` 를 함께 켠다) |
+| `--brief` · `--time` | 없다 | 요약표만 · 턴별 소요 시간 |
+| `--script N` | 캔드 LLM 시나리오 — API 키 없이 돈다 (`--list` 로 7종 확인) | 없다 |
+| `--any-customer` | 이 체크아웃에 없는 고객 id 로도 진행(경고만) | 없다 |
+
+`$CADR` 의 `--why` 는 예전 이름이 `--debug` 였다 — 같은 이름이 두 CLI 에서 다른 것
+(전체 트레이스 / 재료 한 줄 로그)을 가리켜 갈랐다. 대본 선택도 예전에는
+`--demo`·`--scenario`·`--final` 이라 옵션처럼 생겼는데, 지금은 첫 인자에 이름으로 쓴다
+(`demo` · `library` · `review`). 예전 이름을 넣으면 바뀐 이름을 알려주고 멈춘다.
 
 트레이스는 노드 순서·상태 변화, LLM 호출 자리(understand·plan·clarify·tools·select),
 그리고 compose 게이트 `verify_texts`(원장 밖 수치) → `relations`(근거와의 관계) → `span`
@@ -188,6 +207,27 @@ python -m pension_agent.observability
 - **프롬프트에는 고객 원장이 실린다.** 지금 고객은 시연용 목업이라 그대로 보내지만,
   실데이터 전환 때 정할 것은 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
 
+### WorkB 쪽지 발송 붙이기
+
+직원이 「쪽지로 보내줘」라고 하면 에이전트가 초안을 세우고, 승낙하면 행내 메신저(WorkB)로
+보낸다. **보내는 쪽은 주입받는다** — 행내 MCP 클라이언트(`mcp_sdk`)는 저장소 밖 패키지라
+여기서 임포트하면 그 패키지 없이는 테스트도 임포트도 안 되기 때문이다(망분리 밖에서는 설치도
+못 한다). 앱 시작 시 한 번 등록한다:
+
+```python
+from pension_agent import workb
+workb.use_sender(MCPClient(emp_no).send_message)   # send(recipients: list[str], title, body)
+```
+
+등록하지 않으면 **보내지 않고 «미연결»이라고 답한다** — 조용히 성공처럼 끝나지 않는다.
+받는 사람은 로그인 사번(`AgentState["employee_id"]`)이고, 없으면 `WORKB_EMP_NO` 환경변수,
+그것도 없으면 발송을 제안하지 않는다. 다른 직원에게 보내는 것은 직원이 **사번을 적었을
+때만**이다(「사번 3902172한테 쪽지로 보내줘」).
+
+| 환경변수 | |
+|---|---|
+| `WORKB_EMP_NO` | 로그인 사번이 없을 때의 수신자 사번(개발·시연용 폴백) |
+
 ### 평가 대시보드 (`streamlit run app.py`) — 기획자용 테스트 환경
 
 기획자가 **키보드만으로** 대화형 에이전트를 두드려 보고, 이상한 답을 그 자리에서 남길 수
@@ -286,7 +326,7 @@ src/
   저작 시점에 연결된 `pitch_refs`/`objection_refs` 를 실시간 조회한다.
 - **⑥~⑨ 는 문제상황에서 출발한다.** "왜 관리 대상인가"를 먼저 확정하고 그 사유에 맞는
   화법·반론·자료를 모은다. 사유가 없는 고객은 비운다 — 만들어내지 않는다.
-- **출처는 원본 문서 이름으로 말한다.** `consult_agent/kb.py::origin_of()` 한 곳에서만
+- **출처는 원본 문서 이름으로 말한다.** `knowledge/kb.py::origin_of()` 한 곳에서만
   만들고, 못 찾으면 "확인 필요"라고 한다. 적재 json 의 이름표로 물러서지 않는다.
 - **되돌릴 수 없는 행위는 사람이 정한다.** 에이전트는 제안(`act.offer`)하고, 발송은 확인을
   한 턴 거친다(`act.confirm_action`). 편집 가능 범위도 코드가 못박는다

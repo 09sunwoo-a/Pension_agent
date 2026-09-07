@@ -141,6 +141,26 @@ def build() -> tuple[str, dict[str, int]]:
                for kw in unmapped])
     L += [""]
 
+    # 전략에 첨부할 발송 자료(customer_facing) — 미등록이면 그 전략은 자료 없는 문구로 내려간다.
+    # 예전에는 브리핑 엔진이 이 사실을 «확인 필요» 목록에 넣었는데(engine/pipeline.py), 그
+    # 목록은 대화형 customer 재료로 실려 직원 안내에 그대로 나갔다(2026-09-07 실측). 저작자가
+    # 볼 것은 여기서 센다.
+    from pension_agent.strategy_agent.engine import catalog as _catalog  # noqa: PLC0415
+    from pension_agent.strategy_agent.engine import render as _render  # noqa: PLC0415
+    no_asset = [s for s in _catalog.BY_ID.values()
+                if s.get("clause_if_asset") and _render.customer_facing_asset(s.get("branch")) is None]
+    n["no_asset"] = len(no_asset)
+    L += [f"### 발송 자료 미등록 전략 — {len(no_asset)}건", "",
+          "`clause_if_asset`(자료를 첨부해 보내는 문구)를 선언했지만 `assets.json` 에 고객 발송",
+          "승인(`customer_facing: true`) 자료가 없어 자료 없는 문구(`clause`)로 내려가는 전략이다.",
+          "자료를 등록하면 그 전략의 실행 문구가 첨부 문구로 바뀐다.", ""]
+    if no_asset:
+        _rows(L, ["전략", "자료 있을 때의 문구"],
+              [[s["id"], s["clause_if_asset"]] for s in no_asset])
+    else:
+        L += ["- 없음", ""]
+    L += [""]
+
     # 2. 데모 금리표
     n["rates"] = len(snap["rates"]) if snap.get("dummy") else 0
     L += [f"## 2. 데모 금리표 — {n['rates']}종", "",
