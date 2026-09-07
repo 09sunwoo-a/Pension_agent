@@ -324,9 +324,12 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
 1. **안내 콘텐츠 폴백이 «맞춤»으로 나간다 (SY7).** 최서윤은 상태에 걸린 콘텐츠가 0건인
    고객(`suggest.outreach_chips` 가 빈 목록)인데, `outreach` 도구가 화면 ⑨ 의 임박순 폴백
    (EVT-004 · SEM-002)을 «추천 사유»와 함께 실었고 답변이 그것을 «원리금보장·현금성 36% →
-   미운용 자금 운용 이벤트가 적합»으로 썼다(36% 는 원장값이라 게이트 통과). 재료가 «이 고객
-   상태에 걸린 것이 아니라 임박순 폴백»임을 밝혀야 한다 — `consult_agent/tools.py::_outreach`
-   · `support/outreach.py::relevant_outreach` 의 관련도 0 표시.
+   미운용 자금 운용 이벤트가 적합»으로 썼다(36% 는 원장값이라 게이트 통과).
+   **고침(2026-09-07).** `consult_agent/tools.py::_outreach` 가 콘텐츠마다 이 고객 요건과
+   맞는지를 추천 질문 칩과 같은 함수(`support.relevant_outreach`)로 판정해, 맞으면
+   «요건 일치: <요건 이름>» 을, 아니면 «요건 일치: 없음 — 이 고객 요건과 무관» 을 적고
+   추천 사유를 싣지 않는다. 머리말의 «지금 안내할 것 N건»은 맞는 것만 세고, 폴백은 발송
+   화면 제안 목록에서 뺀다. 회귀: `tests.test_consult_agent::check_outreach` ⑤.
 2. **개발자 메모가 직원 안내로 나간다 (DY5).** 「고객 발송 가능 자료 미등록 — assets.json 의
    customer_facing 확인 필요」(`strategy_agent/engine/pipeline.py:258` 이 `needs_confirm` 에
    넣는 문장)가 `customer` 재료의 «확인 필요»로 실려 «하면 안 되는 것»의 답에 그대로 나갔다.

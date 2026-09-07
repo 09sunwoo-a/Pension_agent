@@ -627,6 +627,45 @@ def check_outreach() -> int:
               for k in ev["meta"]["lms"])
     print(f"{'✓' if hit else '✗'} 대화가 싣는 문구가 브리핑 ⑨ 의 문구와 같다")
     ok += hit
+
+    # ⑤ 요건에 맞는 콘텐츠와 임박 순 폴백을 재료가 가른다.
+    #
+    # 회귀 대상(2026-09-07 실측, 최서윤): 이 고객 요건에 걸린 콘텐츠가 0건인데 화면 ⑨ 의
+    # 임박순 폴백 2건이 요건에 맞는 것과 같은 모양으로 실렸고, 답변이 그것을 «이 고객에게
+    # 적합»으로 세우고 사유까지 붙였다. 그 답 끝에 발송 화면 제안이 붙어 고객과 무관한
+    # 문자가 나가는 경로가 됐다. 판정은 추천 질문 칩과 같은 함수(relevant_outreach)다.
+    from pension_agent.strategy_agent import support as strategy_support
+    from pension_agent.strategy_agent import situations as strategy_situations
+    none_cid = next((p.id for p in PERSONAS if not strategy_support.relevant_outreach(
+        strategy_situations.problem_situations(p))), None)
+    hit = none_cid is not None
+    print(f"{'✓' if hit else '✗'} 요건에 걸린 콘텐츠가 0건인 고객이 시연 로스터에 있다"
+          + (f" ({none_cid})" if none_cid else ""))
+    ok += hit
+    if none_cid:
+        none_state = {"customer_id": none_cid, "question": "이 고객한테 안내할 만한 세미나나 이벤트 있어?"}
+        none_ev = tools.run("outreach", none_state, "안내할 세미나 이벤트")
+        none_text = (none_ev or {}).get("text", "")
+        hit = (bool(none_ev) and "지금 안내할 것 0건" in none_text
+               and "요건 일치: 없음" in none_text and "추천 사유:" not in none_text
+               and "요건에 맞는 콘텐츠는 없다" in none_text)
+        print(f"{'✓' if hit else '✗'} 걸린 콘텐츠 0건이면 재료가 «0건»과 «요건 일치: 없음»을 적고 "
+              f"추천 사유를 싣지 않는다")
+        ok += hit
+        # 폴백 문구로는 발송 화면을 제안하지 않는다 — 답변이 이름을 그대로 불러도.
+        fb_name = (facts_none := strategy_agent.propose(
+            strategy_customer.get_profile(none_cid))["facts"].get("outreach") or {})
+        fb_name = next((v["name"] for v in fb_name.values() if v), "")
+        hit = (bool(none_ev) and not none_ev["meta"]["lms"]
+               and not act.offer({**none_state, "evidence": [none_ev],
+                                  "answer": f"«{fb_name}» 를 안내해보세요."}).get("pending_action"))
+        print(f"{'✓' if hit else '✗'} 폴백 콘텐츠에는 발송 화면 제안이 붙지 않는다")
+        ok += hit
+        del facts_none
+    # 요건에 맞는 고객(PERSONAS[0])은 «요건 일치: <요건 이름>»이 붙고 추천 사유가 남는다.
+    hit = "요건 일치: " in text and "요건 일치: 없음" not in text and "지금 안내할 것 2건" in text
+    print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 «요건 일치: <요건 이름>»이 붙는다")
+    ok += hit
     return ok
 
 

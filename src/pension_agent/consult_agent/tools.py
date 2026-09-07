@@ -1579,20 +1579,40 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
     if not (picked.get("event") or picked.get("seminar")):
         return None
 
+    # **요건에 맞는 것과 임박 순 폴백을 가른다.** 화면 ⑨ 는 이 고객 요건에 걸린 콘텐츠가
+    # 하나도 없어도 날짜가 가까운 것을 세운다(섹션을 비우지 않는 요건). 그 폴백이 여기서
+    # 요건에 맞는 것과 같은 모양으로 실리면 답변이 «이 고객에게 적합하다»고 쓴다 — 실측
+    # (2026-09-07 최서윤): 걸린 콘텐츠 0건인데 답이 임박순 2건을 «적합»으로 세우고 사유까지
+    # 붙였다. 판정은 추천 질문 칩과 **같은 함수**(`support.relevant_outreach`)로 한다 —
+    # 칩은 안 뜨는데 대화는 «있다»고 말하는 상태를 만들지 않기 위해서다.
+    from pension_agent.strategy_agent import support as strategy_support  # noqa: PLC0415
+    try:
+        relevant_ids = {r["id"] for r in strategy_support.relevant_outreach(
+            facts.get("problem_situations") or [], name=profile.nm)}
+    except Exception:
+        relevant_ids = set()
+    matched = {key: bool(picked.get(key)) and picked[key]["id"] in relevant_ids
+               for key in ("event", "seminar")}
+
     # **개수를 코드가 세어 싣는다.** 답을 쓰면 「2건을 추천드려요」·「1. … 2. …」처럼 개수와
     # 열거 번호가 문장에 들어가는데, 그 수가 재료에 없으면 verify 가 «원장 밖 수치»로 보고
     # **맞는 답을 통째로 폐기한다**(그러면 compose 가 이 블록을 그대로 덤프한다 — 실측:
     # 안내 콘텐츠 2건을 고른 답이 "수치 '2'" 로 잘렸다). 세는 것은 코드가 이미 아는 사실이라
     # 지어낼 자리가 없다 — `suitable` 도구가 「안내할 수 있는 상품 N종」을 싣는 것과 같다.
-    n_picked = sum(1 for key in ("event", "seminar") if picked.get(key))
+    n_picked = sum(1 for key in ("event", "seminar") if matched[key])
+    n_fallback = sum(1 for key in ("event", "seminar") if picked.get(key) and not matched[key])
     n_other = {key: max(len(pools.get(key) or []) - (1 if picked.get(key) else 0), 0)
                for key in ("event", "seminar")}
     lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
              f"· 지금 안내할 것 {n_picked}건 — "
-             + " · ".join(f"{label} {1 if picked.get(key) else 0}건"
+             + " · ".join(f"{label} {1 if matched[key] else 0}건"
                           for key, label in (("event", "이벤트"), ("seminar", "세미나")))
+             + (f" · 이 고객 요건과 무관한 것 {n_fallback}건" if n_fallback else "")
              + f" · 아직 열려 있는 다른 후보 이벤트 {n_other['event']}건 · "
                f"세미나 {n_other['seminar']}건"]
+    if n_picked == 0:
+        lines.append("· 이 고객 요건에 맞는 콘텐츠는 없다. 아래는 열려 있는 콘텐츠 중 날짜가 "
+                     "가까운 것이며, 이 고객에게 맞는 것으로 안내하지 않는다")
     atomic: list[str] = []
     lms: dict[str, dict] = {}
     for key, label in (("event", "이벤트"), ("seminar", "세미나")):
@@ -1602,8 +1622,16 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
         lines.append(f"· [{label}] {item['name']} — {item['schedule']} · 주관 {item.get('organizer') or '미상'}")
         if item.get("description"):
             lines.append(f"  내용: {item['description']}")
-        if item.get("reason"):
-            lines.append(f"  추천 사유: {item['reason']}")
+        if matched[key]:
+            # 맞댄 축은 문제상황의 요건이다(`relevant_outreach` 와 같은 축). 이름은 CONDS 에서.
+            wanted = {c for s in (facts.get("problem_situations") or []) for c in (s.get("conds") or [])}
+            hits = [strategy_customer.CONDS.get(c, c) for c in (item.get("conds") or []) if c in wanted]
+            lines.append(f"  요건 일치: {', '.join(hits) or '있음'}")
+            if item.get("reason"):
+                lines.append(f"  추천 사유: {item['reason']}")
+        else:
+            # 폴백은 사유를 싣지 않는다 — 사유 문장이 있으면 답변이 그것을 «맞춤»의 근거로 쓴다.
+            lines.append("  요건 일치: 없음 — 이 고객 요건과 무관. 열려 있는 콘텐츠 중 날짜가 가까운 것")
         if item.get("keywords"):
             lines.append(f"  매칭 키워드: {', '.join(item['keywords'])}")
         if item.get("url"):
@@ -1611,7 +1639,10 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
             # 링크는 한 글자만 달라도 죽는다 — 답변이 이 값을 말하면 원문 그대로여야 한다.
             atomic.append(item["url"])
         lines.append(f"  발송 문구: {item['lms_message']}")
-        lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"]}
+        # 발송 화면 제안(act._propose_lms)은 요건에 맞는 것에만 붙는다 — 폴백 문구가 나가면
+        # 그 고객과 무관한 문자가 나간다.
+        if matched[key]:
+            lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"]}
         # 다른 후보 — "다른 건 없어?" 에 답할 재료다. 선정된 것은 위에 이미 있으므로 뺀다.
         others = [c for c in (pools.get(key) or []) if c["id"] != item["id"]]
         if others:
