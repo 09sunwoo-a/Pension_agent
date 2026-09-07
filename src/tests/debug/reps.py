@@ -213,8 +213,8 @@ def _observed(result: dict, turn: TR.Turn) -> dict:
     """이 턴에서 «코드가 아는 사실»만 모은다 — 기대값 판정의 입력(scenarios.Expect).
 
     **답변 문장은 보지 않는다.** 여기서 재는 것은 무슨 도구를 불렀나 · 어떻게 끝났나 ·
-    판정 등급 · 게이트를 통과했나 · 출처가 실렸나 · 연계를 제안했나뿐이다. 답이 좋은지는
-    사람이 읽어야 하고, LLM 에게 자기 답을 채점시키지 않는다.
+    판정 등급 · 게이트를 통과했나 · 출처가 실렸나 · 연계를 제안했나 · 게이트가 갈래를
+    표시했나뿐이다. 답이 좋은지는 사람이 읽어야 하고, LLM 에게 자기 답을 채점시키지 않는다.
 
     값의 출처가 둘이다 — 진입점 반환값(`graph.ask`)과 계측(trace). 도구 목록·출처·연계는
     앞쪽이 그대로 주고, 판정 등급·재계획·게이트 판정은 상태 차분에만 있어 뒤쪽에서 뽑는다.
@@ -236,6 +236,9 @@ def _observed(result: dict, turn: TR.Turn) -> dict:
         "gates_passed": bool(gates) and _stopped(node) is None,
         "sources": bool(result.get("sources")),
         "offered": bool(result.get("pending_action")),
+        # 갈래 표시는 `plan_step` 이 자기 반환값으로 넘긴다(answer 노드가 아니다) — 계획이
+        # 여러 바퀴 돌면 마지막 바퀴에만 실리므로 턴 전체를 훑는다. `replanned` 와 같다.
+        "branches": any(n.delta.get("branches") for n in turn.nodes),
     }
 
 

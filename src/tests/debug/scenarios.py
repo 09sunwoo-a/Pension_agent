@@ -394,6 +394,10 @@ class Expect:
     gates_passed: bool | None = None
     sources: bool | None = None
     offered: bool | None = None  # 화면 연계를 제안했나(§10)
+    # 적합성 게이트가 «답이 갈리는 축»을 표시했나(tools.record_branches). 되묻기 판정이
+    # 혼자 갈래를 알아낸 것과, 게이트가 후보를 나란히 놓고 표시해 준 것은 다른 사건이다 —
+    # `verdict="ask"` 만 재면 둘이 같은 통과로 보고된다(장치가 죽어 있어도 표는 초록이다).
+    branches: bool | None = None
 
     def diff(self, got: dict) -> list[str]:
         """어긋난 항목만 사람이 읽을 한 줄씩. 비어 있으면 통과다."""
@@ -408,7 +412,7 @@ class Expect:
             want = getattr(self, field)
             if want and got.get(field) != want:
                 out.append(f"{field:8} 기대 {want} · 실제 {got.get(field) or '없음'}")
-        for field in ("replanned", "gates_passed", "sources", "offered"):
+        for field in ("replanned", "gates_passed", "sources", "offered", "branches"):
             want = getattr(self, field)
             if want is not None and bool(got.get(field)) is not want:
                 out.append(f"{field:8} 기대 {want} · 실제 {bool(got.get(field))}")
@@ -434,12 +438,17 @@ EXPECT: dict[tuple[str, str], Expect] = {
     ("cases", "7"):  Expect(tools=("customer",), outcome="answer"),
     ("cases", "7b"): Expect(outcome="answer"),
     # gap 22 — 되묻기 턴에도 출처가 실린다. 2026-09-07 실측으로 확인된 기대다.
-    ("cases", "8"):  Expect(outcome="clarify", verdict="ask", sources=True),
-    # `pitch` 를 요구했던 것은 **기대가 좁았다**(2026-09-07 실측). 고객 화면이 열려 있으면
-    # 그 고객 상태에 걸린 화법을 꺼내는 `playbook` 도 맞는 선택이고(§3 「고객 상태에 걸린
-    # 재료」 · 지워진 gap 28), 둘은 같은 매칭 함수를 쓴다. 도구 이름을 못박는 대신 결말만
-    # 본다 — 무엇으로 답했는지가 아니라 답했는지가 이 케이스의 요점이다.
-    ("cases", "10"): Expect(outcome="answer"),
+    # `branches` 를 함께 재는 것은 gap 34 를 이 대본에 묶어 두기 위해서다. 「수수료 얼마야」의
+    # 후보는 부담금 종류·면제 조건·부과 방식으로 갈리고, 그 넷은 **전부 이 질문의 답이라
+    # 하나도 안 빠진다** — 게이트가 뺄 후보에서만 갈래를 찾던 동안 이 턴은 되묻기에 성공하면서
+    # 갈래 표시는 한 번도 안 했다. 판정이 혼자 알아낸 것으로도 통과하던 자리다.
+    ("cases", "8"):  Expect(outcome="clarify", verdict="ask", sources=True, branches=True),
+    # 한때 `outcome` 만 봤다 — 「`playbook` 도 맞는 선택이고 둘은 같은 매칭 함수를 쓴다」는
+    # 이유였는데, **틀렸다**(gap 35). `playbook` 의 후보는 고객 계좌 상태가 고르고 질문은
+    # 그것을 좁히기만 해서, 「손실만 나는데 해지하겠다」로 이 고객을 조회하면 관련도 0.09 의
+    # 절차 카드 한 장이 남는다. 같은 질문이 `pitch` 로 가면 pitch.k03.012(해지 대신 연금개시
+    # 후 부분인출)가 4.25 로 1등이다 — 재료는 있었고 도구가 안 불렸다. 도구를 되박는다.
+    ("cases", "10"): Expect(tools=("pitch",), outcome="answer"),
     ("cases", "11"): Expect(tools=("outreach",), outcome="answer", offered=True),
 
     # ── demo — 전체 시연 대본 ──────────────────────────────

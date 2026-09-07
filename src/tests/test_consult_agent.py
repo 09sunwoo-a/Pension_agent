@@ -5704,6 +5704,64 @@ def check_graded_judge() -> int:
     print(f"{'✓' if hit else '✗'} ask — 써 둔 답을 버리고 되묻기로 턴이 끝난다")
     ok += hit
 
+    # ⑪ 게이트가 갈래를 **남긴 후보 위에서** 찾는지. 이 지시가 「빼려는 후보들이 서로
+    #    갈래면」이던 동안 갈래 절은 «뺄 후보가 있는 턴»에만 읽혔고, 실측 11턴 내내
+    #    `branches` 가 한 번도 안 찍혔다(gap 34). 갈래가 걸리는 질문일수록 갈래마다 답이
+    #    되는 카드가 전부 맞는 카드라 하나도 안 빠지기 때문이다 — 장치가 붙어 있는데
+    #    입력이 영원히 비는 형태라, 되묻기가 잘 되는 동안 아무도 눈치채지 못한다.
+    #    문구를 재는 테스트인 이유는 **여기서 갈래가 생기지 않으면 아래 배선이 전부 죽은
+    #    코드**이기 때문이다(⑥⑦⑧ 이 전부 통과해도 실전에서 안 돈다).
+    from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
+    text = ADEQUACY_PROMPT
+    hit = "남긴 후보 중에" in text and "빼려는 후보들이" not in text
+    print(f"{'✓' if hit else '✗'} 게이트는 갈래를 «남긴 후보» 위에서 찾는다(뺄 때만이 아니다)")
+    ok += hit
+
+    return ok
+
+
+def check_tool_axes() -> int:
+    """`pitch` 와 `playbook` 의 설명이 «무엇으로 찾나»로 갈리는가 (gap 35).
+
+    도구 설명은 계획 LLM 이 읽는 **유일한** 판단 재료다(`tools.catalog`). 둘 다 「반론」을
+    말하고 축을 말하지 않던 동안, 고객 화면이 열린 턴의 반론 질문이 통째로 `playbook` 으로
+    갔다 — 그쪽은 후보를 **고객 계좌 상태**로 고르고 질문은 좁히기만 해서, 「손실만 나는데
+    해지하겠다」로 조회하면 관련도 0.09 의 절차 카드 한 장이 남는다. 같은 질문이 `pitch` 로
+    가면 pitch.k03.012(해지 대신 연금개시 후 부분인출)가 1등이다.
+
+    **재료가 있는데 도구가 안 불린 것**이라, 검색을 고쳐서는 안 닫힌다. 같은 처방을 이
+    저장소가 이미 두 번 썼다(`suitable` vs `lineup` · `history` vs `transcript`).
+    """
+    from pension_agent.consult_agent.state import KB
+    ok = 0
+    print("\n[도구 설명 — pitch 와 playbook 이 «무엇으로 찾나»로 갈린다 (gap 35)]")
+
+    pitch, playbook = tools.TOOLS["pitch"].desc, tools.TOOLS["playbook"].desc
+
+    hit = "고객의 말" in pitch and "고객 화면이 열려 있어도" in pitch
+    print(f"{'✓' if hit else '✗'} pitch — 질문에 담긴 «고객이 한 말»로 찾는다고 밝힌다")
+    ok += hit
+
+    hit = "계좌 상태" in playbook and "좁히기만 한다" in playbook
+    print(f"{'✓' if hit else '✗'} playbook — 후보를 고르는 것은 상태이고 질문이 아니라고 밝힌다")
+    ok += hit
+
+    # 서로를 가리켜야 계획이 잘못 든 자리에서 되돌아 나올 수 있다. 한쪽 설명만 고치면
+    # 다른 쪽은 여전히 「화법·예상반론」을 내걸고 서 있다.
+    hit = "pitch" in playbook
+    print(f"{'✓' if hit else '✗'} playbook 이 고객의 말은 pitch 라고 되돌려 보낸다")
+    ok += hit
+
+    # 재료가 실제로 그쪽에 있다는 것 — 설명만 갈라 두고 검색이 못 찾으면 아무것도 아니다.
+    # 슬롯(거절유형)이 붙으면 n-gram 폴백만으로도 해지 화법이 1등으로 올라온다.
+    hits = tools.retrieve(KB, top_k=3, kinds=["pitch"],
+                          utterance="고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",
+                          objection_type="해지·망설임")
+    hit = bool(hits) and hits[0][1]["tags"].get("objection_type") == "해지·망설임"
+    print(f"{'✓' if hit else '✗'} 그 질문의 화법이 pitch 쪽 검색에 실재한다"
+          f" ({hits[0][1]['id'] if hits else '0건'})")
+    ok += hit
+
     return ok
 
 
@@ -5897,6 +5955,7 @@ def main() -> int:
         check_llm_down()
         check_compose_retry()
         check_graded_judge()
+        check_tool_axes()
         check_rehearsal_expectations()
         check_notice_scope()
         check_guard()
