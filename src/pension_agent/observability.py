@@ -253,12 +253,17 @@ def current_trace_id() -> str | None:
     return _TRACE_ID.get()
 
 
-def _tag(kind: str, value: Any) -> list[str]:
-    """«분류:값» 태그 한 장. 값이 없으면 빈 목록이라 아무것도 붙지 않는다."""
+def tag(kind: str, value: Any) -> list[str]:
+    """«분류:값» 태그 한 장. 값이 없으면 빈 목록이라 아무것도 붙지 않는다.
+
+    태그로 만드는 이유는 대시보드가 **거를 수 있는 축**이 태그이기 때문이다 —
+    메타데이터에만 두면 한 건씩 열어봐야 보인다.
+    """
     return [f"{kind}:{value}"] if value else []
 
 
-def customer_ref(customer_id: str | None, name: str | None) -> dict:
+def customer_ref(customer_id: str | None, name: str | None,
+                 conditions: list[str] | None = None) -> dict:
     """관측에 실을 «누구인가» — user_id·태그·메타데이터를 한 벌로 만든다.
 
         who = observability.customer_ref(p.id, p.nm)
@@ -275,18 +280,27 @@ def customer_ref(customer_id: str | None, name: str | None) -> dict:
     고객을 다른 꼴로 적으면 대시보드에서 두 사람으로 갈리는데, 그 어긋남은 화면에
     «줄이 두 개 보인다»로만 나타나 알아채기 어렵다.
 
-    **`LANGFUSE_CAPTURE_CONTENT=0` 이면 이름을 뺀다.** 그 스위치는 «개인정보를 외부로
-    내보내지 않는다»는 약속이다. 본문만 가리고 이름을 user_id·태그로 내보내면 그
-    약속이 거짓이 되고, 그건 이 저장소가 가장 경계하는 실패다(루트 CLAUDE.md 절대규칙
-    1 — 표시가 거짓말하는 상태). id 는 남는다 — 그것 없이는 묶을 방법이 없다.
+    **`conditions` 는 그 고객에게 성립한 타겟 선정 요건**(`idl`·`hlt`·`mat`…)이다. 이것을
+    태그로 다는 이유는 「어떤 상태의 고객에게 무슨 일이 생기나」가 이 저장소에서 가장
+    쓸모 있는 축이기 때문이다 — 「`요건:hlt` 인데 답이 게이트에 걸린 턴」처럼 거를 수 있다.
+    **판정을 여기서 만들지 않는다**: 호출부가 strategy_agent 산출을 그대로 넘긴다(§3 —
+    같은 판정을 두 번 구현하지 않는다).
+
+    **`LANGFUSE_CAPTURE_CONTENT=0` 이면 이름과 요건을 뺀다.** 그 스위치는 «개인정보를
+    외부로 내보내지 않는다»는 약속이다. 본문만 가리고 이름·상태를 user_id·태그로
+    내보내면 그 약속이 거짓이 되고, 그건 이 저장소가 가장 경계하는 실패다(루트
+    CLAUDE.md 절대규칙 1 — 표시가 거짓말하는 상태). 요건 코드는 이름이 아니지만 **그
+    고객의 상태**라 같이 가린다. id 는 남는다 — 그것 없이는 실행을 묶을 방법이 없다.
     """
     if not conf().capture_content:
-        name = None
+        name, conditions = None, None
     label = f"{name}({customer_id})" if name and customer_id else (name or customer_id)
     meta: dict[str, Any] = {}
     _put_if(meta, "customer_id", customer_id)
     _put_if(meta, "customer", name)
-    return {"user_id": label, "metadata": meta, "tags": _tag("고객", name)}
+    _put_if(meta, "conditions", list(conditions) if conditions else None)
+    tags = tag("고객", name) + [t for c in (conditions or []) for t in tag("요건", c)]
+    return {"user_id": label, "metadata": meta, "tags": tags}
 
 
 # ─────────────────────────────────────────────────────────────
