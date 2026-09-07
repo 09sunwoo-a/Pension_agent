@@ -459,6 +459,29 @@ def check_prompt_is_quotable() -> int:
     print(f"{'✓' if hit else '✗'} 기준시점: 화면번호·대표번호를 기간으로 읽지 않는다")
     ok += hit
 
+    # ── ①-b 표시(notices)는 인용해도 된다 — 채널 카드의 시효 표시 「— 2025.03.31 기준 표기입니다」.
+    #    본문(_render_channel)에는 기준시점이 없고 표시에만 있어서, 시킨 대로 옮겨 쓴 채널
+    #    답변이 리허설 3턴 전부 «자료 밖 날짜»로 폐기됐다(2026-09-05 demo T3b · cases 2·3).
+    chan = next((c for c in KB.cards if c["_kind"] == "channel" and c.get("as_of")
+                 and c.get("volatile")), None)
+    if chan is None:
+        print("✗ 표시 인용: 기준시점·시효 경고를 가진 채널 카드가 없다")
+    else:
+        ev = tools._ev("channel", "q", tools._render_channel(chan),
+                       KBMOD.sources_of(KB, [(2.0, chan)]),
+                       notices=[tools.stale_mark(chan)], cards=[chan])
+        mark = tools.stale_mark(chan)
+        hit = verify_texts(f"메뉴는 위와 같아요.\n{mark}", tools.ledger_texts([ev]),
+                           echoable=[""])[0]
+        print(f"{'✓' if hit else '✗'} 표시 인용: 시효 표시의 기준시점을 옮겨 쓴 채널 답변이 통과한다"
+              f" ({chan.get('as_of')})")
+        ok += hit
+        # 좁히는 쪽은 그대로다 — 표시에 없는 다른 날짜는 여전히 걸린다.
+        hit = not verify_texts("메뉴는 위와 같아요. 2024.01.15 기준 표기입니다.",
+                               tools.ledger_texts([ev]), echoable=[""])[0]
+        print(f"{'✓' if hit else '✗'} 표시 인용: 표시에 없는 날짜는 여전히 걸린다")
+    ok += hit
+
     # ── ② 가드·승낙 문구 — 프롬프트에 실어 보낸 것 (plan._screen)
     card = KB.facts.get("fact.k04.f47")
     if card is None:
