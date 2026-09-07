@@ -40,8 +40,17 @@ def ledger_marks(evidence: list[Evidence]) -> list[str]:
 
 
 def ledger_texts(evidence: list[Evidence]) -> list[str]:
-    """원장의 검증 허용 텍스트 전부. verify_texts 가 이걸 재료로 본다."""
-    return [t for e in evidence for t in e["allow"]]
+    """원장의 검증 허용 텍스트 전부. verify_texts 가 이걸 재료로 본다.
+
+    **표시(notices)도 허용 텍스트다.** 표시는 compose 가 「빠뜨리면 안 되는 표시」로 답변에
+    싣게 하는 문장인데(stale_mark 의 「— <기준시점> 기준 표기입니다」, caution 비고, 팩트
+    상태), 그 문장이 `allow` 에는 없어서 **시킨 대로 옮겨 쓴 답변이 «자료 밖 날짜»로
+    통째로 버려졌다** — 채널 카드는 본문(_render_channel)에 기준시점이 없고 표시에만 있어
+    채널 답변이 리허설 3턴 전부 근거 원문 덤프로 끝났다(2026-09-05 demo T3b · cases 2·3).
+    지워진 gap 31 과 같은 부류다(코드가 프롬프트에 실어 보낸 것을 인용하면 폐기됐다).
+    표시는 전부 카드 데이터에서 코드가 만든 문장이라 넓혀도 LLM 이 지어낼 자리가 없다.
+    """
+    return [t for e in evidence for t in (*e["allow"], *(e.get("notices") or []))]
 
 
 #: 출처의 역할. 답이 **그 재료에서 나온 것**인지, 표현을 **제한만** 한 것인지는 다른

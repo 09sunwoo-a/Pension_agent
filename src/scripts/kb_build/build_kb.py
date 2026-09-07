@@ -104,12 +104,57 @@ def sentences(text: str, limit: int = 4) -> list[str]:
     return merged[:limit]
 
 
+#: 절 구분자. 쉼표는 **숫자 사이의 자릿수 구분("1,800만원")이 아닐 때만** 절을 가른다 —
+#: 이전 정규식 `[,·]` 은 그 쉼표에서도 잘라 팩트 11장·세그먼트 7장의 검색 예시가
+#: 「개인형IRP의 연간 납입한도는 1」처럼 숫자 중간에서 끊겼다. 가운뎃점(·)은 절 구분자가
+#: 아니라 명사 나열("연금저축·DC")이라 더는 가르지 않는다 — "IRP·DC 적립금 중 …" 이
+#: 「IRP」에서 잘려 8자 미만으로 버려지던 자리다. 문장 끝(". ")과 줄표(" — ")는 가른다.
+#: "또는"·"그리고"는 양쪽에 공백이 있을 때만 절 구분자다 — "연금저축(또는 타사 IRP)" 의 괄호
+#: 안은 나열이지 절이 아니다.
+_CLAUSE_SPLIT = re.compile(r"(?<!\d),|,(?!\d)|\s—\s|(?<=\.)\s|\s또는\s|\s그리고\s")
+
+
 def first_clause(text: str, limit: int = 70) -> str | None:
-    """조건문의 첫 절 — 세그먼트 검색 예시로 쓴다. 너무 길면 자른다."""
+    """본문의 첫 절 — 검색 예시로 쓴다. 8자 미만인 절은 건너뛰고 다음 절을 본다. 너무 길면 자른다.
+
+    「데이터 — '25.11~'26.4 이탈고객 분석: …」처럼 앞에 짧은 표지가 붙은 본문은 표지를
+    건너뛰어야 내용이 있는 절이 잡힌다.
+    """
     if not text:
         return None
-    head = re.split(r"[,·]|또는|그리고", text.strip())[0].strip()
-    return head[:limit] if len(head) >= 8 else None
+    for head in _CLAUSE_SPLIT.split(text.strip()):
+        head = head.strip().rstrip(".")
+        if len(head) < 8:
+            continue
+        if len(head) > limit:
+            # 낱말 중간에서 끊지 않는다 — 「…습관이 돼 있」처럼 끝이 잘리면 검색 예시로 읽히지 않는다.
+            cut = head.rfind(" ", limit // 2, limit + 1)
+            head = head[:cut if cut > 0 else limit].rstrip(" ,:;(")
+        return head
+    return None
+
+
+def triggers_of(card_id: str, *texts: str | None, limit: int = 3) -> list[str]:
+    """카드의 검색 예시(trigger_examples) — 본문 첫 절들 + config.TRIGGER_EXTRA.
+
+    **제목은 넣지 않는다.** 카드 목록 한 줄(`consult_agent/kb.py::_card_line`)은 제목 뒤에
+    예상질문을 최대 2개만 싣는다. 제목이 첫 칸을 차지하면 LLM 이 보는 정보 칸은 하나뿐이다
+    (2026-09-04 실측: 633장 중 388장이 그랬다). 제목은 이미 한 줄 앞에 있고, n-gram 폴백은
+    `kb.score_parts` 가 제목을 예상질문과 같은 방식으로 함께 잰다.
+
+    질문 문형("…는 어떻게 되나요?")을 만들어 붙이지 않는 규약은 그대로다 — 일반 문형은
+    n-gram 유사도가 문형만 보고 무관한 질문을 끌어당긴다(`useful_trigger` 의 사고 기록).
+    여기 실리는 것은 전부 **원문 본문의 절**이거나, 사람이 원문 주제어로 적은 TRIGGER_EXTRA 다.
+    """
+    out: list[str] = []
+    for text in texts:
+        clause = first_clause(text or "")
+        if clause and clause not in out:
+            out.append(clause)
+    for extra in config.TRIGGER_EXTRA.get(card_id, []):
+        if extra not in out:
+            out.append(extra)
+    return out[:limit]
 
 
 def topics_of(*texts: str) -> list[str]:
@@ -772,8 +817,9 @@ def build_segments(resolver: DocResolver) -> list[dict]:
             })
 
         primary = next((q["doc"] for q in quote_records if q["doc"]), None)
+        seg_id = f"seg.{no.zfill(2) if parent is None else no}"
         records.append(record(
-            f"seg.{no.zfill(2) if parent is None else no}", "segment",
+            seg_id, "segment",
             {
                 "no": no, "title": title, "group": group,
                 "derivation": derivation, "decision": (meta or {}).get("decision"),
@@ -788,8 +834,8 @@ def build_segments(resolver: DocResolver) -> list[dict]:
                 "parent": f"seg.{parent.zfill(2)}" if parent else None,
                 "tags": {"topics": topics_of(title, condition, reason)},
                 # 화법과 같은 이유로 일반 질문 문형을 만들어 붙이지 않는다 — 세그먼트를 찾는 단서는
-                # 세그먼트 이름과 조건문 자체다.
-                "trigger_examples": [t for t in (title, first_clause(condition)) if t],
+                # 세그먼트 이름(제목, 목록 한 줄에 이미 있다)과 조건문·이유 자체다.
+                "trigger_examples": triggers_of(seg_id, condition, reason),
                 # 원문 임계값과 코드 판정의 차이 기록. 역할까지 config 에서 사람이 정한다 —
                 # 상담 중 알아야 오안내를 피하는 차이(caution)와 참고 설명(info)이 갈린다.
                 "note": ([dict(config.SEGMENT_NOTES[no])]
@@ -977,8 +1023,12 @@ def build_methods(resolver: DocResolver) -> list[dict]:
             })
 
         primary = next((q["doc"] for q in quote_records if q["doc"]), None)
+        method_id = f"m.{no.zfill(3) if parent is None else no}"
+        # 상황이 비어 있는 문단형 항목(1·46~49·112~126번)은 액션 첫 절이 단서다. 둘 다 없으면
+        # 주제 태그를 한 묶음으로 싣는다 — 원문에 실제로 나온 어휘라 지어낸 것이 아니다.
+        topic_bag = " ".join(topics_of(title, situation, action))
         records.append(record(
-            f"m.{no.zfill(3) if parent is None else no}", "method",
+            method_id, "method",
             {
                 "no": no, "title": title, "group": group,
                 "situation": redact(situation) or None,
@@ -992,7 +1042,8 @@ def build_methods(resolver: DocResolver) -> list[dict]:
                 "parent": f"m.{parent.zfill(3)}" if parent else None,
                 "segments": [],
                 "tags": {"topics": topics_of(title, situation, action)},
-                "trigger_examples": [t for t in (title, first_clause(situation)) if t],
+                "trigger_examples": (triggers_of(method_id, situation, action)
+                                     or triggers_of(method_id, topic_bag)),
                 "author_redacted": True,
             },
             source={"doc": primary,
@@ -1037,8 +1088,9 @@ def build_fieldtips(resolver: DocResolver) -> list[dict]:
         quote_records = [{"text": redact(_TIP_AUTHOR.sub("", b).strip()), "source_text": None,
                           "doc": doc_id} for b in bullets]
 
+        tip_id = f"tip.{no.zfill(2)}"
         records.append(record(
-            f"tip.{no.zfill(2)}", "fieldtip",
+            tip_id, "fieldtip",
             {
                 "no": no, "title": title,
                 "summary": redact(summary) or None,
@@ -1046,7 +1098,9 @@ def build_fieldtips(resolver: DocResolver) -> list[dict]:
                 "implication": redact(implication) or None,
                 "segments": [],
                 "tags": {"topics": topics_of(title, summary, implication)},
-                "trigger_examples": [title],
+                # 다른 종류와 같은 규약 — 정리·시사점 첫 절. 오래 `[title]` 하나뿐이어서
+                # 10장 전부가 제목 밖의 검색 단서가 없었다(README 「n-gram 폴백이 약하다」).
+                "trigger_examples": triggers_of(tip_id, redact(summary), redact(implication)),
                 "author_redacted": True,
             },
             source={"doc": doc_id, "locator": f"{config.INSIGHT_REL}/01_현장의목소리_HotTip_50건.md § {no}. {title}"},
@@ -1469,7 +1523,9 @@ def _market_triggers(title: str, text: str, keywords: list[str], limit: int = 8)
     flat = re.sub(r"[^0-9A-Za-z가-힣]", "", f"{title} {text}").lower()
     hits = [kw for kw in _market_keywords(keywords)
             if re.sub(r"[^0-9A-Za-z가-힣]", "", kw).lower() in flat]
-    return ([title] + hits)[: 1 + limit]
+    # 절 제목은 싣지 않는다(triggers_of 의 이유와 같다). 키워드가 하나도 안 걸린 절은 본문
+    # 첫 절로 입구를 낸다 — 비어 있으면 그 절은 n-gram 폴백에서 제목 하나로만 잡힌다.
+    return hits[:limit] or [c for c in (first_clause(text),) if c]
 
 
 #: 원문 front-matter 의 category → 카드 종류. **시황과 상품은 다른 종류다** — 묻는 것이
@@ -1558,8 +1614,9 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
             # 있고, 검색은 trigger_examples 와 표 이름이 한다.
             "tags": {"topics": topics_of(title, fm.get("topic") or "",
                                          " ".join(fm.get("key_points") or []))},
-            "trigger_examples": ([title] + _market_keywords(fm.get("trigger_keywords") or [])
-                                 )[:24] + _table_triggers(ov_tables),
+            # 제목은 싣지 않는다(triggers_of 의 이유와 같다) — 문서 키워드와 표 이름이 입구다.
+            "trigger_examples": _market_keywords(fm.get("trigger_keywords") or [])[:24]
+                                + _table_triggers(ov_tables),
             **common,
         }, source={"doc": doc_id, "locator": f"{rel} § 개요"}))
 
@@ -1767,8 +1824,11 @@ def build_facts(resolver: DocResolver) -> tuple[list[dict], list[dict]]:
             "title": title,
             "group": group,
             "tags": {"topics": topics_of(title, statement)},
-            # 트리거는 제목과 팩트 문장 첫 절이다 — 다른 종류(세그먼트·문제상황)와 같은 규약.
-            "trigger_examples": [t for t in (title, first_clause(statement)) if t][:3],
+            # 트리거는 팩트 문장 첫 절과 검증 포인트 첫 절이다 — 다른 종류와 같은 규약.
+            # 검증 포인트는 직원이 실제로 틀리게 묻는 말("900만원이 IRP 단독 한도인가")이라
+            # 검색 입구로 맞다.
+            "trigger_examples": triggers_of(f"fact.k04.{no.lower()}", statement,
+                                            slots.get("검증포인트")),
             # label 은 04 제목 전체를 쓴다. 레거시 fact 는 "연간 납입한도" 처럼 짧은 라벨이라,
             # 같은 주제라도 문자열이 달라 check_fact_conflicts 의 오탐이 나지 않는다. 값이 정말
             # 어긋나는지는 변환 리포트(_draft_kb_fact_review.md)로 사람이 본다.
@@ -2110,7 +2170,7 @@ def build_procedures(resolver: DocResolver) -> list[dict]:
                 "legacy_no": legacy.group(1) if legacy else None,
                 "segments": [],
                 "tags": {"topics": topics_of(title, summary)},
-                "trigger_examples": [t for t in (title, first_clause(summary)) if t],
+                "trigger_examples": triggers_of(f"proc.{no.zfill(3)}", summary),
                 "author_redacted": True,
             },
             source={"doc": primary,
@@ -2197,6 +2257,19 @@ def main() -> int:
 
     built = (segments + methods + pitches + facts + procedures + screens_
              + channels + fieldtips + market_cards + lineup_cards)
+
+    # 검색 예시 보강표(config.TRIGGER_EXTRA) 검증 — 없는 카드를 가리키거나, 그 카드의 주제어를
+    # 담지 않은 문장은 알린다. 표는 원문 주제어를 옮긴 파생 텍스트여야 하고 지어낸 것이면 안 된다.
+    by_id = {r["id"]: r for r in built}
+    for cid, extras in config.TRIGGER_EXTRA.items():
+        r = by_id.get(cid)
+        if r is None:
+            note(f"[보강표 대상없음] TRIGGER_EXTRA {cid} — 그런 카드가 없다")
+            continue
+        title = r["fields"].get("title") or ""
+        for extra in extras:
+            if not useful_trigger(extra, title):
+                note(f"[보강표 주제어없음] {cid} '{extra[:30]}…' — 제목·주제 어휘와 겹치는 말이 없다")
     print(f"doc {len(docs)}건 · segment {len(segments)}건 · method {len(methods)}건 "
           f"· pitch {len(pitches)}건 · fact {len(facts)}건(보류 {len(pending)}건) "
           f"· procedure {len(procedures)}건 · screen {len(screens_)}건 "
