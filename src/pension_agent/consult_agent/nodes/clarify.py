@@ -211,6 +211,16 @@ def _quotable(text: str, evidence: list) -> bool:
     return said <= numbers("\n".join(tools.ledger_texts(evidence)))
 
 
+def _can_settle(state: AgentState) -> bool:
+    """갈래를 **정해 줄 수 있는 재료**가 이 턴에 있나 — 열린 고객이거나 이전 대화다.
+
+    `settled_block` 이 서는 조건(고객 화면)과 §5 가 말하는 «맥락»(이전 대화) 둘이다.
+    판정 프롬프트에 그 둘이 하나도 안 실린 턴에서 「정해졌다」는 판정이 나오면, 그것은
+    무엇을 읽고 정한 것이 아니라 **지어낸 전제**다.
+    """
+    return bool(state.get("customer_id") or state.get("history"))
+
+
 def _verdict_of(parsed: dict) -> str:
     """등급을 읽는다. 등급 칸이 없으면 **옛 규격**(`{"ask": …}`)으로 읽는다.
 
@@ -272,7 +282,14 @@ def clarify(state: AgentState) -> dict[str, Any]:
 
     if verdict == ASSUME:
         premise = str(parsed.get("premise") or "").strip()
-        if premise and _quotable(premise, evidence):
+        # **정해 줄 것이 없으면 «정해졌다»고 말할 수 없다.** assume 은 «대화 맥락이나 열려
+        # 있는 고객 값이 갈래를 정해 준다»는 판정인데, 그 둘이 다 없는 턴에서도 LLM 이
+        # 전제를 만들어 냈다 — 2026-09-07 리허설 케이스 1(고객 화면 없음 · 첫 턴):
+        # 「IRP 세액공제 한도가 얼마야?」에 전제를 세워 답을 ISA 전환 쪽으로 밀었고, 그
+        # 답이 카드가 못박은 오답(「전환금 전액이 공제 대상」)에 걸려 폐기됐다.
+        # 갈래를 **만드는** 것은 LLM 이 해도 되지만, 갈래가 **정해졌는지**는 코드가 아는
+        # 사실이다(루트 규칙 2). 정할 재료가 없으면 그냥 답한다 — 이 등급 이전의 동작이다.
+        if premise and _can_settle(state) and _quotable(premise, evidence):
             return {**graded, "judge_note": COMPOSE_PREMISE_BLOCK.format(premise=premise)}
         return graded
 

@@ -5549,7 +5549,8 @@ def check_graded_judge() -> int:
     try:
         # ① assume — 갈래를 «정해 주는» 재료가 있으면 되묻지 말고 전제를 밝히고 답한다.
         CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "타행에서 당행으로 가져오는 경우"}'
-        out = CL.clarify({"question": "실물이전 어떻게 처리해?", "evidence": [ev()]})
+        out = CL.clarify({"question": "실물이전 어떻게 처리해?", "customer_id": "198734-1205842",
+                          "evidence": [ev()]})
         hit = out.get("judge_verdict") == CL.ASSUME and "타행에서 당행으로" in (out.get("judge_note") or "") \
             and not out.get("clarify")
         print(f"{'✓' if hit else '✗'} assume — 되묻지 않고 전제를 작성 지시로 넘긴다")
@@ -5562,18 +5563,42 @@ def check_graded_judge() -> int:
         print(f"{'✓' if hit else '✗'} none — 없다는 사실을 첫 문장에 세우라고 넘긴다")
         ok += hit
 
+        # ②-b **정해 줄 것이 없으면 전제를 만들 수 없다.** 열린 고객도 이전 대화도 없는
+        #      턴에서 assume 이 나오면 그것은 무엇을 읽고 정한 것이 아니라 지어낸 전제다
+        #      (2026-09-07 리허설 케이스 1 — 첫 턴·고객 없음인데 전제를 세워 답을 ISA 쪽으로
+        #      밀었고, 카드가 못박은 오답에 걸려 폐기됐다).
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "ISA 만기 전환 포함"}'
+        out = CL.clarify({"question": "IRP 세액공제 한도가 얼마야?", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASSUME and not out.get("judge_note")
+        print(f"{'✓' if hit else '✗'} 고객도 이전 대화도 없으면 전제를 버린다(지어낸 전제)")
+        ok += hit
+
+        out = CL.clarify({"question": "IRP 세액공제 한도가 얼마야?", "evidence": [ev()],
+                          "customer_id": "198734-1205842"})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 고객이 열려 있으면 전제가 산다")
+        ok += hit
+
+        out = CL.clarify({"question": "그럼 얼마야?", "evidence": [ev()],
+                          "history": [{"question": "앞 질문"}]})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 이전 대화가 있으면 전제가 산다(맥락도 정해 주는 재료다)")
+        ok += hit
+
         # ③ 판정이 **수치를 새로 만들 수 없다** — 원장 밖 숫자가 든 전제는 버린다.
         #    작성 프롬프트에 들어가면 작성자가 되받고, 그 수치는 원장 밖이라 답이 통째로
         #    폐기된다(§6). 넓히는 대신 넓힐 필요가 없는 문장만 통과시킨다.
         CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "총급여 7,700만원 구간"}'
-        out = CL.clarify({"question": "얼마 돌려받아?", "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
+        out = CL.clarify({"question": "얼마 돌려받아?", "customer_id": "198734-1205842",
+                          "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
         hit = out.get("judge_verdict") == CL.ASSUME and not out.get("judge_note")
         print(f"{'✓' if hit else '✗'} 원장 밖 수치가 든 전제는 버린다(경계는 코드가 쥔다)")
         ok += hit
 
         # 원장 안 수치면 통과한다 — 잃는 쪽으로만 기울지 않는다.
         CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "총급여 5,500만원 이하 구간"}'
-        out = CL.clarify({"question": "얼마 돌려받아?", "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
+        out = CL.clarify({"question": "얼마 돌려받아?", "customer_id": "198734-1205842",
+                          "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
         hit = bool(out.get("judge_note"))
         print(f"{'✓' if hit else '✗'} 원장 안 수치를 쓴 전제는 통과한다")
         ok += hit
