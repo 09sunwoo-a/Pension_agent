@@ -139,6 +139,9 @@ from pension_agent.consult_agent.tools.playbook import (  # noqa: F401
 from pension_agent.consult_agent.tools.outreach import (  # noqa: F401
     _outreach,
 )
+from pension_agent.consult_agent.tools.targets import (  # noqa: F401
+    _targets,
+)
 from pension_agent.consult_agent.tools.ledger import (  # noqa: F401
     CAUTION,
     GROUND,
@@ -230,6 +233,12 @@ TOOLS: dict[str, Tool] = {
         Tool("outreach", "이 고객에게 안내할 세미나·이벤트와 그 발송 문구를 돌려준다 — "
              "「보낼 만한 세미나 있어」·「왜 이 이벤트야」·「다른 건 없어」·「문자로 뭐라고 "
              "보내지」가 여기다", _outreach, progress="안내할 이벤트·세미나"),
+        # 고객 화면을 열기 «전»의 재료라 _NEEDS_CUSTOMER 에 넣지 않는다 — 오히려 고객이
+        # 안 열려 있을 때가 이 도구의 자리다.
+        Tool("targets", "오늘 관리해야 할 타겟 고객 목록 — 누가 왜 선정됐는지(성립 요건과 "
+             "그 요건을 성립시킨 값)를 순서대로 돌려준다. 「오늘 누구부터 봐야 해」·"
+             "「타겟 몇 명이야」·「타겟 목록 쪽지로 보내줘」가 여기다", _targets,
+             progress="오늘의 타겟 고객 목록"),
         Tool("playbook", "지금 열려 있는 고객의 상태(문제상황)에 걸린 화법·예상반론·"
              "관리방법론·업무절차 참고자료를 브리핑 화면 ⑥⑦⑧ 과 같은 후보군에서 돌려준다",
              _playbook, progress="이 고객 상태에 걸린 참고자료"),

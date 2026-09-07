@@ -63,6 +63,10 @@ class AgentState(TypedDict, total=False):
     # 답할 때 이 세션을 제외하기 위해 있다 — 이번 세션의 직전 턴들은 이미 대화 맥락으로
     # 프롬프트에 실려 있어서, 상담 기록 재료에 다시 실리면 방금 한 말이 «지난 상담»이 된다.
     session_id: str | None
+    # [입력] 로그인한 직원의 사번(호출자가 넘김). WorkB 쪽지의 수신자가 이 값이다 —
+    # 코드가 정하므로 LLM 이 수신자를 만들어낼 자리가 없다. 없으면 환경변수로 떨어지고,
+    # 그것도 없으면 쪽지 발송을 제안하지 않는다(workb.employee_id).
+    employee_id: str | None
     intent: str                      # understand 가 채움 — routing.INTENTS 중 하나
     customer_type: str | None
     objection_type: str | None
