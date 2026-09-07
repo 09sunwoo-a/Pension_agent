@@ -35,7 +35,7 @@
 
 from __future__ import annotations
 
-from pension_agent.consult_agent.kb import KnowledgeBase
+from pension_agent.knowledge.kb import KnowledgeBase
 
 #: 문서 레지스트리의 tier → 답변에 옮길 신뢰 표시. 07_에이전트_기능정의/01 ② 의 분류다.
 TIER_NOTE: dict[str, str] = {

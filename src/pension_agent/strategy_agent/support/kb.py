@@ -1,4 +1,4 @@
-"""근거 대조용 지식베이스 — consult_agent 의 카드를 읽어오는 창구.
+"""근거 대조용 지식베이스 — 공용 카드 지식베이스(`pension_agent.knowledge.kb`)를 읽어오는 창구.
 
 ⑥~⑨ 는 전부 지식 카드를 재료로 쓴다. 그 적재를 여기 한 곳에서만 하고, 첫 사용 시점까지
 미룬다 — 지식 카드 전체를 읽어 시효성 판정까지 돌리므로, prepare() 를 부르지 않는
@@ -7,11 +7,11 @@
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import kb as pitch_kb_module  # noqa: F401 — 재노출
+from pension_agent.knowledge import kb as pitch_kb_module  # noqa: F401 — 재노출
 
 
 # ─────────────────────────────────────────────────────────────
-# 지식베이스 적재 (consult_agent/kb.py — 지연 로딩)
+# 지식베이스 적재 (knowledge/kb.py — 지연 로딩)
 # ─────────────────────────────────────────────────────────────
 
 def load_reference_kb():

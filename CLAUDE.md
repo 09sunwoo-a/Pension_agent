@@ -48,7 +48,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 1. **원문은 고치지 않는다.** 카드의 `quotes`·`source_text` 는 행내 문서의 원문 인용이다.
    여기를 고치면 "출처는 진짜인데 수치는 가짜인 카드"가 되고, 그게 신뢰 표시가 거짓말하는
    가장 위험한 형태다. 시효성 수치는 원문 대신 **파생 텍스트**(`content`·`summary`·
-   `key_points`·`dialogue`)를 바꾸거나 참고 표시를 얹는다 → `consult_agent/kb.py`.
+   `key_points`·`dialogue`)를 바꾸거나 참고 표시를 얹는다 → `knowledge/kb.py`.
 
 2. **코드 = 근거의 경계와 계산 / LLM = 경계 안에서의 계획과 표현.**
 
@@ -59,7 +59,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
    | | 누가 정하나 |
    |---|---|
    | 어떤 도구를 어떤 질의로 부를지, 이제 충분한지 | LLM (`nodes/plan.py::plan_step`) |
-   | 부를 수 있는 도구가 무엇인지 | 코드 (`consult_agent/tools.py::TOOLS`) |
+   | 부를 수 있는 도구가 무엇인지 | 코드 (`consult_agent/tools/__init__.py::TOOLS`) |
    | 몇 바퀴까지 도는지 · 같은 호출 반복 차단 | 코드 (`plan.MAX_STEPS`) |
    | 수치·상품·적합성 계산 | 코드 (`strategy_agent`) |
    | 답변 문장 | LLM |
@@ -155,3 +155,12 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
 - **데이터는 소유가 있는 곳에 둔다.** 두 에이전트가 함께 읽는 지식 카드는
   `pension_agent/knowledge/data/`, strategy 만 읽는 상품·전략 카탈로그는
   `pension_agent/strategy_agent/data/`. 적재는 `knowledge.shared_store()` 한 곳에서만 한다.
+  두 에이전트가 함께 쓰는 카드 지식베이스(적재·시효성·출처·검색)도 같은 이유로
+  `pension_agent/knowledge/kb.py` 가 소유한다 — consult_agent 에 두면 strategy 가 consult 를
+  거꾸로 임포트하게 된다(실제로 그랬다).
+- **에이전트 사이의 의존은 한 방향이다.** `knowledge ← strategy_agent ← consult_agent`.
+  strategy_agent 는 consult_agent 를 임포트하지 않는다 — 대화형은 전략제안의 산출을 받아
+  말하는 쪽이지 그 반대가 아니다. 공용 모듈(`pension_agent/*.py`·`knowledge/`·`market/`)도
+  consult_agent 를 임포트하지 않는다(`pension_agent/tools.py` 가 발송 게이트의 자산 목록을
+  위해 strategy_agent.support 를 읽는 것이 공용 → 에이전트 방향의 유일한 간선이다).
+  `tests/test_infra.py` 가 역방향 간선을 잡는다.

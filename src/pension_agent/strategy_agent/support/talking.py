@@ -46,7 +46,7 @@ def pitch_talk(spec: dict, customer_type: str | None) -> str:
 
 
 def _freshness_notes(card: dict) -> list[str]:
-    """시효성 표시 — 확인 요구 경고 · 원문 대비 현재 금리(consult_agent.kb 가 붙인 값).
+    """시효성 표시 — 확인 요구 경고 · 원문 대비 현재 금리(knowledge.kb 가 붙인 값).
 
     카드 대사에 금리가 없고 인용문에만 있는 경우엔 원문을 고치지 않으므로, 대신 "원문 X ·
     현재 Y" 를 재료에 얹는다. 확인 요구(_verify_first)는 주장을 판정할 근거가 시스템에
