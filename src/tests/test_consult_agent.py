@@ -5373,6 +5373,37 @@ def check_graded_judge() -> int:
     print(f"{'✓' if hit else '✗'} 갈래를 정하지 못하는 줄(⑥⑦⑧·AI 산문)은 빼고 싣는다")
     ok += hit
 
+    # 계획이 customer 도구를 **안 불러도** 판정은 그 고객의 원장을 본다. 원장만 보면
+    # 갈래가 정해지는지가 LLM 의 도구 선택에 달리는데, 「수수료 얼마야?」는 fact 하나만
+    # 부르고도 이 고객의 부담금 종류가 답을 정해 준다(대본 T8 실측 — 그래서 되물었다).
+    # 지워진 gap 10 이 「하지 말 것」 가드에서 같은 의존을 끊은 것과 같은 자리다.
+    seen.clear()
+    orig_material = tools.customer_material
+    tools.customer_material = lambda state: "· 개인부담금 0원\n· 퇴직급여 5.2억"
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"verdict": "answer"}')[1]
+    try:
+        CL.clarify({"question": "수수료 얼마야?", "evidence": [ev()],
+                    "customer_id": "188406-7352194"})
+    finally:
+        CL.generate, tools.customer_material = orig_gen, orig_material
+    hit = bool(seen) and "개인부담금 0원" in seen[0]
+    print(f"{'✓' if hit else '✗'} 계획이 customer 를 안 불러도 판정은 원장을 본다 (gap 10 과 같은 자리)")
+    ok += hit
+
+    # 원장에 이미 있으면 두 번 싣지 않는다.
+    seen.clear()
+    calls_material: list[int] = []
+    tools.customer_material = lambda state: calls_material.append(1) or "· 개인부담금 0원"
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"verdict": "answer"}')[1]
+    try:
+        CL.clarify({"question": "수수료 얼마야?", "evidence": [ev(), cust],
+                    "customer_id": "188406-7352194"})
+    finally:
+        CL.generate, tools.customer_material = orig_gen, orig_material
+    hit = not calls_material and seen[0].count("개인부담금 0원") == 1
+    print(f"{'✓' if hit else '✗'} 원장에 이미 있으면 다시 읽지 않는다")
+    ok += hit
+
     # 관문은 그대로다 — 고객 재료뿐이면 판정을 아예 돌리지 않는다(오판의 기회를 없앤다).
     hit = not CL.applicable({"question": "평가금액 얼마야", "evidence": [cust]})
     print(f"{'✓' if hit else '✗'} 관문은 그대로 — 갈래를 만드는 재료가 없으면 판정을 안 돌린다")

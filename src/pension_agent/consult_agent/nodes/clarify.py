@@ -126,17 +126,35 @@ def _branchable(state: AgentState) -> list:
     return [e for e in (state.get("evidence") or []) if e["tool"] not in _NO_BRANCH]
 
 
+def _trim(text: str) -> str:
+    """판정 프롬프트에 실을 꼴로 자른다 — 갈래를 정하지 못하는 줄을 빼고 길이를 자른다."""
+    lines = [ln for ln in text.splitlines()
+             if not any(f"· {label}:" in ln for label in _NOT_DECIDING)]
+    return "\n".join(lines)[:_DECIDING_MAX_CHARS].strip()
+
+
 def _deciding_block(state: AgentState) -> str:
-    """갈래를 **정해 주는** 재료 블록. 없으면 빈 문자열(블록 자체가 안 붙는다)."""
+    """갈래를 **정해 주는** 재료 블록. 없으면 빈 문자열(블록 자체가 안 붙는다).
+
+    원장에 실린 것(계획이 그 도구를 부른 경우)에 더해, **고객 화면이 열려 있으면 코드가
+    그 고객의 재료를 읽어 붙인다.** 원장만 보면 계획 LLM 이 `customer` 를 골랐을 때만
+    갈래가 정해지는데, 「수수료 얼마야?」는 `fact` 하나만 부르고도 이 고객의 원장이
+    부담금 종류를 이미 답한다 — 실제로 그래서 되물었다(대본 T8 · 2026-09-07 실측).
+    판정이 무엇을 볼 수 있는지가 LLM 의 도구 선택에 달려 있으면 안 된다는 것은
+    지워진 gap 10 이 「하지 말 것」 가드에서 이미 정한 규약이다.
+    """
     parts: list[str] = []
     for e in state.get("evidence") or []:
         if e["tool"] not in _NO_BRANCH:
             continue
-        lines = [ln for ln in e["text"].splitlines()
-                 if not any(f"· {label}:" in ln for label in _NOT_DECIDING)]
-        text = "\n".join(lines)[:_DECIDING_MAX_CHARS].strip()
+        text = _trim(e["text"])
         if text:
             parts.append(text)
+    if not any(e["tool"] == "customer" for e in state.get("evidence") or []):
+        # 원장에 없을 때만 읽는다 — 있으면 같은 재료가 두 번 실린다.
+        extra = tools.customer_material(state)
+        if extra and _trim(extra):
+            parts.append(_trim(extra))
     return JUDGE_DECIDING_BLOCK.format(deciding="\n\n".join(parts)) if parts else ""
 
 

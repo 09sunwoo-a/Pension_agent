@@ -724,6 +724,26 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                        "context": "\n".join(lines).replace("_", " ")}])
 
 
+def customer_material(state: AgentState) -> str | None:
+    """열려 있는 고객의 재료 텍스트 — **계획이 `customer` 도구를 불렀는지와 무관하게.**
+
+    답변 재료가 아니라 «판정이 갈래를 정할 때 보는 값»으로 쓴다(nodes/clarify.py). 원장만
+    보면 그 턴에 계획 LLM 이 `customer` 를 골랐을 때만 보이는데, 갈래를 정해 주는 값이
+    있는지는 **고객 화면이 열려 있는지**로 정해지지 LLM 의 도구 선택으로 정해지지 않는다 —
+    「수수료 얼마야?」는 `fact` 하나만 불러도 이 고객의 원장이 부담금 종류를 이미 답한다
+    (지워진 gap 10 이 「하지 말 것」 가드에서 같은 의존을 끊은 것과 같은 자리다).
+
+    **같은 경로를 쓴다.** 값을 여기서 다시 렌더하면 판정이 보는 값과 답변이 인용하는 값이
+    갈릴 수 있다 — `customer` 도구 본체를 그대로 부른다. `propose()` 는 프로파일 내용을
+    키로 캐시되므로(strategy_agent, 지워진 gap 25) 화면이 이미 만든 브리핑을 다시 만들지
+    않는다. 고객 화면이 닫혀 있거나 재료를 못 읽으면 None.
+    """
+    if not state.get("customer_id"):
+        return None
+    found = _customer(state, "")
+    return found["text"] if found else None
+
+
 #: 인용 허용 집합에서 빼는 facts 가지. 값이 아니라 **선별 전 후보 더미**다.
 #:
 #: allow 는 "이 답변이 인용해도 되는 값"의 집합이고, verify 는 답변의 수치가 그 안에 있는지만
