@@ -1644,7 +1644,10 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
         # 발송 화면 제안(act._propose_lms)은 요건에 맞는 것에만 붙는다 — 폴백 문구가 나가면
         # 그 고객과 무관한 문자가 나간다.
         if matched[key]:
-            lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"]}
+            # url 도 들려 보낸다 — 답변이 이름을 바꿔 써도 링크는 원문 그대로라(atomic)
+            # 제안 노드가 «이 콘텐츠를 가리켰다»를 링크로 판정할 수 있다(act._mentions).
+            lms[key] = {"id": item["id"], "name": item["name"], "message": item["lms_message"],
+                        "url": item.get("url") or ""}
         # 다른 후보 — "다른 건 없어?" 에 답할 재료다. 선정된 것은 위에 이미 있으므로 뺀다.
         others = [c for c in (pools.get(key) or []) if c["id"] != item["id"]]
         if others:

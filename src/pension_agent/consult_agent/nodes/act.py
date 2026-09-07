@@ -155,7 +155,7 @@ def _propose_lms(state: AgentState) -> dict[str, Any] | None:
         if ev["tool"] != "outreach":
             continue
         for key, item in _lms_items(ev):
-            if not _mentions(answer, item["name"]):
+            if not _mentions(answer, item["name"], item.get("url")):
                 continue          # 답변이 가리키지 않은 콘텐츠는 제안하지 않는다
             found = screens.lms_screen(KB)
             if not found:
@@ -173,7 +173,7 @@ def _propose_lms(state: AgentState) -> dict[str, Any] | None:
 _CONTENT_KINDS = ("이벤트", "세미나")
 
 
-def _mentions(answer: str, name: str) -> bool:
+def _mentions(answer: str, name: str, url: str | None = None) -> bool:
     """답변이 이 콘텐츠 이름을 불렀는가 — 조건 ③ 「답변이 그 콘텐츠를 실제로 가리켰다」의 판정.
 
     글자 그대로의 부분문자열 대조였던 동안 **제안이 엉뚱한 콘텐츠에 붙었다**(2026-09-03
@@ -184,6 +184,14 @@ def _mentions(answer: str, name: str) -> bool:
     낱말 생략·공백 차이)은 LLM 이 정하는 표현이라 지시로 고정할 수 없다 — 대조 쪽이 그
     폭을 갖는다. 넓히는 것은 **끝의 종류 낱말과 공백**뿐이다. 이름의 앞부분을 잘라 부르는
     것은 여전히 «가리킨 것»이 아니다(후보를 늘어놓기만 한 답변에 붙이지 않는다는 조건 ③).
+
+    **링크 인용도 «가리킨 것»이다**(2026-09-07 실측, 김서연 SE6). 답변이 등록 이름
+    「ISA 만기자금, IRP로 이어가는 절세 이벤트」를 「ISA 만기자금 IRP 이전 절세 이벤트」로
+    바꿔 써서 이름 대조가 탈락했고, 제안이 안 붙어 다음 턴 «응, 열어줘»가 «직전에 제안드린
+    작업이 없어요»로 끝났다. 그 답변에 안내 링크는 원문 그대로 있었다 — 링크는 원문 스팬
+    (atomic)이라 답변이 바꿔 쓸 수 없는 값이고, 콘텐츠마다 다르므로 이름보다 확실한
+    식별자다. 이름을 줄여 쓰는 방식은 LLM 이 정하는 표현이라 지시로 못 막지만 링크는
+    막을 필요가 없다. 후보를 늘어놓기만 한 답변(이름도 링크도 없음)에는 여전히 안 붙는다.
     """
     stem = name.strip()
     for kind in _CONTENT_KINDS:
@@ -191,7 +199,9 @@ def _mentions(answer: str, name: str) -> bool:
             stem = stem[: -len(kind)].strip()
             break
     squash = lambda s: re.sub(r"\s+", "", s)  # noqa: E731
-    return bool(stem) and squash(stem) in squash(answer)
+    if bool(stem) and squash(stem) in squash(answer):
+        return True
+    return bool(url) and url.strip() in answer
 
 
 def _lms_items(ev: dict) -> list[tuple[str, dict]]:
