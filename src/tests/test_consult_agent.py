@@ -888,6 +888,13 @@ def check_briefing_shared() -> int:
     orig_gen, orig_avail = SA.llm.generate, SA.llm.available
     profile = CUST.PERSONAS[0]
 
+    # 파일 저장소(briefing_cache/)를 끈다 — `scripts.prebuild_briefings` 를 돌린 체크아웃에는
+    # 저장분이 있어 첫 호출이 LLM 0회로 그것을 읽고, «한 번만 만든다»의 1회차가 0 이 된다.
+    # 여기서 재는 것은 프로세스 캐시이지 파일 저장소가 아니다(test_engine 의 같은 격리).
+    from pension_agent import config as _cfg
+    saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir / "__off__"   # 없는 디렉터리 = 꺼짐
+
     SA.clear_briefing_cache()
     SA.llm.available = lambda: True
     # 부를 때마다 다른 문장을 내는 LLM — 캐시가 없으면 두 호출이 갈린다.
@@ -952,6 +959,7 @@ def check_briefing_shared() -> int:
         SA.clear_briefing_cache()
     print(f"{'✓' if hit else '✗'} 캐시가 상한({SA._BRIEFING_MAX})에서 오래된 것부터 밀어낸다")
     ok += hit
+    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir
     return ok
 
 
