@@ -27,7 +27,7 @@ PACKAGE_ROOT = Path(__file__).resolve().parent      # src/pension_agent
 SRC_ROOT = PACKAGE_ROOT.parent                      # src
 REPO_ROOT = SRC_ROOT.parent                         # 저장소 최상위(지식베이스 원문 폴더)
 
-DOTENV = SRC_ROOT / ".env"                          # 두 에이전트가 공유하는 단일 설정 파일
+DOTENV = SRC_ROOT / ".env"                          # 공통 설정 파일. 환경별 파일은 옆의 .env.<프로파일> (env.py)
 
 # ─────────────────────────────────────────────────────────────
 # 데이터 루트

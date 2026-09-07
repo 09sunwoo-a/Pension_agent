@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from pension_agent.consult_agent.kb import load_kb
+from pension_agent.knowledge.kb import load_kb
 
 HISTORY_LIMIT = 4  # 프롬프트에 넣는 최근 대화 턴 수 (understand·situation_slots 공통)
 

@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 
-from pension_agent.consult_agent.kb import KnowledgeBase, origin_of, role_texts, source_url
+from pension_agent.knowledge.kb import KnowledgeBase, origin_of, role_texts, source_url
 
 # 고객 요건(customer.conditions() 의 코드) → 지식베이스에서 찾을 말.
 # 값은 "무엇을 하지 말라"가 아니라 **어디를 뒤질까**다 — 문장은 지식베이스가 갖고 있다.
