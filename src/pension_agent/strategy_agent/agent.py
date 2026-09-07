@@ -269,6 +269,33 @@ def _customer_state(p: Profile) -> dict:
     }
 
 
+def _state_blob(p: Profile) -> list[str]:
+    """`_customer_state` 가 프롬프트로 내보낸 값 그대로 — `engine.verify(..., extra=)` 에 싣는다.
+
+    **보여준 값은 인용할 수 있어야 한다.** 선별·생성 프롬프트는 고객 상태를 `_customer_state`
+    로 보여주는데, 검증기가 펴는 것은 `facts["customer"]` 다(pension_agent/verify.py::
+    allowed_facts). 두 스냅샷이 같지 않다 — 포트폴리오 4칸·투자기간·운용이력은 앞쪽에만
+    있다. 그래서 **코드가 보여준 숫자를 LLM 이 옮겨 적으면 코드가 그 문장을 버렸다.**
+
+    실측(2026-09-07 · 고객 188406-7352194): 프롬프트가 「최종 운용변경 이후 13.7개월 경과」·
+    「원리금보장·현금성 54」를 보여주는데 `13.7`·`54`·`24`·`22`·`2.9` 가 전부 허용 집합 밖이라
+    ⑨ 추천 사유가 «생성 사유가 재료를 벗어남»으로 반려됐다. 살아남은 판은 LLM 이 우연히
+    13.7 을 「13개월 이상」으로 반올림하고 54 에 % 를 붙인 것이었다(`54%` 는 ② 항목 텍스트에
+    있어서 통과한다) — **통과가 운에 달려 있었다.**
+
+    지어내는 자리가 아니다: 여기 실리는 값은 전부 `Profile` 에서 코드가 꺼낸 것이고, 이미
+    브리핑 화면에 떠 있는 값이다. `_content_blob` 이 콘텐츠 DB 의 일정·링크를 같은 이유로
+    싣는 것과 같은 처방이다(그때는 LMS 문구가 「9/10 16시」로 전부 폐기되던 자리였다).
+    """
+    out: list[str] = []
+    for key, value in _customer_state(p).items():
+        # 포트폴리오는 한 겹 더 들어가 있다(칸 이름 → 비중). 펴지 않으면 그 네 숫자만
+        # 빠지는데, 하필 이 프롬프트들이 가장 자주 인용하는 값이다.
+        pairs = value.items() if isinstance(value, dict) else [(key, value)]
+        out += [f"{k} {v}" for k, v in pairs]
+    return out
+
+
 def _select(p: Profile, facts: dict, key: str, label: str,
             candidates: list[dict], k: int) -> list[dict] | None:
     """후보 중 k개를 LLM 이 고른다(REQUIREMENTS.md §15 — DB 는 Rule, 선별은 LLM).
@@ -361,7 +388,8 @@ def _select_outreach(p: Profile, facts: dict, key: str, label: str,
         return None
     item = dict(candidates[pick])
     reason = str(data.get("reason") or "").strip()
-    if reason and engine.verify(reason, facts, extra=_content_blob(item))[0]:
+    if reason and engine.verify(reason, facts,
+                                extra=[*_state_blob(p), *_content_blob(item)])[0]:
         item["reason"] = reason
     else:
         skipped[f"{key}_reason"] = ("생성 사유가 재료를 벗어남 — 사유 없이 표시됨" if reason
@@ -410,7 +438,7 @@ def _write_top_holdings_insight(p: Profile, facts: dict) -> None:
     if not insight:
         facts["llm_skipped"]["top_holdings_insight"] = "LLM 응답에 insight 없음"
         return
-    if not engine.verify(insight, facts)[0]:
+    if not engine.verify(insight, facts, extra=_state_blob(p))[0]:
         facts["llm_skipped"]["top_holdings_insight"] = "재료에 없는 값이 포함됨"
         return
     facts["top_holdings_insight"] = insight
@@ -449,7 +477,8 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
         # 아니라 게이트로 옮겼다: pension_agent.tools.open_lms_screen() 이 dummy 자산의
         # 문구를 발송 화면에 채우는 것을 거부한다. 접두는 LLM 이 지울 수 있지만
         # 게이트는 못 지운다.
-        if body and engine.verify(body, facts, extra=_content_blob(item))[0]:
+        if body and engine.verify(body, facts,
+                                  extra=[*_state_blob(p), *_content_blob(item)])[0]:
             item["lms_message"] = support.lms_frame(p.nm, body, item.get("url") or "")
             item["lms_generated"] = True
         else:

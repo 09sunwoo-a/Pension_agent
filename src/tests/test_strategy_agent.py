@@ -287,8 +287,51 @@ def check_outreach_prompt_has_no_condition_codes() -> None:
           detail=(code.search(seen[0]).group(0) if seen and code.search(seen[0]) else "프롬프트 없음"))
 
 
+def check_shown_state_is_quotable() -> None:
+    """프롬프트가 **보여준** 고객 상태 값을 생성문이 인용할 수 있다.
+
+    회귀 대상(2026-09-07 실측 · 고객 188406-7352194): 선별·생성 프롬프트는 고객 상태를
+    `_customer_state` 로 보여주는데 검증기가 펴는 것은 `facts["customer"]` 다. 두 스냅샷이
+    같지 않아서 — 포트폴리오 4칸·투자기간·운용이력은 앞쪽에만 있다 — **코드가 보여준
+    숫자를 LLM 이 옮겨 적으면 코드가 그 문장을 버렸다.** ⑨ 추천 사유가 「생성 사유가 재료를
+    벗어남」으로 반려됐고, 대화 쪽은 그 반려 사실을 원장으로 받아 「구체적인 생성 사유는
+    확인되지 않아요」로 답했다(리허설 케이스 11).
+
+    살아남은 판은 LLM 이 우연히 13.7 을 「13개월 이상」으로 반올림한 것이었다 — 통과가
+    운에 달려 있었다. 그래서 «반려되던 문장이 이제 통과한다»만 재면 부족하고, **넓힌 것이
+    보여준 값에서 멈추는지**를 함께 잰다. 지어낸 값·계산한 값까지 열리면 이 수정은 §6 이
+    막으려는 것을 정확히 뚫는다.
+    """
+    p = _BY_NAME.get("송도윤")
+    if p is None:
+        check(False, "보여준 값 인용: 전제조건 불충족 — 송도윤 없음")
+        return
+    facts = engine.prepare(p)
+    extra = A._state_blob(p)
+
+    # 프롬프트가 실제로 보여주는 값에서 그대로 뽑는다 — 상수로 적으면 더미가 바뀌었을 때
+    # 테스트만 통과하고 회귀는 되살아난다.
+    state = A._customer_state(p)
+    shown = f"최종 운용변경 이후 {p.nchM}개월이 지났고 투자기간은 {state['투자기간']}이에요."
+    ok, bad = engine.verify(shown, facts, extra=extra)
+    check(ok, "프롬프트가 보여준 고객 상태 값을 생성문이 인용할 수 있다", detail=str(bad))
+
+    port = state["포트폴리오"]
+    label, share = next(iter(port.items()))
+    ok, bad = engine.verify(f"{label} 비중이 {share} 입니다.", facts, extra=extra)
+    check(ok, "포트폴리오 칸의 비중도 인용할 수 있다(한 겹 더 들어가 있다)", detail=str(bad))
+
+    # 넓힌 폭은 «보여준 값» 하나뿐이다.
+    ok, _ = engine.verify("예상 수익률은 연 7.5% 입니다.", facts, extra=extra)
+    check(not ok, "보여주지 않은 값은 여전히 막힌다(지어낸 수치)")
+
+    ok, _ = engine.verify(f"{p.nchM}개월 중 9개월은 방치였어요.", facts, extra=extra)
+    check(not ok, "보여준 값으로 **계산한** 값도 여전히 막힌다")
+
+
 def main() -> int:
     check_outreach_prompt_has_no_condition_codes()
+    check_shown_state_is_quotable()
     check_order_mismatch_fallback()
     check_sentence_verify_rejects_fabrication()
     check_why_customer_accepts_grounded()
