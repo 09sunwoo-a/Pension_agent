@@ -74,7 +74,7 @@
 `test_paths` 가 실패한다). 부서·시점은 문서 표기가 일정하지 않아 시드가 계속 갖는다.
 
 **`meta.title` 은 출처가 아니다.** 그건 적재 파일의 이름표라서 "영업 화법 — 06/03 영업화법"
-처럼 변환본 이름인 경우가 있다. 출처를 만드는 곳은 `consult_agent/kb.py::origin_of()` 하나이고,
+처럼 변환본 이름인 경우가 있다. 출처를 만드는 곳은 `knowledge/kb.py::origin_of()` 하나이고,
 `원천 문서 → 원문 표기(source_text) → 추출지식 절 → "확인 필요"` 순으로 물러선다 —
 어느 단계에서도 파일 이름표로는 물러서지 않는다. 파일 하나가 통째로 원천 문서 하나면
 레코드마다 `source.doc` 를 반복하지 말고 **`meta.source_doc` 에 한 번만** 적는다(레코드가
@@ -129,7 +129,7 @@ python -m scripts.kb_build.build_kb --activate   # '_draft_' 접두 제거(= 검
 6) 검토        →  수치·상품명·조항이 원본과 맞는지, null 처리가 옳은지 사람이 확인
 7) 활성화      →  파일명에서 '_draft_' 제거
 8) 검증        →  python -m pension_agent.knowledge.schema validate <루트>   # ERROR 0 필수
-                  + 도메인 검증: 지식 `python -m pension_agent.consult_agent.kb`
+                  + 도메인 검증: 지식 `python -m pension_agent.knowledge.kb`
                                  전략 `python -m pension_agent.strategy_agent.engine && python -m tests.test_engine`
 ```
 
@@ -160,7 +160,7 @@ python -m scripts.kb_build.build_kb --activate   # '_draft_' 접두 제거(= 검
 `knowledge.schema validate` (통합·종류 무관): 필수필드 누락 · 잘못된 값/enum · id 중복 ·
 깨진 refs · **사실충돌**(같은 label 에 다른 value = 개정 반영 누락, ERROR) · **최신성 미기재**
 (`fact.as_of` 없음, WARN) · **개인정보 의심**(작성자 실명·부점·직급 패턴, WARN). 도메인 검증
-(엔진 게이트·근거 교차검증·화법 오답 차단)은 각 에이전트의 `engine.py`/`kb.py` 가 계속 담당한다.
+(엔진 게이트·근거 교차검증·화법 오답 차단)은 `strategy_agent/engine`·`knowledge/kb.py` 가 계속 담당한다.
 
 ## 6. 새 종류를 만났을 때 (내가 놓친 데이터 포함)
 
@@ -183,7 +183,7 @@ python -m scripts.kb_build.build_kb --activate   # '_draft_' 접두 제거(= 검
 ```
 
 이후 `python -m pension_agent.knowledge.schema prompt regulation` 으로 바로 저작 프롬프트가 나온다. 검색형
-종류를 pitch 검색이 함께 다루게 하려면 `consult_agent/kb.py` 의 로드 종류만 넓히면 된다.
+종류를 pitch 검색이 함께 다루게 하려면 `knowledge/kb.py` 의 로드 종류만 넓히면 된다.
 
 ## 7. 주의
 
