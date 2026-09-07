@@ -416,10 +416,25 @@ def allowed_facts(facts: dict, extra: Iterable[str] = ()) -> tuple[set[str], set
 
     넓히는 것은 **호출부가 명시한 텍스트**뿐이다. facts 스키마를 늘리지 않는 이유는 이
     함수를 쓰는 다른 생성문(코칭·해석·추천 사유)까지 그 값을 인용할 수 있게 되기 때문이다.
+
+    ━━ 허용 상품명은 두 갈래다 ━━
+    ① **이번에 권할 상품**(`items[*].products`) — 적합성 게이트를 통과해 실행 항목에 붙은 것.
+    ② **이 고객이 이미 가진 상품**(`owned_products`) — 보유분과 ④ 동연령 상위1% 사례.
+
+    ②가 없던 동안, 화면이 이미 띄운 보유 상품을 그대로 옮긴 문장이 «미등록 상품명»으로
+    폐기됐다(2026-09-07 실측 — 「판매중단 상품인 KB 퇴직연금 배당 (주식) 8,000만원을 보유하고
+    계세요」가 ② 선정 사유와 ④ 해석 두 곳에서). 이름이 프롬프트로는 나가고 인용은 막히는
+    상태였다 — `extra` 로도 못 열린다: 그쪽은 **수치만** 넓힌다.
+
+    ②를 열어도 상품명의 상한은 살아 있다. 무너뜨리는 것은 순환(지어낸 이름이 답변과 재료에
+    함께 실려 서로를 근거로 통과하는 것)인데, `owned_products` 는 코드가 계좌 원장에서 읽어
+    담은 목록이라(engine/pipeline.py::_owned_product_names) LLM 이 끼어들 자리가 없다.
     """
     prods: set[str] = set()
     blob = [str(v) for v in facts["customer"].values()] + list(facts["conditions"]) + list(extra)
     blob += [str(v) for k, v in facts["briefing"].items() if k != "source"]
+    for name in facts.get("owned_products") or ():
+        prods.add(str(name).split("(")[0].strip())
     for it in facts["items"]:
         blob += [it["clause"], it["evidence"], it["amount"] or "", it["formula"], it["talk"]]
         blob += it["evidence_extra"]

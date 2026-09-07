@@ -329,9 +329,49 @@ def check_shown_state_is_quotable() -> None:
     check(not ok, "보여준 값으로 **계산한** 값도 여전히 막힌다")
 
 
+def check_owned_products_are_quotable() -> None:
+    """이 고객이 **가진** 상품 이름을 생성문이 말할 수 있다.
+
+    회귀 대상(2026-09-07 실측 · 송도윤): briefing 의 «보유상품»·«동연령대비교» 칸이 상품
+    이름을 프롬프트로 내보내는데, 검증기의 허용 상품 집합은 `items[*].products`(=이번에
+    권할 상품)만 봤다. 그래서 ② 선정 사유의 「판매중단 상품인 KB 퇴직연금 배당 (주식)
+    8,000만원을 보유하고 계세요」와 ④ 해석이 «상품명 미등록»으로 폐기됐다 — **화면이 이미
+    띄운 사실을 그대로 옮긴 문장**이다.
+
+    허가는 «이 고객의 원장에 이름이 있는 것»까지다. 상품명 상한이 살아 있는지를 같이
+    잰다 — 지어낸 이름과, 다른 고객이 가진 이름은 여전히 막혀야 한다. 그 둘까지 열리면
+    이 수정은 닫힌 목록이 막으려던 순환을 그대로 되살린다.
+    """
+    p = _BY_NAME.get("송도윤")
+    if p is None:
+        check(False, "보유 상품 인용: 전제조건 불충족 — 송도윤 없음")
+        return
+    facts = engine.prepare(p)
+    owned = facts.get("owned_products") or []
+    mine = next((n for n in owned if n.startswith("KB ")), "")
+    if not mine:
+        check(False, "보유 상품 인용: 전제조건 불충족 — 검사기가 보는 'KB ' 이름이 없다")
+        return
+
+    ok, bad = engine.verify(f"판매중단 상품인 {mine} 을 보유하고 계세요.", facts)
+    check(ok, f"이 고객이 가진 상품 이름을 말할 수 있다 ({mine})", detail=str(bad))
+
+    ok, _ = engine.verify("KB 무지개 성장 펀드를 권해보세요.", facts)
+    check(not ok, "지어낸 상품 이름은 여전히 막힌다")
+
+    # 다른 고객의 보유 상품 — facts 는 고객 한 명당 하나이므로 넘어오면 안 된다.
+    others = {n for q in PERSONAS if q.nm != p.nm
+              for n in (engine.prepare(q).get("owned_products") or [])}
+    alien = next((n for n in sorted(others - set(owned)) if n.startswith("KB ")), "")
+    if alien:
+        ok, _ = engine.verify(f"{alien} 를 보유 중이세요.", facts)
+        check(not ok, f"다른 고객이 가진 상품 이름은 막힌다 ({alien})")
+
+
 def main() -> int:
     check_outreach_prompt_has_no_condition_codes()
     check_shown_state_is_quotable()
+    check_owned_products_are_quotable()
     check_order_mismatch_fallback()
     check_sentence_verify_rejects_fabrication()
     check_why_customer_accepts_grounded()
