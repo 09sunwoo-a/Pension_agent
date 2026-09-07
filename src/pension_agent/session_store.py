@@ -75,6 +75,26 @@ def append_turn(
     _save(customer_id, doc)
 
 
+def drop_session(customer_id: str, session_id: str) -> bool:
+    """세션 하나를 저장소에서 지운다. 지운 것이 있으면 True.
+
+    **리허설이 자기 잔여물을 걷어내기 위한 자리다**(tests/debug/runner.py). 실 LLM
+    리허설은 운영 진입점을 그대로 부르므로 턴마다 기록을 남기는데(§2), 그 기록이
+    시연용 시드 세션과 **같은 파일에 섞인다** — 저장소에 커밋되는 픽스처라 리허설을
+    한 번 돌 때마다 추적 파일이 더러워지고, 그대로 커밋되면 다음 시연에서 T5
+    「지난번엔 무슨 얘기 했지?」가 리허설의 오류 문장을 «지난 상담»으로 읽는다.
+
+    운영 경로는 이 함수를 부르지 않는다 — 상담 기록은 지우는 것이 아니다.
+    """
+    doc = _load(customer_id)
+    kept = [s for s in doc["sessions"] if s["session_id"] != session_id]
+    if len(kept) == len(doc["sessions"]):
+        return False
+    doc["sessions"] = kept
+    _save(customer_id, doc)
+    return True
+
+
 def list_sessions(customer_id: str) -> list[dict[str, Any]]:
     return _load(customer_id)["sessions"]
 
