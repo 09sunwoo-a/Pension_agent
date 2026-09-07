@@ -976,13 +976,59 @@ def _headline(card: dict) -> str:
     return f"- [{card.get('id')}] {title}" + (f" · {tail}" if tail else "")
 
 
-#: 적합성 판정 응답의 토큰 상한. id 몇 개짜리 JSON 배열 한 줄.
-ADEQUACY_MAX_TOKENS = 200
+#: 적합성 판정 응답의 토큰 상한. keep 배열 + 갈래 한 축이 들어가는 JSON 객체 한 줄.
+#: 예전에는 id 배열뿐이라 200 이었다 — 갈래를 함께 적게 되면서 닫는 괄호 전에 잘릴 여지가
+#: 생겼고, 잘린 JSON 은 통째로 버려져 **후보가 전멸한다**(계획 프롬프트의 PLAN_MAX_TOKENS
+#: 가 같은 이유로 80 에서 늘어난 적이 있다).
+ADEQUACY_MAX_TOKENS = 400
+
+#: 갈래 한 축의 최소 선택지 수. 하나뿐이면 갈래가 아니다(되묻기의 MIN_OPTIONS 와 같은 값이고
+#: 같은 이유다 — 갈래를 보여주지 못하는 갈래 표시는 아무것도 정해주지 않는다).
+MIN_BRANCH_OPTIONS = 2
+
+
+def _branches(raw: object) -> list[dict]:
+    """게이트 응답의 `branches` 를 규격에 맞는 것만 남겨 정규화한다.
+
+    싣는 것은 **축 이름과 선택지 라벨뿐**이다. 카드 id 를 싣지 않는 이유는 갈래 후보를
+    빼지 않고 남기기 때문이다(ADEQUACY_PROMPT 머리말) — 재료는 이미 원장에 있으므로
+    여기서 다시 가리킬 것이 없고, 판정 프롬프트가 필요로 하는 것은 「무엇으로 갈리나」다.
+    """
+    out: list[dict] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        axis = str(item.get("axis") or "").strip()
+        options = [str(o).strip() for o in (item.get("options") or [])
+                   if isinstance(o, str) and str(o).strip()]
+        if axis and len(options) >= MIN_BRANCH_OPTIONS:
+            out.append({"axis": axis, "options": options})
+    return out
+
+
+def record_branches(state: AgentState, found: list[dict]) -> None:
+    """게이트가 표시한 갈래를 이번 턴의 상태에 쌓는다. 축 이름으로 중복을 걷는다.
+
+    **왜 상태를 여기서 건드리나** — 갈래를 아는 곳(게이트)과 그것을 쓰는 곳(되묻기 판정)
+    사이에 노드 경계가 있다. 원장(evidence)에 실으면 될 것 같지만 이건 근거가 아니라
+    «후보가 어떻게 갈렸나»의 기록이라, 근거로 실으면 답변 재료가 되고 compose 가 그 문구를
+    인용할 수 있게 된다. 전달은 `plan_step` 이 자기 반환값으로 명시적으로 한다 — 여기서는
+    같은 노드 안의 리스트에 쌓기만 한다(그래프 상태 전파를 in-place 변경에 기대지 않는다).
+    """
+    if not found:
+        return
+    bucket = state.setdefault("branches", [])
+    seen = {b["axis"] for b in bucket}
+    for b in found:
+        if b["axis"] not in seen:
+            seen.add(b["axis"])
+            bucket.append(b)
 
 
 def fits_question(question: str, hits: list[tuple[float, dict]],
                   kind: str = "지식", history: list[dict] | None = None,
-                  query: str | None = None) -> list[tuple[float, dict]]:
+                  query: str | None = None,
+                  sink: list[dict] | None = None) -> list[tuple[float, dict]]:
     """질문의 '실제 의도'에 답이 되는 후보만 남긴다(오답 차단). 순서·점수는 그대로 둔다.
 
     LLM 이 없는 id 를 지어내도 실재 후보와 대조해 걸러낸다 — select.llm_pick 과 같은
@@ -996,6 +1042,11 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
     **계획이 이번에 무엇을 찾는지도 함께 넘긴다**(`query`). 없으면 직원 질문을 그대로
     쓴다. 왜 필요한지는 ADEQUACY_PROMPT 머리말에 적어뒀다 — 고객 특정 질문에서 일반
     자료가 전멸하던 자리다.
+
+    **`sink` 는 갈래를 받아 가는 자리다.** 후보 목록 전체를 보는 곳이 여기뿐이라 「이 둘은
+    조건이 갈려 답이 달라지는 관계」를 알 수 있는 것도 여기뿐인데, 반환값은 남길 후보라
+    그 사실을 실을 데가 없었다(ADEQUACY_PROMPT 머리말 「갈래를 여기서 적는 이유」).
+    갈래로 표시된 후보는 **빼지 않는다** — 빼면 되묻기가 성립할 재료가 사라진다.
     """
     progress.emit("찾은 자료가 질문에 맞는지 확인하고 있어요")
     cards = "\n".join(_headline(c) for _, c in hits)
@@ -1003,13 +1054,40 @@ def fits_question(question: str, hits: list[tuple[float, dict]],
                                           query=query or question,
                                           history_block=format_history(history)),
                    max_tokens=ADEQUACY_MAX_TOKENS, name="consult.adequacy")
-    m = re.search(r"\[.*\]", raw, re.S)
-    try:
-        kept = json.loads(m.group()) if m else []
-    except ValueError:
-        kept = []
-    keep = {x for x in kept if isinstance(x, str)} if isinstance(kept, list) else set()
-    return [(score, card) for score, card in hits if card.get("id") in keep]
+    kept, found = _adequacy_verdict(raw)
+    if sink is not None:
+        sink.extend(found)
+    return [(score, card) for score, card in hits if card.get("id") in kept]
+
+
+def _adequacy_verdict(raw: str) -> tuple[set[str], list[dict]]:
+    """게이트 응답을 (남길 id, 갈래) 로 읽는다.
+
+    **객체와 배열을 둘 다 읽는다.** 규격은 객체(`{"keep": …, "branches": …}`)인데, 갈래를
+    적기 전의 규격이 배열(`["proc.020"]`)이었고 작은 모델은 그 꼴로 돌아가는 일이 있다.
+    배열로 오면 «갈래는 못 봤지만 채택은 했다»로 읽는다 — 규격을 못 맞췄다고 후보를
+    전멸시키면, 갈래를 적게 한 변경이 **맞는 답을 지우는** 쪽으로 작동한다(§6 이 가장
+    경계하는 자리다). 아무것도 못 읽으면 지금까지와 같이 빈 채택이다.
+    """
+    obj = re.search(r"\{.*\}", raw, re.S)
+    if obj:
+        try:
+            val = json.loads(obj.group())
+        except ValueError:
+            val = None
+        if isinstance(val, dict):
+            keep = val.get("keep")
+            return ({x for x in keep if isinstance(x, str)} if isinstance(keep, list) else set(),
+                    _branches(val.get("branches")))
+    arr = re.search(r"\[.*\]", raw, re.S)
+    if arr:
+        try:
+            val = json.loads(arr.group())
+        except ValueError:
+            val = None
+        if isinstance(val, list):
+            return {x for x in val if isinstance(x, str)}, []
+    return set(), []
 
 
 def _adopt(state: AgentState, query: str, hits: list[tuple[float, dict]],
@@ -1018,11 +1096,18 @@ def _adopt(state: AgentState, query: str, hits: list[tuple[float, dict]],
 
     직원 질문과 이번 질의를 **둘 다** 넘긴다. 예전에는 `question or query` 로 하나만
     넘겨서, 계획이 무엇을 찾는 중인지가 게이트에 안 보였다.
+
+    게이트가 표시한 갈래는 상태에 쌓아 되묻기 판정으로 넘긴다(`record_branches`).
+    `tools.run` 이 질의를 바꿔 한 번 더 부르면 게이트도 두 번 도는데, 축 이름으로 중복이
+    걷히므로 같은 갈래가 두 줄로 서지 않는다.
     """
     if not hits:
         return []
-    return fits_question(state.get("question") or query, hits, kind,
-                         history=state.get("history"), query=query)
+    sink: list[dict] = []
+    kept = fits_question(state.get("question") or query, hits, kind,
+                         history=state.get("history"), query=query, sink=sink)
+    record_branches(state, sink)
+    return kept
 
 
 # ─────────────────────────────────────────────────────────────

@@ -72,7 +72,7 @@ _PROMPT_MARKS: tuple[tuple[str, str], ...] = (
     (_head(PROMPTS.PLAN_PROMPT), "plan"),
     (_head(PROMPTS.ROUTE_PROMPT), "route"),
     (_head(PROMPTS.ADEQUACY_PROMPT), "adequacy"),
-    (_head(PROMPTS.CLARIFY_PROMPT), "clarify"),
+    (_head(PROMPTS.JUDGE_PROMPT), "clarify"),
 )
 
 if len({mark for mark, _ in _PROMPT_MARKS}) != len(_PROMPT_MARKS):

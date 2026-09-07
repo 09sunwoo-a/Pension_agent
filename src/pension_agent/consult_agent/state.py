@@ -71,6 +71,17 @@ class AgentState(TypedDict, total=False):
     # 이번 턴이 답변 대신 판별 질문으로 끝났다면 그 질문과 선택지(§5). 있으면 compose 를
     # 건너뛰고 턴이 끝나며, 화면 연계 제안도 붙지 않는다 — 되묻기와 연계 확인은 다르다.
     clarify: dict | None
+    # 적합성 게이트가 표시한 «답이 갈리는 축»(tools.record_branches). 근거가 아니라 후보가
+    # 어떻게 갈렸나의 기록이라 원장(evidence)에 싣지 않는다 — 원장에 실으면 답변 재료가
+    # 되어 compose 가 그 문구를 인용한다. 쓰는 곳은 되묻기 판정 하나다(nodes/clarify.py).
+    branches: list
+    # 판정이 «전제를 밝히고 답하라»(assume) 또는 «핵심 대상이 자료에 없다»(none)로 끝났을
+    # 때 작성 프롬프트에 끼울 블록(§5). 판정과 작성이 동시에 도는 구조라(nodes/answer.py)
+    # 이 값이 있으면 이미 써 둔 답을 버리고 블록을 얹어 한 번 다시 쓴다.
+    judge_note: str
+    # 판정이 실제로 돈 턴의 등급(answer/assume/ask/none). 관문에서 걸러 판정을 **안 돌린**
+    # 턴에는 없다 — 「판정 안 함」과 「answer 로 판정」은 다른 사건이라 계측이 갈라 센다.
+    judge_verdict: str
     # 근거 원장 — 이번 턴에 도구들이 반환한 근거의 누적. 답변은 이 안에서만 쓰인다.
     # (예전의 hits·broaden_count·verified 를 대신한다 — 화법 체인이 도구 하나로 접혔다.)
     evidence: list                   # [tools.Evidence, ...] 도구별 근거 블록

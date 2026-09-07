@@ -164,6 +164,11 @@ def ask(
             "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify") else "answer",
             comment=out.get("llm_error"))
         observability.score("evidence_count", len(evidence))
+        # 답의 형태 판정 등급(§5 · nodes/clarify.py). 「되묻기가 몇 %인가」만으로는 부족하다 —
+        # 전제를 밝히고 답한 턴(assume)과 핵심 대상이 없다고 답한 턴(none)이 얼마나 나오는지가
+        # 이 판정을 등급으로 늘린 이유이므로, 그 분포가 대시보드에 잡혀야 한다. 판정을 아예
+        # 안 돌린 턴(관문에서 걸린 턴)은 "n/a" 로 갈라 센다.
+        observability.score("judge_verdict", out.get("judge_verdict") or "n/a")
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가
