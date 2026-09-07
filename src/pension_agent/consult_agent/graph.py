@@ -34,7 +34,7 @@ from pension_agent import observability
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
-from pension_agent.consult_agent import progress, suggest
+from pension_agent.consult_agent import guard, progress, suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -143,11 +143,15 @@ def ask(
     # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
     # 진입점에 함께 있는 안정된 id 는 이것뿐이다(직원 id 는 아직 진입점이 받지 않는다).
     # 표기 꼴은 브리핑 쪽과 어긋나면 안 되므로 `customer_ref` 한 곳이 정한다.
-    who = observability.customer_ref(customer_id, _customer_name(customer_id))
+    # 고객 «상태»(성립 요건)도 함께 태그로 단다 — 「어떤 상태의 고객에게 무슨 일이
+    # 생기나」가 대시보드에서 가장 쓸모 있는 축이다. 판정은 새로 만들지 않고
+    # strategy_agent 것을 그대로 쓴다(§3 — 같은 판정을 두 번 구현하지 않는다).
+    who = observability.customer_ref(
+        customer_id, _customer_name(customer_id), guard.conditions_of(customer_id))
+    tags = ["consult", *who["tags"]]
     with observability.trace(
         "consult.turn", input=question, session_id=session_id,
-        user_id=who["user_id"], metadata=who["metadata"],
-        tags=["consult", *who["tags"]],
+        user_id=who["user_id"], metadata=who["metadata"], tags=tags,
     ) as span:
         with progress.reporting(on_progress):
             out = _AGENT.invoke(
@@ -155,8 +159,12 @@ def ask(
                  # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
                  "session_id": session_id})
         evidence = out.get("evidence") or []
+        # intent 는 턴이 끝나야 정해지므로 닫을 때 태그를 다시 채운다 — 여는 이벤트의
+        # 태그를 덮어쓰므로 그때 준 것을 함께 실어야 한다. intent 는 «직원이 무엇을
+        # 물었나»라 고객 정보가 아니고, 그래서 마스킹 대상이 아니다.
         span.update(output=out.get("answer"), intent=out.get("intent"),
-                    tools=sorted({e["tool"] for e in evidence}))
+                    tools=sorted({e["tool"] for e in evidence}),
+                    tags=[*tags, *observability.tag("intent", out.get("intent"))])
         # 턴 하나가 어떻게 끝났는지. 「되묻기가 몇 %인가 · 근거 0건이 몇 %인가 · LLM 이
         # 죽은 턴이 있었나」를 대시보드가 집계한다 — 트레이스를 한 건씩 열어서는 못 센다.
         # **도구가 죽어 재료를 못 읽은 턴은 정상 턴으로 세지 않는다**(tool_failed). 이걸

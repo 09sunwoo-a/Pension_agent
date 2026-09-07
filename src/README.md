@@ -12,7 +12,9 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 ```bash
 cd src
 pip install -r requirements.txt
-cp .env.example .env      # 사내 게이트웨이 URL·키 (pension_agent/llm.py 가 읽음)
+cp .env.example .env                 # 공통 설정 (기본 프로파일 이름 등)
+cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
+python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
@@ -43,6 +45,8 @@ $CADR library                                         # 고객별 시나리오 5
 $CADR library 김서연 정민석 --why                      # 이름·번호로 골라서 (옵션은 대본과 무관하게 같다)
 $CADR review                                          # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
 $CADR review 이수민 --why                              # 고객 골라서
+PENSION_TODAY=2026-09-07 $CADR qa                     # 고객 12명 예상질문 83턴 — 턴마다 «기대» 표시 (docs/QA_CUSTOMER_QUESTIONS.md)
+PENSION_TODAY=2026-09-07 $CADR qa 김현수 윤가영 --why --pause=20   # 고객 골라서 · 턴 사이 20초(분당 한도 키)
 $CADR --versions                                      # 중간점검본 판 이력 — 무엇을 왜 바꿨나
 $CADR --diff v5 v6                                    # 두 판의 질문 차이
 $CADR review@v3                                       # 옛 판 그대로 돌려보기
@@ -61,7 +65,7 @@ python -m tests.test_infra             # 공용 인프라 · 임포트 경계
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
 python -m scripts.kb_build.test_paths  # 경로 · locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증
-python -m pension_agent.consult_agent.kb                          # 지식베이스 리포트
+python -m pension_agent.knowledge.kb                              # 지식베이스 리포트
 
 # ── 재생성 (생성물은 손으로 고치지 않는다 — 생성기를 고친다)
 python -m scripts.kb_build.build_kb [--activate]   # 06_주제별_추출지식 → 카드
@@ -141,6 +145,22 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 | **Tracing** → Filter → `Tags` = `고객:김서연` | 이름으로 거를 때 |
 | **Tracing** → Filter → `User ID` | 위 Users 탭과 같은 것을 필터로 |
 
+**고객 «상태»로도 거른다.** 트레이스에 그 고객의 성립 요건이 `요건:idl` · `요건:hlt` 처럼
+태그로 붙는다(판정은 strategy_agent 것을 그대로 옮긴다 — 두 번 구현하지 않는다). 대화 턴에는
+`intent:situation` 도 붙는다. 「어떤 상태의 고객에게 무슨 일이 생기나」가 이 저장소에서 가장
+쓸모 있는 축이라 태그로 둔다 — 메타데이터에만 있으면 한 건씩 열어야 보인다.
+
+| 물음 | 거르는 법 |
+|---|---|
+| 지식베이스에 **없는 것**은 무엇인가 | `evidence_count = 0` 인 트레이스의 질문들. **저작 우선순위가 여기서 나온다** |
+| 어떤 고객군에서 답이 게이트에 걸리나 | `요건:hlt` + `compose_passed = 0` |
+| 어떤 고객군에서 질문이 모호해지나 | `요건:idl` + `turn_outcome = clarify` |
+| 어떤 도구가 자주 헛도나 | span `tool:*` 의 `found = false` |
+| 계획이 고른 질의가 얼마나 빗나가나 | span `tool:*` 의 `retried = true` 비율 |
+
+**지금 쌓인 것으로 «고객군별 질문량»을 결론내지 않는다.** 시연 목업 12명에 리허설을 몇 번
+돌렸는가가 그대로 분포로 보인다 — 실직원이 쓰기 시작해야 의미가 생기는 축이다.
+
 `LANGFUSE_CAPTURE_CONTENT=0` 이면 **이름이 전부 빠지고 id 만 남는다**(`user_id` · 태그 ·
 메타데이터). 그 스위치는 «개인정보를 내보내지 않는다»는 약속이라, 본문만 가리고 이름을
 태그로 내보내면 약속이 거짓이 된다.
@@ -186,6 +206,27 @@ python -m pension_agent.observability
   전부 보려면 `LANGFUSE_DEBUG=1`.
 - **프롬프트에는 고객 원장이 실린다.** 지금 고객은 시연용 목업이라 그대로 보내지만,
   실데이터 전환 때 정할 것은 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
+
+### WorkB 쪽지 발송 붙이기
+
+직원이 「쪽지로 보내줘」라고 하면 에이전트가 초안을 세우고, 승낙하면 행내 메신저(WorkB)로
+보낸다. **보내는 쪽은 주입받는다** — 행내 MCP 클라이언트(`mcp_sdk`)는 저장소 밖 패키지라
+여기서 임포트하면 그 패키지 없이는 테스트도 임포트도 안 되기 때문이다(망분리 밖에서는 설치도
+못 한다). 앱 시작 시 한 번 등록한다:
+
+```python
+from pension_agent import workb
+workb.use_sender(MCPClient(emp_no).send_message)   # send(recipients: list[str], title, body)
+```
+
+등록하지 않으면 **보내지 않고 «미연결»이라고 답한다** — 조용히 성공처럼 끝나지 않는다.
+받는 사람은 로그인 사번(`AgentState["employee_id"]`)이고, 없으면 `WORKB_EMP_NO` 환경변수,
+그것도 없으면 발송을 제안하지 않는다. 다른 직원에게 보내는 것은 직원이 **사번을 적었을
+때만**이다(「사번 3902172한테 쪽지로 보내줘」).
+
+| 환경변수 | |
+|---|---|
+| `WORKB_EMP_NO` | 로그인 사번이 없을 때의 수신자 사번(개발·시연용 폴백) |
 
 ### 평가 대시보드 (`streamlit run app.py`) — 기획자용 테스트 환경
 
@@ -285,7 +326,7 @@ src/
   저작 시점에 연결된 `pitch_refs`/`objection_refs` 를 실시간 조회한다.
 - **⑥~⑨ 는 문제상황에서 출발한다.** "왜 관리 대상인가"를 먼저 확정하고 그 사유에 맞는
   화법·반론·자료를 모은다. 사유가 없는 고객은 비운다 — 만들어내지 않는다.
-- **출처는 원본 문서 이름으로 말한다.** `consult_agent/kb.py::origin_of()` 한 곳에서만
+- **출처는 원본 문서 이름으로 말한다.** `knowledge/kb.py::origin_of()` 한 곳에서만
   만들고, 못 찾으면 "확인 필요"라고 한다. 적재 json 의 이름표로 물러서지 않는다.
 - **되돌릴 수 없는 행위는 사람이 정한다.** 에이전트는 제안(`act.offer`)하고, 발송은 확인을
   한 턴 거친다(`act.confirm_action`). 편집 가능 범위도 코드가 못박는다

@@ -254,8 +254,11 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
                           "trim_target": _trim_target(p, tspec, conds, t_extra)})
             b["evidence_extra"].append(tspec["evidence"].format_map(t_ctx))
 
-        if spec.get("clause_if_asset") and not asset:
-            needs_confirm.append("고객 발송 가능 자료 미등록 — assets.json 의 customer_facing 확인 필요")
+        # 발송 자료가 등록되지 않은 전략은 `clause`(자료 없는 문구)로 내려가는 것으로 끝난다.
+        # 예전에는 여기서 needs_confirm 에 「assets.json 의 customer_facing 확인 필요」를
+        # 넣었는데, 그 목록은 대화형 `customer` 재료의 «확인 필요»로 실려 직원 안내로 나갔다
+        # (2026-09-07 실측 — 「하면 안 되는 게 뭐야」 답변에 그 문장이 그대로). 저작자에게
+        # 하는 말은 직원 재료가 아니라 docs/DEMO_STATUS.md 가 센다(scripts/demo_status).
         if spec.get("impact", {}) and (spec.get("impact") or {}).get("kind") == "tax_credit" \
                 and not p.income_bracket:
             needs_confirm.append(

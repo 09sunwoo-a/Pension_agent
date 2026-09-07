@@ -55,6 +55,9 @@ _TOOL_GROUPS = (
     ("지식베이스", ("pitch", "fact", "procedure", "screen", "channel",
                     "segment", "method", "fieldtip", "market", "lineup")),
     ("현재 고객", ("customer", "suitable", "history", "transcript", "playbook", "outreach")),
+    # `targets` 는 «고객 화면을 열기 전»의 재료라 현재 고객 갈래가 아니다 — 고객이 안
+    # 열려 있을 때가 이 도구의 자리다(오늘의 타겟 목록이 서비스의 첫 화면이다).
+    ("오늘의 목록", ("targets",)),
     ("계산", ("tax_credit", "date")),
 )
 

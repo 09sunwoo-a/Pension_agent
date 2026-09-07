@@ -6,7 +6,7 @@
 
 문구는 전부 **코드가 조립한다**(고정 템플릿 + 계산값). LLM 이 칩을 쓰면 기록에 없는
 내용이 질문에 실려 들어오고, 직원이 누르는 순간 그 문장이 원장의 출발점이 된다.
-템플릿에는 지어낼 자리가 없다 — 날짜와 경과일은 세션 저장소·customer.today() 에서 온
+템플릿에는 지어낼 자리가 없다 — 날짜와 경과일은 세션 저장소·clock.today() 에서 온
 계산값이다.
 
 기록이 없으면 빈 리스트다. 항상 뜨는 칩은 배경이 되어 아무도 읽지 않는다
@@ -50,7 +50,7 @@ def history_chips(customer_id: str | None) -> list[str]:
 
     # 경과일은 브리핑의 다른 경과일(미접촉 일수 등)과 같은 축이어야 화면에서 어긋나지
     # 않는다 — 그 축은 원장 스냅샷이 아니라 오늘이다(customer.py 의 두 시간축 주석).
-    from pension_agent.strategy_agent.customer import today  # noqa: PLC0415
+    from pension_agent.clock import today  # noqa: PLC0415
     elapsed = (today() - latest).days
     when = f"{latest.month}/{latest.day}"
     return [
@@ -431,6 +431,12 @@ def followup_questions(out: dict) -> list[str]:
             # 이번 턴에 이미 쓴 재료로 다시 보내지 않는다 — 방금 답한 것을 또 묻게 된다.
             # pitch → pitch(반론 후속)만 예외다: 같은 재료의 **다른 카드**가 답한다.
             if lead in used and not (lead == "pitch" and found["tool"] == "pitch"):
+                continue
+            # 안내 콘텐츠 재료가 폴백뿐이면(이 고객 요건에 맞는 것이 0건 — tools._outreach 가
+            # 그때 meta.lms 를 비운다) «이 콘텐츠를 어떻게 안내하지»는 성립하지 않는다 —
+            # 안내하지 않을 콘텐츠를 안내하는 법을 묻게 된다. 상품 범위 칩은 그대로 둔다.
+            if found["tool"] == "outreach" and lead == "pitch" \
+                    and not (found.get("meta") or {}).get("lms"):
                 continue
             question = _phrase(variants, topic, len(history))
             if not question or _norm(question) in asked or _norm(question) in seen:
