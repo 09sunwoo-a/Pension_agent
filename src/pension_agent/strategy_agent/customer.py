@@ -220,6 +220,20 @@ class Profile:
     customer_type: str | None = None  # "직장인" / "사업자" / "공통". strategy.pitch_refs 에서 화법을
     # 고를 때만 쓴다 — 없으면 "공통" 화법으로 폴백(pitch_talk() 참고). 출처 미정: 타겟리스트·
     # MyStar·CRM 중 실제 직업 구분 값이 있는지 확인이 이 필드 사용의 전제 조건이다.
+    # ── 부담금 재원별 구성 ────────────────────────────────────
+    # 적립금이 «누구 몫에서 왔는가». 수수료율표(fact.k04.f50)가 「사용자부담금(퇴직금)」과
+    # 「가입자부담금」으로 행이 갈리므로, 이 둘을 모르면 "수수료 얼마야?" 에 답할 수 없다.
+    # 값은 원장(06_PENSION `퇴직급여금액`·`개인부담금금액`)에 있었는데 여기서 접히지 않아
+    # 대화형이 직원에게 **부담금 종류를 되물었다**(consult_agent/CLAUDE.md §12 지워진 gap 30).
+    #
+    # **목업과 실데이터의 의미가 다르다.** 목업 12케이스는 이 둘의 합이 전체평가금액과
+    # 정확히 같다(= 평가금액을 재원별로 가른 값). 반면 실데이터 딕셔너리의 대응 컬럼
+    # `사용자부담금`(userBram)·`가입자부담금`(apctBram)은 «부담금 **납입** 누계금액」이고,
+    # 그 합은 `부담금납입누계금액` 이지 평가금액이 아니다(평가금액 = 납입누계 + 운용수익).
+    # 실데이터 전환 때 이 필드를 그대로 이어 붙이면 «평가금액 구성»이라고 적힌 자리에
+    # 납입누계가 들어간다 — 조인 시 어느 축인지 먼저 정해야 한다.
+    severance_amt: int = 0  # 퇴직급여(사용자부담금) 몫(원)
+    own_contrib_amt: int = 0  # 개인부담금(가입자부담금) 몫(원)
     pension_paid_ytd: int = 0  # 당해 연금계좌 기납입액(원). 세액공제 잔여 한도 산출에 사용한다.
     paid_ytd_total: int = 0  # 당해 연금계좌 실납입액 합계(원) — IRP + 연금저축.
     # `pension_paid_ytd`(세액공제 **인정** 납입액)와 다른 값이다: 900만원을 넘겨 넣은 몫은
@@ -450,7 +464,8 @@ def days_to_year_end(base: date | None = None) -> int:
 
 
 # ─────────────────────────────────────────────────────────────
-# 고객 로스터 — 시연용 더미 9케이스 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx)
+# 고객 로스터 — 시연용 더미 12케이스
+# (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx 9 + scripts/demo_cases.json 3)
 #
 # 원장은 `config.CUSTOMERS_JSON` 이다(scripts/import_customers.py 가 원본 xlsx 에서 생성 —
 # 손으로 고치지 않는다). 여기서는 그 레코드를 Profile 로 **매핑만** 한다. 매핑 규약:
@@ -465,9 +480,29 @@ def days_to_year_end(base: date | None = None) -> int:
 #     둔다(각각 그레이스풀 생략·보수적 공제율 경로가 이미 있다).
 #   · matDD/matAmt 는 만기일 있는 보유상품(예금·GIC) 중 최근접 만기의 잔여일수·평가금액 합.
 #
-# 원본의 나머지 재료(배지 4종·판매중단·ISA·동연령 비교·상담이력)는 Profile 로 접지 않고
-# customers.json 에 그대로 남아 있다 — 요건화는 지식베이스 근거 확인이 선행돼야 한다
-# (루트 CLAUDE.md "지식베이스에 없는 기준은 만들지 않는다").
+# ── 접지 않은 원장 컬럼 (2026-09-07 전수 대조) ────────────────────────────────
+# **원장에 컬럼이 있는 것과 답할 수 있는 것은 다르다.** 여기서 접히지 않으면 대화형은 그
+# 값을 본 적이 없고, 그런데도 «없는 값»이 아니라 «답을 못 하는 값»으로 보여서 눈에 띄지
+# 않는다 — 부담금 재원 구성(퇴직급여/개인부담금)이 그래서 반년 가까이 되묻기로 남아 있었다
+# (consult_agent/CLAUDE.md §12 지워진 gap 30). 그래서 남은 것을 **이유와 함께** 적어둔다.
+#
+#   badges 블록 전체     기획자가 세그먼트를 읽고 부여한 **골든셋**이다. 요건은 계좌 값에서
+#                        코드가 판정하고(conditions()), 배지는 그 판정을 대조하는 정답표로만
+#                        쓴다(tests/test_engine.py). 접으면 정답을 보고 답을 쓰는 꼴이 된다.
+#   summary 의 비중 컬럼  `_assets()` 가 원장 소수값을 그대로 옮긴다(접는 대상이 아니다).
+#   tax_isa.세액공제기준한도  같은 값이 TAX_CREDIT_CAP_WON(fact.k04.f2)에 있다. 원장에서도
+#                        읽으면 세법 개정 때 한쪽만 고쳐져 화면과 답변이 갈린다.
+#   basic.관리점          읽는 곳이 없다. 화면 상단 요건(REQUIREMENTS.md §3.1)에도 없다.
+#   basic.투자성향분석일   유효기간 규칙이 지식베이스에 없다. 날짜만 실으면 «언제까지 유효한가»를
+#                        LLM 이 지어낸다(루트 CLAUDE.md "없는 기준은 만들지 않는다").
+#   summary.디폴트옵션위험등급  설정 여부(dopt)만 접는다. 등급별 판정 기준이 아직 없다.
+#   pension.연금개시일·연금지급설계등록여부  12케이스 전원이 미개시라 값이 없다(전부 null/N).
+#                        연금개시 고객이 생기면 그때 `pension_started` 옆에 함께 접는다.
+#   pension.퇴직급여포함여부  `severance_amt > 0` 과 같은 뜻이라 금액만 접는다.
+#   products.판매상태     `판매중단여부` 로 이미 판정한다. 데이터사전이 "목업 시나리오용 가상
+#                        상태"라고 못박은 컬럼이기도 하다.
+#   history 블록          scripts/seed_sessions.py 가 세션 저장소로 심는다 — Profile 에도
+#                        두면 같은 상담이 화면에 두 번 실린다(위 holdings 주석 참고).
 #
 # customers.json 이 없으면 로스터는 빈 리스트다 — 브리핑 CLI·Streamlit 화면·문제상황
 # 덤프는 "등록된 고객 없음" 으로 빠지고 `get_profile()` 은 None 을 반환한다.
@@ -648,6 +683,8 @@ def _to_profile(rec: dict) -> Profile:
         paid_ytd_total=_paid_ytd_total(rec["tax_isa"]),
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
         joined=rec["pension"].get("IRP가입일"),
+        severance_amt=rec["pension"].get("퇴직급여금액") or 0,
+        own_contrib_amt=rec["pension"].get("개인부담금금액") or 0,
         pension_started=rec["pension"]["연금개시여부"] == "Y",
         pension_eligible=rec["pension"]["연금개시요건충족여부"] == "Y",
         club_grade=basic["KB스타클럽등급"],
