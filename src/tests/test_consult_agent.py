@@ -408,6 +408,29 @@ def check_branch_answer_amount() -> int:
     hit = len(blocked) == 2
     print(f"{'✓' if hit else '✗'} 화면번호: 근거에 없는 번호는 여전히 폐기된다")
     ok += hit
+
+    # ③ 아는 화면은 **원장 전체**로 본다 — 근거 한 건씩 재면 다른 근거의 화면이 «없는 화면»이
+    #    된다. 실측(2026-09-07, 오세훈 SH5 · 박정호 PJ5): 절차 카드([06-12-622] → [02-12-221])와
+    #    화면 카드([02-12-221])가 함께 실린 턴에서 답변이 절차 본문의 [06-12-622] 를 인용하자
+    #    화면 카드 근거 차례에서 폐기됐고, 절차 원문 2건이 저작 메모까지 그대로 덤프됐다.
+    from pension_agent.consult_agent.nodes import plan as PLAN
+    _blank = {"notices": [], "notice_scopes": [], "related": [], "marks": [],
+              "sources": [], "meta": {}, "query": ""}
+    _proc_text = "■ 연금개시는 [06-12-622] 세액 미공제 한도 등록 → [02-12-221] 연금지급 등록의 2단계"
+    _scr_text = "■ [02-12-221] 개인형IRP 연금지급  (지급·과세이연·연금)"
+    # 실제 도구(_ev)처럼 본문을 수치 검사 허용 텍스트(allow)에도 싣는다.
+    proc_ev = {**_blank, "tool": "procedure", "atomic": ["[06-12-622]", "[02-12-221]"],
+               "text": _proc_text, "allow": [_proc_text]}
+    scr_ev = {**_blank, "tool": "screen", "atomic": ["[02-12-221]"],
+              "text": _scr_text, "allow": [_scr_text]}
+    both = [proc_ev, scr_ev]
+    passed = not PLAN._screen("먼저 06-12-622 에서 등록하고, 02-12-221 에서 연금지급을 등록해요.",
+                              both, "연금개시 절차", set())[0]
+    faults = PLAN._screen("먼저 06-12-999 에서 등록해요.", both, "연금개시 절차", set())[0]
+    hit = passed and bool(faults)
+    print(f"{'✓' if hit else '✗'} 화면번호: 원장의 다른 근거가 아는 번호는 통과하고, 어느 근거에도 "
+          f"없는 번호는 폐기된다")
+    ok += hit
     return ok
 
 
