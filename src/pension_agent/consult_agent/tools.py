@@ -116,7 +116,21 @@ def _ev(tool: str, query: str, text: str, sources: list[dict],
             "notice_scopes": scopes if scopes is not None else (
                 [_scope(sources[0].get("title") or tool if sources else tool, atomic, notices)]
                 if notices else []),
-            "allow": allow if allow is not None else [text], "sources": sources,
+            # **원문 스팬은 언제나 인용할 수 있다.** `atomic` 은 그 숫자를 쓰면 원문을
+            # 그대로 실으라고, `notices` 는 언급 여부와 무관하게 늘 실으라고 코드가
+            # 강제하는 문장이다 — 그런데 기본 allow 가 `[text]` 하나라, **렌더 텍스트 밖에서
+            # 조립된 표시**의 수치가 인용 허용에서 빠졌다. 시킨 대로 쓰면 폐기되는 자리다
+            # (지워진 gap 31 과 같은 형태).
+            #
+            # 실측(2026-09-07 리허설 케이스 3): channel 카드의 시효 표시가 기준시점을
+            # 달고 notices 로 강제되는데 allow 에 없어서, 그 기준시점을 쓴 답변이 매번
+            # «자료 밖 날짜»로 폐기되고 카드 원문이 덤프됐다.
+            # (기준시점 값 자체는 여기 적지 않는다 — 코드에 박으면 원문과 갈린다. §12 gap 16)
+            #
+            # 이건 경계를 **넓히는** 것이 아니다. atomic·notices 는 코드가 카드에서 떼어 온
+            # 원문이라 이미 원장 안이고, allow 계산이 그것을 세지 않고 있었을 뿐이다.
+            "allow": (allow if allow is not None else [text]) + atomic + notices,
+            "sources": sources,
             "meta": meta or {}}
 
 

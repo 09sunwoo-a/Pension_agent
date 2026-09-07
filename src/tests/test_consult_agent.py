@@ -5605,6 +5605,54 @@ def check_rehearsal_expectations() -> int:
     return ok
 
 
+def check_notices_quotable() -> int:
+    """코드가 답변에 넣으라고 **요구하는** 문장은 인용할 수 있어야 한다 (§6 · gap 36).
+
+    `atomic` 은 그 숫자를 쓰면 원문을 그대로 실으라고, `notices` 는 언급 여부와 무관하게
+    늘 실으라고 강제하는 문장이다. 그런데 인용 허용 집합의 기본값이 렌더 텍스트 하나라,
+    **텍스트 밖에서 조립된 표시**의 수치는 허용에서 빠졌다 — 시킨 대로 쓰면 폐기된다.
+    지워진 gap 31 이 «코드가 프롬프트에 실어 보낸 문구»에서 고친 것과 같은 형태이고,
+    여기는 그 문구가 원장 안에서 만들어진다는 점만 다르다.
+    """
+    ok = 0
+    print("\n[요구하는 문장은 인용할 수 있다 (§6)]")
+
+    ev = tools._ev("t", "q", "본문에는 없는 값", [{"id": "x", "title": "t", "doc": "d"}],
+                   atomic=["총급여 5,500만원 이하 16.5%"],
+                   notices=["※ 2025.03.31 기준 표기입니다."])
+    texts = tools.ledger_texts([ev])
+    hit = any("2025.03.31" in t for t in texts) and any("5,500" in t for t in texts)
+    print(f"{'✓' if hit else '✗'} atomic·notices 가 인용 허용 집합에 들어간다")
+    ok += hit
+
+    passed, bad = _vt("2025.03.31 기준이고 5,500만원 이하면 16.5% 예요.", texts)
+    print(f"{'✓' if passed else '✗'} 그 문장을 그대로 쓴 답변이 통과한다 {bad or ''}")
+    ok += passed
+
+    # allow 를 **명시한** 도구도 마찬가지다 — 고객 재료처럼 화면에 안 보이는 값을 따로
+    # 싣는 도구에서도 표시는 요구되므로, 명시했다고 표시가 빠지면 안 된다.
+    ev2 = tools._ev("t", "q", "본문", [{"id": "x", "title": "t", "doc": "d"}],
+                    allow=["따로 실은 재료"], notices=["※ 2025.03.31 기준 표기입니다."])
+    hit = any("2025.03.31" in t for t in tools.ledger_texts([ev2]))
+    print(f"{'✓' if hit else '✗'} allow 를 명시한 도구에서도 표시가 인용 허용에 남는다")
+    ok += hit
+
+    # 실제 카드로 — 시효 표시에 기준시점이 붙는 종류가 이 규약을 실제로 지키는지.
+    orig_pick, orig_fits = tools.llm_pick, tools.fits_question
+    tools.llm_pick = lambda kinds, query: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
+    try:
+        found = tools.run("channel", {"question": "스타뱅킹 추가납입"}, "퇴직연금 입금 개인부담금")
+    finally:
+        tools.llm_pick, tools.fits_question = orig_pick, orig_fits
+    dates = [n for n in (found["notices"] if found else []) if numbers(n)]
+    hit = bool(found) and all(
+        numbers(n) <= numbers("\n".join(tools.ledger_texts([found]))) for n in dates)
+    print(f"{'✓' if hit else '✗'} channel 시효 표시의 기준시점을 답변이 쓸 수 있다 (실측 gap 36)")
+    ok += hit
+    return ok
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -5686,6 +5734,7 @@ def main() -> int:
         check_compose_retry()
         check_graded_judge()
         check_rehearsal_expectations()
+        check_notices_quotable()
         check_notice_scope()
         check_guard()
         check_architecture_doc()
