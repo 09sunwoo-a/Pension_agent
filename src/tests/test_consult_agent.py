@@ -41,7 +41,7 @@ from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import routing, select, tools
 from pension_agent.consult_agent.nodes import pitch, plan, understand
 from pension_agent.llm import LLMError
-from pension_agent.verify import numbers, verify_texts
+from pension_agent.verify import first_measure, numbers, verify_texts
 
 _vt = verify_texts
 
@@ -2248,7 +2248,14 @@ def check_clarify_settled() -> int:
         print(f"{'✓' if hit else '✗'} 정해진 것은 <근거>(갈래 후보) 밖에 실린다")
         ok += hit
 
-        # ③ 원장에 이미 실린 고객 재료 본문도 같은 블록에 온다(gap 30 — T8 부담금 종류).
+        # ②-2 부담금 종류도 «정해진 것»이다(2026-09-07). 수수료율표(fact.k04.f50)가 갈리는
+        #     축 셋 중 둘(부담금 종류·거래채널)이 원장 값이라, 이 블록에 없으면 T8 이 다시
+        #     직원에게 되묻는다. 고객 도구가 안 불린 턴에도 실려야 한다 — 재료는 fact 뿐이다.
+        hit = "사용자부담금" in settled and "가입자부담금" in settled
+        print(f"{'✓' if hit else '✗'} 부담금 종류(사용자/가입자)가 «정해진 것»에 실린다")
+        ok += hit
+
+        # ③ 원장에 이미 실린 고객 재료 본문도 같은 블록에 온다.
         seen.clear()
         CL.clarify({"question": "수수료 얼마야?", "customer_id": cid, "evidence": customer + fact})
         prompt = seen[-1] if seen else ""
@@ -3538,6 +3545,15 @@ def check_labeled_pairs() -> int:
         other = numeric[(i + 1) % len(numeric)]
         if other["value"] == row["value"]:
             continue
+        # **판정 불가는 놓친 것이 아니다**(relations.py 머리말 · §6). 판정은 이름 뒤의 **첫
+        # 수치** 하나를 그 항목의 값과 견주는데(`labeled_mispaired`), 남의 값이 마침 그
+        # 수치부터 시작하면 두 문장이 구별되지 않는다 — 잔여한도 0만원인 고객에게 「0원
+        # …」으로 시작하는 남의 값을 붙이는 짝이 그렇다. 어떤 구현으로도 못 잡는 짝을
+        # 검출률에 넣으면, 재료에 줄이 하나 늘 때마다 회전 짝이 다시 섞여 이 비율이
+        # 흔들린다(2026-09-07 부담금별 구성이 실려 11/13 → 11/14 로 떨어졌다).
+        said = first_measure(other["value"][:REL.LABEL_NEAR])
+        if said is not None and said[1] & REL.numbers(row["value"]):
+            continue
         cases += 1
         caught += bool(REL.check(f"{row['label']}은 {other['value']}이에요.", cards))
     hit = cases and caught / cases >= 0.8
@@ -3596,21 +3612,49 @@ def check_account_state() -> int:
     "준비된 자료가 없어요" 가 나갔다 — 정확히 "네, 돼 있습니다" 라고 답해야 하는 자리에서.
 
     값이 없어서가 아니었다. 전부 Profile 에 있었고, 렌더 경로만 걸러냈다. 그래서 이 테스트는
-    **9명 전원**에 대해 재료가 있는지 본다 — 한 명이라도 빠지면 그 상태의 고객이 답을 못 받는
-    것이고, 그게 원래 증상이었다(고치기 전 0~3/9).
+    **로스터 전원**에 대해 재료가 있는지 본다 — 한 명이라도 빠지면 그 상태의 고객이 답을 못
+    받는 것이고, 그게 원래 증상이었다(고치기 전 0~3/9).
+
+    **부담금별 구성은 «렌더 경로»가 아니라 한 단계 앞에서 끊겨 있었다**(2026-09-07). 원장
+    06_PENSION 에 `퇴직급여금액`·`개인부담금금액` 이 있는데 `Profile` 이 접지 않아 재료까지
+    오지 못했고, 그래서 수수료율표(fact.k04.f50)가 갈리는 축을 대화형이 직원에게 되물었다
+    (기준서 §12 지워진 gap 30). 같은 줄에서 함께 재는 이유는 증상이 하나이기 때문이다 —
+    «원장에는 있는데 답을 못 한다».
     """
     ok = 0
     from pension_agent.strategy_agent import customer as CUST
 
     STATES = ("디폴트옵션", "연금개시", "연금개시요건", "세액공제 잔여한도",
-              "판매중단 보유상품", "ISA 만기자금", "IRP 가입일")
+              "판매중단 보유상품", "ISA 만기자금", "IRP 가입일", "부담금별 구성")
     texts = {p.id: ((tools.TOOLS["customer"].run({"customer_id": p.id}, "확인") or {}).get("text", ""))
              for p in CUST.PERSONAS}
     for key in STATES:
         missing = [pid for pid, t in texts.items() if key not in t]
         hit = not missing
-        print(f"{'✓' if hit else '✗'} 계좌 상태 «{key}» 가 9명 전원 재료에 있다"
+        print(f"{'✓' if hit else '✗'} 계좌 상태 «{key}» 가 {len(texts)}명 전원 재료에 있다"
               + ("" if hit else f" — 빠진 고객 {len(missing)}명"))
+        ok += hit
+
+    # 부담금 재원 구성은 **원장 두 컬럼을 옮긴 값**이라, 재료의 금액이 원장과 같아야 한다.
+    # 그리고 그 값을 인용한 답변이 통과해야 되묻기가 실제로 줄어든다 — 재료에 실렸는데
+    # 검증기가 자르면 gap 30 이 이름만 바뀐 채 남는다.
+    split = next((p for p in CUST.PERSONAS if p.severance_amt and p.own_contrib_amt), None)
+    only_one = next((p for p in CUST.PERSONAS if not p.severance_amt), None)
+    hit = split is not None and only_one is not None
+    print(f"{'✓' if hit else '✗'} 두 부담금이 섞인 고객과 한쪽뿐인 고객이 로스터에 다 있다")
+    ok += hit
+    if split is not None:
+        ev = tools.TOOLS["customer"].run({"customer_id": split.id}, "수수료 얼마야?")
+        from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
+        said = (f"이 고객 적립금은 사용자부담금(퇴직급여) {won(split.severance_amt)}, "
+                f"가입자부담금(개인부담금) {won(split.own_contrib_amt)}이에요.")
+        hit = _vt(said, (ev or {}).get("allow") or [])[0]
+        print(f"{'✓' if hit else '✗'} 두 부담금 금액을 그대로 인용한 답변이 통과한다")
+        ok += hit
+        # 경계는 넓어지지 않았다 — 원장에 없는 금액은 여전히 막힌다.
+        wrong = f"사용자부담금은 {won(split.severance_amt + 7_777_000)}이에요."
+        hit = not _vt(wrong, (ev or {}).get("allow") or [])[0]
+        print(f"{'✓' if hit else '✗'} 원장에 없는 부담금 금액은 막힌다")
         ok += hit
 
     # 값이 «정상»인 쪽도 말할 수 있어야 한다. 미설정만 실리던 것이 원래 증상이라, 설정된
