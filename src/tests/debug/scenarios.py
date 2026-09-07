@@ -419,7 +419,10 @@ EXPECT: dict[tuple[str, str], Expect] = {
     # ── cases — 검토 11케이스 ──────────────────────────────
     ("cases", "1"):  Expect(tools=("fact",), outcome="answer", gates_passed=True),
     ("cases", "2"):  Expect(tools=("screen",), outcome="answer", offered=True),
-    ("cases", "3"):  Expect(tools=("channel",), outcome="answer"),
+    # 게이트를 함께 잰다 — 2026-09-07 실측에서 이 턴이 `verify_texts ✗ ["날짜 '2025.03.31'"]`
+    # 로 생성문을 버리고 카드 원문을 덤프했는데, tools·outcome 만 보던 기대는 통과로 셌다.
+    # 답이 «나오기는 했다»와 «답변으로 나왔다»는 다르다(§6 폴백은 문체가 갑자기 바뀐다).
+    ("cases", "3"):  Expect(tools=("channel",), outcome="answer", gates_passed=True),
     ("cases", "4"):  Expect(tools=("customer", "pitch"), outcome="answer"),
     ("cases", "5"):  Expect(tools=("suitable",), outcome="answer", gates_passed=True),
     ("cases", "6"):  Expect(tools=("customer",), outcome="answer"),
@@ -427,7 +430,11 @@ EXPECT: dict[tuple[str, str], Expect] = {
     ("cases", "7b"): Expect(outcome="answer"),
     # gap 22 — 되묻기 턴에도 출처가 실린다. 2026-09-07 실측으로 확인된 기대다.
     ("cases", "8"):  Expect(outcome="clarify", verdict="ask", sources=True),
-    ("cases", "10"): Expect(tools=("pitch",), outcome="answer"),
+    # `pitch` 를 요구했던 것은 **기대가 좁았다**(2026-09-07 실측). 고객 화면이 열려 있으면
+    # 그 고객 상태에 걸린 화법을 꺼내는 `playbook` 도 맞는 선택이고(§3 「고객 상태에 걸린
+    # 재료」 · 지워진 gap 28), 둘은 같은 매칭 함수를 쓴다. 도구 이름을 못박는 대신 결말만
+    # 본다 — 무엇으로 답했는지가 아니라 답했는지가 이 케이스의 요점이다.
+    ("cases", "10"): Expect(outcome="answer"),
     ("cases", "11"): Expect(tools=("outreach",), outcome="answer", offered=True),
 
     # ── demo — 전체 시연 대본 ──────────────────────────────
