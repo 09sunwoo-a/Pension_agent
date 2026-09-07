@@ -322,6 +322,12 @@ check(_tax is not None, "박지민: 세액공제 전략 성립")
 if _tax:
     check(_tax["amount"] == engine.won(3_000_000), "박지민: 세액공제 대상액 = 잔여 한도 300만원",
           str(_tax["amount"]))
+# «확인 필요»는 직원이 고객과 확인할 항목만이다. 저작자에게 하는 말(자료 미등록 — assets.json
+# 확인)이 여기 섞이면 대화형 customer 재료로 실려 «하면 안 되는 것» 답변에 그대로 나간다
+# (2026-09-07 실측, 송도윤). 자료 미등록은 docs/DEMO_STATUS.md 가 센다.
+check(not any(("assets.json" in n or "customer_facing" in n)
+              for p in PERSONAS for n in FACTS[p.nm]["needs_confirm"]),
+      "확인 필요 목록에 저작자용 문장(assets.json·customer_facing)이 없다")
 check(any("총급여 구간 미확인" in n for n in FACTS["한지우"]["needs_confirm"]),
       "한지우: 소득 구간 미확인이 확인 항목으로 노출")
 
