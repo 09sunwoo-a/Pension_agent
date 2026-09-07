@@ -6,17 +6,17 @@
 고객으로 대화를 잇는 것**과 **고객을 바꿔가며 다른 장면을 꺼내는 것**을 위해 고객 단위로
 쪼갠 판이다.
 
-> **중간점검 시연에서 실제로 쓰는 것은 `DEMO_FINAL.md` 다** — 기획자가 이 라이브러리에서
-> 김서연·이수민·박정호를 추려 문구·순서를 확정한 판이고, `reps --final` 로 돈다. 이 문서는
-> 그 재료가 된 라이브러리로 남는다.
+> **중간점검 시연에서 실제로 쓰는 것은 `DEMO_REVIEW.md` 다** — 기획자가 이 라이브러리에서
+> 김서연·이수민·박정호를 추려 문구·순서를 정한 판이고, `reps review` 로 돈다(질문 구성은
+> 판으로 관리한다 — `reps --versions`). 이 문서는 그 재료가 된 라이브러리로 남는다.
 >
 > 이 문서는 손으로 쓴다(생성물이 아니다). 「보이는 것」은 기대이지 보장이 아니다 —
 > 문장은 매번 LLM 이 새로 쓰므로 리허설에서 확인하고 들어간다. **◇ 표시가 붙은 턴은 아직
 > 실 LLM 으로 돌려보지 않았다**(2026-09-02 추가). 실행 — 시나리오 통째로
-> (`tests/debug/reps.py::SCENARIOS`, 고객마다 한 세션·맥락 이어짐):
+> (`tests/debug/scenarios.py::LIBRARY`, 고객마다 한 세션·맥락 이어짐):
 >
->     cd src && PENSION_TODAY=2026-09-01 python -m tests.debug.reps --scenario
->     cd src && PENSION_TODAY=2026-09-01 python -m tests.debug.reps --scenario 김서연 --debug
+>     cd src && PENSION_TODAY=2026-09-01 python -m tests.debug.reps library
+>     cd src && PENSION_TODAY=2026-09-01 python -m tests.debug.reps library 김서연 --why
 >
 > 턴 하나만 따로 볼 때:
 >
@@ -182,11 +182,11 @@ L5 는 이 다섯 고객 중 계산이 가장 깨끗한 자리다 — 당해 납
 
 **주의 — 리허설 날짜에서는 「만기 임박」이 요건으로 서지 않는다.** 만기 요건(`mat`)은
 만기 30일 이내에만 성립하는데(`customer.MAT_WINDOW_DAYS` · 세그먼트 6·9 「1개월 내
-만기도래」), `reps --scenario` 는 오늘을 2026-08-24 로 고정하므로 이 고객은 **D-33** 이 되어
+만기도래」), `reps library` 는 오늘을 2026-08-24 로 고정하므로 이 고객은 **D-33** 이 되어
 성립 요건이 「원리금보장 편중 · 디폴트옵션 미설정 · 세액공제 · 추가입금 여력」 넷뿐이다.
 L1 에서 「만기 임박」이 관리 사유로 안 나오고, L2 의 「지금이 그 구간」도 서지 않는다.
 골든 케이스가 말하는 D-25 는 오늘이 2026-09-01 일 때다 — 이 고객만은
-`PENSION_TODAY=2026-09-01 python -m tests.debug.reps --scenario 이수민` 으로 리허설한다.
+`PENSION_TODAY=2026-09-01 python -m tests.debug.reps library 이수민` 으로 리허설한다.
 실화면은 실제 날짜로 돌므로 2026-08-27(D-30) 이후에는 그대로 성립한다.
 (L5~L6 은 이 날짜 문제에 걸리지 않는다 — 세액공제 요건은 두 날짜 모두에서 성립한다.)
 

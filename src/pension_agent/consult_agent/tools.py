@@ -894,7 +894,15 @@ TRANSCRIPT_NONE = "· 기록 없음 — 이번 상담에서 아직 오간 대화
 
 #: 기록된 답변 끝에 붙어 있는 제안 문구(act.offer — 화면 연계·화법 제시·쪽지 보내기). 안내가
 #: 아니라 화면 장치라 요약 재료에서 뗀다 — 추천질문을 기록에서 빼는 것과 같은 이유다(graph.ask).
+#: 쪽지 본문을 감싼 코드블록 펜스(memo.FENCE)도 같은 이유로 뗀다(_strip_devices).
 _OFFER_TRAILER = re.compile(r"\n*— [^\n]*\(네 / 아니오\)\s*$")
+
+
+def _strip_devices(text: str) -> str:
+    """기록된 답변에서 화면 장치(제안 문구·코드블록 펜스)를 뗀 본문."""
+    from pension_agent.consult_agent import memo  # noqa: PLC0415
+    text = _OFFER_TRAILER.sub("", text.strip())
+    return "\n".join(ln for ln in text.splitlines() if ln.strip() != memo.FENCE)
 
 
 def _transcript(state: AgentState, query: str) -> Evidence | None:
@@ -927,8 +935,7 @@ def _transcript(state: AgentState, query: str) -> Evidence | None:
 
     lines = [f"■ 이번 상담 대화 기록 — 지금 진행 중인 상담에서 오간 대화 ({len(turns)}턴)"]
     for turn in turns[-TRANSCRIPT_TURNS:]:
-        text = _OFFER_TRAILER.sub("", (turn.get("text") or "").strip())
-        text = " ".join(text.split())
+        text = " ".join(_strip_devices(turn.get("text") or "").split())
         if len(text) > TRANSCRIPT_EXCERPT:
             text = text[:TRANSCRIPT_EXCERPT] + "…"
         lines.append(f"- {_HISTORY_ROLE.get(turn.get('role'), '?')}: {text}")

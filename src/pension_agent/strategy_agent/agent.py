@@ -629,12 +629,13 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
             # 관측 트레이스 — 한 건 만드는 데 LLM 을 11번 부른다. 어느 단계가 무엇을 받고
             # 무엇을 뱉었는지 되짚으려면 그 11번이 한 묶음이어야 한다(observability).
             # 캐시·저장소에서 꺼내 쓴 경우는 생성이 아니므로 트레이스를 만들지 않는다.
+            who = observability.customer_ref(p.id, p.nm)
             with observability.trace(
                 "briefing.generate",
                 input={"customer_id": p.id, "customer": p.nm,
                        "use_llm": use_llm, "top_n": top_n},
-                user_id=p.id, metadata={"customer_id": p.id, "customer": p.nm},
-                tags=["briefing", *observability.tag("고객", p.nm)],
+                user_id=who["user_id"], metadata=who["metadata"],
+                tags=["briefing", *who["tags"]],
             ) as span:
                 out = _propose(p, use_llm=use_llm, top_n=top_n)
                 out["facts"]["summaries"] = engine.section_summaries(

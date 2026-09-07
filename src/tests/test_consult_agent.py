@@ -3637,6 +3637,7 @@ def check_memo() -> int:
       ⑤ 본문·제목은 LLM 이 가이드라인 안에서 쓰고, 코드가 화면 답변과 **같은 검사**에 건다.
          걸리면 보내지 않고 사유를 말한다(폴백 없음). 꼴(HTML)은 코드가 만든다.
       ⑥ 승낙하면 제안한 턴의 초안 그대로 보내고 기록에 남긴다. 거절하면 보내지 않는다.
+      ⑦ 화면에서는 초안을 코드블록으로 감싸고, 보내는 본문과 기록 재료에는 펜스가 없다.
     """
     import os
     import tempfile
@@ -3679,6 +3680,11 @@ def check_memo() -> int:
                 "text": "[06-12-501] 후선업무 의뢰등록부터 해요. 60일 내 입금이에요.\n\n"
                         "— 06-12-501 화면 열기, 연계해드릴까요? (네 / 아니오)"})
             session_store.append_turn("CM", now, {"role": "tool", "text": "[발송 화면 연계] 문구"})
+            # 앞선 쪽지 제안 턴이 기록에 남은 꼴 — 펜스와 제안 문구는 화면 장치라 재료에서 뗀다.
+            session_store.append_turn("CM", now, {
+                "role": "agent",
+                "text": f"{memo.FENCE}\n앞선 쪽지 본문\n{memo.FENCE}\n\n"
+                        "— 이 요약을 쪽지로 보낼까요? 받는 사람은 본인이에요. (네 / 아니오)"})
             state = {"question": "대화 내용 요약해서 쪽지로 보내줘", "customer_id": "CM",
                      "session_id": now}
             found = tools.run("transcript", state, "이번 상담 요약")
@@ -3736,8 +3742,10 @@ def check_memo() -> int:
 
     # ② 화면 장치는 재료가 아니다 — 답변 안의 화면번호·기한은 남는다(요약이 옮길 값).
     hit = (bool(found) and "연계해드릴까요" not in found["text"] and "도구실행" not in found["text"]
-           and "[06-12-501]" in found["text"] and "60일" in found["text"])
-    print(f"{'✓' if hit else '✗'} 제안 문구·도구 실행 줄은 떼고 답변 본문은 그대로 싣는다")
+           and "[06-12-501]" in found["text"] and "60일" in found["text"]
+           and memo.FENCE not in found["text"] and "쪽지로 보낼까요" not in found["text"]
+           and "앞선 쪽지 본문" in found["text"])
+    print(f"{'✓' if hit else '✗'} 제안 문구·도구 실행 줄·코드블록 펜스는 떼고 답변 본문은 그대로 싣는다")
     ok += hit
 
     hit = closed is None and nosess is None and bool(empty) and tools.TRANSCRIPT_NONE in empty["text"]
@@ -3776,9 +3784,12 @@ def check_memo() -> int:
     hit = (pending["title"] == "과세이연 등록 상담 정리"
            and "쪽지" not in pending["title"] and not any(c.isdigit() for c in pending["title"])
            and "<br>" in pending["html"] and "<b>" not in pending["text"]
-           and offered["answer"].startswith("[제목] 과세이연 등록 상담 정리")
+           # 펜스는 화면 장치다 — 초안은 코드블록 안에 서고, 나가는 본문에는 없다.
+           and memo.FENCE not in pending["text"] and memo.FENCE not in pending["html"]
+           and offered["answer"].startswith(f"{memo.FENCE}\n[제목] 과세이연 등록 상담 정리")
+           and f"\n{memo.FENCE}\n\n— " in offered["answer"]
            and offered["answer"].endswith("(네 / 아니오)"))
-    print(f"{'✓' if hit else '✗'} 제목·본문은 LLM 이 쓰고 HTML 은 코드가 만든다(화면에는 평문을 보여준다)")
+    print(f"{'✓' if hit else '✗'} 제목·본문은 LLM 이 쓰고 HTML 은 코드가 만든다(화면에는 코드블록 안 평문)")
     ok += hit
 
     hit = (not screened.get("pending_action") and "보내지 않았어요" in screened["answer"]
@@ -3834,9 +3845,22 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 기준일 안내는 늘 붙고 «선정 기준»은 목록 쪽지에만 붙는다")
     ok += hit
 
+    # 조립식이던 동안은 화면 답변이 곧 쪽지 본문이라, LLM 이 얹은 도입 문장(2026-09-03 실측 —
+    # 「쪽지 발송 여부는 시스템이 답변 뒤에 따로 안내해요」)을 코드가 항목 줄만 취해 걸렀다
+    # (`memo.items_of`). 지금 화면 답변은 초안의 **출발점**일 뿐이고 본문은 쪽지 가이드라인이
+    # 따로 쓰므로 그 거름은 사라졌다 — 대신 그 지시가 가이드라인 쪽에 서 있어야 한다.
+    hit = ("쪽지로 보내드립니다" in prompts.MEMO_SYSTEM          # 쪽지 자신에 대해 쓰지 않는다
+           and "복사해서 붙여넣으세요" in prompts.MEMO_SYSTEM
+           and "인사말·맺음말" in prompts.MEMO_SELF_GUIDE       # 내 기록에는 도입·맺음이 없다
+           and "인사" in prompts.MEMO_OTHER_GUIDE               # 남에게 보내는 쪽에는 한 줄 둔다
+           and not hasattr(memo, "items_of"))                   # 부르는 곳 없는 거름을 남기지 않는다
+    print(f"{'✓' if hit else '✗'} 쪽지 자신을 말하지 말라는 지시가 가이드라인 쪽에 서 있다")
+    ok += hit
+
     shape = prompts.ANSWER_SHAPES["transcript"]
-    hit = "쪽지" in shape and "도입" in shape and "「- 물은 것 — 안내 요지」" in shape
-    print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지한다")
+    hit = ("쪽지" in shape and "도입" in shape and "「- 물은 것 — 안내 요지」" in shape
+           and "시스템이" not in shape and "답변 뒤에" not in shape)   # 옮겨 적힌 지시 문장(실측)
+    print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지하며, 시스템이 무엇을 하는지는 적지 않는다")
     ok += hit
 
     hit = ("send_memo" in REG.TOOL_REGISTRY and "쪽지로 보내줘" in prompts.ROUTE_PROMPT

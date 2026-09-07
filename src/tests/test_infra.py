@@ -589,6 +589,15 @@ try:
     check(all(s["traceId"] == _tr2.id for s in _scores),
           "observability: 점수가 그 트레이스에 붙는다")
 
+    # 고객 표기 — Users 목록이 user_id 문자열 하나만 보여주므로 이름을 거기 넣는다
+    _who = _obs.customer_ref("171203-4815062", "김서연")
+    check(_who["user_id"] == "김서연(171203-4815062)",
+          "observability: user_id 에 이름과 id 가 함께 실린다", str(_who["user_id"]))
+    check(_who["tags"] == ["고객:김서연"] and _who["metadata"]["customer"] == "김서연",
+          "observability: 고객 태그·메타데이터가 같은 이름으로 붙는다", str(_who))
+    check(_obs.customer_ref(None, None) == {"user_id": None, "metadata": {}, "tags": []},
+          "observability: 고객이 없으면 아무것도 붙지 않는다")
+
     # 트레이스가 없으면 점수는 나가지 않는다 — 붙을 데가 없는 점수는 찾을 방법이 없다
     _sent.clear()
     _obs.score("orphan", 1)
@@ -604,6 +613,14 @@ try:
     _llm.generate(_secret, name="test.masked")
     _obs.flush(timeout=5.0)
     _masked = [e for batch in _sent for e in batch["batch"] if e["type"] == "generation-create"]
+    # 그 스위치는 «개인정보를 내보내지 않는다»는 약속이다. 본문만 가리고 이름을 user_id·
+    # 태그로 내보내면 약속이 거짓이 된다 — id 만 남고 이름은 전부 빠져야 한다.
+    _masked_who = _obs.customer_ref("171203-4815062", "김서연")
+    check(_masked_who == {"user_id": "171203-4815062",
+                          "metadata": {"customer_id": "171203-4815062"}, "tags": []},
+          "observability: CAPTURE_CONTENT=0 이면 고객 이름이 user_id·태그·메타에서 빠진다",
+          str(_masked_who))
+
     check(bool(_masked)
           and _masked[0]["body"]["input"] == {"omitted": True, "chars": len(_secret)},
           "observability: CAPTURE_CONTENT=0 이면 본문 대신 길이만 나간다",
@@ -678,6 +695,58 @@ for _py in sorted(Path(".").rglob("*.py")):
                            if "*" in _PY311_ONLY.get(a.name.split(".")[0], ())]
 check(not _offenders, "3.11+ 전용 이름을 임포트하지 않는다 (로컬 3.10 호환)",
       "; ".join(_offenders))
+
+
+# ─────────────────────────────────────────────────────────────
+# 시연 대본의 판 이력 — tests/debug/scenarios.py
+#
+# 판은 첫 판에 변경을 접어서 만든다. 변경이 가리키는 라벨이 그 시점 판에 없으면 이력이
+# 조용히 거짓말을 하므로 `_apply` 가 예외를 낸다 — 여기서 **모든 판을 한 번 만들어** 그
+# 예외를 잡는다. 이 모듈은 langgraph 를 타지 않아 키·설치 없이 돈다.
+# ─────────────────────────────────────────────────────────────
+
+from tests.debug import scenarios as _SCEN  # noqa: E402 — 위 임포트 경계 검사 뒤에 온다
+
+_built: dict[str, tuple] = {}
+_build_error = ""
+try:
+    _built = {v.name: _SCEN.review_blocks(v.name) for v in _SCEN.REVIEW}
+except ValueError as exc:
+    _build_error = str(exc)
+check(not _build_error, "시연 대본: 모든 판이 만들어진다 (변경이 가리키는 라벨이 실재한다)",
+      _build_error)
+
+check(_SCEN.LATEST == _SCEN.REVIEW[-1].name, "시연 대본: 지금 판은 이력의 맨 끝이다")
+
+_dupes = []
+for _name, _blocks in _built.items():
+    _labels = [label for _, _, _, turns in _blocks for label, _ in turns]
+    if len(_labels) != len(set(_labels)):
+        _dupes.append(_name)
+check(not _dupes, "시연 대본: 판마다 턴 라벨이 유일하다 (변경이 라벨로 대상을 찾는다)",
+      " ".join(_dupes))
+
+_bad_edits = []
+for _v in _SCEN.REVIEW:
+    for _e in _v.edits:
+        if _e.op not in ("고침", "뺌", "더함"):
+            _bad_edits.append(f"{_v.name} {_e.label}: 모르는 op {_e.op}")
+        if _e.op in ("고침", "더함") and not _e.question:
+            _bad_edits.append(f"{_v.name} {_e.label}: 바꾼 질문이 비었다")
+        if _e.op == "더함" and not _e.after:
+            _bad_edits.append(f"{_v.name} {_e.label}: 넣을 자리(after)가 없다")
+        if not _e.why:
+            _bad_edits.append(f"{_v.name} {_e.label}: 왜 바꿨는지가 없다")
+check(not _bad_edits, "시연 대본: 변경마다 무엇을·왜 가 채워져 있다", " · ".join(_bad_edits))
+
+# 판이 실제로 갈라져 있어야 «이전 것과 비교»가 뜻을 갖는다 — 변경을 적고 질문은 그대로면
+# 이력만 늘어난다.
+_same = [v.name for v in _SCEN.REVIEW[1:]
+         if _built[v.name] == _built[_SCEN.REVIEW[_SCEN.REVIEW.index(v) - 1].name]]
+check(not _same, "시연 대본: 변경을 적은 판은 직전 판과 실제로 다르다", " ".join(_same))
+
+check(_SCEN.questions_of()["④"] == "고객이 '그 돈 그냥 예금으로 둬도 되지 않나요?' 하는데 뭐라고 하지?",
+      "시연 대본: 이수민 ④ 는 «예금으로» 반론이다 (v6)")
 
 # ─────────────────────────────────────────────────────────────
 # WorkB 쪽지 — 오늘의 타겟 고객 본문

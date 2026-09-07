@@ -169,8 +169,11 @@ def _memo_offer(state: AgentState) -> dict[str, Any]:
               "title": found.title, "text": found.text, "html": found.html,
               "to": label, "recipients": list(found.recipients),
               "params": {"customer_id": state.get("customer_id") or ""}}
-    return {"answer": f"[제목] {found.title}\n\n{found.text}\n\n— {action['prompt']}",
-            "pending_action": action}
+    # 초안은 코드블록으로 감싸 «여기까지가 쪽지»를 화면에서 가른다 — 초안이 답변 자리를
+    # 통째로 차지하므로, 표시가 없으면 에이전트가 하는 말과 구별되지 않는다. 펜스는 화면
+    # 장치라 나가는 본문에는 없고, 세션 기록에서 재료를 만들 때도 뗀다(tools._strip_devices).
+    draft = f"{memo.FENCE}\n[제목] {found.title}\n\n{found.text}\n{memo.FENCE}"
+    return {"answer": f"{draft}\n\n— {action['prompt']}", "pending_action": action}
 
 
 def _propose_lms(state: AgentState) -> dict[str, Any] | None:
