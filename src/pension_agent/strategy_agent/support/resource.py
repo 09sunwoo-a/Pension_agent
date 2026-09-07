@@ -81,7 +81,7 @@ def consult_resources(p: Profile, conds: list[str], situations: list[dict] | Non
     "지금 이 상담에 유용한 리소스"라는 요건에 가장 가깝다.
 
     2차는 기존 경로: 프로파일만 입력이라 자연어 질문이 없으므로 성립 요건 라벨을 의사-발화로
-    합성해 consult_agent.kb.retrieve() 를 호출한다(기존 n-gram+태그 스코어링 재사용). 다만 이
+    합성해 knowledge.kb.retrieve() 를 호출한다(기존 n-gram+태그 스코어링 재사용). 다만 이
     경로는 요건 라벨과 카드 표현이 문자 단위로 겹쳐야 해서 실측상 대부분 0건이었다 — 그래서
     1차를 앞에 두었다.
     """

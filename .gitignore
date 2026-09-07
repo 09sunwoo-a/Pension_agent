@@ -3,6 +3,8 @@
 .Rhistory
 .env
 .env.*
+!.env.example
+!.env.*.example
 
 # OS 잡파일
 Thumbs.db

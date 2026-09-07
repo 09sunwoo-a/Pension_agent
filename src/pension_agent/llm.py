@@ -16,6 +16,12 @@
            LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
+━━ 실행 환경(프로파일) ━━
+환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(OpenAI 호환 게이트웨이의 Sonnet, genai
+경로). 환경마다 `src/.env.<이름>`
+한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
+잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
+
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
   LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
@@ -298,7 +304,8 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "
-            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오."
+            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오. "
+            "어느 .env 가 읽혔는지는 python -m pension_agent.env 로 봅니다."
             % PROVIDER
         )
     _throttle()
