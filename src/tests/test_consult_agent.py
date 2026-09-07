@@ -5497,6 +5497,114 @@ def check_graded_judge() -> int:
     return ok
 
 
+def check_rehearsal_expectations() -> int:
+    """리허설 기대값 — `sees` 중 기계가 판정할 수 있는 부분 (tests/debug/scenarios.EXPECT).
+
+    실 LLM 없이 재는 것은 **판정 장치 자체**다: 기대가 실재하는 턴을 가리키는가 · 무엇을
+    어긋남으로 보는가 · 실행 사실을 어떻게 읽는가. 실제 대본을 도는 것은 `reps` 의 일이고
+    그건 LLM 이 있어야 한다.
+    """
+    from tests.debug import reps as REPS, scenarios as SCEN, trace as TR
+    ok = 0
+    print("\n[리허설 기대값 — sees 를 기계가 판정한다]")
+
+    # 기대는 실재하는 턴을 가리켜야 한다. 없는 라벨을 적으면 그 기대는 영원히 판정되지
+    # 않으면서 통과처럼 보인다 — 검사 표가 거짓말하는 가장 나쁜 형태다.
+    hit = bool(SCEN.EXPECT) and all(
+        label in SCEN._labels_of(script) for script, label in SCEN.EXPECT)
+    print(f"{'✓' if hit else '✗'} 모든 기대가 실재하는 턴을 가리킨다 ({len(SCEN.EXPECT)}건)")
+    ok += hit
+
+    saved = dict(SCEN.EXPECT)
+    try:
+        SCEN.EXPECT[("cases", "없는턴")] = SCEN.Expect(outcome="answer")
+        try:
+            SCEN._validate_expectations()
+            raised = False
+        except ValueError:
+            raised = True
+    finally:
+        SCEN.EXPECT.clear()
+        SCEN.EXPECT.update(saved)
+    print(f"{'✓' if raised else '✗'} 없는 턴을 가리키면 임포트가 실패한다(조용히 지나가지 않는다)")
+    ok += raised
+
+    # ── diff 의 규약 ──────────────────────────────────────
+    want = SCEN.Expect(tools=("fact",), outcome="answer", verdict="assume", sources=True)
+    base = {"tools": ["fact", "customer"], "outcome": "answer", "verdict": "assume",
+            "sources": True}
+    hit = want.diff(base) == []
+    print(f"{'✓' if hit else '✗'} tools 는 부분집합 판정 — 여분의 도구는 어긋남이 아니다")
+    ok += hit
+
+    hit = len(SCEN.Expect(tools=("screen",)).diff(base)) == 1
+    print(f"{'✓' if hit else '✗'} 기대한 도구가 안 불리면 어긋남")
+    ok += hit
+
+    hit = SCEN.Expect().diff({}) == [] and SCEN.Expect(outcome="").diff({"outcome": "clarify"}) == []
+    print(f"{'✓' if hit else '✗'} 비워 둔 항목은 판정하지 않는다(확신 없는 기대를 강요하지 않는다)")
+    ok += hit
+
+    hit = SCEN.Expect(sources=False).diff({"sources": True}) != [] \
+        and SCEN.Expect(sources=False).diff({}) == []
+    print(f"{'✓' if hit else '✗'} 참/거짓 항목은 False 도 기대로 판정한다")
+    ok += hit
+
+    # ── 실행 사실을 어떻게 읽나(_observed) ────────────────
+    def turn(nodes):
+        t = TR.Turn(question="q")
+        t.nodes.extend(nodes)
+        return t
+
+    answered = turn([TR.Node(name="answer", delta={"judge_verdict": "assume"},
+                             gates=[TR.Gate("verify_texts", True), TR.Gate("span", True)])])
+    got = REPS._observed({"history": [{"tools": ["fact"]}], "sources": [{"id": "x"}],
+                          "pending_action": {"label": "화면"}}, answered)
+    hit = (got["outcome"] == "answer" and got["verdict"] == "assume"
+           and got["tools"] == ["fact"] and got["gates_passed"] and got["offered"]
+           and got["sources"])
+    print(f"{'✓' if hit else '✗'} 답변 턴 — 도구·등급·게이트·출처·연계를 읽는다")
+    ok += hit
+
+    asked = turn([TR.Node(name="answer", delta={"judge_verdict": "ask", "clarify": {"question": "?"}})])
+    got = REPS._observed({"history": [{"tools": ["fact"]}], "clarify": {"question": "?"},
+                          "sources": [{"id": "x"}]}, asked)
+    hit = got["outcome"] == "clarify" and got["verdict"] == "ask"
+    print(f"{'✓' if hit else '✗'} 되묻기 턴 — 답변으로 세지 않는다")
+    ok += hit
+
+    # LLM 이 죽은 턴은 «되묻지도 답하지도 않은» 세 번째 결말이다(§11). 답변으로 세면
+    # 장애가 난 실행이 통과로 보고된다 — 실제로 리허설 11턴 중 10턴이 그랬던 날이 있다.
+    dead = turn([TR.Node(name="plan_step", delta={"llm_error": "HTTPError"}),
+                 TR.Node(name="answer", delta={})])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, dead)
+    hit = got["outcome"] == "llm_down" and not got["gates_passed"]
+    print(f"{'✓' if hit else '✗'} LLM 이 죽은 턴 — 답변으로도 «게이트 통과»로도 세지 않는다")
+    ok += hit
+
+    stopped = turn([TR.Node(name="answer", delta={},
+                            gates=[TR.Gate("verify_texts", True), TR.Gate("span", False)])])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, stopped)
+    hit = not got["gates_passed"]
+    print(f"{'✓' if hit else '✗'} 게이트가 생성문을 버렸으면 통과로 세지 않는다")
+    ok += hit
+
+    replanned = turn([TR.Node(name="plan_step", delta={"plan_retry": True}),
+                      TR.Node(name="answer", delta={})])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, replanned)
+    hit = got["replanned"]
+    print(f"{'✓' if hit else '✗'} 재계획이 돌았는지 읽는다 (gap 23 이 만든 경로)")
+    ok += hit
+
+    # 기대가 없는 턴은 아무것도 찍지 않는다 — 대부분의 턴이 그렇다.
+    line, misses = REPS._expect_line("cases", "9", {}, answered)
+    hit = line == "" and misses == []
+    print(f"{'✓' if hit else '✗'} 기대가 없는 턴은 판정하지 않는다")
+    ok += hit
+
+    return ok
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -5577,6 +5685,7 @@ def main() -> int:
         check_llm_down()
         check_compose_retry()
         check_graded_judge()
+        check_rehearsal_expectations()
         check_notice_scope()
         check_guard()
         check_architecture_doc()

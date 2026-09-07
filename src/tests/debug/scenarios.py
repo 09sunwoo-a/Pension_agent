@@ -351,3 +351,120 @@ def changes_between(older: str, newer: str) -> list[tuple[Version, Edit]]:
 def questions_of(version: str | None = None) -> dict[str, str]:
     """라벨 → 질문. 두 판을 라벨로 맞대볼 때 쓴다."""
     return {label: q for _, _, _, turns in review_blocks(version) for label, q in turns}
+
+
+# ─────────────────────────────────────────────────────────────
+# 기대값 — `sees` 한 줄 중 **기계가 판정할 수 있는 부분**
+#
+# 대본의 `sees` 는 사람이 읽는 줄이다("빗나가도 다른 도구로 갈아타나"). 그 줄이 무엇을
+# 보라고 말하는지는 적혀 있는데, **그대로 됐는지는 사람이 출력을 읽어야만** 알 수 있었다.
+# 그래서 리허설의 회귀 탐지가 «누가 로그를 끝까지 읽었는가»에 달려 있었다 — 실제로
+# 2026-09-07 에 T8 이 되묻기로 끝난 것을 로그를 눈으로 훑다가 발견했다.
+#
+# 여기 적는 것은 **전부 코드가 아는 사실**이다: 무슨 도구를 불렀나 · 어떻게 끝났나 ·
+# 판정 등급 · 게이트를 통과했나 · 출처가 실렸나 · 연계를 제안했나.
+# **답변 문장의 좋고 나쁨은 재지 않는다** — 그건 사람이 읽어야 하고, LLM 에게 자기 답을
+# 채점시키지 않는다는 규약(`nodes/plan.py` compose 주석)이 여기에도 그대로 적용된다.
+#
+# ━━ 기대값은 «sees 가 이미 주장하는 것»에서 시작한다 ━━
+# 처음 값은 `sees` 문장을 옮겨 적은 것이다. 실행이 그와 다르면 둘 중 하나다 — 구현이
+# 어긋났거나, 기대가 틀렸거나. **어느 쪽인지는 사람이 정한다**(고치는 쪽도 사람이다).
+# 확신이 없는 항목은 **비워 둔다**: 지어낸 기대는 매 실행마다 거짓 실패를 내고, 그러면
+# 아무도 이 표를 안 보게 된다.
+# ─────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Expect:
+    """턴 하나에 기대하는 사실. 비운 항목은 판정하지 않는다.
+
+    `tools` 만 **부분집합** 판정이다 — 「이 도구는 불렸어야 한다」이지 「이것만 불렸어야
+    한다」가 아니다. 한 답변에 여러 재료가 섞이는 것이 정상이고(기준서 §1), 여분의 도구를
+    실패로 잡으면 정상 동작이 매번 어긋난 것으로 보고된다.
+    """
+
+    tools: tuple[str, ...] = ()
+    outcome: str = ""            # answer · clarify · llm_down
+    verdict: str = ""            # answer · assume · ask · none (판정이 돈 턴만)
+    replanned: bool | None = None
+    gates_passed: bool | None = None
+    sources: bool | None = None
+    offered: bool | None = None  # 화면 연계를 제안했나(§10)
+
+    def diff(self, got: dict) -> list[str]:
+        """어긋난 항목만 사람이 읽을 한 줄씩. 비어 있으면 통과다."""
+        out: list[str] = []
+        if self.tools:
+            called = set(got.get("tools") or ())
+            missing = set(self.tools) - called
+            if missing:
+                out.append(f"tools    기대 ⊇{{{', '.join(sorted(self.tools))}}}"
+                           f" · 실제 {{{', '.join(sorted(called)) or '없음'}}}")
+        for field in ("outcome", "verdict"):
+            want = getattr(self, field)
+            if want and got.get(field) != want:
+                out.append(f"{field:8} 기대 {want} · 실제 {got.get(field) or '없음'}")
+        for field in ("replanned", "gates_passed", "sources", "offered"):
+            want = getattr(self, field)
+            if want is not None and bool(got.get(field)) is not want:
+                out.append(f"{field:8} 기대 {want} · 실제 {bool(got.get(field))}")
+        return out
+
+
+#: (대본, 턴 라벨) → 기대값. 라벨은 화면에 찍히는 것과 같다 — `cases` 는 번호(2턴째는 `6b`),
+#: 리허설 대본은 대본이 데이터로 준 라벨(`T8`·`①`·`M1`)이다.
+#:
+#: **없는 라벨을 적으면 임포트가 실패한다**(아래 `_validate_expectations`). 대본이 바뀌어
+#: 라벨이 사라졌는데 기대만 남으면, 그 기대는 영원히 판정되지 않으면서 통과처럼 보인다.
+EXPECT: dict[tuple[str, str], Expect] = {
+    # ── cases — 검토 11케이스 ──────────────────────────────
+    ("cases", "1"):  Expect(tools=("fact",), outcome="answer", gates_passed=True),
+    ("cases", "2"):  Expect(tools=("screen",), outcome="answer", offered=True),
+    ("cases", "3"):  Expect(tools=("channel",), outcome="answer"),
+    ("cases", "4"):  Expect(tools=("customer", "pitch"), outcome="answer"),
+    ("cases", "5"):  Expect(tools=("suitable",), outcome="answer", gates_passed=True),
+    ("cases", "6"):  Expect(tools=("customer",), outcome="answer"),
+    ("cases", "7"):  Expect(tools=("customer",), outcome="answer"),
+    ("cases", "7b"): Expect(outcome="answer"),
+    # gap 22 — 되묻기 턴에도 출처가 실린다. 2026-09-07 실측으로 확인된 기대다.
+    ("cases", "8"):  Expect(outcome="clarify", verdict="ask", sources=True),
+    ("cases", "10"): Expect(tools=("pitch",), outcome="answer"),
+    ("cases", "11"): Expect(tools=("outreach",), outcome="answer", offered=True),
+
+    # ── demo — 전체 시연 대본 ──────────────────────────────
+    # T8 은 gap 30 이 닫혔는지를 재는 자리다. 같은 질문이 고객 화면 **없이**(cases 8)는
+    # 되묻고, 화면이 열려 있으면 원장이 갈래를 정해 주므로 전제를 밝히고 답해야 한다.
+    # 두 줄이 갈리는 것이 그 gap 이 닫혀 있다는 증거다(2026-09-07 실측으로 확인).
+    ("demo", "T8"):  Expect(outcome="answer", verdict="assume"),
+    ("demo", "T10"): Expect(tools=("suitable",), outcome="answer"),
+    ("demo", "T11"): Expect(tools=("outreach",), offered=True),
+}
+
+
+def expect_for(script: str, label: str) -> Expect | None:
+    """이 턴에 기대값이 있나. 없으면 판정하지 않는다(대부분의 턴이 그렇다)."""
+    return EXPECT.get((script, label))
+
+
+def _labels_of(script: str) -> set[str]:
+    """그 대본이 실제로 내는 턴 라벨. `cases` 는 번호에서 만들어진다(reps 와 같은 규칙)."""
+    if script == "cases":
+        return {str(no) if i == 0 else f"{no}b"
+                for no, _, _, turns in CASES for i, _ in enumerate(turns)}
+    blocks = review_blocks() if script == "review" else {"demo": DEMO, "library": LIBRARY}[script]
+    return {label for _, _, _, turns in blocks for label, _ in turns}
+
+
+def _validate_expectations() -> None:
+    """없는 턴을 가리키는 기대를 임포트 시점에 잡는다.
+
+    조용히 지나가면 그 기대는 **영원히 판정되지 않으면서 통과처럼 보인다** — 검사 표가
+    거짓말하는 가장 나쁜 형태다(`_apply` 가 없는 라벨에 실패하는 것과 같은 이유).
+    """
+    known = {"cases", "demo", "library", "review"}
+    bad = [f"{s}/{label}" for (s, label) in EXPECT
+           if s not in known or label not in _labels_of(s)]
+    if bad:
+        raise ValueError("대본에 없는 턴의 기대값입니다: " + " · ".join(sorted(bad)))
+
+
+_validate_expectations()

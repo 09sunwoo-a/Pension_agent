@@ -51,6 +51,10 @@ NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
 #: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
 ANSWER_NODE = "answer"
 
+#: LLM 이 죽어 분류조차 못 한 턴의 노드(§11). 「되묻지도 답하지도 않은」 세 번째 결말이라
+#: 기대값 판정이 이것을 답변으로 세면 안 된다(reps._observed).
+LLM_DOWN_NODE = "llm_down"
+
 #: compose 가 순서대로 거는 검사. 이 순서를 여기 적어두는 이유는 **실행되지 않은 게이트**를
 #: 말하기 위해서다 — 앞에서 끊기면 뒤는 아예 안 불리고, 그 사실이 진단의 핵심이다.
 GATES = ("verify_texts", "relations", "span")
@@ -234,7 +238,8 @@ def _summary(delta: dict) -> dict:
     # judge_verdict 가 여기 없으면 리허설이 «되물었나»만 보고 «전제를 밝히고 답했나»·
     # «없다고 답했나»를 못 본다 — 판정이 넷으로 갈린 뒤로는 그 셋이 다른 사건이다.
     out = {k: v for k, v in delta.items()
-           if k in ("intent", "plan_done", "llm_error", "clarify", "judge_verdict")}
+           if k in ("intent", "plan_done", "llm_error", "clarify", "judge_verdict",
+                    "plan_retry")}
     # 전제·빠진 대상은 블록 통째로 찍으면 트레이스 한 줄이 열 줄이 된다. 판정이 무엇을
     # 정했는지만 남긴다 — 답변 원문에 그 전제가 실제로 실렸는지는 답변을 보면 된다.
     if delta.get("judge_note"):
