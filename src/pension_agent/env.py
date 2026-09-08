@@ -10,7 +10,8 @@ LLM 을 쓸 수 있는 환경이 셋이고(행내 genai · 로컬 anthropic · a
 
     src/.env            공통 — 어느 환경에서나 같은 값(관측 스위치·PENSION_TODAY 등)과
                         기본 프로파일 이름(`PENSION_ENV=local`)
-    src/.env.bank       행내  — genai 게이트웨이 (LLM_BASE_URL · LLM_API_KEY · LLM_MODEL)
+    src/.env.bank       행내  — GenAI 플랫폼 (LLM_BASE_URL · LLM_API_KEY, LLM_MODEL 은 비운다)
+    src/.env.gateway    행내  — LLM Gateway (LiteLLM). bank 와 택일. LLM_MODEL 을 채운다
     src/.env.local      로컬  — anthropic (ANTHROPIC_API_KEY)
     src/.env.aiden      aiden — OpenAI 호환 게이트웨이의 Sonnet (genai 와 같은 키 셋, 값만 다름)
 
@@ -56,7 +57,7 @@ DOTENV_ENV = DOTENV_ENVS[0]
 PROFILE_ENV = "PENSION_ENV"
 
 #: 알려진 프로파일. 여기 없는 이름도 `.env.<이름>` 이 있으면 읽는다 — 목록은 안내용이다.
-PROFILES = ("bank", "local", "aiden")
+PROFILES = ("bank", "gateway", "local", "aiden")
 
 _loaded = False
 _active: dict = {"profile": None, "how": "미적재", "files": []}

@@ -30,6 +30,78 @@ CAD="python -m tests.debug"                    # 같은 것 + 트레이스
 CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 · 시연 대본)
 ```
 
+## 행내에서 처음 실행
+
+저장소를 clone 하는 대신 **폴더를 복사해 올리는** 경우(Azure ML 컴퓨트 인스턴스 등)를 기준으로
+적는다. clone 이 되면 0번은 건너뛴다.
+
+```bash
+# 0. 붙여넣기로 올렸다면 줄바꿈부터 — Windows 를 거치면 CRLF 가 붙는다.
+#    셰방이 «/bin/bash^M» 이 되어 bad interpreter 로 죽는데 chmod 로는 안 고쳐진다.
+#    올릴 때마다 필요하다(git 으로 받으면 .gitattributes 가 알아서 한다).
+cd src
+find . -name "*.sh" -exec sed -i 's/\r$//' {} +
+chmod +x *.sh
+
+# 1. 패키지 — 공개 PyPI 가 막혀 있으면 Nexus 를 지정한다.
+pip install -r requirements.txt \
+  --index-url https://stg-nexus-genaihub.kbonecloud.com/repository/pypi/simple \
+  --trusted-host stg-nexus-genaihub.kbonecloud.com
+#    설치되는 것은 셋뿐이다: fastapi · uvicorn · langgraph==0.4.8
+#    (Streamlit 화면까지 쓰려면 requirements-dev.txt 도. API·CLI 만 쓸 거면 불필요)
+
+# 2. 공통 설정
+cp .env.example .env
+```
+
+### 2-b. LLM 프로파일 — 콘솔에서 **어느 카드의 키를 받았는지**로 갈린다
+
+둘은 **택일**이다. 프로파일 파일을 하나만 두면 `env.py` 가 알아서 그것을 잡는다.
+
+| | 내부 GenAI 플랫폼 | LLM Gateway (LiteLLM) |
+|---|---|---|
+| 파일 | `cp .env.bank.example .env.bank` | `cp .env.gateway.example .env.gateway` |
+| `LLM_BASE_URL` | 콘솔의 GenAI 플랫폼 카드 URL 그대로 | `http://litellm.aidc-prod.svc.cluster.local:4000` |
+| `LLM_MODEL` | **비운다** — URL 경로가 곧 모델이다 | **채운다** — `claude-sonnet-4-6` |
+| 컴퓨트 인스턴스에서 | 닿는다(실측) | **안 닿는다** — 클러스터 내부 이름이라 DNS 가 안 풀린다 |
+| 확인된 상태 | 2026-09-08 실측 통과 | 미실측 — 배포된 컨테이너 안에서만 설 수 있다 |
+
+`LLM_MODEL` 이 서로 반대인 이유는 `llm.py` 의 `MODEL` 상수 주석에 있다. **SKILL.md 는 이
+값을 「필수」로 적는데 그쪽은 Gateway 기준이다** — GenAI 플랫폼에서 콘솔이 알려준 모델
+이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
+
+```bash
+# 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
+python -m pension_agent.env
+
+# 4. LLM 없이 도는 검사부터. 여기서 깨지면 키를 봐도 소용없다.
+python -m tests.test_api          # HTTP 스키마 계약
+python -m tests.test_infra        # 429 호출 게이트
+python -m tests.test_consult_agent   # 통과하면 langgraph 0.4.8 에서 그래프가 선다는 뜻
+
+# 5. 돌려보기 — CLI 는 서버가 필요 없다
+source ./cli.sh
+$CA "세액공제 한도가 얼마야?"
+$CA -c 198734-1205842 "이 고객 왜 관리 대상이야?"   # 브리핑 경로(LLM 9~11 연쇄)
+
+# 6. HTTP API 로도 볼 거면 — 터미널 둘
+./run_local.sh                                     # 터미널 A
+./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"  # 터미널 B
+```
+
+### 막히면
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| `/bin/bash^M: bad interpreter` | CRLF | 위 0번 |
+| `프로바이더 anthropic` | `.env.<프로파일>` 이 안 잡힘 | `python -m pension_agent.env` 로 읽힌 파일 확인 |
+| `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
+| `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 함께 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
+| `HTTP 429` | 호출이 몰림 | `.env.<프로파일>` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작 |
+
+`.env` 는 **프로세스 기동 때 한 번만** 읽는다. 고쳤으면 서버를 다시 띄워야 한다
+(`--reload` 는 `.py` 변경만 본다).
+
 ```bash
 # ── 브리핑 · 대화 · 화면
 python -m pension_agent.strategy_agent.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
