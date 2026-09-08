@@ -100,9 +100,10 @@ DEFAULT_MAX_TOKENS = 900
 
 #: 모델 슬러그. **비우면 payload 에서 `model` 키를 아예 뺀다** — 그것이 기본이다.
 #:
-#: 규격 문서 셋이 여기서 갈린다. SKILL.md 는 LLM_MODEL 을 「필수」로 적고 예시 슬러그
-#: (claude-sonnet-4-6)까지 주는데, genai-platform.md 는 「생략이 기본값 — 게이트웨이가
-#: 라우팅한다」고 적고 코드 예제에서 model 을 주석 처리해 둔다. 어긋난 것이 아니라
+#: 규격 문서 셋이 여기서 갈린다(저장소 루트 skills/genai-platform-agent-dev/). SKILL.md 는
+#: LLM_MODEL 을 「필수」로 적고 예시 슬러그(claude-sonnet-4-6)까지 주는데,
+#: refs/genai-platform.md 는 「생략이 기본값 — 게이트웨이가 라우팅한다」고 적고 코드
+#: 예제에서 model 을 주석 처리해 둔다. 어긋난 것이 아니라
 #: **엔드포인트가 모델을 고르는 방식이 둘**이기 때문이다:
 #:
 #:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이

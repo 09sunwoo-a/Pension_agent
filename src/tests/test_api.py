@@ -1,7 +1,7 @@
 """HTTP 진입점(main.py) 회귀 테스트 — 플랫폼 I/O 스키마를 지키는가.
 
-행내 GenAI 플랫폼은 요청·응답 형태를 고정해 두었다(refs/genai-platform.md «API I/O
-스키마 (고정)»). 이 스키마가 어긋나면 에이전트가 아무리 잘 답해도 플랫폼이 못 읽는다 —
+행내 GenAI 플랫폼은 요청·응답 형태를 고정해 두었다(skills/genai-platform-agent-dev/refs/
+genai-platform.md «API I/O 스키마 (고정)»). 이 스키마가 어긋나면 에이전트가 아무리 잘 답해도 플랫폼이 못 읽는다 —
 그런데 그 사실은 **행내에 들고 가서야** 드러난다. 여기서 미리 잡는다.
 
   · input_value 는 JSON «문자열» 이고, 그 안에 message·x_client_user 가 있어야 한다
