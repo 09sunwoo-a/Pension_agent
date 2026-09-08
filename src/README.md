@@ -72,9 +72,18 @@ pip install -r requirements.txt \
 값을 「필수」로 적는데 그쪽은 Gateway 기준이다** — GenAI 플랫폼에서 콘솔이 알려준 모델
 이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
 
-`src/.env`(공통 파일)는 **선택**이다. 관측(Langfuse)을 켜거나 상담 시점의 «오늘»을 고정할
-때만 만든다(`cp .env.example .env`). 프로파일 파일을 둘 이상 둘 때 어느 것을 쓸지 고정하는
-자리이기도 하다 — 하나만 두면 그럴 일이 없다.
+`src/.env` 는 **로컬 실행에서는 선택**이다(프로파일 파일이 하나면 그것이 잡힌다). 관측을
+켜거나 「오늘」을 고정할 때, 프로파일이 둘 이상이라 고를 때만 만든다.
+
+**배포 이미지에서는 필수다.** `Dockerfile` 이 COPY 하는 설정 파일은 `.env` **하나뿐**이고
+프로파일 파일은 이미지에 들어가지 않는다 — 없으면 COPY 단계에서 빌드가 실패한다
+(refs/dockerfile.md). 그래서 배포용 `.env` 에는 **LLM 설정까지 전부** 넣는다:
+
+```bash
+cp .env.example .env      # LLM_BASE_URL · LLM_API_KEY · LLM_MODEL 이 들어 있다
+cat .env.bank >> .env     # 또는 프로파일에 채운 값을 그대로 합친다
+docker build -f Dockerfile -t pension-agent .
+```
 
 ```bash
 # 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다

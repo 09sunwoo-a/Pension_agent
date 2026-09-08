@@ -14,6 +14,9 @@ ENV ENV_PATH=$ENV_FILE_PATH
 WORKDIR /custom
 
 COPY ./requirements.txt /custom/requirements.txt
+# 이미지가 갖는 설정 파일은 이 **하나**다 — `.env.bank` 같은 프로파일 파일은 담지 않는다.
+# 그래서 배포용 `.env` 에는 LLM 설정까지 전부 들어 있어야 한다(.env.example 머리말 ②).
+# 없으면 여기서 빌드가 실패한다(refs/dockerfile.md).
 COPY .env /custom/.env
 
 # STG
