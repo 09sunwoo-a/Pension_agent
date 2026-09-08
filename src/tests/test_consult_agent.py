@@ -4840,6 +4840,20 @@ def check_tool_loop() -> int:
                and "customer" in tools.catalog({"customer_id": "CX"}))
         print(f"{'✓' if hit else '✗'} 쓸 수 없는 도구는 카탈로그에서 제외")
         ok += hit
+
+        # ⑨ 계획이 **남은 호출 수**를 본다. 상한을 쥔 것은 코드인데, 「한 재료로 답할 수
+        #    있으면 last: true 로 한 바퀴를 아껴라」라고 시키면서 몇 바퀴가 남았는지는
+        #    안 알려주던 자리다(§5 「형태 요구는 재료에 없는 것을 요구하지 않는다」).
+        seen: list[str] = []
+        plan.generate = lambda prompt, **kw: (seen.append(prompt) or '{"done": true}')
+        plan.plan_step({"question": "질문"})
+        plan.plan_step({"question": "질문",
+                        "steps": [{"tool": "fact", "query": "q", "outcome": "miss"}]})
+        hit = (len(seen) == 2
+               and f"남은 호출: {plan.MAX_STEPS}회" in seen[0]
+               and f"남은 호출: {plan.MAX_STEPS - 1}회" in seen[1])
+        print(f"{'✓' if hit else '✗'} 계획 프롬프트가 남은 호출 수를 싣고 바퀴마다 준다")
+        ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
         _proc_qa.search = _orig_proc_search

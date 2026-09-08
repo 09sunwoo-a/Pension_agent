@@ -31,7 +31,8 @@ from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
     MUST_BLOCK,
-    PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
+    PLAN_BUDGET_BLOCK, PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK,
+    SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -208,6 +209,13 @@ def _misses_block(state: AgentState, steps: list[dict]) -> str:
     return "".join(parts)
 
 
+def _budget_block(steps: list[dict]) -> str:
+    """계획 프롬프트에 끼우는 '남은 호출 수'. 상한을 쥔 것은 코드인데 계획은 그 값을 못
+    봤다 — `last: true` 로 한 바퀴를 아끼라고 시키면서 몇 바퀴가 남았는지는 안 알려주던
+    자리다(PLAN_BUDGET_BLOCK 머리말). 계산은 장부 길이 하나다."""
+    return PLAN_BUDGET_BLOCK.format(left=max(MAX_STEPS - len(steps), 0))
+
+
 def plan_step(state: AgentState) -> dict[str, Any]:
     evidence = list(state.get("evidence") or [])
     steps = _steps(state)
@@ -226,6 +234,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
                 catalog=tools.catalog(state),
                 ledger=tools.summarize(evidence),
                 misses_block=_misses_block(state, steps),
+                budget_block=_budget_block(steps),
                 # 후속 질문("그럼 안 된다고 하면요?")은 이전 턴을 이어받아야 무엇을 묻는지
                 # 정해진다. 이 줄이 없으면 계획이 이번 질문 한 줄만 보고 재료를 고른다(§2-1).
                 history_block=format_history(state.get("history")),
