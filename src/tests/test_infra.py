@@ -131,7 +131,7 @@ check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임�
 # ─────────────────────────────────────────────────────────────
 # env — 실행 환경(프로파일) 선택 · 값의 우선순위 (env.py 머리말 ①~④)
 #
-# 환경이 셋(행내·로컬·aiden)이라 파일을 환경마다 하나씩 두고 env.py 가 고른다. 고정하는 것:
+# 환경이 셋(행내 플랫폼·행내 Gateway·로컬)이라 파일을 환경마다 하나씩 두고 env.py 가 고른다. 고정하는 것:
 #   · 실제 환경변수 PENSION_ENV > .env 의 PENSION_ENV= 줄 > 프로파일 파일이 하나뿐이면 그것
 #   · 여럿 있고 지정이 없으면 고르지 않는다(짐작하지 않는다)
 #   · 값은 실제 환경변수 > .env.<프로파일> > .env — 프로파일이 공통을 덮는다
@@ -202,7 +202,7 @@ try:
 
         # 지정한 프로파일 파일이 없으면 그 사실을 남긴다(조용히 넘어가지 않는다)
         _clear_env()
-        os.environ["PENSION_ENV"] = "aiden"
+        os.environ["PENSION_ENV"] = "nosuch"   # 존재하지 않는 프로파일 이름
         _env.load(force=True, root=_root)
         check("파일이 없다" in _env.active()["how"], "env: 지정한 프로파일 파일이 없으면 그 사실을 남긴다",
               _env.active()["how"])

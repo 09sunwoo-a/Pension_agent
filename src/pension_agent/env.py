@@ -4,22 +4,21 @@
 쓴다 — 망분리 환경에 코드를 들여올 때 설치할 것이 늘지 않아야 한다.
 
 ━━ 파일 셋 ━━
-LLM 을 쓸 수 있는 환경이 셋이고(행내 genai · 로컬 anthropic · aiden 의 OpenAI 호환 Sonnet), 환경마다
-프로바이더·엔드포인트·키가 다르다. 한 파일(`src/.env`)에 세 벌을 넣고 주석을 바꿔 가며
-쓰면 어느 줄이 살아 있는지 보이지 않는다. 그래서 **환경마다 파일 하나**다.
+LLM 을 쓸 수 있는 환경이 셋이고(행내 GenAI 플랫폼 · 행내 LLM Gateway · 로컬 anthropic),
+환경마다 프로바이더·엔드포인트·키가 다르다. 한 파일(`src/.env`)에 세 벌을 넣고 주석을 바꿔
+가며 쓰면 어느 줄이 살아 있는지 보이지 않는다. 그래서 **환경마다 파일 하나**다.
 
     src/.env            공통 — 어느 환경에서나 같은 값(관측 스위치·PENSION_TODAY 등)과
                         기본 프로파일 이름(`PENSION_ENV=local`)
     src/.env.bank       행내  — GenAI 플랫폼 (LLM_BASE_URL · LLM_API_KEY, LLM_MODEL 은 비운다)
     src/.env.gateway    행내  — LLM Gateway (LiteLLM). bank 와 택일. LLM_MODEL 을 채운다
     src/.env.local      로컬  — anthropic (ANTHROPIC_API_KEY)
-    src/.env.aiden      aiden — OpenAI 호환 게이트웨이의 Sonnet (genai 와 같은 키 셋, 값만 다름)
 
 전부 gitignore 다(비밀). 저장소에는 `*.example` 만 있다 — 복사해서 채운다.
 
 ━━ 어느 파일을 읽나 ━━
 프로파일은 이 순서로 정한다. 먼저 걸리는 것이 이긴다.
-  ① 실제 환경변수 `PENSION_ENV`           — 한 번만 바꿔 돌릴 때(`PENSION_ENV=aiden python -m …`)
+  ① 실제 환경변수 `PENSION_ENV`           — 한 번만 바꿔 돌릴 때(`PENSION_ENV=gateway python -m …`)
   ② `src/.env` 안의 `PENSION_ENV=` 줄      — 이 머신의 기본값을 고정해 둘 때
   ③ `src/.env.<이름>` 이 **딱 하나만** 있으면 그것 — 행내 머신에는 `.env.bank` 만 두면 끝
   ④ 없음                                  — 프로파일 파일 없이 `.env` 와 실제 환경변수만
@@ -57,7 +56,7 @@ DOTENV_ENV = DOTENV_ENVS[0]
 PROFILE_ENV = "PENSION_ENV"
 
 #: 알려진 프로파일. 여기 없는 이름도 `.env.<이름>` 이 있으면 읽는다 — 목록은 안내용이다.
-PROFILES = ("bank", "gateway", "local", "aiden")
+PROFILES = ("bank", "gateway", "local")
 
 _loaded = False
 _active: dict = {"profile": None, "how": "미적재", "files": []}

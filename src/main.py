@@ -142,7 +142,7 @@ def health() -> dict[str, Any]:
     """
     return {
         "status": "ok",
-        # 어느 .env 가 읽혔나 — 프로파일이 셋이라(bank·local·aiden) 이것이 진단의 첫 질문이다.
+        # 어느 .env 가 읽혔나 — 프로파일이 셋이라(bank·gateway·local) 이것이 진단의 첫 질문이다.
         # `python -m pension_agent.env` 가 터미널에 찍는 것과 같은 내용이다.
         "env": env.active(),
         "llm": {

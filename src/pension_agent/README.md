@@ -96,17 +96,17 @@ LLM 을 쓸 수 있는 환경이 셋이고 환경마다 프로바이더·엔드�
 
 | 프로파일 | 환경 | 파일 | 프로바이더 |
 |---|---|---|---|
-| `bank` | 행내(망분리) | `src/.env.bank` | genai — `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL` |
+| `bank` | 행내 GenAI 플랫폼 | `src/.env.bank` | genai — `LLM_BASE_URL`·`LLM_API_KEY`, `LLM_MODEL` 은 **비운다** |
 | `local` | 개발 PC | `src/.env.local` | anthropic — `ANTHROPIC_API_KEY` |
-| `aiden` | 행내·외부 중간, Sonnet | `src/.env.aiden` | genai — OpenAI 호환 게이트웨이. `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL`(Sonnet 슬러그) |
+| `gateway` | 행내 LLM Gateway (LiteLLM) | `src/.env.gateway` | genai 경로 — `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL`(모델 슬러그를 **채운다**) |
 
 어느 파일을 읽을지는 이 순서로 정한다: 실제 환경변수 `PENSION_ENV` → `src/.env` 안의
 `PENSION_ENV=` 줄 → `.env.<이름>` 파일이 하나뿐이면 그것. 행내 머신에는 `.env.bank` 만
 두면 아무것도 지정하지 않아도 그쪽이 잡힌다. 여러 개를 두는 개발 PC 는 `.env` 에
-`PENSION_ENV=local` 로 기본을 고정하고, 잠깐 바꿔 돌릴 때만 `PENSION_ENV=aiden python -m …`
+`PENSION_ENV=local` 로 기본을 고정하고, 잠깐 바꿔 돌릴 때만 `PENSION_ENV=gateway python -m …`
 으로 앞에 붙인다. 프로파일 파일이 공통 파일을 덮는다.
 
 ```bash
-cp .env.example .env && cp .env.aiden.example .env.aiden   # 견본을 복사해 채운다
+cp .env.bank.example .env.bank      # 견본 하나를 복사해 채운다(.env 는 선택)
 python -m pension_agent.env                                # 어느 파일·프로바이더가 잡혔나
 ```
