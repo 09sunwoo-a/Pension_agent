@@ -61,6 +61,22 @@ check(len(summary) == 2, "session_store: summarize_for_briefing 최신순 2건",
 empty_summary = session_store.summarize_for_briefing("NO_SUCH_CUSTOMER")
 check(empty_summary == [], "session_store: 없는 고객은 빈 목록(에러 아님)")
 
+# UTF-8 로 쓸 수 없는 문자가 섞여도 기록은 남는다 — 행내 터미널(로케일 비 UTF-8)에서
+# 백스페이스가 한글 한 글자 중 1바이트만 지우면 남은 2바이트가 surrogateescape 로 들어와
+# `input()` 은 성공하고 파일 쓰기에서 죽었다(2026-09-08 실측 — 답변까지 만든 턴이 통째로).
+_broken = "이 고객 왜 타겟".encode("utf-8")[:-1].decode("utf-8", "surrogateescape") + " 이야?"
+check(session_store.scrub_text(_broken) == "이 고객 왜 타 이야?",
+      "session_store.scrub_text: 반쪽 바이트(서로게이트)를 지운다", repr(session_store.scrub_text(_broken)))
+try:
+    session_store.append_turn("TEST01", "sess-c", {"role": "user", "text": _broken})
+    _saved_ok = True
+except UnicodeEncodeError:
+    _saved_ok = False
+check(_saved_ok, "session_store: 서로게이트가 섞인 텍스트로도 저장이 죽지 않는다")
+_sess_c = next(s for s in session_store.list_sessions("TEST01") if s["session_id"] == "sess-c")
+check(_sess_c["turns"][0]["text"] == "이 고객 왜 타 이야?",
+      "session_store: 저장 뒤 다시 읽힌다(깨진 바이트만 빠진다)", repr(_sess_c["turns"][0]["text"]))
+
 _clean_session_data()
 
 

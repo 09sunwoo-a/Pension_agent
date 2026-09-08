@@ -13,6 +13,7 @@ import sys
 
 from pension_agent.consult_agent import render
 from pension_agent.consult_agent.graph import ask
+from pension_agent.session_store import scrub_text
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -57,7 +58,9 @@ else:
     history = []
     while True:
         try:
-            q = input("\n> ").strip()
+            # 로케일이 UTF-8 이 아닌 터미널에서 백스페이스가 남긴 반쪽 바이트를 지운다
+            # (session_store.scrub_text 주석 — 그대로 두면 상담이력 저장에서 턴이 죽는다).
+            q = scrub_text(input("\n> ")).strip()
         except EOFError:
             break
         if not q:
