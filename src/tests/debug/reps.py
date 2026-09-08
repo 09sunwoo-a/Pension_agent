@@ -28,6 +28,12 @@
 것이라, 읽는 사람은 «그 값이 그 뜻으로 답에 들어 있는가»만 보면 된다. 채점은 여전히
 하지 않는다(아래 「채점하지 않는다」).
 
+턴에 **기대값**이 달려 있으면(`scenarios.EXPECT`) 그 턴 아래와 맨 끝 요약에 판정이 함께
+찍힌다 — 무슨 도구를 불렀나 · 어떻게 끝났나 · 판정 등급 · 게이트를 통과했나처럼 **코드가
+아는 사실**만 본다(답변 문장의 좋고 나쁨은 사람이 읽는다). 기대가 없는 턴은 아무것도
+찍지 않는다. 이게 없던 동안 리허설의 회귀 탐지는 «누가 로그를 끝까지 읽었는가»에 달려
+있었다.
+
 `--why` 는 예전 이름이 `--debug` 였다. 같은 이름이 `python -m tests.debug` 에서는 **전체
 트레이스**(노드·게이트 트리)를 뜻해 두 CLI 에서 다른 것을 가리켰다 — 이름이 같으면 뜻도
 같아야 한다. `--show-llm`(폐기된 생성문)은 두 CLI 에서 뜻이 같아 이름을 그대로 둔다.
@@ -209,6 +215,68 @@ def _pad(text: str, width: int) -> str:
 
 def _width(text: str) -> int:
     return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def _observed(result: dict, turn: TR.Turn) -> dict:
+    """이 턴에서 «코드가 아는 사실»만 모은다 — 기대값 판정의 입력(scenarios.Expect).
+
+    **답변 문장은 보지 않는다.** 여기서 재는 것은 무슨 도구를 불렀나 · 어떻게 끝났나 ·
+    판정 등급 · 게이트를 통과했나 · 출처가 실렸나 · 연계를 제안했나 · 게이트가 갈래를
+    표시했나뿐이다. 답이 좋은지는 사람이 읽어야 하고, LLM 에게 자기 답을 채점시키지 않는다.
+
+    값의 출처가 둘이다 — 진입점 반환값(`graph.ask`)과 계측(trace). 도구 목록·출처·연계는
+    앞쪽이 그대로 주고, 판정 등급·재계획·게이트 판정은 상태 차분에만 있어 뒤쪽에서 뽑는다.
+    """
+    node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
+    delta = node.delta if node is not None else {}
+    # LLM 이 죽은 턴은 «되묻지도 답하지도 않은» 세 번째 결말이다(§11) — 답변으로 세면
+    # 장애가 난 실행이 통과로 보고된다. 원인은 어느 노드에서든 남을 수 있다.
+    failed = any(n.delta.get("llm_error") or n.name == TR.LLM_DOWN_NODE for n in turn.nodes)
+    gates = [g for n in turn.nodes for g in n.gates]
+    return {
+        # 진입점이 턴 기록에 남기는 도구 이름(state.Turn 의 tools). 원장을 다시 세지 않는다.
+        "tools": ((result.get("history") or [{}])[-1] or {}).get("tools") or [],
+        "outcome": "llm_down" if failed else "clarify" if result.get("clarify") else "answer",
+        "verdict": delta.get("judge_verdict") or "",
+        "replanned": any(n.delta.get("plan_retry") for n in turn.nodes),
+        # 게이트가 **한 번도 안 돈** 턴을 통과로 세지 않는다 — LLM 이 죽어 작성까지 못 간
+        # 턴이 «검증 통과»로 보고되면 그 표는 거짓말이다.
+        "gates_passed": bool(gates) and _stopped(node) is None,
+        "sources": bool(result.get("sources")),
+        "offered": bool(result.get("pending_action")),
+        # 갈래 표시는 `plan_step` 이 자기 반환값으로 넘긴다(answer 노드가 아니다) — 계획이
+        # 여러 바퀴 돌면 마지막 바퀴에만 실리므로 턴 전체를 훑는다. `replanned` 와 같다.
+        "branches": any(n.delta.get("branches") for n in turn.nodes),
+    }
+
+
+def _expect_line(script: str, label: str, result: dict, turn: TR.Turn) -> tuple[str, list[str]]:
+    """기대값 판정 한 건. 반환: (요약 한 줄, 어긋난 항목). 기대가 없으면 ("", [])."""
+    want = SCEN.expect_for(script, label)
+    if want is None:
+        return "", []
+    misses = want.diff(_observed(result, turn))
+    return ("✗ 기대 어긋남" if misses else "✓ 기대 통과"), misses
+
+def _print_expectations(judged: list[tuple[str, str, list[str]]]) -> None:
+    """기대값 판정 결과. 기대를 단 턴이 하나도 없으면 아무것도 찍지 않는다.
+
+    **어긋난 것을 맨 아래에 다시 모은다.** 턴마다 찍은 줄은 긴 출력 중간에 묻히는데,
+    이 실행이 무엇을 어겼는지는 스크롤하지 않고 알 수 있어야 한다 — 그 한 가지가
+    「리허설을 끝까지 읽은 사람만 회귀를 안다」는 상태를 없애려는 목적의 전부다.
+    """
+    if not judged:
+        return
+    bad = [(label, misses) for label, verdict, misses in judged if misses]
+    print(f"\n  기대값 — {len(judged) - len(bad)}/{len(judged)} 통과"
+          + ("" if bad else " (전부 통과)"))
+    for label, misses in bad:
+        print(f"    ✗ {label}")
+        for m in misses:
+            print(f"        {m}")
+    if bad:
+        print("    어긋난 것이 구현 쪽인지 기대 쪽인지는 사람이 정합니다 —"
+              " 기대가 틀렸으면 scenarios.EXPECT 를 고칩니다.")
 
 
 def _row(no: object, sees: str, turn: TR.Turn, secs: float) -> list[str]:
@@ -512,6 +580,7 @@ def main(argv: list[str]) -> int:
         print(f"\n대본: {where}  ({SCRIPTS[script][1]})")
 
     rows: list[list[str]] = []
+    judged: list[tuple[str, str, list[str]]] = []   # (라벨, 판정, 어긋난 항목)
     with _fixtures_intact():
         for no, sees, customer, turns in blocks:
             if (picked or names) and str(no) not in picked \
@@ -593,6 +662,15 @@ def main(argv: list[str]) -> int:
                             print()   # 진행 줄과 답변을 가른다
                         _print_answer(result)
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1], took))
+                    # 기대값 판정 — `sees` 중 기계가 볼 수 있는 부분만(scenarios.EXPECT).
+                    # 기대가 없는 턴은 아무것도 찍지 않는다.
+                    verdict, misses = _expect_line(script, label, result, tr.turns[-1])
+                    if verdict:
+                        judged.append((label, verdict, misses))
+                        if not brief:
+                            print(f"\n   {verdict}")
+                            for m in misses:
+                                print(f"       {m}")
                     if rehearsal and why and not brief:
                         print()
                         print(_log(tr.turns[-1], result, show_llm=show_llm))
@@ -613,6 +691,7 @@ def main(argv: list[str]) -> int:
         if i == 0:
             print("  " + "  ".join("─" * w for w in widths))
     print("\n  도구 뒤의 ✗ 는 그 호출이 자료를 못 찾은 것 — 다음 칸에서 다른 도구로 옮겨갔는지가 요점입니다.")
+    _print_expectations(judged)
     for line in CHECKS.get(script, ()):
         print(line)
     if script == "review" and version and version != SCEN.LATEST:

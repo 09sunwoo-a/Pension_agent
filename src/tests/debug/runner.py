@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 
+from pension_agent import session_store
 from pension_agent.consult_agent import graph as G
 from tests.debug import script, trace as TR
 
@@ -47,20 +48,38 @@ def session(*, customer_id: str | None = None,
     받는다. 넘기지 않으면 예전처럼 빈 히스토리로 시작한다.
     """
     tr = TR.Trace()
+    # 우리가 만든 id 인지 기억한다 — 나갈 때 걷어낼지가 여기서 갈린다(아래).
+    ours = session_id is None
     session_id = session_id or f"debug-{uuid.uuid4().hex[:8]}"
     outer = script.installed(scenario) if scenario else nullcontext()
-    with outer, TR.instrument(tr):
-        turns: list[dict] = list(history or [])
+    try:
+        with outer, TR.instrument(tr):
+            turns: list[dict] = list(history or [])
 
-        def ask(question: str) -> dict:
-            nonlocal turns
-            tr.begin_turn(question)
-            r = G.ask(question, history=turns, customer_id=customer_id,
-                      session_id=session_id, on_progress=on_progress)
-            turns = r["history"]
-            return r
+            def ask(question: str) -> dict:
+                nonlocal turns
+                tr.begin_turn(question)
+                r = G.ask(question, history=turns, customer_id=customer_id,
+                          session_id=session_id, on_progress=on_progress)
+                turns = r["history"]
+                return r
 
-        yield ask, tr
+            yield ask, tr
+    finally:
+        # 리허설이 남긴 기록을 걷어낸다. 운영 진입점을 그대로 부르므로 턴마다 기록이
+        # 남는데(§2), 그 파일은 **시연용 시드 세션과 같은 파일**이고 저장소에 커밋된다 —
+        # 걷어내지 않으면 리허설을 돌 때마다 추적 파일이 더러워지고, 그대로 커밋되면 다음
+        # 시연에서 T5 「지난번엔 무슨 얘기 했지?」가 리허설의 오류 문장을 «지난 상담»으로
+        # 읽는다(tests/test_consult_agent.py 가 자기 잔여물을 지우는 것과 같은 자리다).
+        #
+        # **호출자가 준 id 는 건드리지 않는다.** 그건 그쪽이 이어 가는 상담이라 우리 것이
+        # 아니다. 정리가 실패해도 리허설 결과를 죽이지 않는다 — 잔여물은 손으로 지울 수
+        # 있지만 결과는 다시 돌려야 나온다.
+        if ours and customer_id:
+            try:
+                session_store.drop_session(customer_id, session_id)
+            except Exception:  # noqa: BLE001 — 정리 실패가 리허설을 죽이지 않는다
+                pass
 
 
 def run(questions: list[str], *, customer_id: str | None = None,

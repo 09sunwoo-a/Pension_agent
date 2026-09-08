@@ -189,7 +189,7 @@ def check_pitch_stages() -> bool:
         return [] if any(kw.get(k) for k in ("customer_type", "objection_type", "stage")) else [(0.5, real)]
 
     orig_retrieve, orig_verify = tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None: h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         found = tools._pitch(
             {"question": "질문", "customer_type": "사업자", "stage": "이탈방어", "objection_type": None},
@@ -903,7 +903,7 @@ def check_verify_gate() -> bool:
     agent = G.build_agent()
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: []
     try:
         out = agent.invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
     finally:
@@ -1540,7 +1540,10 @@ def check_context_and_clarify() -> int:
     # 되묻지 않기로 하면 그대로 답변으로 흘러간다.
     CL.generate = lambda prompt, **kw: '{"ask": null}'
     try:
-        hit = CL.clarify({"question": "한도 얼마야?", "evidence": evidence}) == {}
+        # 등급은 남는다(계측용) — 막지 않는다는 것은 «되묻지도, 다시 쓰게 하지도 않는다»다.
+        out = CL.clarify({"question": "한도 얼마야?", "evidence": evidence})
+        hit = not out.get("clarify") and not out.get("judge_note") \
+            and out.get("judge_verdict") == CL.ANSWER
     finally:
         CL.generate = orig_gen
     print(f"{'✓' if hit else '✗'} 되묻지 않기로 하면 답변 경로를 막지 않는다")
@@ -1637,7 +1640,7 @@ def check_adequacy_and_shape() -> int:
 
     # ① 게이트가 재료 종류를 가리지 않는가 — 전부 버리면 어느 도구도 근거를 못 내놓는다.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: []
     try:
         blocked = [name for name in ("fact", "procedure", "segment", "method", "fieldtip", "pitch")
                    if tools.run(name, {"question": "세액공제 한도가 얼마야?"},
@@ -1651,7 +1654,7 @@ def check_adequacy_and_shape() -> int:
 
     # 0건이면 게이트를 부르지 않는다 — 부를 이유가 없는 자리에서 LLM 을 쓰지 않는다.
     called: list[str] = []
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: (called.append(kind), h)[1]
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: (called.append(kind), h)[1]
     try:
         tools.run("fact", {"question": "오늘 서울 날씨 어때?"}, "오늘 서울 날씨 어때?")
     finally:
@@ -1674,7 +1677,7 @@ def check_adequacy_and_shape() -> int:
     q = "디폴트옵션 변경 화면번호 알려줘"
     candidates = procedure_qa.search(q)
     keep = candidates[-1][1]["id"] if candidates else ""
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: [x for x in h if x[1]["id"] == keep]
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: [x for x in h if x[1]["id"] == keep]
     try:
         found = tools.run("procedure", {"question": q}, q)
     finally:
@@ -1685,7 +1688,7 @@ def check_adequacy_and_shape() -> int:
     ok += hit
 
     # 남길 것이 하나도 없을 때만 근거 없음이다.
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: []
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: []
     try:
         hit = tools.run("procedure", {"question": q}, q) is None
     finally:
@@ -1856,7 +1859,7 @@ def check_material_marks() -> int:
 
     # 도구가 실제로 표시를 실어 보내는가(선언이 아니라 배선을 본다).
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "사전 고지를 안 하면 민원으로 돌아온다는데 현장에서는 어떻게 하나요?"
         found = tools.run("fieldtip", {"question": q}, q)
@@ -1971,7 +1974,7 @@ def check_relations() -> int:
     with_rel = next(f for f in by_id.values() if R.declared(f) and f.get("value"))
     without_rel = next(f for f in by_id.values() if not R.declared(f) and f.get("value"))
     orig_fits, orig_search = tools.fits_question, facts_qa.search
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
     facts_qa.search = lambda question: [(2.0, with_rel), (2.0, without_rel)]
     try:
         found = tools.run("fact", {"question": "q"}, "세액공제 공제율")
@@ -2082,7 +2085,7 @@ def check_turn_cost() -> int:
     orig_fits = tools.fits_question
     pitch.extract_slots = lambda st: called.append("slots") or {}
     tools.llm_pick = lambda kinds, q: []
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
     try:
         tools.run("pitch", {"question": "수수료 부담된다고 하시네요"}, "수수료 부담")
     finally:
@@ -2151,7 +2154,7 @@ def check_miss_recovery() -> int:
     question = "포트폴리오 운용현황 조회 화면 번호는?"
     shrunk = "운용현황 조회 화면번호"
     orig_fits = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         hit = (not procedure_qa.search(shrunk)                       # 줄여 쓰면 0건인데
                and bool(procedure_qa.search(question))               # 원문으로는 찾고
@@ -2370,7 +2373,8 @@ def check_clarify_golden() -> int:
                           "history": history, "evidence": evidence})
     finally:
         CL.generate = orig_cl
-    hit = bool(seen) and "타행에서 퇴직금 가져오려는 고객" in seen[0] and out == {}
+    hit = bool(seen) and "타행에서 퇴직금 가져오려는 고객" in seen[0] \
+        and not out.get("clarify") and not out.get("judge_note")
     print(f"{'✓' if hit else '✗'} 판정 프롬프트가 이전 대화를 본다(맥락으로 갈래가 정해진 후속 질문)")
     ok += hit
 
@@ -2587,7 +2591,7 @@ def check_screen_registry() -> int:
 
     # 화면번호 질문이 그 카드에 닿는가.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "포트폴리오 운용현황 조회 화면 번호는?"
         found = tools.run("screen", {"question": q}, q)
@@ -2631,7 +2635,7 @@ def check_screen_registry() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "고객이 스타뱅킹에서 직접 상품변경 하려면 어느 메뉴로 가나요"
         found = tools.run("channel", {"question": q}, q)
@@ -3236,7 +3240,7 @@ def check_caution_roles() -> int:
     from pension_agent.consult_agent.nodes import procedure_qa as PQ
     by_id = {c["id"]: c for c in KB.cards}
     orig_search, orig_fits = PQ.search, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         PQ.search = lambda q: [(2.0, by_id["proc.001"])]
         found = tools.run("procedure", {"question": "q"}, "적립금 조회 절차")
@@ -3248,7 +3252,7 @@ def check_caution_roles() -> int:
 
     # ④ caution 은 표시로 나간다 — 역할을 나눈 목적은 진짜 주의를 살리는 것이다.
     orig_pick, orig_fits = tools.pick, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         tools.pick = lambda kinds, q, **kw: [(2.0, by_id["screen.06-10-182"])]
         found = tools.run("screen", {"question": "q"}, "연금납입정보 조회 화면")
@@ -4693,7 +4697,7 @@ def check_order_flipped() -> int:
         return []
 
     orig_pick, orig_retrieve, orig_verify = tools.llm_pick, tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None: h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None, sink=None: h
     ok = 0
     try:
         # ① LLM 이 골랐으면 n-gram 은 아예 돌지 않는다.
@@ -4712,7 +4716,7 @@ def check_order_flipped() -> int:
 
         # ③ LLM 의 선택도 게이트를 그대로 통과해야 한다(1차가 됐다고 면제 아님).
         tools.llm_pick = lambda kinds, query: [(2.0, target)]
-        tools.fits_question = lambda q, h, kind="", history=None, query=None: []
+        tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: []
         hit = tools._pitch({"question": "질문"}, "질문") is None
         print(f"{'✓' if hit else '✗'} LLM 선택도 적합성 게이트 적용")
         ok += hit
@@ -4730,7 +4734,7 @@ def check_tool_loop() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
 
     # 절차 카드는 검색 1위가 아니라 **이름으로 고정**한다. 예전에는 "디폴트옵션 변경 화면번호"
     # 의 1위(proc.018)에 기댔는데, 그 카드의 화면번호는 ⚠ 유의 박스에서 잘못 딸려 온 것이라
@@ -5009,7 +5013,7 @@ def check_market_material() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "디폴트옵션 알파드림 구성상품이 뭐야"
         found = tools.run("lineup", {"question": q}, q)
@@ -5125,7 +5129,7 @@ def check_market_material() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "1975년생이면 TDF 몇 년짜리 골라야 해?"
         found = tools.run("lineup", {"question": q}, q)
@@ -5154,7 +5158,7 @@ def check_market_material() -> int:
     # ② 같은 문서의 절이 걸리면 개요 카드는 자리를 비켜준다. 개요는 문서 키워드를 통째로
     #    들고 있어 어떤 질문에나 걸리는데, **답이 든 표는 절에 있다**.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         found = tools.run("lineup", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
     finally:
@@ -5275,7 +5279,7 @@ def check_atomic_spans() -> int:
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))
         orig_fits, orig_search = tools.fits_question, FQ.search
-        tools.fits_question = lambda question, h, kind="", history=None, query=None: h
+        tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
         FQ.search = lambda question: [(2.0, bare)]
         try:
             f = tools.run("fact", {"question": "q"}, "확정값")
@@ -5377,7 +5381,7 @@ def check_plan_failure() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     question = "고객이 주식이 더 낫다는데 뭐라고 하지?"
     base = {"question": question, "utterance": question}
 
@@ -5730,6 +5734,354 @@ def check_node_label_collision() -> int:
     return hit
 
 
+def check_graded_judge() -> int:
+    """등급형 판정 — 답한다 · 전제를 밝히고 답한다 · 되묻는다 · 없다 (§5 · gap 30).
+
+    판정의 출력이 「되물을까/말까」 둘이던 동안 §5 의 나머지 두 결론은 **출력을 갖지
+    못했다**: 판정자가 갈래를 알아내고도 그 사실이 작성자에게 건너가지 않았고(전제),
+    핵심 대상이 없다는 판단은 작성 지시로만 걸려 있었다(대본 T12). 여기서 재는 것은
+    네 등급이 각자 다른 일을 하는지, 그리고 **판정이 경계를 넓히지 못하는지**다.
+    """
+    from pension_agent.consult_agent.nodes import answer as ANS, clarify as CL
+    ok = 0
+    print("\n[등급형 판정 — 네 결론이 각자 출력을 갖는다 (§5)]")
+
+    def ev(tool="procedure", text="타행→당행 절차 / 당행→타행 절차"):
+        # allow 는 `_ev` 의 기본값과 같게 둔다 — `_quotable` 이 보는 원장 텍스트가
+        # compose 의 검증기가 보는 것과 같아야 «통과할 전제»와 «폐기될 답»이 어긋나지 않는다.
+        return {"tool": tool, "query": "q", "text": text, "atomic": [], "notices": [],
+                "notice_scopes": [], "marks": [], "related": [], "allow": [text],
+                "sources": [{"id": "proc.020", "title": "계약이전", "doc": "d",
+                             "score": None, "page": None}], "meta": {}}
+
+    orig_gen = CL.generate
+    try:
+        # ① assume — 갈래를 «정해 주는» 재료가 있으면 되묻지 말고 전제를 밝히고 답한다.
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "타행에서 당행으로 가져오는 경우"}'
+        out = CL.clarify({"question": "실물이전 어떻게 처리해?", "customer_id": "198734-1205842",
+                          "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASSUME and "타행에서 당행으로" in (out.get("judge_note") or "") \
+            and not out.get("clarify")
+        print(f"{'✓' if hit else '✗'} assume — 되묻지 않고 전제를 작성 지시로 넘긴다")
+        ok += hit
+
+        # ② none — 질문의 핵심 대상이 재료에 없다(§5 · 대본 T12 타행 수수료).
+        CL.generate = lambda prompt, **kw: '{"verdict": "none", "missing": "타행 IRP 수수료"}'
+        out = CL.clarify({"question": "타행 IRP 수수료는 우리보다 싼가?", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.NONE and "타행 IRP 수수료" in (out.get("judge_note") or "")
+        print(f"{'✓' if hit else '✗'} none — 없다는 사실을 첫 문장에 세우라고 넘긴다")
+        ok += hit
+
+        # ②-b **정해 줄 것이 없으면 전제를 만들 수 없다.** 열린 고객도 이전 대화도 없는
+        #      턴에서 assume 이 나오면 그것은 무엇을 읽고 정한 것이 아니라 지어낸 전제다
+        #      (2026-09-07 리허설 케이스 1 — 첫 턴·고객 없음인데 전제를 세워 답을 ISA 쪽으로
+        #      밀었고, 카드가 못박은 오답에 걸려 폐기됐다).
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "ISA 만기 전환 포함"}'
+        out = CL.clarify({"question": "IRP 세액공제 한도가 얼마야?", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASSUME and not out.get("judge_note")
+        print(f"{'✓' if hit else '✗'} 고객도 이전 대화도 없으면 전제를 버린다(지어낸 전제)")
+        ok += hit
+
+        out = CL.clarify({"question": "IRP 세액공제 한도가 얼마야?", "evidence": [ev()],
+                          "customer_id": "198734-1205842"})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 고객이 열려 있으면 전제가 산다")
+        ok += hit
+
+        out = CL.clarify({"question": "그럼 얼마야?", "evidence": [ev()],
+                          "history": [{"question": "앞 질문"}]})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 이전 대화가 있으면 전제가 산다(맥락도 정해 주는 재료다)")
+        ok += hit
+
+        # ③ 판정이 **수치를 새로 만들 수 없다** — 원장 밖 숫자가 든 전제는 버린다.
+        #    작성 프롬프트에 들어가면 작성자가 되받고, 그 수치는 원장 밖이라 답이 통째로
+        #    폐기된다(§6). 넓히는 대신 넓힐 필요가 없는 문장만 통과시킨다.
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "총급여 7,700만원 구간"}'
+        out = CL.clarify({"question": "얼마 돌려받아?", "customer_id": "198734-1205842",
+                          "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
+        hit = out.get("judge_verdict") == CL.ASSUME and not out.get("judge_note")
+        print(f"{'✓' if hit else '✗'} 원장 밖 수치가 든 전제는 버린다(경계는 코드가 쥔다)")
+        ok += hit
+
+        # 원장 안 수치면 통과한다 — 잃는 쪽으로만 기울지 않는다.
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "총급여 5,500만원 이하 구간"}'
+        out = CL.clarify({"question": "얼마 돌려받아?", "customer_id": "198734-1205842",
+                          "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 원장 안 수치를 쓴 전제는 통과한다")
+        ok += hit
+
+        # ④ 옛 규격(`{"ask": …}`)도 되묻기로 읽는다 — 등급을 늘린 변경이 있던 기능을
+        #    없애는 쪽으로 작동하면 안 된다(작은 모델이 규격을 못 맞추는 일이 있다).
+        CL.generate = lambda prompt, **kw: '{"ask": "어느 방향인가요?", "options": ["타행 → 당행", "당행 → 타행"]}'
+        out = CL.clarify({"question": "실물이전", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASK and bool(out.get("clarify")) and bool(out.get("sources"))
+        print(f"{'✓' if hit else '✗'} 등급 칸이 없는 옛 응답도 되묻기로 읽는다")
+        ok += hit
+    finally:
+        CL.generate = orig_gen
+
+    # 관문은 그대로다 — 고객 재료뿐이면 판정을 아예 돌리지 않는다(오판의 기회를 없앤다).
+    hit = not CL.applicable({"question": "평가금액 얼마야",
+                             "evidence": [ev(tool="customer", text="· 개인부담금 0원")]})
+    print(f"{'✓' if hit else '✗'} 관문은 그대로 — 갈래를 만드는 재료가 없으면 판정을 안 돌린다")
+    ok += hit
+
+    # ⑥ 게이트가 표시한 갈래가 판정 프롬프트에 실린다. 없으면 블록 자체가 안 붙는다 —
+    #    없는데 「갈래: 없음」을 세우면 판정 LLM 이 없는 갈래를 만든다(§7 과 같은 이유).
+    seen: list[str] = []
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"verdict": "answer"}')[1]
+    try:
+        CL.clarify({"question": "실물이전", "evidence": [ev()],
+                    "branches": [{"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]})
+        CL.clarify({"question": "실물이전", "evidence": [ev()]})
+    finally:
+        CL.generate = orig_gen
+    hit = len(seen) == 2 and "이전 방향" in seen[0] and "<갈래" not in seen[1]
+    print(f"{'✓' if hit else '✗'} 게이트가 표시한 갈래가 실리고, 없으면 블록이 안 붙는다")
+    ok += hit
+
+    # ⑦ 게이트 응답 읽기 — 객체·배열 둘 다 읽는다. 규격을 못 맞췄다고 후보를 전멸시키면
+    #    갈래를 적게 한 변경이 «맞는 답을 지우는» 쪽으로 작동한다(§6).
+    keep, br = tools._adequacy_verdict(
+        '{"keep": ["proc.020", "proc.031"],'
+        ' "branches": [{"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]}')
+    hit = keep == {"proc.020", "proc.031"} and br == [
+        {"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]
+    print(f"{'✓' if hit else '✗'} 게이트 응답: 채택과 갈래를 함께 읽는다")
+    ok += hit
+
+    hit = tools._adequacy_verdict('["proc.020"]') == ({"proc.020"}, [])
+    print(f"{'✓' if hit else '✗'} 옛 배열 규격도 채택으로 읽는다(후보를 전멸시키지 않는다)")
+    ok += hit
+
+    # 선택지가 하나뿐이면 갈래가 아니다 — 갈래를 보여주지 못하는 표시는 아무것도 정해주지 않는다.
+    hit = tools._adequacy_verdict('{"keep": [], "branches": [{"axis": "축", "options": ["하나"]}]}')[1] == []
+    print(f"{'✓' if hit else '✗'} 선택지가 2개 미만이면 갈래로 세지 않는다")
+    ok += hit
+
+    # ⑧ 갈래는 축 이름으로 중복이 걷힌다 — `tools.run` 이 질의를 바꿔 게이트를 두 번 돌린다.
+    st: dict = {}
+    axis = [{"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]
+    tools.record_branches(st, axis)
+    tools.record_branches(st, axis)
+    hit = st.get("branches") == axis
+    print(f"{'✓' if hit else '✗'} 같은 갈래가 두 줄로 서지 않는다(원문 재검색 대비)")
+    ok += hit
+
+    # ⑨ 배선 — assume 이면 **다시 쓴 답**이 나가고, 다시 쓴 것이 비면 처음 것이 나간다.
+    #    판정을 도우려던 장치가 답을 없애면 안 된다(§6 의 «옳은 답의 거부»가 판정 쪽에서
+    #    재현되는 자리다).
+    calls: list[dict] = []
+
+    def fake_compose(state):
+        calls.append(dict(state))
+        return {"answer": "다시 쓴 답" if state.get("judge_note") else "처음 답"}
+
+    orig_compose, orig_clarify = ANS.compose, ANS.clarify
+    ANS.compose = fake_compose
+    ANS.clarify = lambda state: {"judge_verdict": "assume", "judge_note": "<전제>"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify = orig_compose, orig_clarify
+    hit = out.get("answer") == "다시 쓴 답" and len(calls) == 2 and not calls[0].get("judge_note")
+    print(f"{'✓' if hit else '✗'} assume — 첫 작성은 판정을 못 보고, 그 뒤 한 번 다시 쓴다")
+    ok += hit
+
+    calls.clear()
+    ANS.compose = lambda state: (calls.append(1), {"answer": "" if state.get("judge_note") else "처음 답"})[1]
+    ANS.clarify = lambda state: {"judge_verdict": "none", "judge_note": "<없다>"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify = orig_compose, orig_clarify
+    hit = out.get("answer") == "처음 답"
+    print(f"{'✓' if hit else '✗'} 다시 쓴 것이 비면 처음 답이 나간다(답을 잃지 않는다)")
+    ok += hit
+
+    # ⑩ 되묻기는 그대로 — 판정이 되묻자고 하면 써 둔 답은 나가지 않는다(§5 의 지위는 불변).
+    ANS.compose = lambda state: {"answer": "써 둔 답"}
+    ANS.clarify = lambda state: {"judge_verdict": "ask", "clarify": {"question": "?"},
+                                 "answer": "되묻기"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify = orig_compose, orig_clarify
+    hit = out.get("answer") == "되묻기" and bool(out.get("clarify"))
+    print(f"{'✓' if hit else '✗'} ask — 써 둔 답을 버리고 되묻기로 턴이 끝난다")
+    ok += hit
+
+    # ⑪ 게이트가 갈래를 **남긴 후보 위에서** 찾는지. 이 지시가 「빼려는 후보들이 서로
+    #    갈래면」이던 동안 갈래 절은 «뺄 후보가 있는 턴»에만 읽혔고, 실측 11턴 내내
+    #    `branches` 가 한 번도 안 찍혔다(gap 34). 갈래가 걸리는 질문일수록 갈래마다 답이
+    #    되는 카드가 전부 맞는 카드라 하나도 안 빠지기 때문이다 — 장치가 붙어 있는데
+    #    입력이 영원히 비는 형태라, 되묻기가 잘 되는 동안 아무도 눈치채지 못한다.
+    #    문구를 재는 테스트인 이유는 **여기서 갈래가 생기지 않으면 아래 배선이 전부 죽은
+    #    코드**이기 때문이다(⑥⑦⑧ 이 전부 통과해도 실전에서 안 돈다).
+    from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
+    text = ADEQUACY_PROMPT
+    hit = "남긴 후보 중에" in text and "빼려는 후보들이" not in text
+    print(f"{'✓' if hit else '✗'} 게이트는 갈래를 «남긴 후보» 위에서 찾는다(뺄 때만이 아니다)")
+    ok += hit
+
+    return ok
+
+
+def check_tool_axes() -> int:
+    """`pitch` 와 `playbook` 의 설명이 «무엇으로 찾나»로 갈리는가 (gap 35).
+
+    도구 설명은 계획 LLM 이 읽는 **유일한** 판단 재료다(`tools.catalog`). 둘 다 「반론」을
+    말하고 축을 말하지 않던 동안, 고객 화면이 열린 턴의 반론 질문이 통째로 `playbook` 으로
+    갔다 — 그쪽은 후보를 **고객 계좌 상태**로 고르고 질문은 좁히기만 해서, 「손실만 나는데
+    해지하겠다」로 조회하면 관련도 0.09 의 절차 카드 한 장이 남는다. 같은 질문이 `pitch` 로
+    가면 pitch.k03.012(해지 대신 연금개시 후 부분인출)가 1등이다.
+
+    **재료가 있는데 도구가 안 불린 것**이라, 검색을 고쳐서는 안 닫힌다. 같은 처방을 이
+    저장소가 이미 두 번 썼다(`suitable` vs `lineup` · `history` vs `transcript`).
+    """
+    from pension_agent.consult_agent.state import KB
+    ok = 0
+    print("\n[도구 설명 — pitch 와 playbook 이 «무엇으로 찾나»로 갈린다 (gap 35)]")
+
+    pitch, playbook = tools.TOOLS["pitch"].desc, tools.TOOLS["playbook"].desc
+
+    hit = "고객의 말" in pitch and "고객 화면이 열려 있어도" in pitch
+    print(f"{'✓' if hit else '✗'} pitch — 질문에 담긴 «고객이 한 말»로 찾는다고 밝힌다")
+    ok += hit
+
+    hit = "계좌 상태" in playbook and "좁히기만 한다" in playbook
+    print(f"{'✓' if hit else '✗'} playbook — 후보를 고르는 것은 상태이고 질문이 아니라고 밝힌다")
+    ok += hit
+
+    # 서로를 가리켜야 계획이 잘못 든 자리에서 되돌아 나올 수 있다. 한쪽 설명만 고치면
+    # 다른 쪽은 여전히 「화법·예상반론」을 내걸고 서 있다.
+    hit = "pitch" in playbook
+    print(f"{'✓' if hit else '✗'} playbook 이 고객의 말은 pitch 라고 되돌려 보낸다")
+    ok += hit
+
+    # 재료가 실제로 그쪽에 있다는 것 — 설명만 갈라 두고 검색이 못 찾으면 아무것도 아니다.
+    # 슬롯(거절유형)이 붙으면 n-gram 폴백만으로도 해지 화법이 1등으로 올라온다.
+    hits = tools.retrieve(KB, top_k=3, kinds=["pitch"],
+                          utterance="고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",
+                          objection_type="해지·망설임")
+    hit = bool(hits) and hits[0][1]["tags"].get("objection_type") == "해지·망설임"
+    print(f"{'✓' if hit else '✗'} 그 질문의 화법이 pitch 쪽 검색에 실재한다"
+          f" ({hits[0][1]['id'] if hits else '0건'})")
+    ok += hit
+
+    return ok
+
+
+def check_rehearsal_expectations() -> int:
+    """리허설 기대값 — `sees` 중 기계가 판정할 수 있는 부분 (tests/debug/scenarios.EXPECT).
+
+    실 LLM 없이 재는 것은 **판정 장치 자체**다: 기대가 실재하는 턴을 가리키는가 · 무엇을
+    어긋남으로 보는가 · 실행 사실을 어떻게 읽는가. 실제 대본을 도는 것은 `reps` 의 일이고
+    그건 LLM 이 있어야 한다.
+    """
+    from tests.debug import reps as REPS, scenarios as SCEN, trace as TR
+    ok = 0
+    print("\n[리허설 기대값 — sees 를 기계가 판정한다]")
+
+    # 기대는 실재하는 턴을 가리켜야 한다. 없는 라벨을 적으면 그 기대는 영원히 판정되지
+    # 않으면서 통과처럼 보인다 — 검사 표가 거짓말하는 가장 나쁜 형태다.
+    hit = bool(SCEN.EXPECT) and all(
+        label in SCEN._labels_of(script) for script, label in SCEN.EXPECT)
+    print(f"{'✓' if hit else '✗'} 모든 기대가 실재하는 턴을 가리킨다 ({len(SCEN.EXPECT)}건)")
+    ok += hit
+
+    saved = dict(SCEN.EXPECT)
+    try:
+        SCEN.EXPECT[("cases", "없는턴")] = SCEN.Expect(outcome="answer")
+        try:
+            SCEN._validate_expectations()
+            raised = False
+        except ValueError:
+            raised = True
+    finally:
+        SCEN.EXPECT.clear()
+        SCEN.EXPECT.update(saved)
+    print(f"{'✓' if raised else '✗'} 없는 턴을 가리키면 임포트가 실패한다(조용히 지나가지 않는다)")
+    ok += raised
+
+    # ── diff 의 규약 ──────────────────────────────────────
+    want = SCEN.Expect(tools=("fact",), outcome="answer", verdict="assume", sources=True)
+    base = {"tools": ["fact", "customer"], "outcome": "answer", "verdict": "assume",
+            "sources": True}
+    hit = want.diff(base) == []
+    print(f"{'✓' if hit else '✗'} tools 는 부분집합 판정 — 여분의 도구는 어긋남이 아니다")
+    ok += hit
+
+    hit = len(SCEN.Expect(tools=("screen",)).diff(base)) == 1
+    print(f"{'✓' if hit else '✗'} 기대한 도구가 안 불리면 어긋남")
+    ok += hit
+
+    hit = SCEN.Expect().diff({}) == [] and SCEN.Expect(outcome="").diff({"outcome": "clarify"}) == []
+    print(f"{'✓' if hit else '✗'} 비워 둔 항목은 판정하지 않는다(확신 없는 기대를 강요하지 않는다)")
+    ok += hit
+
+    hit = SCEN.Expect(sources=False).diff({"sources": True}) != [] \
+        and SCEN.Expect(sources=False).diff({}) == []
+    print(f"{'✓' if hit else '✗'} 참/거짓 항목은 False 도 기대로 판정한다")
+    ok += hit
+
+    # ── 실행 사실을 어떻게 읽나(_observed) ────────────────
+    def turn(nodes):
+        t = TR.Turn(question="q")
+        t.nodes.extend(nodes)
+        return t
+
+    answered = turn([TR.Node(name="answer", delta={"judge_verdict": "assume"},
+                             gates=[TR.Gate("verify_texts", True), TR.Gate("span", True)])])
+    got = REPS._observed({"history": [{"tools": ["fact"]}], "sources": [{"id": "x"}],
+                          "pending_action": {"label": "화면"}}, answered)
+    hit = (got["outcome"] == "answer" and got["verdict"] == "assume"
+           and got["tools"] == ["fact"] and got["gates_passed"] and got["offered"]
+           and got["sources"])
+    print(f"{'✓' if hit else '✗'} 답변 턴 — 도구·등급·게이트·출처·연계를 읽는다")
+    ok += hit
+
+    asked = turn([TR.Node(name="answer", delta={"judge_verdict": "ask", "clarify": {"question": "?"}})])
+    got = REPS._observed({"history": [{"tools": ["fact"]}], "clarify": {"question": "?"},
+                          "sources": [{"id": "x"}]}, asked)
+    hit = got["outcome"] == "clarify" and got["verdict"] == "ask"
+    print(f"{'✓' if hit else '✗'} 되묻기 턴 — 답변으로 세지 않는다")
+    ok += hit
+
+    # LLM 이 죽은 턴은 «되묻지도 답하지도 않은» 세 번째 결말이다(§11). 답변으로 세면
+    # 장애가 난 실행이 통과로 보고된다 — 실제로 리허설 11턴 중 10턴이 그랬던 날이 있다.
+    dead = turn([TR.Node(name="plan_step", delta={"llm_error": "HTTPError"}),
+                 TR.Node(name="answer", delta={})])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, dead)
+    hit = got["outcome"] == "llm_down" and not got["gates_passed"]
+    print(f"{'✓' if hit else '✗'} LLM 이 죽은 턴 — 답변으로도 «게이트 통과»로도 세지 않는다")
+    ok += hit
+
+    stopped = turn([TR.Node(name="answer", delta={},
+                            gates=[TR.Gate("verify_texts", True), TR.Gate("span", False)])])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, stopped)
+    hit = not got["gates_passed"]
+    print(f"{'✓' if hit else '✗'} 게이트가 생성문을 버렸으면 통과로 세지 않는다")
+    ok += hit
+
+    replanned = turn([TR.Node(name="plan_step", delta={"plan_retry": True}),
+                      TR.Node(name="answer", delta={})])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, replanned)
+    hit = got["replanned"]
+    print(f"{'✓' if hit else '✗'} 재계획이 돌았는지 읽는다 (gap 23 이 만든 경로)")
+    ok += hit
+
+    # 기대가 없는 턴은 아무것도 찍지 않는다 — 대부분의 턴이 그렇다.
+    line, misses = REPS._expect_line("cases", "9", {}, answered)
+    hit = line == "" and misses == []
+    print(f"{'✓' if hit else '✗'} 기대가 없는 턴은 판정하지 않는다")
+    ok += hit
+
+    return ok
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -5742,7 +6094,7 @@ def main() -> int:
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     agent = G.build_agent()
 
     for question, expected in CASES:
@@ -5811,6 +6163,9 @@ def main() -> int:
         check_plan_failure()
         check_llm_down()
         check_compose_retry()
+        check_graded_judge()
+        check_tool_axes()
+        check_rehearsal_expectations()
         check_notice_scope()
         check_guard()
         check_architecture_doc()

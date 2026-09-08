@@ -72,6 +72,36 @@ from pension_agent.strategy_agent.support import (
 
 # ─────────────────────────────────────────────────────────────
 
+def _owned_product_names(p: Profile) -> list[str]:
+    """이 고객의 원장에 이름이 적혀 있는 상품 — 보유분과 ④ 동연령 상위1% 사례.
+
+    ━━ 왜 인용 허가가 필요한가 ━━
+    이 이름들은 **이미 프롬프트로 나가고 있다** — briefing 의 «보유상품»(「KB 퇴직연금 배당
+    (주식) 8,000만원 수익률 60.0% ⚠판매중단 …」)과 «동연령대비교»(「상위1% 인기 펀드 …」)
+    칸이 그것이고, ①③ 문장·② 선정 사유·③ 코칭·④ 해석이 전부 그 briefing 을 받는다.
+    그런데 검증기의 허용 상품 집합(verify.allowed_facts)은 `items[*].products`, 즉 **이번에
+    권할 상품**만 봤다. 그래서 「판매중단 상품인 KB 퇴직연금 배당 (주식) 8,000만원을 보유하고
+    계세요」처럼 **화면이 이미 띄운 사실을 그대로 옮긴 문장**이 «상품명 미등록»으로 폐기됐다
+    (2026-09-07 실측 · 송도윤 ②·④ 두 곳).
+
+    ━━ 왜 이것이 상품명 상한을 무너뜨리지 않는가 ━━
+    상한을 닫힌 목록이 쥐어야 하는 이유는 순환이다(pension_agent/verify.py::verify_texts —
+    LLM 이 지어낸 이름이 답변과 재료에 함께 실려 서로를 근거로 통과한다). 여기 실리는 것은
+    `Profile.holdings`·`Profile.peer`, 즉 **코드가 계좌 원장에서 읽은 값**이라 LLM 이 끼어들
+    자리가 없다. 지어낸 이름은 이 목록에도 판매 등록부에도 없으므로 여전히 막힌다.
+
+    허가는 «이 고객»에 한한다 — facts 는 고객 한 명당 하나이므로, 다른 고객이 가진 상품
+    이름이 이 고객의 문장에 실리지 않는다.
+
+    고유계정대는 상품명이 아니라 계정 구분이라 뺀다.
+    """
+    names = [h["name"] for h in (p.holdings or [])
+             if h.get("name") and h.get("type") != "고유계정대"]
+    peer = p.peer or {}
+    names += [*(peer.get("top1_funds") or []), *(peer.get("top1_etfs") or [])]
+    return sorted({n for n in names if n})
+
+
 def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     """고객 프로파일로부터 확정 사실을 산출한다. 반환값이 LLM 단계의 유일한 입력이다."""
     conds = conditions(p)
@@ -337,6 +367,9 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         "llm_skipped": {},
         # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(REQUIREMENTS.md ④).
         "top_holdings": top_reference_products(p),
+        # 이 고객의 원장이 이름을 말하고 있는 상품 — 보유분과 ④ 동연령 상위1% 사례.
+        # **인용 허가 목록이지 추천 목록이 아니다**(verify.allowed_facts 가 읽는다).
+        "owned_products": _owned_product_names(p),
         # 고객님께 안내해보세요 — 문제상황에 맞는 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨).
         "outreach": next_event_and_seminar(situations, name=p.nm),
         "items": [{
