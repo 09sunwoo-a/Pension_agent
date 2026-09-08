@@ -508,11 +508,16 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────
-# llm — 429(속도 제한) 재시도
+# llm — 429(속도 제한)·5xx(서버 오류) 재시도
 #
 # 행내 게이트웨이가 몰린 호출(브리핑 11연쇄·앱 기동 선생성)에 429 를 냈고, 재시도가
-# 없어서 턴이 통째로 죽었다. 429 두 번 뒤 성공하는 서버를 흉내 내 재시도가 실제로
-# 도는지, Retry-After 를 기다리는지, 다른 HTTP 에러는 재시도하지 않는지 본다.
+# 없어서 턴이 통째로 죽었다. 5xx 는 예전에 재시도 대상이 아니었는데(「기다려도 안
+# 풀린다」는 전제였다) 실측이 그 전제를 뒤집었다 — gemma 리허설 한 블록의 11턴 중
+# 10턴이 500 으로 죽었고 같은 프롬프트가 재시도에서 200 이었다.
+#
+# 재시도가 실제로 도는지, Retry-After 를 기다리는지, **요청이 잘못된 에러(4xx)는
+# 재시도하지 않는지**를 본다. 마지막 것이 요건인 이유는 401·404 를 반복해 던지면
+# 결과는 그대로인 채 진단만 늦어지기 때문이다.
 # ─────────────────────────────────────────────────────────────
 
 import io
@@ -571,18 +576,46 @@ try:
     check(_raised is not None and "429" in _raised,
           "llm: 계속 429 면 상한에서 멈추고 LLMError 로 올린다", str(_raised))
 
+    # 5xx 는 재시도한다 — 두 번 죽고 세 번째에 살아나는 서버를 흉내 낸다.
+    calls["n"], _sleeps[:] = 0, []
+
+    def _urlopen_500_twice(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise _http_error(500)
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_500_twice
+    out = _llm.generate("q")
+    check(out == "답" and calls["n"] == 3, "llm: 500 두 번 뒤 재시도로 성공한다",
+          f"calls={calls['n']} out={out!r}")
+
+    # 계속 5xx 면 상한에서 멈추고, 원인이 «속도 제한»이 아니라 «서버 오류»로 나간다 —
+    # 직원이 할 일이 다르다(쿼터를 본다 / 잠시 후 다시 시도한다).
+    calls["n"], _sleeps[:] = 0, []
+    _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+        _http_error(503))
+    try:
+        _llm.generate("q")
+        _raised = None
+    except _llm.LLMError as exc:
+        _raised = str(exc)
+    check(_raised is not None and "503" in _raised and "서버 오류" in _raised,
+          "llm: 계속 5xx 면 상한에서 멈추고 서버 오류로 말한다", str(_raised))
+
+    # 요청이 잘못된 에러는 재시도하지 않는다 — 반복해도 결과가 같고 진단만 늦어진다.
     calls["n"] = 0
 
-    def _urlopen_500(req, timeout=None):
+    def _urlopen_401(req, timeout=None):
         calls["n"] += 1
-        raise _http_error(500)
+        raise _http_error(401)
 
-    _llm.urllib.request.urlopen = _urlopen_500
+    _llm.urllib.request.urlopen = _urlopen_401
     try:
         _llm.generate("q")
     except _llm.LLMError:
         pass
-    check(calls["n"] == 1, "llm: 429 아닌 HTTP 에러는 재시도하지 않는다", f"calls={calls['n']}")
+    check(calls["n"] == 1, "llm: 4xx(요청이 잘못된 에러)는 재시도하지 않는다", f"calls={calls['n']}")
 finally:
     (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
      _llm.urllib.request.urlopen) = _saved_llm

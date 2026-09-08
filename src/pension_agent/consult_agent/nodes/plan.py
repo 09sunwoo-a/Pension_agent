@@ -295,6 +295,13 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # 갖고 있어서, 결과 종류가 늘 때마다 반환값의 키가 늘었다(state.py 의 `steps` 주석).
     update: dict[str, Any] = {
         "steps": steps + [_step(name, query, FOUND if found is not None else MISS)], **alive}
+    # 게이트가 이번 호출에서 표시한 갈래(tools.record_branches 가 state 에 쌓아 둔 것)를
+    # **자기 반환값으로** 넘긴다. 그래프 상태 전파를 in-place 변경에 기대지 않는다 —
+    # 노드가 돌려준 것만 다음 노드가 본다는 규약이 여기서도 지켜져야, 계획이 여러 바퀴
+    # 도는 동안 갈래가 조용히 사라지거나 두 벌이 되는 일이 없다.
+    branches = state.get("branches")
+    if branches:
+        update["branches"] = list(branches)
     if found is not None:
         update["evidence"] = evidence + [found]
 
@@ -666,6 +673,13 @@ def compose(state: AgentState) -> dict[str, Any]:
     # 그것을 아는 것은 코드다 — 이번 턴의 말에서 다시 추측하지 않는다(§10).
     if state.get("accepted"):
         prompt = f"{prompt}\n{ACCEPTED_BLOCK.format(label=state['accepted'])}"
+    # 판정이 «전제를 밝히고 답하라»(assume)·«핵심 대상이 자료에 없다»(none)로 끝났으면 그
+    # 블록을 얹는다(§5 · nodes/clarify.py). 판정과 작성은 동시에 도므로 이 값이 붙는 것은
+    # **다시 쓰는 호출**뿐이다(nodes/answer.py) — 첫 호출은 판정 결과를 볼 수 없다.
+    # 블록 안의 문장은 판정 LLM 이 썼지만 **원장 밖 수치가 없음이 이미 확인된 것**이라
+    # (clarify._quotable) 인용 허용을 넓히지 않아도 된다.
+    if state.get("judge_note"):
+        prompt = f"{prompt}\n{state['judge_note']}"
     note = guard.prompt_note(guards, alts)
     if note:
         prompt = f"{prompt}\n\n{note}"

@@ -1,8 +1,21 @@
-"""판별 질문 — 답의 갈래가 갈리는데 정할 근거가 없으면 답변 대신 되묻는다 (CLAUDE.md §5).
+"""답을 어떤 형태로 낼지 판정한다 — 답한다 · 전제를 밝히고 답한다 · 되묻는다 · 없다 (§5).
 
 되묻기는 답을 미루는 것이 아니라 **틀린 답을 막는 것**이다. "실물이전"이 타행→당행인지
 당행→타행인지에 따라 절차가 다른데, 한쪽을 골라 답하면 직원은 그게 다른 절차인 줄도 모른
 채 잘못된 순서로 처리한다.
+
+━━ 왜 예/아니오가 아니라 등급인가 ━━
+§5 는 결론을 넷으로 정의하는데 이 판정의 출력은 오래도록 「되물을까/말까」 둘이었다.
+그래서 나머지 둘이 **출력을 갖지 못했다**:
+
+  전제를 밝히고 답한다   판정자는 어느 갈래인지 알아내고도 `{"ask": null}` 을 돌려줬다 —
+                         그 사실이 작성자에게 한 글자도 건너가지 않아, 작성자는 전제가
+                         필요한 줄도 몰랐다.
+  없다고 답한다          작성 지시(COMPOSE_SYSTEM 9번)로만 걸려 있어서, 타행 수수료를
+                         물었는데 당행 수수료표를 펴 놓는 답이 실제로 나갔다(대본 T12).
+
+지금은 넷이 다 판정값이고, 뒤의 둘은 작성 프롬프트에 끼울 블록(`judge_note`)으로 나간다.
+작성과 판정은 동시에 도므로(nodes/answer.py) 그 둘일 때만 한 번 다시 쓴다.
 
 ━━ 왜 계획 루프 뒤에 있나 ━━
 갈래가 **실제로 존재하는지**는 지식베이스를 봐야 안다. 질문만 보고 "모호하다"고 판정하면
@@ -23,6 +36,9 @@
     제안한 턴이 정했고, 이번 턴의 말에서 다시 추측하지 않는다(§10).
   · 선택지가 2개 미만이면 되묻지 않는다 — 갈래를 보여주지 못하는 되묻기는 "무엇을
     원하세요?"와 같고, 직원이 무엇을 답해야 할지 다시 생각해야 한다.
+  · **판정이 낸 문장은 수치를 새로 만들 수 없다**(`_quotable`). premise·missing 은 LLM 이
+    쓴 문장인데 작성 프롬프트로 들어가므로, 원장 밖 숫자가 거기 있으면 작성자가 그것을
+    되받고 답이 통째로 폐기된다(§6). 경계를 넓힐 수 있는 것은 코드뿐이다(루트 규칙 2).
 
 되묻기 턴에는 화면 연계 제안을 붙이지 않는다(§5 마지막) — 그건 그래프 배선이 한다
 (graph.py: clarify 는 offer 를 거치지 않고 END 로 간다).
@@ -35,12 +51,19 @@ import re
 from typing import Any
 
 from pension_agent.consult_agent import tools
-from pension_agent.consult_agent.prompts import CLARIFY_PROMPT
+from pension_agent.consult_agent.prompts import (
+    CLARIFY_PROMPT, COMPOSE_MISSING_BLOCK, COMPOSE_PREMISE_BLOCK, JUDGE_BRANCHES_BLOCK,
+)
 from pension_agent.consult_agent.state import AgentState, format_history
 from pension_agent.llm import LLMError, generate
+from pension_agent.verify import numbers
 
-#: 판별 질문 응답의 토큰 상한. 질문 한 문장 + 선택지 몇 개 분량.
-CLARIFY_MAX_TOKENS = 200
+#: 판정 응답의 토큰 상한. 등급 한 낱말 + (되물으면) 질문 한 문장과 선택지 몇 개.
+CLARIFY_MAX_TOKENS = 250
+
+#: 판정 등급. 뒤의 둘은 «작성 프롬프트에 블록을 얹어 다시 쓴다»로 이어진다.
+ANSWER, ASSUME, ASK, NONE = "answer", "assume", "ask", "none"
+_VERDICTS = (ANSWER, ASSUME, ASK, NONE)
 
 #: 선택지의 최소 개수. 갈래를 보여주지 못하면 되묻는 의미가 없다.
 MIN_OPTIONS = 2
@@ -156,6 +179,60 @@ def applicable(state: AgentState) -> bool:
     return bool(evidence) and not asked_last_turn(state.get("history"))
 
 
+def _branches_block(state: AgentState) -> str:
+    """게이트가 표시한 갈래 축(tools.record_branches). 없으면 빈 문자열.
+
+    없는데도 블록을 세우면(«갈래: 없음») 판정 LLM 이 없는 갈래를 만든다 — 조건부 표시가
+    관련 있을 때만 붙어야 하는 것과 같은 자리다(§7).
+    """
+    axes = [b for b in (state.get("branches") or [])
+            if isinstance(b, dict) and b.get("axis") and b.get("options")]
+    if not axes:
+        return ""
+    lines = [f"- {b['axis']}: " + " / ".join(b["options"]) for b in axes]
+    return JUDGE_BRANCHES_BLOCK.format(branches="\n".join(lines))
+
+
+def _quotable(text: str, evidence: list) -> bool:
+    """판정이 쓴 문장을 작성 프롬프트에 실어도 되나 — **원장 밖 수치가 없어야 한다.**
+
+    premise·missing 은 LLM 이 지어낸 문장이라 그 자체가 근거가 아니다. 그런데 작성
+    프롬프트에 들어가면 작성자가 그 말을 되받아 적고, 되받은 수치가 원장 밖이면 §6 의
+    검사가 답을 통째로 버린다 — 판정을 도우려던 장치가 답을 죽인다.
+
+    지워진 gap 31 이 «코드가 실어 보낸 문구»의 수치를 인용 허용에 더한 것과 방향이 반대다.
+    그건 코드가 정한 문구였고 이건 LLM 이 만든 문장이라, 허용을 넓히는 대신 **넓힐 필요가
+    없는 문장만 통과**시킨다. 걸리면 그 등급을 버리고 평범한 답으로 되돌아간다 — 잃는 것은
+    전제 한 줄이고, 그건 이 변경 이전의 동작이다.
+    """
+    said = numbers(text)
+    if not said:
+        return True
+    return said <= numbers("\n".join(tools.ledger_texts(evidence)))
+
+
+def _can_settle(state: AgentState) -> bool:
+    """갈래를 **정해 줄 수 있는 재료**가 이 턴에 있나 — 열린 고객이거나 이전 대화다.
+
+    `settled_block` 이 서는 조건(고객 화면)과 §5 가 말하는 «맥락»(이전 대화) 둘이다.
+    판정 프롬프트에 그 둘이 하나도 안 실린 턴에서 「정해졌다」는 판정이 나오면, 그것은
+    무엇을 읽고 정한 것이 아니라 **지어낸 전제**다.
+    """
+    return bool(state.get("customer_id") or state.get("history"))
+
+
+def _verdict_of(parsed: dict) -> str:
+    """등급을 읽는다. 등급 칸이 없으면 **옛 규격**(`{"ask": …}`)으로 읽는다.
+
+    작은 모델이 규격을 못 맞추는 일이 있는데, 그때 판정을 통째로 버리면 되묻기가 사라진다 —
+    등급을 늘린 변경이 있던 기능을 없애는 쪽으로 작동하면 안 된다.
+    """
+    said = str(parsed.get("verdict") or "").strip().lower()
+    if said in _VERDICTS:
+        return said
+    return ASK if parsed.get("ask") else ANSWER
+
+
 def clarify(state: AgentState) -> dict[str, Any]:
     """되물을지 판정한다. 되묻지 않기로 하면 아무것도 바꾸지 않고 compose 로 흘려보낸다."""
     evidence = [e for e in (state.get("evidence") or []) if e["tool"] not in _NO_BRANCH]
@@ -164,6 +241,7 @@ def clarify(state: AgentState) -> dict[str, Any]:
 
     prompt = CLARIFY_PROMPT.format(
         context="\n\n".join(e["text"] for e in evidence),
+        branches_block=_branches_block(state),
         settled_block=settled_block(state),
         history_block=format_history(state.get("history")),
         question=state["question"],
@@ -177,20 +255,48 @@ def clarify(state: AgentState) -> dict[str, Any]:
 
     m = re.search(r"\{.*\}", raw, re.S)
     try:
-        verdict = json.loads(m.group()) if m else {}
+        parsed = json.loads(m.group()) if m else {}
     except ValueError:
-        verdict = {}
-    if not isinstance(verdict, dict):
+        parsed = {}
+    if not isinstance(parsed, dict):
         return {}
 
-    ask = verdict.get("ask")
-    options = [o for o in (verdict.get("options") or []) if isinstance(o, str) and o.strip()]
-    if not isinstance(ask, str) or not ask.strip() or len(options) < MIN_OPTIONS:
-        return {}
+    verdict = _verdict_of(parsed)
+    # 등급은 판정이 **실제로 돈** 턴에만 남긴다 — 관문에서 걸러 판정을 안 돌린 턴과
+    # 「answer」로 판정한 턴은 다른 사건이고, 계측이 그 둘을 갈라 세야 한다(graph.ask).
+    graded: dict[str, Any] = {"judge_verdict": verdict}
 
-    asked = {"question": ask.strip(), "options": options}
-    # 선택지는 근거 카드에서 나온 것이므로 그 카드를 출처로 싣는다(§3 "모든 답에 출처를
-    # 밝힌다"). 비워 두면 화면이 "근거: 없음"이라고 말하는데, 직원 입장에서는 어디서 나온
-    # 갈래인지 모른 채 고르라는 말이 된다 — 되묻기도 재료에서 나온 답이다.
-    return {"clarify": asked, "answer": _render(ask.strip(), options),
-            "sources": [{**s, "role": tools.GROUND} for s in tools.ledger_sources(evidence)]}
+    if verdict == ASK:
+        ask = parsed.get("ask")
+        options = [o for o in (parsed.get("options") or []) if isinstance(o, str) and o.strip()]
+        if not isinstance(ask, str) or not ask.strip() or len(options) < MIN_OPTIONS:
+            # 되묻기로 판정했지만 선택지를 못 세웠다 — 갈래를 보여주지 못하는 되묻기는
+            # "무엇을 원하세요?" 와 같아서 하지 않는다(§5). 등급은 남겨 계측에 잡히게 한다.
+            return graded
+        asked = {"question": ask.strip(), "options": options}
+        # 선택지는 근거 카드에서 나온 것이므로 그 카드를 출처로 싣는다(§3 "모든 답에 출처를
+        # 밝힌다"). 비워 두면 화면이 "근거: 없음"이라고 말하는데, 직원 입장에서는 어디서 나온
+        # 갈래인지 모른 채 고르라는 말이 된다 — 되묻기도 재료에서 나온 답이다.
+        return {**graded, "clarify": asked, "answer": _render(ask.strip(), options),
+                "sources": [{**s, "role": tools.GROUND} for s in tools.ledger_sources(evidence)]}
+
+    if verdict == ASSUME:
+        premise = str(parsed.get("premise") or "").strip()
+        # **정해 줄 것이 없으면 «정해졌다»고 말할 수 없다.** assume 은 «대화 맥락이나 열려
+        # 있는 고객 값이 갈래를 정해 준다»는 판정인데, 그 둘이 다 없는 턴에서도 LLM 이
+        # 전제를 만들어 냈다 — 2026-09-07 리허설 케이스 1(고객 화면 없음 · 첫 턴):
+        # 「IRP 세액공제 한도가 얼마야?」에 전제를 세워 답을 ISA 전환 쪽으로 밀었고, 그
+        # 답이 카드가 못박은 오답(「전환금 전액이 공제 대상」)에 걸려 폐기됐다.
+        # 갈래를 **만드는** 것은 LLM 이 해도 되지만, 갈래가 **정해졌는지**는 코드가 아는
+        # 사실이다(루트 규칙 2). 정할 재료가 없으면 그냥 답한다 — 이 등급 이전의 동작이다.
+        if premise and _can_settle(state) and _quotable(premise, evidence):
+            return {**graded, "judge_note": COMPOSE_PREMISE_BLOCK.format(premise=premise)}
+        return graded
+
+    if verdict == NONE:
+        missing = str(parsed.get("missing") or "").strip()
+        if missing and _quotable(missing, evidence):
+            return {**graded, "judge_note": COMPOSE_MISSING_BLOCK.format(missing=missing)}
+        return graded
+
+    return graded
