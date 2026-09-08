@@ -42,4 +42,19 @@ COPY ./main.py /custom/main.py
 COPY ./pension_agent /custom/pension_agent
 COPY ./session_data /custom/session_data
 
+# 미리 만들어 둔 브리핑(scripts/prebuild_briefings.py). **없으면 여기서 빌드가 실패한다**
+# — .env 와 같다. 미리 만들지 않고 빌드하려면 `mkdir -p briefing_cache` 로 빈 디렉터리만
+# 만든다(아래 RUN 이 있으니 이미지 쪽은 비어도 선다).
+#
+# 왜 넣나: 대화형은 브리핑이 **이미 있다고 보고** 답한다. 이 컨테이너가 직접 만들면
+# 고객당 순차 LLM 11 회이고, 외부에서 호출할 때마다 그 시간을 문다. 구워 넣으면 첫
+# 호출부터 읽어 쓴다.
+#
+# 비어 있어도 의미가 있다 — **디렉터리가 있으면 저장소가 켜지고**(briefing_store.enabled),
+# 그러면 런타임에 만든 브리핑을 컨테이너가 스스로 저장한다. 날짜가 넘어가 지문이 어긋난
+# 다음 날에도 고객당 첫 호출만 11 회를 치르고 그 뒤부터는 저장분을 읽는다.
+# 지금 무엇이 읽히고 있는지는 `/health` 의 `briefing_cache` 가 답한다.
+RUN mkdir -p /custom/briefing_cache
+COPY ./briefing_cache /custom/briefing_cache
+
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

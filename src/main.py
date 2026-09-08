@@ -55,6 +55,7 @@ from pydantic import BaseModel
 from pension_agent import config, llm
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import render
+from pension_agent.strategy_agent import briefing_store
 
 log = logging.getLogger(__name__)
 
@@ -157,6 +158,12 @@ def health() -> dict[str, Any]:
             "timeout_sec": llm.TIMEOUT,
             **_host_check(),
         },
+        # 미리 만들어 둔 브리핑을 **지금 실제로 읽고 있나.** 대화형은 브리핑이 이미 있다고
+        # 보고 답하는데(고객 재료 도구가 `strategy_agent.propose()` 를 부른다), 그것을 이
+        # 컨테이너가 직접 만들면 고객당 순차 LLM 11 회다. 미리 구워 넣었는지, 그게 지금
+        # 지문으로 읽히는지, 런타임에 만든 것을 저장할 수 있는지 — 셋 다 어긋나도 답변은
+        # 정상으로 나가고 «느리다»로만 보인다(briefing_store.stats 머리말).
+        "briefing_cache": briefing_store.stats(),
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
             "max_concurrency": llm.MAX_CONCURRENCY,
