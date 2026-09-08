@@ -575,16 +575,46 @@ try:
     check(len(_sleeps) == 2 and all(0.9 < w <= 1.0 for w in _sleeps),
           "llm: Retry-After 초만큼 기다린다", str(_sleeps))
 
+    # 서버가 준 Retry-After 는 **추측 백오프의 상한(30초)에 걸리지 않는다.** 행내 실측
+    # (2026-09-08): 50초를 30초에서 끊자 다음 시도가 같은 429 를 맞고 20초를 더 쉬었다 —
+    # 쉬는 시간은 같은데 재시도 횟수 하나가 헛되이 나갔다.
     calls["n"], _sleeps[:] = 0, []
+    _llm._next_free = 0.0
+
+    def _urlopen_429_long(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(429, {"Retry-After": "50"})
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_429_long
+    _llm.generate("q")
+    check(len(_sleeps) == 1 and 49.0 < _sleeps[0] <= 50.0,
+          "llm: 서버 Retry-After 는 추측 상한(30초)에 걸리지 않고 그대로 쉰다", str(_sleeps))
+    # 그래도 터무니없는 값은 끊는다 — 상한은 서버 값 전용(MAX_RETRY_AFTER)이다.
+    _wait, _told = _llm._backoff(_http_error(429, {"Retry-After": "9999"}), 0)
+    check(_told and _wait == _llm.MAX_RETRY_AFTER,
+          "llm: Retry-After 가 터무니없이 크면 MAX_RETRY_AFTER 에서 끊는다", f"{_wait}")
+    _wait, _told = _llm._backoff(_http_error(429), 10)
+    check(not _told and _wait <= _llm.MAX_BACKOFF,
+          "llm: Retry-After 가 없으면 추측 백오프이고 MAX_BACKOFF 를 넘지 않는다", f"{_wait}")
+
+    calls["n"], _sleeps[:] = 0, []
+    _llm._next_free = 0.0
     _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
         _http_error(429))
     try:
         _llm.generate("q")
         _raised = None
+        _raised_exc = None
     except _llm.LLMError as exc:
         _raised = str(exc)
+        _raised_exc = exc
     check(_raised is not None and "429" in _raised,
           "llm: 계속 429 면 상한에서 멈추고 LLMError 로 올린다", str(_raised))
+    # 호출부가 «속도 제한»을 문자열 검색 없이 가르는 자리 — prebuild_briefings 가 429 면 멈춘다.
+    check(getattr(_raised_exc, "status", None) == 429,
+          "llm: LLMError 가 HTTP 상태 코드를 싣는다(status)", str(getattr(_raised_exc, "status", None)))
 
     # 5xx 는 재시도한다 — 두 번 죽고 세 번째에 살아나는 서버를 흉내 낸다.
     calls["n"], _sleeps[:] = 0, []

@@ -37,6 +37,7 @@
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
   LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
   LLM_COOLDOWN      429·5xx 를 맞은 뒤 프로세스 전체가 쉬는 시간의 기준값(초). 기본 2
+                    (서버가 Retry-After 를 주면 그 값이 이긴다 — MAX_RETRY_AFTER 주석)
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
   GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
@@ -140,8 +141,14 @@ MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
 MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
 #: 서버가 Retry-After 를 안 줄 때 쓰는 지수 백오프의 기준값(초).
 COOLDOWN = float(os.getenv("LLM_COOLDOWN", "2"))
-#: 한 번에 쉬는 최대 시간(초). Retry-After 가 터무니없이 커도 여기서 끊는다.
+#: **우리가 추측한** 백오프의 상한(초). 서버가 회복 시각을 안 알려줄 때만 쓰는 값이다.
 MAX_BACKOFF = 30.0
+#: **서버가 알려준** Retry-After 의 상한(초). 추측 상한과 갈라 둔 이유는 행내 실측이다
+#: (2026-09-08 · prebuild_briefings): 게이트웨이의 Retry-After 를 30초에서 끊었더니
+#: «30.0초 감속 → 다시 429 → 20.0초 감속» 으로 한 번 쉴 것을 두 번에 나눠 쉬고, 그 사이
+#: 재시도 횟수(RETRY_ATTEMPTS) 하나를 헛되이 썼다. 서버가 50초라고 하면 50초를 쉬는 것이
+#: 맞다 — 그보다 일찍 가면 같은 답(429)만 돌아온다. 이 값은 «터무니없는 값»만 거른다.
+MAX_RETRY_AFTER = 120.0
 
 _SLOTS = threading.BoundedSemaphore(MAX_CONCURRENCY)
 _PACE_LOCK = threading.Lock()
@@ -246,7 +253,16 @@ class LLMError(RuntimeError):
     LLM 장애가 같이 걸리면 "찾아봤는데 재료가 없다"는 답으로 나간다 — 있는 자료를
     없다고 말하는 셈이다(CLAUDE.md §11). 호출부는 이 예외를 재던지고, 턴은 'LLM 연결이
     안 되어 있다'는 한 가지 안내로 끝난다.
+
+    status: 원인이 HTTP 응답이면 그 상태 코드(429·500 …), 아니면 None. 호출부가 «속도
+    제한이라 조금 뒤에 다시 하면 되는 실패»와 나머지를 문자열 검색 없이 가르는 자리다 —
+    `scripts.prebuild_briefings` 가 429 를 만나면 다음 고객으로 넘어가지 않고 멈추는 데 쓴다
+    (넘어가 봐야 같은 429 를 재시도 횟수만큼 더 맞을 뿐이다).
     """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def available() -> bool:
@@ -343,13 +359,16 @@ def _post_json(req: urllib.request.Request) -> dict:
                 # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
                 raise LLMError(
                     f"HTTP {exc.code} {exc.reason} — {req.full_url}"
-                    + (f"\n응답: {body}" if body else "")) from exc
+                    + (f"\n응답: {body}" if body else ""), status=exc.code) from exc
             last, last_body = exc, body
             if attempt == RETRY_ATTEMPTS - 1:
                 break
-            wait = _backoff(exc, attempt)
-            _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d)",
-                         exc.code, wait, attempt + 1, RETRY_ATTEMPTS)
+            wait, told = _backoff(exc, attempt)
+            # 서버가 준 값인지 우리 추측인지를 남긴다 — 「30.0초」가 서버 말인지 상한에 걸린
+            # 것인지 로그만 보고 갈려야 상한을 조정할 근거가 생긴다(MAX_RETRY_AFTER 주석).
+            _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
+                         exc.code, wait, attempt + 1, RETRY_ATTEMPTS,
+                         "서버 Retry-After" if told else "추정 백오프")
             _slow_down(wait)
     code = last.code if last else 0
     detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
@@ -358,7 +377,7 @@ def _post_json(req: urllib.request.Request) -> dict:
         f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
         f"(동시 {MAX_CONCURRENCY} · 간격 {MIN_INTERVAL}초 — LLM_MAX_CONCURRENCY 를 낮추거나 "
         f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)"
-        + (f"\n응답: {last_body}" if last_body else "")) from last
+        + (f"\n응답: {last_body}" if last_body else ""), status=code or None) from last
 
 
 #: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
@@ -384,20 +403,21 @@ def _retryable(code: int) -> bool:
     return code == 429 or 500 <= code < 600
 
 
-def _backoff(exc: urllib.error.HTTPError, attempt: int) -> float:
-    """다음 시도까지 프로세스 전체가 쉴 초.
+def _backoff(exc: urllib.error.HTTPError, attempt: int) -> tuple[float, bool]:
+    """다음 시도까지 프로세스 전체가 쉴 초와, 그 값이 서버가 알려준 것인지(True).
 
-    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_BACKOFF) — 서버가 아는
-    회복 시각을 우리가 추측으로 덮을 이유가 없다. 없으면 지수 백오프에 지터를 섞는다.
-    지터가 필요한 이유: 동시에 맞은 스레드들이 같은 시간을 기다리면 같은 순간에 한꺼번에
-    다시 몰려가 또 같이 맞는다.
+    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_RETRY_AFTER) — 서버가 아는
+    회복 시각을 우리가 추측으로 덮을 이유가 없고, 더 짧게 끊으면 다음 시도가 같은 429 를
+    맞아 재시도 횟수만 축난다(상한 상수 주석의 실측). 없으면 지수 백오프에 지터를 섞는다
+    (상한 MAX_BACKOFF). 지터가 필요한 이유: 동시에 맞은 스레드들이 같은 시간을 기다리면
+    같은 순간에 한꺼번에 다시 몰려가 또 같이 맞는다.
     """
     retry_after = (exc.headers.get("Retry-After") or "").strip() if exc.headers else ""
     try:
-        return min(float(retry_after), MAX_BACKOFF)
+        return min(float(retry_after), MAX_RETRY_AFTER), True
     except ValueError:
         pass
-    return min(COOLDOWN * (2 ** attempt) * (0.5 + random.random()), MAX_BACKOFF)
+    return min(COOLDOWN * (2 ** attempt) * (0.5 + random.random()), MAX_BACKOFF), False
 
 
 def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
