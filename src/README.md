@@ -14,8 +14,7 @@ cd src
 pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 (Python 3.10)
 pip install -r requirements-dev.txt  # + Streamlit 화면·변환기·사외 프로바이더 (개발용)
 
-cp .env.example .env                 # 행내: 이 파일 하나(train/serving URL 두 벌이 함께 있다)
-cp .env.local.example .env.local     # 사외 개발 PC 는 프로파일 파일(local · gateway)
+cp .env.example .env                 # 어디서나 이 파일 하나 — 안의 구역 ①행내 ②Gateway ③사외 중 채운다
 python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
@@ -71,7 +70,7 @@ cp .env.example .env
 실제 환경변수가 파일보다 이기므로, 적어 두면 Jenkins 가 넣는 값과 헷갈릴 뿐이다.
 어느 단계·URL 을 읽었는지는 `python -m pension_agent.env` 와 `/health` 의 `stage` 가 보여준다.
 
-**LLM Gateway(LiteLLM)** 를 쓰는 경우는 따로다: `cp .env.gateway.example .env.gateway`.
+**LLM Gateway(LiteLLM)** 를 쓰는 경우는 같은 `.env` 의 구역 ② 를 채운다.
 단계 구분이 없어 URL 하나(`LLM_BASE_URL`)이고 `LLM_MODEL` 을 **채운다**(`claude-sonnet-4-6`).
 base_url 이 클러스터 내부 이름이라 컴퓨트 인스턴스에서는 이름이 안 풀린다 — 배포된 컨테이너
 안에서만 설 수 있고, 미실측이다.
@@ -81,7 +80,7 @@ base_url 이 클러스터 내부 이름이라 컴퓨트 인스턴스에서는 �
 이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
 
 `Dockerfile` 이 COPY 하는 설정 파일은 `.env` 하나다 — 없으면 COPY 단계에서 빌드가 실패한다
-(refs/dockerfile.md). 프로파일 파일(`.env.gateway` · `.env.local`)은 이미지에 들어가지 않는다.
+(refs/dockerfile.md).
 
 ```bash
 # 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
@@ -107,10 +106,10 @@ $CA -c 198734-1205842 "이 고객 왜 관리 대상이야?"   # 브리핑 경로
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | `/bin/bash^M: bad interpreter` | CRLF | 위 0번 |
-| `프로바이더 anthropic` | `.env.<프로파일>` 이 안 잡힘 | `python -m pension_agent.env` 로 읽힌 파일 확인 |
+| `프로바이더 anthropic` | `.env` 가 안 읽혔거나 구역 ① 이 비어 있음 | `python -m pension_agent.env` 로 읽힌 파일 확인 |
 | `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
 | `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 함께 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
-| `HTTP 429` | 호출이 몰림 | `.env.<프로파일>` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작 |
+| `HTTP 429` | 호출이 몰림 | `.env` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작 |
 
 `.env` 는 **프로세스 기동 때 한 번만** 읽는다. 고쳤으면 서버를 다시 띄워야 한다
 (`--reload` 는 `.py` 변경만 본다).

@@ -142,7 +142,7 @@ def health() -> dict[str, Any]:
     """
     return {
         "status": "ok",
-        # 어느 .env 가 읽혔나 — 행내는 .env 하나, 그 밖은 프로파일(gateway·local)이라 첫 질문이다.
+        # 어느 파일이 읽혔나 — «키를 넣었는데 왜 안 되나»의 첫 질문이다.
         # `python -m pension_agent.env` 가 터미널에 찍는 것과 같은 내용이다.
         "env": env.active(),
         "llm": {

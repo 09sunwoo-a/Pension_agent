@@ -87,9 +87,8 @@ try:
           "/health 는 키 «설정 여부»만 내보내고 값은 내보내지 않는다", r.text[:120])
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
-    # 프로파일이 셋이라(bank·gateway·local) «어느 .env 가 읽혔나»가 진단의 첫 질문이다.
-    check("profile" in h["env"] and "files" in h["env"],
-          "/health 가 어느 .env 프로파일이 읽혔는지 보여준다", str(h.get("env")))
+    # «키를 넣었는데 왜 안 되나»의 첫 질문은 어느 파일이 읽혔나다.
+    check("files" in h["env"], "/health 가 어느 .env 가 읽혔는지 보여준다", str(h.get("env")))
     # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는
     # 사고를 여기서 바로 잡아야 한다.
     check(h["llm"].get("stage") in ("train", "serving"),

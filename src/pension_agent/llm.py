@@ -16,11 +16,10 @@
            LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
-━━ 실행 환경(프로파일) ━━
-환경이 셋이다 — 행내 GenAI 플랫폼(genai) · 행내 LLM Gateway(genai 경로, 값만 다름) ·
-로컬(anthropic). 환경마다 `src/.env.<이름>`
-한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
-잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
+━━ 설정 파일 ━━
+`src/.env` 하나다 — 행내 워크스페이스·배포 이미지·사외 개발 PC 모두. 환경에 따라 내용이
+다를 뿐이다(.env.example 의 구역 ①②③). 어느 파일·단계가 잡혔는지는
+`python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
 
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
@@ -102,7 +101,7 @@ DEFAULT_MAX_TOKENS = 900
 #: **엔드포인트가 모델을 고르는 방식이 둘**이기 때문이다:
 #:
 #:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이
-#:                         라우팅 키다. 채워야 한다(.env.gateway.example 이 그 경우).
+#:                         라우팅 키다. 채워야 한다(.env.example 의 구역 ②).
 #:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(…/trnn/gemma-4 · …/serv/gemma-4) → body 에
 #:                         model 을 함께 실으면 **404** 다(2026-09-08 행내 실측).
 #:
