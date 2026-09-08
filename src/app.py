@@ -5,20 +5,17 @@ import os
 import re
 from datetime import date, datetime
 
-# ── «오늘»을 프로세스 시작 시점에 못박는다. **pension_agent 임포트보다 먼저** 해야 한다.
-#
-# 두 가지를 동시에 막는 자리다.
-#  1) `customer.py` 는 임포트 시점에 PERSONAS 를 만들면서 잔여일수·경과일을 «오늘» 기준으로
-#     센다. 프로세스가 자정을 넘겨 살아 있으면 화면 상단의 D-day 와 대화 답변의 D-day 가
-#     갈린다 — 한 세션 안에서는 같은 날이어야 한다.
-#  2) 디버그 모드가 `tests.debug` 를 임포트하는데, `tests/__init__.py` 가
-#     `PENSION_TODAY` 를 **원장 스냅샷 기준일(2026-08-24)로 setdefault** 한다. 여기서
-#     먼저 채워두지 않으면 디버그 모드를 켠 순간 «오늘»이 조용히 과거로 밀리고, 그러면
-#     같은 질문의 답(만기 D-n, 연말까지 며칠)이 디버그 켜고/끄고에 따라 달라진다.
-# 밖에서 `PENSION_TODAY` 를 준 경우(특정 날짜로 얼려 보고 싶을 때)는 그것을 존중한다.
-os.environ.setdefault("PENSION_TODAY", date.today().isoformat())
+# ── **«오늘»을 고정하지 않는다.** 예전에는 여기서 실제 날짜를 채워 넣었는데, 이유가 둘이었다.
+#  1) `customer.py` 가 임포트 시점에 PERSONAS 를 만들며 잔여일수·경과일을 «오늘» 기준으로
+#     세는 탓에, 프로세스가 자정을 넘기면 화면 상단 D-day 와 대화 답변 D-day 가 갈렸다.
+#     → 지금은 로스터가 날이 바뀌면 스스로 다시 만들어진다(`customer.refresh_roster`).
+#  2) 디버그 모드가 `tests.debug` 를 임포트하는데 `tests/__init__.py` 가 임포트만으로
+#     `PENSION_TODAY` 를 원장 기준일로 걸어, 디버그를 켠 순간 «오늘»이 과거로 밀렸다.
+#     → 지금은 회귀 테스트 모듈이 스스로 건다(`tests.pin_today`) — 임포트로는 안 걸린다.
+# 특정 날짜로 얼려 보려면 `PENSION_TODAY=YYYY-MM-DD streamlit run app.py` 는 그대로 된다.
 
 # 에이전트 모듈 임포트
+from pension_agent.strategy_agent import customer
 from pension_agent.strategy_agent.customer import PERSONAS, AS_OF
 from pension_agent.strategy_agent.agent import propose
 from pension_agent.strategy_agent import engine
@@ -57,12 +54,17 @@ if not os.path.exists(CHAT_FEEDBACK_FILE):
         csv.writer(f).writerow(CHAT_FEEDBACK_COLUMNS)
 
 # 상태 유지를 위한 캐싱 (LLM 호출 비용 및 대기 시간 절약)
+#
+# `day` 는 쓰지 않지만 **캐시 키**다 — 자정을 넘기면 키가 바뀌어 브리핑을 다시 만든다.
+# 없으면 잔여일수·경과일이 어제 것인 화면을 오늘 것처럼 보여준다(로스터는
+# `refresh_roster()` 가 다시 만들어도 이 캐시가 옛 산출을 붙들고 있다).
 @st.cache_data(show_spinner=False)
-def load_all_proposals(use_llm=True):
-    return {p.nm: propose(p, use_llm=use_llm) for p in PERSONAS}
+def load_all_proposals(use_llm=True, day=""):
+    customer.refresh_roster()      # 날이 바뀌었으면 잔여일수·경과일을 오늘 기준으로 다시 센다
+    return {p.nm: propose(p, use_llm=use_llm) for p in customer.PERSONAS}
 
 use_llm = st.sidebar.checkbox("LLM 문장 생성 적용", value=True)
-results = load_all_proposals(use_llm)
+results = load_all_proposals(use_llm, clock.today().isoformat())
 
 # ── 실행 조건을 사이드바에 상시 노출한다. 답변이 이상할 때 «에이전트가 틀렸다»와
 # «기준일이 어긋났다»·«LLM 이 안 붙었다»를 화면에서 바로 갈라야 신고가 재현 가능해진다.
@@ -74,16 +76,16 @@ _stamp = next(iter(results.values()))["clock"] if results else clock.stamp()
 with st.sidebar:
     st.divider()
     st.markdown("**실행 조건**")
-    # `pinned` 는 여기서 쓰지 않는다 — 이 앱은 켤 때 스스로 고정하므로(위 19행) 늘 참이라
-    # 표시해도 «누가 밖에서 얼렸다»를 가리지 못한다. 그 사정은 아래 문구가 설명한다.
-    # 이 칸이 쓸모 있는 곳은 자기가 고정하지 않는 쪽이다(리허설 러너·실서비스 프론트).
+    # `pinned` 는 «누가 밖에서 얼렸다»를 말한다 — 이 앱은 이제 스스로 고정하지 않으므로
+    # 참이면 실제로 `PENSION_TODAY` 가 걸려 있는 것이고, 그건 화면에 밝혀야 한다.
     st.caption(
-        f"오늘(상담 시점) · {_stamp['today']}\n\n"
+        f"오늘(상담 시점) · {_stamp['today']}"
+        + (" · ⚠ PENSION_TODAY 로 고정됨" if _stamp["pinned"] else "") + "\n\n"
         f"원장 기준일(AS_OF) · {AS_OF:%Y-%m-%d}\n\n"
         f"LLM · {'연결됨' if llm.available() else '미설정'}"
     )
     st.caption(
-        "«오늘»은 앱을 켠 시각에 고정된다. 특정 날짜로 얼려 보려면 앱을 끄고 "
+        "«오늘»은 실제 날짜다. 특정 날짜로 얼려 보려면 앱을 끄고 "
         "`PENSION_TODAY=YYYY-MM-DD streamlit run app.py` 로 다시 켠다."
     )
 

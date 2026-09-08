@@ -31,6 +31,7 @@ from pension_agent.strategy_agent.customer import (
     PRIO,
     Profile,
     conditions,
+    refresh_roster,
 )
 
 
@@ -63,6 +64,12 @@ def today_targets(profiles: list[Profile] | None = None) -> list[Target]:
 
     로스터가 비어 있으면 빈 목록이다(에러가 아니다) — `customers.json` 이 없을 때 화면이
     "등록된 고객 없음"으로 빠지는 것과 같은 규약이다.
+
+    로스터를 도는 자리라 날짜부터 확인한다(`customer.refresh_roster`) — 만기 잔여일수는
+    Profile 을 만들 때 계산되므로, 자정을 넘긴 프로세스에서는 어제 기준으로 남아 «오늘의»
+    타겟이 어제의 D-day 로 뽑힌다. 넘겨받은 profiles 가 있으면 그건 호출부의 것이다.
     """
+    if profiles is None:
+        refresh_roster()
     found = [Target(p, conditions(p)) for p in (PERSONAS if profiles is None else profiles)]
     return sorted((t for t in found if t.conds), key=lambda t: t.rank)

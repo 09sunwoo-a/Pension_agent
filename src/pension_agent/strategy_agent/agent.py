@@ -35,7 +35,8 @@ from pension_agent.strategy_agent import engine
 from pension_agent import llm, observability
 from pension_agent.strategy_agent import sections
 from pension_agent.strategy_agent import support
-from pension_agent.strategy_agent.customer import PERSONAS, Profile, ledger_stamp
+from pension_agent.strategy_agent.customer import (
+    PERSONAS, Profile, ledger_stamp, refresh_roster)
 # 요건 판정 — 관측 태그에 그대로 옮긴다. 이름이 흔해 별칭을 붙인다
 # (`facts["conditions"]` 는 사람이 읽는 문구이고 이쪽은 코드다).
 from pension_agent.strategy_agent.customer import conditions as target_conditions
@@ -920,6 +921,7 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(encoding="utf-8")
 
     name = " ".join(sys.argv[1:]).strip()
+    refresh_roster()   # 로스터를 도는 자리라 날짜부터 확인한다(customer.refresh_roster)
     if not PERSONAS:
         print("등록된 고객이 없습니다. 시연용 고객 데이터가 정해지면 "
               "pension_agent/strategy_agent/customer.py 의 PERSONAS 에 채웁니다.")

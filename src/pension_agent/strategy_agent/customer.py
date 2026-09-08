@@ -725,11 +725,50 @@ PERSONAS: list[Profile] = _load_personas()
 
 _BY_ID = {p.id: p for p in PERSONAS}
 
+#: 로스터를 만든 «오늘». 아래 `refresh_roster()` 가 이것과 오늘을 견준다.
+_BUILT_ON: date = today()
+
+
+def refresh_roster() -> bool:
+    """날이 바뀌었으면 로스터를 다시 만든다. 다시 만들었으면 True.
+
+    **Profile 의 날짜 파생값은 만들 때 한 번 계산된다** — 만기 잔여일수(`matDD` ·
+    `maturities[].dd` · `isa.dd`) · 최근 접촉 경과일(`dorm`) · 운용변경 경과월(`nchM`) ·
+    가입 후 경과연수. 그래서 프로세스가 자정을 넘겨 살아 있으면 그 값들만 어제 것으로
+    남고, `today()` 를 그때그때 읽는 자리(연말까지 며칠 · `date` 도구 · 이 산출의 스탬프)와
+    하루씩 어긋난다. 화면은 그래도 그럴듯해 보인다 — 「만기 D-14」와 「D-13」은 둘 다
+    말이 되기 때문이다.
+
+    예전에는 `app.py` 가 «오늘»을 프로세스 시작 시각에 **못박아** 그 어긋남을 덮었다.
+    그러면 자정을 넘긴 화면이 통째로 어제를 말한다 — 어긋나지 않을 뿐 틀린 값이다.
+    덮는 대신 다시 만든다.
+
+    **같은 객체를 제자리에서 갈아끼운다.** `from ... import PERSONAS` 로 이름을 가져간
+    곳이 여럿이라(브리핑 CLI·타겟 목록·Streamlit), 새 리스트를 대입하면 그쪽 이름은 옛
+    로스터를 계속 본다.
+
+    비용은 하루에 한 번 JSON 한 번 읽기다 — 날이 같으면 날짜 비교 하나로 끝난다.
+    """
+    global _BUILT_ON
+    now = today()
+    if now == _BUILT_ON:
+        return False
+    PERSONAS[:] = _load_personas()
+    _BY_ID.clear()
+    _BY_ID.update({p.id: p for p in PERSONAS})
+    _BUILT_ON = now
+    return True
+
 
 def get_profile(customer_id: str) -> Profile | None:
     """고객 id 로 Profile 을 조회한다. 지금은 PERSONAS 조회의 얇은 래퍼일 뿐이지만, 대화형
     에이전트(consult_agent 의 customer 도구)가 이 함수 하나만 의존하도록 해 나중에 실제 고객
     프로파일 저장소로 교체할 때 이 함수 본문만 바꾸면 되게 한다.
 
+    조회 전에 날짜를 확인한다 — 이 함수를 지나는 모든 고객 재료가 «오늘» 기준 잔여일수를
+    갖게 하는 자리다(`refresh_roster`). PERSONAS 를 직접 도는 쪽(브리핑 CLI·타겟 목록)은
+    그쪽이 부른다.
+
     로스터가 비어 있는 지금은 어떤 id 로도 None 이 나온다 — 호출부는 이미 None 을 다룬다."""
+    refresh_roster()
     return _BY_ID.get(customer_id)

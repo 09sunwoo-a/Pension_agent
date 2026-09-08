@@ -7,6 +7,13 @@
 
 from __future__ import annotations
 
+from tests import pin_today
+
+pin_today()   # 이 스위트의 «오늘»을 원장 기준일로 고정한다 — **pension_agent 임포트 전에**
+              # (tests/__init__.py). 고정은 회귀의 요건이지 이 패키지를 지나는 모든
+              # 실행의 요건이 아니라, 거는 쪽이 걸고 싶다고 말한다.
+
+
 import asyncio
 import sys
 from pathlib import Path
@@ -442,40 +449,63 @@ check(tests.PINNED_TODAY == CUST.AS_OF.isoformat(),
       "테스트가 고정한 오늘 = 원장 기준일(AS_OF)",
       f"{tests.PINNED_TODAY} vs {CUST.AS_OF}")
 
-# ── 고정은 **회귀 테스트의 요건**이지 이 패키지를 지나는 모든 실행의 요건이 아니다.
-# 리허설 러너·디버그 CLI 가 이 패키지 안에 살아서 임포트만으로 고정을 물려받았고, 실제
-# 날짜로 도는 줄 알고 돌린 사람이 원장 기준일 기준의 경과일을 지어낸 수치로 의심했다
-# (2026-09-07). 되돌리는 관문이 `tests.unpin_today` 이고, 지켜야 할 것은 둘이다.
+# ── **고정은 회귀 테스트가 스스로 건다.** 예전에는 `tests/__init__.py` 가 임포트만으로
+# 걸어서, 이 패키지 «안에 사는» 다른 것들까지 물려받았다 — 리허설 러너·디버그 CLI 가
+# 그랬고, 실제 날짜로 도는 줄 알고 돌린 사람이 원장 기준일 기준의 경과일을 지어낸 수치로
+# 의심했다(2026-09-07). Streamlit 도 디버그 모드를 켜는 순간 물려받아 `app.py` 가 자기
+# 날짜를 먼저 채워 넣는 우회를 갖고 있었다. 지켜야 할 것 셋.
+from pension_agent import config as _config  # noqa: E402 — 경로는 config 소유(구조 규칙)
+
+_INIT_SRC = (_config.SRC_ROOT / "tests" / "__init__.py").read_text(encoding="utf-8")
+check("os.environ[TODAY_ENV] = PINNED_TODAY" in _INIT_SRC.split("def pin_today")[-1],
+      "고정은 pin_today() 안에서만 일어난다 — 임포트만으로 걸리지 않는다")
+
+# 회귀 모듈은 **전부** 그것을 부르고, **`pension_agent` 임포트보다 먼저** 부른다 —
+# `customer` 가 임포트 시점에 PERSONAS 를 만들며 잔여일수·경과일을 굳히므로, 순서가
+# 뒤집히면 걸어도 그 값들은 이미 실제 날짜로 계산돼 있다. 소스 순서로 잰다(실행해서는
+# 못 잰다 — 이 프로세스는 이미 지나온 자리다).
+for _entry in sorted((_config.SRC_ROOT / "tests").glob("test_*.py")) + \
+        [_config.SRC_ROOT / "tests" / "debug" / "test_trace.py"]:
+    _src = _entry.read_text(encoding="utf-8")
+    _at_pin = _src.find("\npin_today()")
+    _at_import = _src.find("\nfrom pension_agent")
+    check(_at_pin > 0 and (_at_import < 0 or _at_pin < _at_import),
+          f"{_entry.name} 가 pension_agent 임포트 전에 pin_today() 를 부른다")
+
+# 밖에서 준 값은 덮지 않는다 — 특정 날짜로 스위트를 돌려 보는 경로를 남긴다.
 _saved_pin = os.environ.get(tests.TODAY_ENV)
 try:
-    tests.unpin_today()
-    check(not os.environ.get(tests.TODAY_ENV, "").strip(),
-          "unpin_today() 가 테스트가 채운 고정을 되돌린다 — 리허설은 실제 날짜로 돈다")
+    os.environ[tests.TODAY_ENV] = "2026-12-25"
+    tests.pin_today()
+    check(os.environ[tests.TODAY_ENV] == "2026-12-25",
+          "pin_today() 는 밖에서 준 값을 덮지 않는다")
 finally:
     if _saved_pin is None:
         os.environ.pop(tests.TODAY_ENV, None)
     else:
         os.environ[tests.TODAY_ENV] = _saved_pin
-check(os.environ.get(tests.TODAY_ENV) == tests.PINNED_TODAY,
-      "되돌린 뒤에도 이 스위트의 고정은 그대로다(위 복원)")
 
-# **밖에서 준 값은 건드리지 않는다.** 특정 날짜로 얼려 보려고 붙인 `PENSION_TODAY=…` 와
-# `app.py` 가 켤 때 채우는 값이 여기 걸린다 — 되돌려 버리면 그쪽이 조용히 실제 날짜로 샌다.
-check(tests.PINNED_BY_TESTS is True,
-      "이 스위트는 고정을 스스로 채웠다(밖에서 준 값이 아니다)")
-
-# 러너 진입이 그 관문을 **`pension_agent` 임포트보다 먼저** 통과해야 한다 — `customer` 가
-# 임포트 시점에 PERSONAS 를 만들며 잔여일수·경과일을 굳히므로, 순서가 뒤집히면 되돌려도
-# 그 값들은 이미 고정된 오늘로 계산돼 있다. 소스 순서로 잰다(실행해 보면 이 프로세스의
-# 고정이 풀린다).
-from pension_agent import config as _config  # noqa: E402 — 경로는 config 소유(구조 규칙)
-
-for _entry in ("tests/debug/reps.py", "tests/debug/__main__.py"):
-    _src = (_config.SRC_ROOT / _entry).read_text(encoding="utf-8")
-    _at_unpin = _src.find("unpin_today()")
-    _at_import = _src.find("\nfrom pension_agent")
-    check(_at_unpin > 0 and (_at_import < 0 or _at_unpin < _at_import),
-          f"{_entry} 가 pension_agent 임포트 전에 고정을 되돌린다")
+# ── 로스터는 날이 바뀌면 다시 만들어진다. Profile 의 날짜 파생값(만기 잔여일수·미접촉
+# 경과일)은 만들 때 한 번 계산되므로, 자정을 넘긴 프로세스에서는 그 값들만 어제 것으로
+# 남아 `today()` 를 그때그때 읽는 자리와 하루씩 어긋난다.
+_before = next(p for p in CUST.PERSONAS if p.dorm is not None)   # 접촉 이력이 있는 고객
+_roster_id = id(CUST.PERSONAS)
+check(CUST.refresh_roster() is False, "같은 날에는 다시 만들지 않는다(날짜 비교 하나)")
+try:
+    os.environ[tests.TODAY_ENV] = "2026-09-30"
+    check(CUST.refresh_roster() is True, "날이 바뀌면 로스터를 다시 만든다")
+    _after = CUST.get_profile(_before.id)
+    _moved = (date(2026, 9, 30) - date.fromisoformat(tests.PINNED_TODAY)).days
+    check(_after is not None and _after.dorm - _before.dorm == _moved,
+          f"다시 만든 프로파일의 경과일이 새 «오늘» 기준이다(+{_moved}일)",
+          f"{_before.dorm} → {_after.dorm if _after else None}")
+    # **같은 객체를 제자리에서 갈아끼운다** — `from ... import PERSONAS` 로 이름을 가져간
+    # 곳(브리핑 CLI·타겟 목록·Streamlit)이 옛 로스터를 계속 보면 안 된다.
+    check(id(CUST.PERSONAS) == _roster_id, "PERSONAS 는 같은 리스트 객체를 유지한다")
+finally:
+    os.environ[tests.TODAY_ENV] = tests.PINNED_TODAY
+    CUST.refresh_roster()
+check(CUST.get_profile(_before.id).dorm == _before.dorm, "되돌리면 원래 값이다(위 복원)")
 
 # 두 축이 이름부터 갈려 있어야 한다. 옛 이름이 살아 있으면 «원장 기준일»과 «오늘»을
 # 같은 것으로 아는 호출부가 조용히 남는다.

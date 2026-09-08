@@ -9,6 +9,13 @@ LLM 을 부르는 자리(understand·계획·문장생성)를 스텁으로 갈�
 
 from __future__ import annotations
 
+from tests import pin_today
+
+pin_today()   # 이 스위트의 «오늘»을 원장 기준일로 고정한다 — **pension_agent 임포트 전에**
+              # (tests/__init__.py). 고정은 회귀의 요건이지 이 패키지를 지나는 모든
+              # 실행의 요건이 아니라, 거는 쪽이 걸고 싶다고 말한다.
+
+
 import json
 import os
 import pathlib
