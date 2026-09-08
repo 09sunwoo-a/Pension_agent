@@ -170,6 +170,9 @@ def health() -> dict[str, Any]:
             "min_interval_sec": llm.MIN_INTERVAL,
             "retry_attempts": llm.RETRY_ATTEMPTS,
             "cooldown_sec": llm.COOLDOWN,
+            # 사번 하나에 쿼터가 몰리지 않게 버킷을 나누고 있나(0=끔). 「.env 를 고쳤는데
+            # 먹었나」가 여기서 끝나야 한다 — 안 먹은 것과 안 듣는 것은 처방이 정반대다.
+            "client_user_spread": llm.CLIENT_USER_SPREAD,
         },
     }
 

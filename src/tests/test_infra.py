@@ -719,6 +719,37 @@ try:
           "llm: 주체를 주지 않으면 기본값으로 나간다(빈 값 금지)",
           str(_seen.get("X-client-user")))
 
+    # 쿼터 버킷 분산 — x-client-user 가 게이트웨이의 쿼터 버킷이라, 사번 하나로 몰아서
+    # 부르면 그 버킷이 바닥난다(STG 분당 10회). 사번 뒤에 임의 접미를 붙여 나누되
+    # **사번은 앞에 그대로 남는다** — 이 값은 버킷이면서 감사 기록이라 누가 불렀는지가
+    # 사라지면 안 된다.
+    _saved_spread, _llm.CLIENT_USER_SPREAD = _llm.CLIENT_USER_SPREAD, 5
+    try:
+        check(_llm.spread_client_user("3902172") != _llm.spread_client_user("3902172"),
+              "llm: 접미는 호출마다 새로 뽑는다(한 프로세스가 순차로 돌아도 나뉜다)")
+        _bucket = _llm.spread_client_user("3902172")
+        check(_bucket.startswith("3902172-") and len(_bucket) == len("3902172-") + 5,
+              "llm: 사번은 앞에 그대로 남고 접미만 붙는다(감사 기록이 사라지지 않는다)",
+              _bucket)
+        # main.py 는 x_client_user 를 직접 넘긴다 — 그 경로가 빠지면 실서비스만 안 나뉜다.
+        _seen.clear()
+        _llm.generate("q", x_client_user="3902172")
+        check(str(_seen.get("X-client-user", "")).startswith("3902172-"),
+              "llm: 호출부가 직접 준 주체에도 분산이 걸린다(API 경로가 빠지지 않는다)",
+              str(_seen.get("X-client-user")))
+        # 관측에도 헤더와 **같은** 값이 실려야 한다 — 갈리면 대시보드에서 되짚을 수 없다.
+        _seen.clear()
+        with _llm.client_user("emp-0417"):
+            _llm.generate("q")
+        check(str(_seen.get("X-client-user", "")).startswith("emp-0417-"),
+              "llm: client_user() 로 감싼 주체에도 분산이 걸린다",
+              str(_seen.get("X-client-user")))
+    finally:
+        _llm.CLIENT_USER_SPREAD = _saved_spread
+    check(_llm.spread_client_user("3902172") == "3902172",
+          "llm: 기본은 꺼짐 — 감사 기록의 모양을 조용히 바꾸지 않는다",
+          _llm.spread_client_user("3902172"))
+
     # ② 동시성 상한 — 동시에 열려 있는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
     _llm._next_free = 0.0
     _inflight = {"now": 0, "max": 0}
