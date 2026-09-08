@@ -464,7 +464,7 @@ def _post_json(req: urllib.request.Request) -> dict:
                 # 404 는 «경로가 없다»와 «그런 모델이 없다»가 같은 코드로 온다 — 응답
                 # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
                 raise LLMError(
-                    f"HTTP {exc.code} {exc.reason} — {req.full_url}"
+                    f"{_http_line(exc)} — {req.full_url}"
                     + (f"\n응답: {body}" if body else ""), status=exc.code) from exc
             last, last_body = exc, body
             if attempt == RETRY_ATTEMPTS - 1:
@@ -480,37 +480,39 @@ def _post_json(req: urllib.request.Request) -> dict:
                 # 재시도로 성공한 429 는 예외가 안 나므로 여기서 안 남기면 본문을 볼 데가
                 # 없다(끝까지 실패한 429 만 LLMError 에 실린다).
                 _log.warning(
-                    "LLM %s — %s %.1f초 감속 후 재시도 (%d/%d · %s). 이후 재시도는 "
-                    "%.0f초 이상 기다릴 때만 남깁니다 — 누적은 /health 의 rate_gate 와 "
-                    "prebuild 요약이 셉니다.%s",
-                    exc.code, _cause(exc.code), wait, attempt + 1, RETRY_ATTEMPTS, source,
-                    LONG_WAIT_LOG_SEC, f"\n  응답: {body}" if body else "")
+                    "LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)%s\n"
+                    "  (이후 재시도는 %.0f초 이상 기다릴 때만 남깁니다 — 누적은 /health 의 "
+                    "rate_gate 와 prebuild 요약이 셉니다.)",
+                    _http_line(exc), wait, attempt + 1, RETRY_ATTEMPTS, source,
+                    f"\n  응답: {body}" if body else "", LONG_WAIT_LOG_SEC)
             elif wait >= LONG_WAIT_LOG_SEC:
                 # 오래 서 있는 것은 멈춘 것과 구별되지 않는다 — 이건 남긴다.
                 _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
-                             exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source)
+                             _http_line(exc), wait, attempt + 1, RETRY_ATTEMPTS, source)
             else:
                 _log.debug("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
-                           exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source)
+                           _http_line(exc), wait, attempt + 1, RETRY_ATTEMPTS, source)
             _slow_down(wait)
         else:
             # 성공했다 — 넓혀 둔 간격을 한 걸음 좁힌다(감속이 영구가 되지 않게).
             _speed_up()
             return payload
     code = last.code if last else 0
-    # 429 와 5xx 는 직원이 할 일이 다르다 — 문장도 갈라야 한다(이 함수 머리말). 게이트
-    # 상태(간격)는 속도 문제일 때만 붙인다. 5xx 에 「간격을 늘리라」고 적으면 엉뚱한 곳을
+    # 서버가 말한 것(원문 한 줄 + 응답 본문)을 먼저 적고, **우리 조치는 「조치:」 아래로
+    # 갈라 둔다.** 섞어 쓰면 어디까지가 서버 말이고 어디부터가 우리 해석인지 안 갈린다.
+    # 429 와 5xx 는 직원이 할 일이 다르므로(이 함수 머리말) 조치가 갈리고, 게이트 상태
+    # (간격)는 속도 문제일 때만 붙인다 — 5xx 에 「간격을 늘리라」고 적으면 엉뚱한 곳을
     # 만지게 된다.
     if code == 429:
-        detail = (
-            "속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오. "
-            f"(동시 {MAX_CONCURRENCY} · 간격 {_interval:.1f}초/바닥 {MIN_INTERVAL}초 — 간격이 "
-            f"상한 {MAX_INTERVAL:.0f}초에 닿았는데도 429 면 속도가 아니라 쿼터 문제입니다.)")
+        fix = ("호출 간격을 두거나 쿼터를 확인하십시오 "
+               f"(동시 {MAX_CONCURRENCY} · 간격 {_interval:.1f}초/바닥 {MIN_INTERVAL}초 — 간격이 "
+               f"상한 {MAX_INTERVAL:.0f}초에 닿았는데도 429 면 속도가 아니라 쿼터 문제입니다).")
     else:
-        detail = "서버 오류. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다)."
+        fix = "서버 오류입니다. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다)."
     raise LLMError(
-        f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail}"
-        + (f"\n응답: {last_body}" if last_body else ""), status=code or None) from last
+        f"{_http_line(last) if last else f'HTTP {code}'} — {RETRY_ATTEMPTS}회 시도 후에도 실패"
+        + (f"\n응답: {last_body}" if last_body else "")
+        + f"\n조치: {fix}", status=code or None) from last
 
 
 #: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
@@ -536,11 +538,19 @@ def _retryable(code: int) -> bool:
     return code == 429 or 500 <= code < 600
 
 
-def _cause(code: int) -> str:
-    """왜 기다리는지 한 마디. 429 와 5xx 는 직원이 할 일이 다르므로 같은 말로 적지 않는다 —
-    「속도를 제한합니다」를 보면 간격을 조이러 가는데, 5xx 는 거기가 아니다."""
-    return ("게이트웨이가 속도를 제한합니다." if code == 429
-            else "서버가 일시적으로 실패했습니다.")
+def _http_line(exc: urllib.error.HTTPError) -> str:
+    """서버·표준이 말한 그대로의 한 줄 — `HTTP Error 429: Too Many Requests`.
+
+    **우리 해석을 여기 넣지 않는다.** 한때 이 자리에 「게이트웨이가 속도를 제한합니다」라고
+    적었는데, 그건 상태 코드를 보고 우리가 지은 문장이지 서버가 한 말이 아니다. 로그를
+    읽는 사람이 검색하고 대조할 대상은 원문이다 — 상태 코드·표준 reason 문구·응답 본문.
+    (부수 효과로 429·5xx 를 우리가 갈라 적을 일도 없어진다. reason 이 이미 갈라 말한다:
+    Too Many Requests / Service Unavailable.)
+
+    `urllib` 이 그대로 올릴 때의 표기(`HTTP Error %d: %s`)를 쓴다 — 같은 오류를 두 곳에서
+    다른 모양으로 적으면 로그와 스택트레이스를 붙여 읽을 수 없다.
+    """
+    return f"HTTP Error {exc.code}: {exc.reason}"
 
 
 def _backoff(exc: urllib.error.HTTPError, attempt: int) -> tuple[float, bool]:

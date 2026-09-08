@@ -835,8 +835,17 @@ try:
         check(len(_catch.lines) == 1,
               "llm: 짧은 재시도는 첫 건만 남긴다(같은 줄이 진행 표시를 덮지 않는다)",
               f"{len(_catch.lines)}줄")
-        check("게이트웨이가 속도를 제한합니다" in _catch.lines[0],
-              "llm: 그 첫 건이 무슨 일인지·이후는 어디서 보는지 말한다", _catch.lines[0])
+        # 로그가 말하는 것은 **서버·표준의 원문**이지 우리 해석이 아니다. 한때 이 자리에
+        # 「게이트웨이가 속도를 제한합니다」라고 적었는데, 그건 상태 코드를 보고 우리가
+        # 지은 문장이었다 — 읽는 사람이 검색·대조할 대상은 원문이다.
+        check(_catch.lines[0].startswith("LLM HTTP Error 429: "),
+              "llm: 재시도 로그는 서버·표준 원문(HTTP Error 429: …)으로 시작한다",
+              _catch.lines[0])
+        check("속도를 제한" not in _catch.lines[0],
+              "llm: 상태 코드를 우리 말로 풀어 쓴 문장을 끼우지 않는다", _catch.lines[0])
+        check("rate_gate" in _catch.lines[0],
+              "llm: 이후 재시도를 어디서 보는지는 말한다(우리 동작이라 우리가 적는다)",
+              _catch.lines[0])
         # 어느 한도에 걸렸나(초당·분당·토큰·일일)는 서버 본문에만 있다. 재시도로 성공한
         # 429 는 예외가 안 나므로 여기서 안 남기면 볼 데가 없다 — 처방이 갈리는 값이다.
         check("tokens per minute" in _catch.lines[0],
@@ -847,8 +856,8 @@ try:
         check(_state["retries"] == 6 and _state["slept_sec"] == 6.0,
               "llm: 남기지 않은 재시도도 누적으로 센다(pace_state)", str(_state))
 
-        # 같은 첫 줄이 5xx 에도 쓰이는데, 5xx 는 «속도 제한»이 아니다 — 그렇게 적으면
-        # 직원이 간격을 조이러 간다(429 와 5xx 는 할 일이 다르다).
+        # 5xx 도 같은 규칙이다 — 원문 reason 이 이미 «Too Many Requests» 와 갈라 말하므로
+        # 우리가 코드를 보고 문장을 지을 일이 없다.
         _catch.lines.clear()
         _llm.reset_pace()
         _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
@@ -857,9 +866,8 @@ try:
             _llm.generate("q")
         except _llm.LLMError:
             pass
-        check(_catch.lines and "속도를 제한" not in _catch.lines[0]
-              and "서버가 일시적으로 실패" in _catch.lines[0],
-              "llm: 5xx 의 첫 재시도 줄은 «속도 제한»이라고 말하지 않는다",
+        check(_catch.lines and _catch.lines[0].startswith("LLM HTTP Error 503: "),
+              "llm: 5xx 재시도 줄도 원문으로 시작한다(우리가 지은 문장을 안 끼운다)",
               _catch.lines[0] if _catch.lines else "(없음)")
 
         # 오래 기다리는 건은 조용히 넘기지 않는다 — 30초 침묵은 멈춘 것과 구별되지 않는다.
