@@ -33,8 +33,12 @@
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
+  LLM_CLIENT_USER_SPREAD  사번 뒤에 붙일 임의 접미의 길이. 0(기본)이면 안 붙인다.
+                    한 사번의 쿼터 버킷이 바닥날 때 여러 버킷으로 나눈다 — 「쿼터 버킷 분산」
   LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
+  LLM_CALLS_PER_MIN  플랫폼이 알려준 «분당 N회» 한도. 있으면 60/N 이 간격의 바닥이 된다
+                    (행내 STG 는 10 — 환산은 코드가 한다)
   LLM_MIN_INTERVAL_SEC  호출 사이 간격의 **바닥**(초). 기본 0.2. 실제 간격은 429 마다
                     넓어졌다 성공마다 좁아진다(적응형 감속 — 아래 세 값)
   LLM_SLOWDOWN_FLOOR_SEC  첫 429 에서 간격을 여기까지 올린다. 기본 3
@@ -67,6 +71,7 @@ import json
 import logging
 import os
 import random
+import string
 import threading
 import time
 import urllib.error
@@ -139,12 +144,25 @@ RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
 
 #: 동시에 나가는 호출 수 상한. 1 이면 완전 직렬.
 MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
+#: 플랫폼이 «분당 N회»로 알려준 한도. 있으면 60/N 이 간격의 바닥이 된다.
+#:
+#: 이 knob 이 따로 있는 이유는 **플랫폼이 알려주는 단위가 「분당 회수」이기 때문**이다.
+#: 행내 STG 는 분당 10회다(2026-09-08 확인). 그걸 사람이 6초로 환산해 넣게 하면 언젠가
+#: 틀리고, 틀려도 조용히 429 로만 나타난다 — 환산은 코드가 한다.
+#:
+#: 한도를 아는 순간 «탐색»은 필요 없다. 아래 적응형 감속은 한도를 모를 때 감당 가능한
+#: 속도를 더듬어 찾는 장치이고, 여기 값이 있으면 처음부터 맞는 속도로 출발한다.
+CALLS_PER_MIN = float(os.getenv("LLM_CALLS_PER_MIN", "0") or 0)
+
 #: 호출 사이 최소 간격(초) — **바닥값**이다. 실제 간격은 아래 `_interval` 이 들고 있고
 #: 429·5xx 를 맞으면 넓어졌다가 성공하면서 여기까지 돌아온다.
 #: 0 이면 간격 제한 없음(테스트가 이렇게 끈다).
 #: 기본을 0 에서 0.2 로 올린 근거는 행내 실측이다 — 게이트웨이가 이 버스트에 429 를 냈다.
 #: 브리핑 11연쇄에 +2.2초라 감당할 수 있는 값이고, 모자라면 .env 에서 올린다.
 MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
+if CALLS_PER_MIN > 0:
+    # 둘 다 있으면 **느린 쪽**을 쓴다 — 한쪽이 한도를 넘게 잡혀 있으면 그게 곧 429 다.
+    MIN_INTERVAL = max(MIN_INTERVAL, 60.0 / CALLS_PER_MIN)
 #: 서버가 Retry-After 를 안 줄 때 쓰는 지수 백오프의 기준값(초).
 COOLDOWN = float(os.getenv("LLM_COOLDOWN", "2"))
 #: **우리가 추측한** 백오프의 상한(초). 서버가 회복 시각을 안 알려줄 때만 쓰는 값이다.
@@ -257,9 +275,11 @@ def pace_state() -> dict[str, float]:
     「재시도 로그」 주석. 몇 번 걸렸는지는 **세면** 되지 같은 줄을 100번 읽을 일이 아니다.
     """
     with _PACE_LOCK:
-        return {"interval_sec": round(_interval, 2), "floor_sec": MIN_INTERVAL,
+        return {"interval_sec": round(_interval, 2), "floor_sec": round(MIN_INTERVAL, 2),
                 "max_sec": MAX_INTERVAL, "retries": _stats["retries"],
-                "slept_sec": round(_stats["slept_sec"], 1)}
+                "slept_sec": round(_stats["slept_sec"], 1),
+                # 한도를 알고 넣었나(0 이면 «모르고 탐색 중»이다) · 버킷을 나누고 있나.
+                "calls_per_min": CALLS_PER_MIN, "client_user_spread": CLIENT_USER_SPREAD}
 
 
 # ── 재시도 로그 — 같은 줄을 100번 찍지 않는다 ────────────────────────────────
@@ -333,6 +353,40 @@ def client_user(name: str | None) -> Iterator[None]:
 def current_client_user() -> str:
     """지금 유효한 x-client-user. 명시 인자 > ContextVar > 환경변수 기본값."""
     return _CLIENT_USER.get() or DEFAULT_CLIENT_USER
+
+
+# ── 쿼터 버킷 분산 ────────────────────────────────────────────────────────────
+#
+# x-client-user 가 게이트웨이의 쿼터 버킷이라(위 주석), 한 직원이 브리핑 12명 ×
+# 11연쇄를 돌리면 그 사번 하나의 버킷이 바닥난다 — 개발·시연에서 429 가 나는 자리다.
+# 사번 뒤에 임의 접미를 붙여 한 사람의 호출을 여러 버킷으로 나눈다.
+#
+# **사번은 그대로 앞에 남긴다.** 이 값은 쿼터 버킷이면서 동시에 감사 기록이라,
+# 익명화하면(예전 "anonymous") 누가 불렀는지가 사라진다. 접미만 갈리므로 «누가»는
+# 그대로 읽히고 «어느 버킷»만 나뉜다.
+#
+# **기본은 꺼짐이다.** 감사 기록의 모양을 바꾸는 설정이라 조용히 켜지면 안 되고,
+# 배포 컨테이너(serving)까지 따라가면 곤란하다 — 켜는 것은 .env 가 정한다.
+# 그리고 **버킷이 x-client-user 로 갈릴 때만 듣는다** — 게이트웨이가 API 키 단위나
+# 전체 단위로 재고 있으면 접미를 붙여도 아무것도 달라지지 않는다.
+
+#: 사번 뒤에 붙일 임의 접미의 길이. 0 이면 안 붙인다(기본).
+CLIENT_USER_SPREAD = max(0, int(os.getenv("LLM_CLIENT_USER_SPREAD", "0") or 0))
+#: 접미에 쓰는 글자. 사번과 섞이지 않게 하이픈으로 잇는다.
+_SPREAD_ALPHABET = string.ascii_letters + string.digits
+
+
+def spread_client_user(base: str) -> str:
+    """쿼터 버킷을 나눈 x-client-user. 꺼져 있으면 base 를 그대로 돌려준다.
+
+    호출 **한 건마다** 새로 뽑는다. 프로세스나 턴 단위로 고정하면 선생성처럼 한
+    프로세스가 순차로 도는 자리에서는 버킷이 하나뿐이라 아무것도 나뉘지 않는다 —
+    그 자리가 바로 이것이 필요한 자리다.
+    """
+    if CLIENT_USER_SPREAD <= 0 or not base:
+        return base
+    suffix = "".join(random.choice(_SPREAD_ALPHABET) for _ in range(CLIENT_USER_SPREAD))
+    return f"{base}-{suffix}"
 
 # ── gemma (외부 사전점검) ──
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
@@ -658,7 +712,9 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
     """
     system = system or None   # "" 은 시스템 메시지 없음으로 본다(프로바이더가 빈 문자열을 싫어한다)
     # 헤더에도 관측 메타데이터에도 같은 값이 실려야 한다 — 여기서 한 번만 정한다.
-    x_client_user = x_client_user or current_client_user()
+    # 쿼터 버킷 분산은 **여기 한 곳**에서 건다 — main.py 는 x_client_user 를 직접 넘기므로
+    # current_client_user() 안에서만 붙이면 실서비스 경로가 통째로 빠진다.
+    x_client_user = spread_client_user(x_client_user or current_client_user())
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "
