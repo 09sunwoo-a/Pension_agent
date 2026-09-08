@@ -547,7 +547,7 @@ _llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY = "genai", "http://fake", "k"
 # 간격 제한은 재시도 검사 동안 끈다 — 재시도 대기와 섞이면 무엇 때문에 잤는지 갈리지
 # 않는다. 간격·동시성 자체는 아래 ②③ 에서 따로 본다.
 _llm.MIN_INTERVAL = 0.0
-_llm._next_free = 0.0
+_llm.reset_pace()          # 바닥이 바뀌었으니 «지금 간격»도 거기서 다시 출발시킨다
 _sleeps: list[float] = []
 # _llm.time 은 stdlib time 모듈 그 자체다 — 여기에 스텁을 꽂으면 이 파일의 time.sleep 도
 # 같이 바뀐다. 진짜로 재워야 하는 곳(동시성 검사)을 위해 원본을 잡아 둔다.
@@ -588,14 +588,17 @@ try:
     # 잠은 게이트(_pace)가 잔다 — 재시도 루프는 «다음 호출 가능 시각»만 민다. 실제
     # monotonic 이 흐르므로 정확히 1.0 이 아니라 그 언저리다(스텁 sleep 은 시간을
     # 흘려보내지 않으니 오차는 테스트가 도는 시간뿐이다).
-    check(len(_sleeps) == 2 and all(0.9 < w <= 1.0 for w in _sleeps),
-          "llm: Retry-After 초만큼 기다린다", str(_sleeps))
+    # 첫 대기는 Retry-After 그대로이고, 그 뒤로는 **넓어진 간격이 더해질 수 있다** —
+    # 429 를 맞으면 간격 자체가 넓어지기 때문이다(아래 ④). 서버가 준 시간보다 일찍
+    # 가지 않는 것이 요건이므로 하한만 잰다.
+    check(len(_sleeps) == 2 and 0.9 < _sleeps[0] <= 1.0 and _sleeps[1] >= 0.9,
+          "llm: Retry-After 초 이상 기다린다", str(_sleeps))
 
     # 서버가 준 Retry-After 는 **추측 백오프의 상한(30초)에 걸리지 않는다.** 행내 실측
     # (2026-09-08): 50초를 30초에서 끊자 다음 시도가 같은 429 를 맞고 20초를 더 쉬었다 —
     # 쉬는 시간은 같은데 재시도 횟수 하나가 헛되이 나갔다.
     calls["n"], _sleeps[:] = 0, []
-    _llm._next_free = 0.0
+    _llm.reset_pace()
 
     def _urlopen_429_long(req, timeout=None):
         calls["n"] += 1
@@ -616,7 +619,7 @@ try:
           "llm: Retry-After 가 없으면 추측 백오프이고 MAX_BACKOFF 를 넘지 않는다", f"{_wait}")
 
     calls["n"], _sleeps[:] = 0, []
-    _llm._next_free = 0.0
+    _llm.reset_pace()
     _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
         _http_error(429))
     try:
@@ -689,7 +692,7 @@ try:
 
     # 재시도를 다 쓴 경우에도 마지막 본문이 남는다(본문은 한 번만 읽을 수 있다).
     _sleeps[:] = []
-    _llm._next_free = 0.0
+    _llm.reset_pace()
     _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
         _http_error(429, body=b"quota exceeded for this key"))
     try:
@@ -701,7 +704,7 @@ try:
           "llm: 재시도를 다 써도 마지막 응답 본문이 남는다", str(_raised))
 
     # x-client-user — 호출부가 준 주체가 실제 헤더로 나가는가.
-    _llm._next_free = 0.0
+    _llm.reset_pace()
     _seen: dict = {}
 
     def _urlopen_capture(req, timeout=None):
@@ -720,7 +723,7 @@ try:
           str(_seen.get("X-client-user")))
 
     # ② 동시성 상한 — 동시에 열려 있는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
-    _llm._next_free = 0.0
+    _llm.reset_pace()
     _inflight = {"now": 0, "max": 0}
     _inflight_lock = threading.Lock()
 
@@ -749,11 +752,46 @@ try:
     _pushed = _llm._next_free - _time.monotonic()
     check(4.0 < _pushed <= 5.0,
           "llm: 429·5xx 를 맞으면 프로세스 전체의 다음 호출 시각이 밀린다", f"{_pushed:.2f}초")
-    _llm._next_free = 0.0
+
+    # ④ 감속이 **지속되는가** — ③ 만으로는 한 번 쉬고 곧바로 예전 속도로 돌아간다.
+    # 행내 실측(2026-09-08): 30초를 쉰 직후 브리핑 11연쇄가 0.2초 간격으로 몰려나가
+    # 같은 429 를 다시 맞았다. 쉬는 것과 느려지는 것은 다른 일이다.
+    _llm.reset_pace()
+    check(_llm._interval == _llm.MIN_INTERVAL, "llm: 감속 전 간격은 바닥값이다", f"{_llm._interval}")
+    _llm._slow_down(1.0)
+    _first = _llm._interval
+    check(_first >= _llm.SLOWDOWN_FLOOR,
+          "llm: 첫 429 는 간격을 바닥에서 SLOWDOWN_FLOOR 까지 끌어올린다", f"{_first}초")
+    _llm._slow_down(1.0)
+    check(_llm._interval == min(_first * _llm.SLOWDOWN_FACTOR, _llm.MAX_INTERVAL),
+          "llm: 429 가 이어지면 간격이 곱으로 넓어진다", f"{_llm._interval}초")
+    for _ in range(200):
+        _llm._slow_down(1.0)
+    check(_llm._interval == _llm.MAX_INTERVAL,
+          "llm: 아무리 맞아도 간격은 상한에서 멈춘다", f"{_llm._interval}초")
+
+    # 회복은 «빼서» 한다 — 성공 한 번에 곱으로 되돌리면 429 직전 속도로 곧장 복귀한다.
+    _llm._speed_up()
+    check(_llm._interval == _llm.MAX_INTERVAL - _llm.RECOVER_STEP,
+          "llm: 성공하면 간격이 한 걸음씩 좁아진다", f"{_llm._interval}초")
+    for _ in range(1000):
+        _llm._speed_up()
+    check(_llm._interval == _llm.MIN_INTERVAL,
+          "llm: 계속 성공하면 바닥까지 돌아온다(감속이 영구가 되지 않는다)", f"{_llm._interval}초")
+
+    # 넓어진 간격이 실제 대기로 나타나는가 — 상태만 바뀌고 _pace 가 안 쓰면 소용없다.
+    _llm.reset_pace()
+    _llm._interval, _llm._next_free = 4.0, 0.0
+    _sleeps[:] = []
+    _llm._pace()          # 첫 호출은 안 기다린다(예약만 한다)
+    _llm._pace()          # 두 번째가 간격만큼 기다린다
+    check(_sleeps and 3.9 < _sleeps[-1] <= 4.0,
+          "llm: 넓어진 간격이 다음 호출의 실제 대기가 된다", str(_sleeps))
+    _llm.reset_pace()
 finally:
     (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
      _llm.urllib.request.urlopen, _llm.MIN_INTERVAL) = _saved_llm
-    _llm._next_free = 0.0
+    _llm.reset_pace()
 
 
 # ─────────────────────────────────────────────────────────────

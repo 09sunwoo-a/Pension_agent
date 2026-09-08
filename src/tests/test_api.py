@@ -87,6 +87,10 @@ try:
           "/health 는 키 «설정 여부»만 내보내고 값은 내보내지 않는다", r.text[:120])
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
+    # 간격은 상수가 아니라 상태다 — 지금 값이 바닥보다 크면 이 프로세스가 감속 중이다.
+    check(h["rate_gate"].get("interval_sec") is not None
+          and h["rate_gate"].get("floor_sec") == llm.MIN_INTERVAL,
+          "/health 가 «지금» 간격과 바닥값을 함께 보여준다", str(h.get("rate_gate")))
     # «키를 넣었는데 왜 안 되나»의 첫 질문은 어느 파일이 읽혔나다.
     check("exists" in h["env"], "/health 가 설정 파일 유무를 보여준다", str(h.get("env")))
     # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는

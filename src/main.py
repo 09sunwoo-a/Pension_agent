@@ -160,9 +160,11 @@ def health() -> dict[str, Any]:
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
             "max_concurrency": llm.MAX_CONCURRENCY,
-            "min_interval_sec": llm.MIN_INTERVAL,
             "retry_attempts": llm.RETRY_ATTEMPTS,
             "cooldown_sec": llm.COOLDOWN,
+            # 간격은 상수가 아니라 상태다 — 429 마다 넓어지고 성공마다 좁아진다.
+            # 지금 값이 바닥보다 크면 이 프로세스가 이미 감속 중이라는 뜻이다.
+            **llm.pace_state(),
         },
     }
 

@@ -143,8 +143,15 @@ def main(argv: list[str]) -> int:
                 # 횟수를 다 쓰며 같은 429 를 맞는다 — 고객 한 명에 수십 분이 사라지고 남는
                 # 것은 없다(행내 실측 2026-09-08). 여기서 멈추고 나머지는 다음 실행에 맡긴다.
                 left.insert(0, persona)
+                pace = LLM.pace_state()
                 print(f"\n속도 제한(429)입니다 — 여기서 멈춥니다. 남은 {len(left)}명: "
                       + " · ".join(p.nm for p in left))
+                print(f"  호출 간격은 {pace['interval_sec']}초까지 넓혔습니다"
+                      f"(상한 {pace['max_sec']:.0f}초).")
+                if pace["interval_sec"] >= pace["max_sec"]:
+                    # 간격 상한까지 갔는데도 계속 429 면 «너무 빠르다»가 아니다.
+                    print("  상한까지 늦췄는데도 계속 429 입니다 — 속도가 아니라 쿼터 문제로 보입니다."
+                          " 위 응답 본문과 키의 한도를 확인하십시오.")
                 print("잠시 뒤 같은 명령을 다시 실행하면 저장된 고객은 건너뛰고 이어서 만듭니다.")
                 break
     except KeyboardInterrupt:

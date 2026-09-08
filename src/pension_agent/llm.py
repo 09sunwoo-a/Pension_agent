@@ -35,7 +35,11 @@
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
   LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
-  LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
+  LLM_MIN_INTERVAL_SEC  호출 사이 간격의 **바닥**(초). 기본 0.2. 실제 간격은 429 마다
+                    넓어졌다 성공마다 좁아진다(적응형 감속 — 아래 세 값)
+  LLM_SLOWDOWN_FLOOR_SEC  첫 429 에서 간격을 여기까지 올린다. 기본 3
+  LLM_MAX_INTERVAL_SEC  간격의 상한(초). 기본 30
+  LLM_RECOVER_STEP_SEC  성공 한 번에 간격에서 빼는 초. 기본 0.5
   LLM_COOLDOWN      429·5xx 를 맞은 뒤 프로세스 전체가 쉬는 시간의 기준값(초). 기본 2
                     (서버가 Retry-After 를 주면 그 값이 이긴다 — MAX_RETRY_AFTER 주석)
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
@@ -135,7 +139,9 @@ RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
 
 #: 동시에 나가는 호출 수 상한. 1 이면 완전 직렬.
 MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
-#: 호출 사이 최소 간격(초). 0 이면 간격 제한 없음(테스트가 이렇게 끈다).
+#: 호출 사이 최소 간격(초) — **바닥값**이다. 실제 간격은 아래 `_interval` 이 들고 있고
+#: 429·5xx 를 맞으면 넓어졌다가 성공하면서 여기까지 돌아온다.
+#: 0 이면 간격 제한 없음(테스트가 이렇게 끈다).
 #: 기본을 0 에서 0.2 로 올린 근거는 행내 실측이다 — 게이트웨이가 이 버스트에 429 를 냈다.
 #: 브리핑 11연쇄에 +2.2초라 감당할 수 있는 값이고, 모자라면 .env 에서 올린다.
 MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
@@ -150,34 +156,89 @@ MAX_BACKOFF = 30.0
 #: 맞다 — 그보다 일찍 가면 같은 답(429)만 돌아온다. 이 값은 «터무니없는 값»만 거른다.
 MAX_RETRY_AFTER = 120.0
 
+# ── ③ 적응형 감속 — «한 번 쉬는 것»과 «느려지는 것»은 다르다 ────────────────
+#
+# 원래 감속은 다음 호출 시각을 미는 것 하나였다. 그런데 그렇게 쉰 **직후 다음 호출은
+# 다시 0.2초 간격**이다 — 브리핑 한 편은 11연쇄라, 30초를 쉬고 나서 11번을 2초 안에
+# 몰아넣고 같은 429 를 다시 맞는다(2026-09-08 행내 실측: prebuild 가 감속·재시도를
+# 반복하며 고객 한 명에 112초를 쓰고도 못 만들었다). 쉰다고 속도가 주는 것이 아니다.
+#
+# 그래서 간격 자체를 상태로 든다. 429·5xx 를 맞으면 **곱해서** 넓히고(SLOWDOWN_FACTOR),
+# 성공하면 **빼서** 좁힌다(RECOVER_STEP). 방향을 이렇게 가르는 이유는 두 신호의 무게가
+# 다르기 때문이다 — 429 는 «지금 너무 빠르다»는 확실한 신호라 크게 물러서야 하고,
+# 성공 한 번은 «이 속도가 안전하다»의 약한 증거라 조금씩만 돌아와야 한다. 반대로 하면
+# (성공에 곱으로 회복) 429 를 맞기 직전 속도로 곧장 되돌아가 같은 자리를 다시 친다.
+#
+# 게이트웨이의 실제 한도를 우리가 모르므로, 감당 가능한 속도는 이렇게 «찾는다».
+# .env 의 LLM_MIN_INTERVAL_SEC 는 여전히 유효하다 — 그 값이 이 탐색의 바닥이 된다.
+
+#: 429·5xx 한 번에 간격을 몇 배로 넓히나.
+SLOWDOWN_FACTOR = 2.0
+#: 감속을 시작할 때의 간격(초). MIN_INTERVAL 이 0.2 라도 첫 429 에서 여기서 출발한다 —
+#: 0.2 를 두 배 해 봐야 0.4초라, 분당 한도에 걸린 상황에서는 없는 것과 같다.
+SLOWDOWN_FLOOR = float(os.getenv("LLM_SLOWDOWN_FLOOR_SEC", "3"))
+#: 넓어질 수 있는 간격의 상한(초). 여기 닿았는데도 429 면 속도 문제가 아니다(쿼터 소진).
+MAX_INTERVAL = float(os.getenv("LLM_MAX_INTERVAL_SEC", "30"))
+#: 성공 한 번에 간격에서 빼는 초. 브리핑 11연쇄가 한 편 도는 동안 조금씩 돌아온다.
+RECOVER_STEP = float(os.getenv("LLM_RECOVER_STEP_SEC", "0.5"))
+
 _SLOTS = threading.BoundedSemaphore(MAX_CONCURRENCY)
 _PACE_LOCK = threading.Lock()
 #: 다음 호출이 나갈 수 있는 가장 이른 시각(time.monotonic 기준). 감속은 이 값을 민다.
 _next_free = 0.0
+#: 지금 유효한 호출 간격(초). MIN_INTERVAL 에서 출발해 429 마다 넓어지고 성공마다 좁아진다.
+_interval = MIN_INTERVAL
 
 _log = logging.getLogger(__name__)
 
 
 def _pace() -> None:
-    """최소 간격·감속이 요구하는 만큼 기다린 뒤 돌아온다. 대기 시각은 락 안에서 «예약»
+    """지금 간격·감속이 요구하는 만큼 기다린 뒤 돌아온다. 대기 시각은 락 안에서 «예약»
     하고 잠은 락 밖에서 잔다 — 락을 쥔 채 자면 뒤따르는 스레드가 예약조차 못 해서
     간격이 벌어지는 게 아니라 줄줄이 밀린다."""
     global _next_free
     with _PACE_LOCK:
         now = time.monotonic()
         start = max(now, _next_free)
-        _next_free = start + MIN_INTERVAL
+        _next_free = start + _interval
     wait = start - time.monotonic()
     if wait > 0:
         time.sleep(wait)
 
 
 def _slow_down(seconds: float) -> None:
-    """지금부터 seconds 동안 **모든** 호출을 세운다(위 ③). 맞은 스레드만이 아니라 아직 안
-    맞은 스레드도 같이 쉬어야 서버가 느끼는 압력이 실제로 준다."""
-    global _next_free
+    """429·5xx 를 맞았다 — 둘을 함께 한다.
+
+    ① 지금부터 seconds 동안 **모든** 호출을 세운다. 맞은 스레드만이 아니라 아직 안 맞은
+       스레드도 같이 쉬어야 서버가 느끼는 압력이 실제로 준다.
+    ② **간격 자체를 넓힌다.** ① 만 하면 쉬고 나서 곧바로 예전 속도로 돌아가 같은 자리를
+       다시 친다(위 ③ 주석의 실측).
+    """
+    global _next_free, _interval
     with _PACE_LOCK:
         _next_free = max(_next_free, time.monotonic() + seconds)
+        _interval = min(max(_interval * SLOWDOWN_FACTOR, SLOWDOWN_FLOOR), MAX_INTERVAL)
+
+
+def _speed_up() -> None:
+    """호출이 성공했다 — 넓혀 둔 간격을 한 걸음만 좁힌다(바닥은 MIN_INTERVAL)."""
+    global _interval
+    with _PACE_LOCK:
+        if _interval > MIN_INTERVAL:
+            _interval = max(MIN_INTERVAL, _interval - RECOVER_STEP)
+
+
+def reset_pace() -> None:
+    """간격·감속을 초기 상태로 되돌린다. 테스트가 검사 사이를 격리하는 자리다."""
+    global _next_free, _interval
+    with _PACE_LOCK:
+        _next_free, _interval = 0.0, MIN_INTERVAL
+
+
+def pace_state() -> dict[str, float]:
+    """지금 게이트가 어떤 속도로 도는가 — /health 와 진단이 읽는다."""
+    return {"interval_sec": round(_interval, 2), "floor_sec": MIN_INTERVAL,
+            "max_sec": MAX_INTERVAL}
 
 
 @contextmanager
@@ -349,7 +410,7 @@ def _post_json(req: urllib.request.Request) -> dict:
     for attempt in range(RETRY_ATTEMPTS):
         try:
             with _gate(), urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                return json.loads(resp.read().decode("utf-8"))
+                payload = json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = _error_body(exc)
             if not _retryable(exc.code):
@@ -370,13 +431,17 @@ def _post_json(req: urllib.request.Request) -> dict:
                          exc.code, wait, attempt + 1, RETRY_ATTEMPTS,
                          "서버 Retry-After" if told else "추정 백오프")
             _slow_down(wait)
+        else:
+            # 성공했다 — 넓혀 둔 간격을 한 걸음 좁힌다(감속이 영구가 되지 않게).
+            _speed_up()
+            return payload
     code = last.code if last else 0
     detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
               else "서버 오류. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다).")
     raise LLMError(
         f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
-        f"(동시 {MAX_CONCURRENCY} · 간격 {MIN_INTERVAL}초 — LLM_MAX_CONCURRENCY 를 낮추거나 "
-        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)"
+        f"(동시 {MAX_CONCURRENCY} · 간격 {_interval:.1f}초/바닥 {MIN_INTERVAL}초 — 간격이 "
+        f"상한 {MAX_INTERVAL:.0f}초에 닿았는데도 429 면 속도가 아니라 쿼터 문제입니다.)"
         + (f"\n응답: {last_body}" if last_body else ""), status=code or None) from last
 
 
