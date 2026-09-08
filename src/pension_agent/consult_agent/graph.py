@@ -30,7 +30,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
-from pension_agent import observability
+from pension_agent import llm, observability
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
@@ -116,6 +116,7 @@ def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
     on_progress: Callable[[str], None] | None = None,
+    x_client_user: str | None = None,
 ) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
 
@@ -132,6 +133,10 @@ def ask(
     on_progress: 진행 표시 콜백. 답변이 만들어지는 동안 "무엇을 하고 있는지" 한 줄씩
     받는다(문구는 전부 코드가 정한다 — progress.py). ContextVar 로 전달되므로 상태·
     history 에 콜러블이 들어가지 않고, 콜백이 죽어도 답변 생성은 계속된다.
+    x_client_user: 이 턴을 부른 사람(행번 등). 이 턴이 내는 **모든** LLM 호출의
+    `x-client-user` 헤더가 된다 — 플랫폼의 감사 기록이자 쿼터 버킷이라, 비워 두면 전사
+    호출이 한 버킷에 몰려 429 를 자초한다(llm.client_user 주석). 한 턴이 여러 노드·
+    도구로 갈라지므로 인자 대신 ContextVar 로 흘린다.
     """
     global _AGENT
     if _AGENT is None:
@@ -143,15 +148,22 @@ def ask(
     # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
     # 진입점에 함께 있는 안정된 id 는 이것뿐이다(직원 id 는 아직 진입점이 받지 않는다).
     # 표기 꼴은 브리핑 쪽과 어긋나면 안 되므로 `customer_ref` 한 곳이 정한다.
+    # 직원 id(x_client_user)는 user_id 가 아니라 메타데이터로 싣는다 — 위 이유대로 이
+    # 대시보드의 축은 고객이고, 직원은 «누가 이 턴을 돌렸나»라는 부가 정보다.
     # 고객 «상태»(성립 요건)도 함께 태그로 단다 — 「어떤 상태의 고객에게 무슨 일이
     # 생기나」가 대시보드에서 가장 쓸모 있는 축이다. 판정은 새로 만들지 않고
     # strategy_agent 것을 그대로 쓴다(§3 — 같은 판정을 두 번 구현하지 않는다).
     who = observability.customer_ref(
         customer_id, _customer_name(customer_id), guard.conditions_of(customer_id))
     tags = ["consult", *who["tags"]]
-    with observability.trace(
+    # client_user 는 트레이스 바깥에 둔다 — 이 턴에서 나가는 **모든** LLM 호출의
+    # x-client-user 헤더가 되고(감사 기록이자 게이트웨이 쿼터 버킷), 관측 메타데이터에도
+    # 같은 값이 실린다. 한 턴이 노드·도구 수십 갈래로 흩어지므로 인자 대신 ContextVar 로
+    # 흘린다(llm.client_user 주석).
+    with llm.client_user(x_client_user), observability.trace(
         "consult.turn", input=question, session_id=session_id,
-        user_id=who["user_id"], metadata=who["metadata"], tags=tags,
+        user_id=who["user_id"], tags=tags,
+        metadata={**who["metadata"], "x_client_user": llm.current_client_user()},
     ) as span:
         with progress.reporting(on_progress):
             out = _AGENT.invoke(

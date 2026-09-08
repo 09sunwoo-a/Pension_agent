@@ -154,7 +154,11 @@ def installed(scn: Scenario):
         P.generate = plan_generate
         CL.generate = lambda prompt, **kw: '{"ask": null}'
         # 적합성 게이트는 이 스위트의 관심사가 아니다 — 시나리오가 지정한 카드만 남긴다.
-        T.fits_question = lambda q, hits, kind="지식", history=None, query=None: (
+        # **나머지 인자는 `**kw` 로 흘려보낸다.** 진짜 서명을 베껴 두면 거기에 인자가 하나
+        # 늘 때마다(history → query → sink) 이 스텁만 조용히 뒤처지고, 그때는 게이트가
+        # TypeError 로 죽어 «도구 고장»으로 둔갑한다(실제로 sink 에서 그랬다). 이 스텁이
+        # 신경 쓰는 것은 앞의 둘뿐이므로 뒤는 알 필요가 없다.
+        T.fits_question = lambda q, hits, kind="지식", **kw: (
             [(s, c) for s, c in hits if c.get("id") in scn.keep] if scn.keep else hits)
         T.llm_pick = S.llm_pick = lambda kinds, query: []
         yield scn

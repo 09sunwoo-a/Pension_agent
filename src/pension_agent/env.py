@@ -46,7 +46,11 @@ from pension_agent import config
 
 #: 명시 경로를 주는 환경변수. 지정하면 프로파일·공통 파일보다 **먼저** 읽는다
 #: (먼저 읽힌 값이 이긴다 — setdefault).
-DOTENV_ENV = "LLM_DOTENV"
+#: `ENV_PATH` 는 행내 플랫폼이 컨테이너에 넣어주는 이름이다(Dockerfile 의
+#: ARG ENV_FILE_PATH → ENV ENV_PATH). 플랫폼이 .env 를 다른 경로에 마운트해도 코드를
+#: 고치지 않아도 되도록 함께 본다. 우리 이름을 먼저 본다 — 손으로 지정한 쪽이 이긴다.
+DOTENV_ENVS = ("LLM_DOTENV", "ENV_PATH")
+DOTENV_ENV = DOTENV_ENVS[0]
 
 #: 프로파일 이름을 주는 환경변수. 실제 환경변수로도, `.env` 안의 한 줄로도 줄 수 있다.
 PROFILE_ENV = "PENSION_ENV"
@@ -120,7 +124,7 @@ def detect_profile(root: Path | None = None) -> tuple[str | None, str]:
 
 
 def load(*, force: bool = False, root: Path | None = None) -> None:
-    """LLM_DOTENV(명시 경로) → `.env.<프로파일>` → `.env`(공통) 순으로 읽는다.
+    """LLM_DOTENV·ENV_PATH(명시 경로) → `.env.<프로파일>` → `.env`(공통) 순으로 읽는다.
 
     두 번째 호출부터는 아무것도 하지 않는다 — 같은 파일을 다시 읽어도 결과는 같지만
     (setdefault 라 멱등), 임포트가 잦은 모듈에서 매번 디스크를 치지 않게 한다.
@@ -132,9 +136,10 @@ def load(*, force: bool = False, root: Path | None = None) -> None:
     _loaded = True
     base = root or config.SRC_ROOT
     files: list[str] = []
-    explicit = os.getenv(DOTENV_ENV)
-    if explicit and load_file(explicit):
-        files.append(explicit)
+    for var in DOTENV_ENVS:
+        explicit = os.getenv(var)
+        if explicit and load_file(explicit):
+            files.append(explicit)
     name, how = detect_profile(base)
     if name:
         pf = profile_file(name, base)

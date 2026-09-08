@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import sys
 
+from pension_agent.consult_agent import render
 from pension_agent.consult_agent.graph import ask
-from pension_agent.consult_agent.tools import source_lines
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,33 +28,15 @@ for flag in ("-c", "--customer"):
         customer_id = argv[i + 1]
         del argv[i:i + 2]
 
-def _print_source(s: dict) -> None:
-    # 표기는 공용 함수 하나가 정한다(tools.source_lines — 문서명·id·관련도·↗URL 규약이
-    # 전부 거기 있다). 디버그 실행기(tests/debug)와 각자 복사해 갖고 있던 동안 출처에
-    # URL 을 싣는 변경이 이쪽에만 적용되고 디버그 화면에는 빠졌다.
-    for line in source_lines(s):
-        print(line)
-
-
 def _progress(text: str) -> None:
     # 진행 표시(graph.ask on_progress). 답변과 구분되게 들여서 찍는다.
     print(f"  ⋯ {text}")
 
 
 def _print_answer(r: dict) -> None:
+    # 출처 표기는 render 가 정한다 — CLI 와 행내 API 가 같은 글자를 내야 한다(render 주석).
     print(r["answer"])
-    # 답이 나온 재료(근거)와 표현을 제한한 재료(주의)를 갈라 보여준다 — 한 목록에 섞으면
-    # 질문과 무관한 고객 상태 가드가 답의 근거처럼 보인다(plan._sources).
-    sources = r["sources"]
-    ground = [s for s in sources if s.get("role", "근거") == "근거"]
-    caution = [s for s in sources if s.get("role") == "주의"]
-    print("\n─ 근거" + ("" if ground else ": 없음"))
-    for s in ground:
-        _print_source(s)
-    if caution:
-        print("\n─ 이 고객 상담에서 지켜야 할 것 (근거 카드)")
-        for s in caution:
-            _print_source(s)
+    print(render.sources_block(r["sources"]))
 
 if len(argv) > 1:
     # 인자를 여러 개 주면 순서대로 한 턴씩 실행 — 멀티턴 시나리오를 한 줄로 재현할 때 씀.

@@ -57,12 +57,21 @@ if not os.path.exists(CHAT_FEEDBACK_FILE):
         csv.writer(f).writerow(CHAT_FEEDBACK_COLUMNS)
 
 # 상태 유지를 위한 캐싱 (LLM 호출 비용 및 대기 시간 절약)
+#
+# **고객 한 명 단위로** 캐싱한다. 예전에는 화면이 뜨는 순간 9명을 한꺼번에 만들었는데,
+# 브리핑 1건이 LLM 9~11 연쇄 호출이라 첫 로드가 90~100 호출의 버스트였다 — 행내
+# 게이트웨이에서 429(Too Many Requests)로 화면이 통째로 죽었다. 지금은 실제로 보는
+# 고객만 만든다(전체 표는 «한눈에 보기» 탭에서 직원이 명시적으로 켠다).
 @st.cache_data(show_spinner=False)
-def load_all_proposals(use_llm=True):
-    return {p.nm: propose(p, use_llm=use_llm) for p in PERSONAS}
+def load_proposal(nm: str, use_llm: bool):
+    p = next(x for x in PERSONAS if x.nm == nm)
+    with llm.client_user(client_user):
+        return propose(p, use_llm=use_llm)
 
 use_llm = st.sidebar.checkbox("LLM 문장 생성 적용", value=True)
-results = load_all_proposals(use_llm)
+# 이 화면이 내는 모든 LLM 호출의 x-client-user 가 된다. 플랫폼의 감사 기록이자 쿼터
+# 버킷이라, 비워 두면 전사 호출이 한 버킷에 몰려 429 를 자초한다(llm.client_user 주석).
+client_user = st.sidebar.text_input("직원 식별자 (x-client-user)", value="streamlit-dev")
 
 # ── 실행 조건을 사이드바에 상시 노출한다. 답변이 이상할 때 «에이전트가 틀렸다»와
 # «기준일이 어긋났다»·«LLM 이 안 붙었다»를 화면에서 바로 갈라야 신고가 재현 가능해진다.
@@ -138,8 +147,19 @@ with tab1:
             "`pension_agent/strategy_agent/customer.py` 의 `PERSONAS` 에 채웁니다."
         )
 
+    # 9명을 한꺼번에 만드는 자리다(= LLM 90~100 호출). 기본은 꺼 두고 직원이 켠다 —
+    # 다른 탭을 보려던 사람이 이 비용을 대신 내지 않게 한다(load_proposal 주석).
+    build_all = st.checkbox(
+        f"전체 고객 브리핑 생성 ({len(PERSONAS)}명 · LLM 호출 약 {len(PERSONAS) * 10}회)",
+        value=False, key="build_all_briefings")
+    if not build_all:
+        st.info("체크하면 전체 고객의 브리핑을 만들어 표로 비교합니다. "
+                "고객 한 명만 볼 때는 «상세 조회 및 피드백» 탭을 쓰세요.")
+
     summary_data = []
-    for nm, res in results.items():
+    for nm, res in (
+        {p.nm: load_proposal(p.nm, use_llm) for p in PERSONAS} if build_all else {}
+    ).items():
         f = res["facts"]
         summary_data.append({
             "고객명": nm,
@@ -152,7 +172,8 @@ with tab1:
             "적합성 차단 건수": len(f["blocked_products"])
         })
     
-    st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+    if summary_data:
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
 
 
 # ==========================================
@@ -171,7 +192,7 @@ with tab2:
     
         with col1:
             target_name = st.selectbox("리뷰할 고객 선택", [p.nm for p in PERSONAS])
-            target_res = results[target_name]
+            target_res = load_proposal(target_name, use_llm)
             f = target_res["facts"]
         
             # 에이전트 최종 답변 형식(agent.py::_print)을 그대로 재현한다 — REQUIREMENTS.md ①~⑨ +
@@ -640,8 +661,12 @@ with tab_chat:
             # «근거 대조를 하는 것»으로 읽혀야 한다. 끝나면 접어서 답변만 남긴다.
             trace_text = ""
             _tr = None
-            with st.status("답변을 준비하고 있어요…", expanded=True) as _status:
+            with st.status("답변을 준비하고 있어요…", expanded=True) as _status, \
+                    llm.client_user(client_user):
                 try:
+                    # 이 턴의 LLM 호출 주체(x-client-user)는 두 갈래 **바깥**에서 한 번
+                    # 정한다 — 계측 실행(debug_runner)도 결국 graph.ask() 를 부르므로,
+                    # 안쪽에 인자로 꿰면 한 갈래만 주체가 실리는 사고가 난다.
                     if debug_mode and not trace_broken:
                         # 계측된 실행. runner 는 **운영 진입점 graph.ask() 를 그대로** 부른다
                         # — 그래프를 직접 조립하면 그때부터는 화면에서 본 것과 같은 실행이

@@ -11,11 +11,20 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 
 ```bash
 cd src
-pip install -r requirements.txt
+pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 (Python 3.10)
+pip install -r requirements-dev.txt  # + Streamlit 화면·변환기·사외 프로바이더 (개발용)
 cp .env.example .env                 # 공통 설정 (기본 프로파일 이름 등)
 cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
 python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
+source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
+```
+
+`cli.sh` 가 정의하는 것은 셋뿐이다. 셋 다 **HTTP 를 타지 않고** `graph.ask()` 를 직접
+부르므로 서버(`run_local.sh`)와 무관하고, `.env` 만 잡혀 있으면 행내에서도 사외에서와
+똑같이 돈다.
+
+```bash
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
 CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 · 시연 대본)
@@ -28,6 +37,14 @@ $CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라�
 $CA -c 198734-1205842                                 # REPL — 고객 화면이 열린 상태
 $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을 한 줄로 (맥락 이어서)
 streamlit run app.py                                  # 평가 대시보드 (개발용 화면)
+
+# ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
+cp .env.bank.example .env.bank                        # 행내 프로파일(이 파일 하나만 두면 잡힌다)
+./run_local.sh                                        # uvicorn main:app :8000
+./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
+CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"   # 고객 화면이 열린 상태
+docker build -f Dockerfile.local -t pension-agent:local .   # 외부망 로컬 빌드
+#   내부망 배포 이미지는 Dockerfile (STG 기준 · PRD 는 주석 줄로 교체)
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다 — 모듈만 바꾸고 --debug)
 $CAD --debug "세액공제 한도가 얼마야?"
@@ -61,7 +78,8 @@ python -m tests.test_engine            # ①~⑤ 결정론 로직
 python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치
 python -m tests.test_strategy_agent    # LLM 산출 검증 · 폴백
 python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드
-python -m tests.test_infra             # 공용 인프라 · 임포트 경계
+python -m tests.test_infra             # 공용 인프라 · 임포트 경계 · 429 호출 게이트
+python -m tests.test_api               # HTTP 진입점 — 플랫폼 I/O 스키마 계약
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
 python -m scripts.kb_build.test_paths  # 경로 · locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent   # 전 데이터 검증

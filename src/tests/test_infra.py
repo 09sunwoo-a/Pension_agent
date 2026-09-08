@@ -518,10 +518,20 @@ finally:
 # 재시도가 실제로 도는지, Retry-After 를 기다리는지, **요청이 잘못된 에러(4xx)는
 # 재시도하지 않는지**를 본다. 마지막 것이 요건인 이유는 401·404 를 반복해 던지면
 # 결과는 그대로인 채 진단만 늦어지기 때문이다.
+#
+# 재시도는 이미 맞은 뒤의 처방이라, 걸리지 않게 하는 처방이 함께 있다(llm 「호출 게이트」).
+# 그쪽도 여기서 본다:
+#   ② 동시성      — 동시에 나가는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
+#   ③ 적응형 감속 — 한 스레드가 맞으면 **아직 안 맞은 스레드도** 쉬는가. 맞은 쪽만 쉬면
+#                   나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다.
+# 그리고 x-client-user 가 실제로 헤더에 실리는가 — 전부 한 값으로 나가면 쿼터가 한 버킷에
+# 몰려 429 를 자초한다.
 # ─────────────────────────────────────────────────────────────
 
 import io
 import json
+import threading
+import time as _time
 import urllib.error
 
 from pension_agent import llm as _llm
@@ -529,9 +539,16 @@ from pension_agent import llm as _llm
 # llm 은 stdlib 의 time.sleep·urllib.request.urlopen 을 모듈 속성으로 부르므로 그 자리를
 # 갈아끼우고 finally 에서 원복한다(다른 검사가 진짜 sleep·urlopen 을 쓸 수 있게).
 _saved_llm = (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
-              _llm.urllib.request.urlopen)
+              _llm.urllib.request.urlopen, _llm.MIN_INTERVAL)
 _llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY = "genai", "http://fake", "k"
+# 간격 제한은 재시도 검사 동안 끈다 — 재시도 대기와 섞이면 무엇 때문에 잤는지 갈리지
+# 않는다. 간격·동시성 자체는 아래 ②③ 에서 따로 본다.
+_llm.MIN_INTERVAL = 0.0
+_llm._next_free = 0.0
 _sleeps: list[float] = []
+# _llm.time 은 stdlib time 모듈 그 자체다 — 여기에 스텁을 꽂으면 이 파일의 time.sleep 도
+# 같이 바뀐다. 진짜로 재워야 하는 곳(동시성 검사)을 위해 원본을 잡아 둔다.
+_real_sleep = _llm.time.sleep
 _llm.time.sleep = _sleeps.append
 
 
@@ -563,7 +580,11 @@ try:
     out = _llm.generate("q")
     check(out == "답" and calls["n"] == 3, "llm: 429 두 번 뒤 재시도로 성공한다",
           f"calls={calls['n']} out={out!r}")
-    check(_sleeps == [1.0, 1.0], "llm: Retry-After 초만큼 기다린다", str(_sleeps))
+    # 잠은 게이트(_pace)가 잔다 — 재시도 루프는 «다음 호출 가능 시각»만 민다. 실제
+    # monotonic 이 흐르므로 정확히 1.0 이 아니라 그 언저리다(스텁 sleep 은 시간을
+    # 흘려보내지 않으니 오차는 테스트가 도는 시간뿐이다).
+    check(len(_sleeps) == 2 and all(0.9 < w <= 1.0 for w in _sleeps),
+          "llm: Retry-After 초만큼 기다린다", str(_sleeps))
 
     calls["n"], _sleeps[:] = 0, []
     _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
@@ -616,9 +637,61 @@ try:
     except _llm.LLMError:
         pass
     check(calls["n"] == 1, "llm: 4xx(요청이 잘못된 에러)는 재시도하지 않는다", f"calls={calls['n']}")
+
+    # x-client-user — 호출부가 준 주체가 실제 헤더로 나가는가.
+    _llm._next_free = 0.0
+    _seen: dict = {}
+
+    def _urlopen_capture(req, timeout=None):
+        _seen.update(req.headers)
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_capture
+    with _llm.client_user("emp-0417"):
+        _llm.generate("q")
+    check(_seen.get("X-client-user") == "emp-0417",
+          "llm: client_user() 로 감싼 호출은 그 주체로 나간다", str(_seen.get("X-client-user")))
+    _seen.clear()
+    _llm.generate("q")
+    check(_seen.get("X-client-user") == _llm.DEFAULT_CLIENT_USER,
+          "llm: 주체를 주지 않으면 기본값으로 나간다(빈 값 금지)",
+          str(_seen.get("X-client-user")))
+
+    # ② 동시성 상한 — 동시에 열려 있는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
+    _llm._next_free = 0.0
+    _inflight = {"now": 0, "max": 0}
+    _inflight_lock = threading.Lock()
+
+    def _urlopen_slow(req, timeout=None):
+        with _inflight_lock:
+            _inflight["now"] += 1
+            _inflight["max"] = max(_inflight["max"], _inflight["now"])
+        _real_sleep(0.02)         # 진짜 sleep — 겹칠 틈을 만든다(time.sleep 은 스텁)
+        with _inflight_lock:
+            _inflight["now"] -= 1
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_slow
+    _threads = [threading.Thread(target=_llm.generate, args=("q",)) for _ in range(8)]
+    for t in _threads:
+        t.start()
+    for t in _threads:
+        t.join()
+    check(_inflight["max"] <= _llm.MAX_CONCURRENCY,
+          f"llm: 동시 호출이 상한({_llm.MAX_CONCURRENCY})을 넘지 않는다",
+          f"관측 최대 {_inflight['max']}")
+
+    # ③ 적응형 감속 — 맞은 스레드가 아니라 **게이트 전체**가 밀리는가.
+    _llm._next_free = 0.0
+    _llm._slow_down(5.0)
+    _pushed = _llm._next_free - _time.monotonic()
+    check(4.0 < _pushed <= 5.0,
+          "llm: 429·5xx 를 맞으면 프로세스 전체의 다음 호출 시각이 밀린다", f"{_pushed:.2f}초")
+    _llm._next_free = 0.0
 finally:
     (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
-     _llm.urllib.request.urlopen) = _saved_llm
+     _llm.urllib.request.urlopen, _llm.MIN_INTERVAL) = _saved_llm
+    _llm._next_free = 0.0
 
 
 # ─────────────────────────────────────────────────────────────

@@ -1,0 +1,22 @@
+# 외부망 로컬 테스트용. 공개 Docker Hub 이미지와 PyPI 를 쓴다.
+#     docker build -f Dockerfile.local -t pension-agent:local .
+#     docker run --rm -p 8000:8000 pension-agent:local
+# CI/CD 배포에는 쓰지 않는다 — 내부망 배포는 Dockerfile 이다.
+
+FROM python:3.10-slim
+
+ARG ENV_FILE_PATH
+ENV ENV_PATH=$ENV_FILE_PATH
+
+WORKDIR /custom
+
+COPY ./requirements.txt /custom/requirements.txt
+COPY .env /custom/.env
+
+RUN pip install --no-cache-dir -r /custom/requirements.txt
+
+COPY ./main.py /custom/main.py
+COPY ./pension_agent /custom/pension_agent
+COPY ./session_data /custom/session_data
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

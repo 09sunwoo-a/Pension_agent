@@ -4466,6 +4466,29 @@ def check_followups() -> int:
     hit = asking["followups"] == [] and G.FOLLOWUP_HEADER not in asking["answer"]
     print(f"{'✓' if hit else '✗'} 되묻기 턴의 답변에는 추천질문 블록이 붙지 않는다")
     ok += hit
+
+    # ask(x_client_user=) — 이 턴 안의 **모든** LLM 호출이 그 직원 이름으로 나가는가.
+    # 한 턴이 노드·도구 수십 갈래로 흩어지므로 인자로 꿰지 않고 ContextVar 로 흘린다
+    # (llm.client_user). 배선이 끊기면 전사 호출이 한 쿼터 버킷에 몰려 429 를 자초하는데,
+    # 그건 행내에 들고 가서야 드러난다 — 그래서 여기서 잡는다.
+    seen: dict = {}
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: (
+            seen.update(who=G.llm.current_client_user()) or
+            {"answer": "답변 본문", "sources": [], "evidence": []}))})()
+        G.ask("세액공제 한도 얼마야?", x_client_user="emp-0417")
+        inside = seen.get("who")
+        G.ask("세액공제 한도 얼마야?")
+        default_used = seen.get("who")
+    finally:
+        G._AGENT = orig_agent
+    hit = inside == "emp-0417"
+    print(f"{'✓' if hit else '✗'} ask(x_client_user=) 가 턴 전체의 LLM 호출 주체를 세운다")
+    ok += hit
+    hit = default_used == G.llm.DEFAULT_CLIENT_USER
+    print(f"{'✓' if hit else '✗'} 주지 않으면 기본 주체로 떨어진다(빈 값으로 나가지 않는다)")
+    ok += hit
     return ok
 
 
@@ -5684,17 +5707,27 @@ def check_origin() -> int:
     print(f"{'✓' if hit else '✗'} source_lines — URL·관련도는 있을 때만, compact 는 한 줄")
     ok += hit
 
-    # 세 진입점이 전부 그 함수를 부르는가. 운영 CLI 는 모듈 최상위에서 REPL 이 돌아
-    # **임포트하면 안 되므로**(스크립트다) 파일 텍스트로 확인한다.
+    # 네 진입점이 전부 그 함수에 닿는가. 운영 CLI 와 행내 API 는 «답변 + 출처 블록»을
+    # 통째로 텍스트로 펴야 해서 `render.sources_block` 을 경유하고, 그 안에서 source_lines
+    # 를 부른다 — 경유가 하나 늘었을 뿐 표기를 정하는 함수는 여전히 하나다. 그 경유까지
+    # 따라가서 본다(중간에 표기를 복사해 갖는 순간 이 검사가 깨진다).
+    # 운영 CLI 는 모듈 최상위에서 REPL 이 돌아 **임포트하면 안 되므로**(스크립트다)
+    # 파일 텍스트로 확인한다. main.py 도 uvicorn 이 부르는 진입점이라 같게 다룬다.
     import inspect
 
+    from pension_agent.consult_agent import render
     from tests.debug import __main__ as dbg_main
     from tests.debug import reps as dbg_reps
-    ops_src = pathlib.Path(tools.__file__).parent.with_name("__main__.py").read_text(encoding="utf-8")
-    hit = ("source_lines" in ops_src
+    # 경로를 되짚지 않고 config 에서 받는다(루트 CLAUDE.md 규칙 4).
+    from pension_agent import config as _config
+    ops_src = (_config.PACKAGE_ROOT / "consult_agent/__main__.py").read_text(encoding="utf-8")
+    api_src = (_config.SRC_ROOT / "main.py").read_text(encoding="utf-8")
+    hit = ("source_lines" in inspect.getsource(render)
+           and "render.sources_block" in ops_src
+           and "render.sources_block" in api_src
            and "source_lines" in inspect.getsource(dbg_main._print_source)
            and "source_lines" in inspect.getsource(dbg_reps._print_source_line))
-    print(f"{'✓' if hit else '✗'} 운영 CLI·$CAD·$CADR 이 같은 출처 표기 함수를 쓴다")
+    print(f"{'✓' if hit else '✗'} 운영 CLI·행내 API·$CAD·$CADR 이 같은 출처 표기 함수에 닿는다")
     ok += hit
 
     # 카드가 밝힌 원천 문서(source.doc)가 레지스트리로 이어져 문서명으로 나온다.
