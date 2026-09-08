@@ -5,6 +5,7 @@
     python -m scripts.prebuild_briefings 188406-7352194 181245-3097614
     python -m scripts.prebuild_briefings --clear      # 저장분을 지우고 저장소를 끈다
     python -m scripts.prebuild_briefings --status     # 무엇이 저장돼 있나
+    python -m scripts.prebuild_briefings --force 173544-2074623   # 저장분이 있어도 다시
 
 브리핑 한 편은 순차 LLM 호출 11 회다. 프로세스 안에서는 한 번으로 줄지만(agent 의 캐시)
 **프로세스가 끝나면 사라진다** — 리허설($CADR --demo)은 고객 블록마다 화면을 여는 자리에서
@@ -77,6 +78,24 @@ def _clear() -> int:
     return 0
 
 
+def _gate_line(state: dict) -> str:
+    """지금 게이트가 어떤 설정으로 도는가 한 줄. .env 가 먹었는지를 여기서 확인한다."""
+    spread = state["client_user_spread"]
+    parts = [f"간격 바닥 {state['floor_sec']}초", f"동시 {LLM.MAX_CONCURRENCY}"]
+    if state["calls_per_min"]:
+        # 둘 다 켜면 분산이 이긴다(llm 「두 설정은 서로 반대로 당긴다」). 한도만 적어 두면
+        # 「10회라고 적었는데 왜 바닥이 0.2초지」가 되므로 어느 쪽이 이겼는지 함께 적는다.
+        won = " — 버킷을 나누는 중이라 간격 바닥으로 걸지 않습니다" if spread else ""
+        parts.append(f"분당 한도 {state['calls_per_min']:.0f}회(LLM_CALLS_PER_MIN){won}")
+    if spread:
+        parts.append(f"버킷 분산 {spread}자(LLM_CLIENT_USER_SPREAD)")
+    if not state["calls_per_min"] and not state["client_user_spread"]:
+        # 둘 다 없으면 한도를 «모르는» 상태다 — 429 를 맞아 가며 찾고, 성공하면 다시
+        # 좁히므로 429 가 주기적으로 되돌아온다. 그게 고장이 아니라는 것을 적어 둔다.
+        parts.append("한도 미설정 — 429 를 맞아 가며 찾습니다(주기적으로 다시 납니다)")
+    return " · ".join(parts)
+
+
 def _throttle_note(before: dict, after: dict) -> str:
     """두 시점 사이에 429·5xx 가 몇 번 걸렸고 그중 얼마를 기다렸나. 없으면 빈 문자열."""
     hits = int(after["retries"] - before["retries"])
@@ -92,10 +111,16 @@ def main(argv: list[str]) -> int:
     if "--clear" in argv:
         return _clear()
 
+    # 저장분이 있어도 다시 만든다. 게이트 설정(.env)을 바꿔 보고 그 효과를 재려는 자리다 —
+    # 지문이 그대로면 전원이 「이미 있음」으로 건너뛰어 LLM 호출이 한 번도 안 나가고,
+    # 그러면 잰 것이 없다. --clear 는 12명을 통째로 버리므로 한 명만 다시 만들 길을 둔다.
+    force = "--force" in argv
+    argv = [a for a in argv if a != "--force"]
+
     unknown = [a for a in argv if a.startswith("--")]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
-        print("  옵션: --status · --clear · 고객 id")
+        print("  옵션: --status · --clear · --force · 고객 id")
         return 1
 
     if not LLM.available():
@@ -115,6 +140,9 @@ def main(argv: list[str]) -> int:
     # 결과를 써 둔다(만들기만 하고 저장이 꺼져 있으면 이 스크립트가 헛돈다).
     config.BRIEFING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     print(f"저장 위치: {config.BRIEFING_CACHE_DIR}")
+    # 「.env 를 고쳤는데 먹었나」가 화면에서 끝나야 한다 — 이 스크립트는 429 를 가장 많이
+    # 만나는 자리이고, 설정이 안 먹은 것과 설정이 안 듣는 것은 처방이 정반대다.
+    print(f"호출 게이트: {_gate_line(LLM.pace_state())}")
 
     run_start = LLM.pace_state()
     made = 0
@@ -127,9 +155,13 @@ def main(argv: list[str]) -> int:
                 print(f"  ✗ {persona.id} {persona.nm} — 프로파일을 못 읽었습니다")
                 continue
             key = SA._cache_key(profile, True, SA.engine.TOP_N)
-            if briefing_store.load(key) is not None:
+            if not force and briefing_store.load(key) is not None:
                 print(f"  · {persona.id} {persona.nm} — 이미 있음(지문 일치)")
                 continue
+            if force:
+                # 프로세스 캐시도 비운다 — 파일을 무시해도 propose 가 메모리에서 돌려주면
+                # 역시 호출이 안 나간다(같은 프로세스에서 여러 명을 --force 로 돌릴 때).
+                SA.clear_briefing_cache()
             started = time.monotonic()
             before = LLM.pace_state()
             try:
