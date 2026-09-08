@@ -87,6 +87,9 @@ try:
           "/health 는 키 «설정 여부»만 내보내고 값은 내보내지 않는다", r.text[:120])
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
+    # 프로파일이 셋이라(bank·local·aiden) «어느 .env 가 읽혔나»가 진단의 첫 질문이다.
+    check("profile" in h["env"] and "files" in h["env"],
+          "/health 가 어느 .env 프로파일이 읽혔는지 보여준다", str(h.get("env")))
 
     # 행내 첫 연결에서 실제로 걸린 자리 — 인증도 쿼터도 아니고 DNS 였다. LLM Gateway 의
     # base_url 은 *.svc.cluster.local 이라 그 쿠버네티스 클러스터 안에서만 풀리는데,

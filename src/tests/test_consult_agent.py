@@ -41,7 +41,7 @@ from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import routing, select, tools
 from pension_agent.consult_agent.nodes import pitch, plan, understand
 from pension_agent.llm import LLMError
-from pension_agent.verify import numbers, verify_texts
+from pension_agent.verify import first_measure, numbers, verify_texts
 
 _vt = verify_texts
 
@@ -164,7 +164,7 @@ def stub_plan_pitch(state):
     재려는 것(카드 채점)이 계획의 흔들림에 묻힌다. 계획 자체는 check_tool_loop 가 본다.
     """
     found = tools.run("pitch", state, state.get("utterance") or state["question"])
-    out = {"plan_done": True, "plan_calls": ["pitch"]}
+    out = {"plan_done": True, "steps": [{"tool": "pitch", "query": "q", "outcome": "found"}]}
     if found is not None:
         out["evidence"] = [found]
     return out
@@ -189,7 +189,7 @@ def check_pitch_stages() -> bool:
         return [] if any(kw.get(k) for k in ("customer_type", "objection_type", "stage")) else [(0.5, real)]
 
     orig_retrieve, orig_verify = tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None: h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         found = tools._pitch(
             {"question": "질문", "customer_type": "사업자", "stage": "이탈방어", "objection_type": None},
@@ -350,6 +350,382 @@ def check_knowledge_intents() -> bool:
     return ok
 
 
+def check_branch_answer_amount() -> int:
+    """되묻기 다음 턴이 «원래 질문»의 금액으로 계산하는가 · 화면번호를 일부만 써도 되는가.
+
+    둘 다 리허설에서 실제로 터진 것이다(2026-09-02 이수민·박정호).
+
+    ① `tax_credit` 이 이번 턴 질문에서만 금액을 뽑아, 되물은 갈래를 고르는 답의 수치를
+       납입액으로 읽었다. 「300만원 더 넣으면?」 → 총급여 구간 되묻기 → 「5,500만원
+       이하야」 에서 5,500만원을 납입액으로 읽고 잔여한도로 잘라 **1,485,000원**을 답했다.
+       물어본 300만원의 답(495,000원)이 아니고, 되묻기 선택지에 방금 495,000원이라 적어
+       놓고 그랬다. 기준서 §5 — 「원래 질문과 고른 갈래를 합쳐 답한다」.
+
+    ② `span` 게이트가 화면번호를 흩어진 토큰으로 재서, 답변이 **일부만 인용하면** 폐기했다.
+       번호끼리 앞 마디를 공유하기 때문이다(`04-12-…`·`06-12-…`). 원장 화면 일곱 개 중
+       여섯 개를 정확히 인용한 절차 답변이 그래서 덤프됐다(박정호 P3).
+    """
+    from pension_agent.consult_agent import tools
+    from pension_agent.consult_agent.nodes.plan import _span_verdict
+    from pension_agent.strategy_agent.customer import PERSONAS
+
+    ok = 0
+    cid = next((p.id for p in PERSONAS if p.room > 0), PERSONAS[0].id)
+
+    # ① 되묻기 다음 턴 — 원래 질문의 금액을 쓴다
+    clarified = [{"question": "300만원 더 넣으면 얼마 돌려받아?",
+                  "pending_clarify": {"question": "총급여 구간을 확인해 주세요",
+                                      "options": ["5,500만원 이하", "5,500만원 초과"]}}]
+    ev = tools._tax_credit({"customer_id": cid, "question": "5,500만원 이하야",
+                            "history": clarified}, "")
+    hit = ev is not None and "추가 납입액 300만원" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 되묻기 답: 갈래를 고른 말이 아니라 원래 질문의 금액으로 계산한다")
+    ok += hit
+
+    # 되묻기가 아니면 이번 질문에서 그대로 읽는다 — 넓히기만 하고 기존 동작을 바꾸지 않는다
+    ev = tools._tax_credit({"customer_id": cid, "question": "500만원 더 넣으면?",
+                            "history": []}, "")
+    hit = ev is not None and "추가 납입액 500만원" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 되묻기 답: 평범한 턴은 이번 질문의 금액을 그대로 쓴다")
+    ok += hit
+
+    # ② 화면번호 — 일부만 인용해도 통과, 근거에 없는 번호는 폐기
+    atomic = ["[06-12-501]", "[01-12-213]", "[04-12-641]", "[04-12-648]",
+              "[04-12-644]", "[06-12-626]", "[04-12-646]"]
+    found = {"atomic": atomic, "notices": [], "notice_scopes": [], "text": "", "allow": []}
+    passing = [a for a in (
+        "[06-12-501] 등록 후 [01-12-213] 로 입금하고 [04-12-646] 로 발굴합니다.",
+        "06-12-501 등록 후 01-12-213 으로 입금합니다.",          # 대괄호 없이도 같은 화면이다
+        "과세이연정보를 먼저 등록하고 60일 안에 입금합니다.",       # 아예 안 쓴 것은 위반이 아니다
+    ) if _span_verdict(found, a)[0] != "discard"]
+    hit = len(passing) == 3
+    print(f"{'✓' if hit else '✗'} 화면번호: 일부만 인용하거나 대괄호를 빼도 폐기되지 않는다")
+    ok += hit
+
+    blocked = [a for a in ("[04-12-640] 화면에서 조회하세요.",
+                           "[06-12-502] 후선 업무의뢰로 등록합니다.")
+               if _span_verdict(found, a)[0] == "discard"]
+    hit = len(blocked) == 2
+    print(f"{'✓' if hit else '✗'} 화면번호: 근거에 없는 번호는 여전히 폐기된다")
+    ok += hit
+
+    # ③ 아는 화면은 **원장 전체**로 본다 — 근거 한 건씩 재면 다른 근거의 화면이 «없는 화면»이
+    #    된다. 실측(2026-09-07, 오세훈 SH5 · 박정호 PJ5): 절차 카드([06-12-622] → [02-12-221])와
+    #    화면 카드([02-12-221])가 함께 실린 턴에서 답변이 절차 본문의 [06-12-622] 를 인용하자
+    #    화면 카드 근거 차례에서 폐기됐고, 절차 원문 2건이 저작 메모까지 그대로 덤프됐다.
+    from pension_agent.consult_agent.nodes import plan as PLAN
+    _blank = {"notices": [], "notice_scopes": [], "related": [], "marks": [],
+              "sources": [], "meta": {}, "query": ""}
+    _proc_text = "■ 연금개시는 [06-12-622] 세액 미공제 한도 등록 → [02-12-221] 연금지급 등록의 2단계"
+    _scr_text = "■ [02-12-221] 개인형IRP 연금지급  (지급·과세이연·연금)"
+    # 실제 도구(_ev)처럼 본문을 수치 검사 허용 텍스트(allow)에도 싣는다.
+    proc_ev = {**_blank, "tool": "procedure", "atomic": ["[06-12-622]", "[02-12-221]"],
+               "text": _proc_text, "allow": [_proc_text]}
+    scr_ev = {**_blank, "tool": "screen", "atomic": ["[02-12-221]"],
+              "text": _scr_text, "allow": [_scr_text]}
+    both = [proc_ev, scr_ev]
+    passed = not PLAN._screen("먼저 06-12-622 에서 등록하고, 02-12-221 에서 연금지급을 등록해요.",
+                              both, "연금개시 절차", set())[0]
+    faults = PLAN._screen("먼저 06-12-999 에서 등록해요.", both, "연금개시 절차", set())[0]
+    hit = passed and bool(faults)
+    print(f"{'✓' if hit else '✗'} 화면번호: 원장의 다른 근거가 아는 번호는 통과하고, 어느 근거에도 "
+          f"없는 번호는 폐기된다")
+    ok += hit
+    return ok
+
+
+def check_prompt_is_quotable() -> int:
+    """프롬프트에 들어간 것은 인용도 허용된다 (§6).
+
+    코드가 이번 턴 프롬프트에 실어 보내는데 원장에는 없는 텍스트가 있었다. 시킨 대로
+    인용하면 «자료 밖 수치»로 답이 통째로 버려지고 근거 원문이 덤프됐다 — `relations.py`
+    머리말이 「데이터가 시킨 일을 했다고 벌하는 것」이라 부른 것의 네 번째다.
+
+    실측(2026-09-02 박정호 P2)에서 답을 죽인 것은 **카드 기준시점의 범위 표기**다.
+    `ANSWER_SHAPES["fact"]` 가 기준시점을 쓰라고 요구하는데, `as_of` 가 «2026.03~04» 일 때
+    답변의 «2026년 3~4월» 이 날짜로 안 끊겨 3·4 가 맨숫자로 남았다. 재작성해도 형태 요구가
+    그대로라 또 썼다.
+
+    **짝으로 잰다.** 넓힌 쪽만 재면 헐거워진 것을 못 잡는다.
+    """
+    from pension_agent.consult_agent import guard, kb as KBMOD, tools
+    from pension_agent.consult_agent.nodes import facts_qa, plan as PLAN
+    from pension_agent.consult_agent.state import KB
+    from pension_agent.verify import verify_texts
+
+    ok = 0
+
+    # ── ① 기준시점 범위 표기 — 원장·답변 양쪽 정규화 (verify.py)
+    ledger = ["· 기준시점 2026.03~04 · 출처 …"]
+    passes = [t for t in ("이 내용은 2026년 3~4월 기준이에요.",
+                          "이 내용은 2026년 3월~4월 기준이에요.",
+                          "이 내용은 2026.03~04 기준이에요.",
+                          "2026년 3월 기준 자료입니다.")
+              if verify_texts(t, ledger, echoable=[""])[0]]
+    hit = len(passes) == 4
+    print(f"{'✓' if hit else '✗'} 기준시점: 원장의 기간 표기를 한국어로 풀어 쓴 답변이 통과한다")
+    ok += hit
+
+    # 넓히기만 하고 좁히는 쪽은 그대로여야 한다 — 기간을 늘리거나 옮기면 여전히 걸린다.
+    blocked = [t for t in ("이 내용은 2026년 3~9월 기준이에요.",
+                           "이 내용은 2026년 1~4월 기준이에요.",
+                           "이 내용은 2025년 3~4월 기준이에요.",
+                           "2026년 7월 기준 자료입니다.")
+               if not verify_texts(t, ledger, echoable=[""])[0]]
+    hit = len(blocked) == 4
+    print(f"{'✓' if hit else '✗'} 기준시점: 기간을 늘리거나 옮긴 답변은 여전히 걸린다")
+    ok += hit
+
+    # 화면번호·대표번호가 기간으로 오독되면 그 답변이 통째로 거부된다(_DATE_DOT 과 같은 경계).
+    hit = verify_texts("[04-12-640] 화면에서 1588-1234 로 문의하세요.",
+                       ["[04-12-640] 1588-1234"], echoable=[""])[0]
+    print(f"{'✓' if hit else '✗'} 기준시점: 화면번호·대표번호를 기간으로 읽지 않는다")
+    ok += hit
+
+    # ── ①-b 표시(notices)는 인용해도 된다 — 채널 카드의 시효 표시 「— 2025.03.31 기준 표기입니다」.
+    #    본문(_render_channel)에는 기준시점이 없고 표시에만 있어서, 시킨 대로 옮겨 쓴 채널
+    #    답변이 리허설 3턴 전부 «자료 밖 날짜»로 폐기됐다(2026-09-05 demo T3b · cases 2·3).
+    chan = next((c for c in KB.cards if c["_kind"] == "channel" and c.get("as_of")
+                 and c.get("volatile")), None)
+    if chan is None:
+        print("✗ 표시 인용: 기준시점·시효 경고를 가진 채널 카드가 없다")
+    else:
+        ev = tools._ev("channel", "q", tools._render_channel(chan),
+                       KBMOD.sources_of(KB, [(2.0, chan)]),
+                       notices=[tools.stale_mark(chan)], cards=[chan])
+        mark = tools.stale_mark(chan)
+        hit = verify_texts(f"메뉴는 위와 같아요.\n{mark}", tools.ledger_texts([ev]),
+                           echoable=[""])[0]
+        print(f"{'✓' if hit else '✗'} 표시 인용: 시효 표시의 기준시점을 옮겨 쓴 채널 답변이 통과한다"
+              f" ({chan.get('as_of')})")
+        ok += hit
+        # 좁히는 쪽은 그대로다 — 표시에 없는 다른 날짜는 여전히 걸린다.
+        hit = not verify_texts("메뉴는 위와 같아요. 2024.01.15 기준 표기입니다.",
+                               tools.ledger_texts([ev]), echoable=[""])[0]
+        print(f"{'✓' if hit else '✗'} 표시 인용: 표시에 없는 날짜는 여전히 걸린다")
+    ok += hit
+
+    # ── ② 가드·승낙 문구 — 프롬프트에 실어 보낸 것 (plan._screen)
+    card = KB.facts.get("fact.k04.f47")
+    if card is None:
+        print("✗ 프롬프트 인용: 기준 카드(fact.k04.f47)가 없어 검사를 건너뛴다")
+        return ok
+    ev = tools._ev("fact", "q", facts_qa.render([(1.0, card)]),
+                   KBMOD.sources_of(KB, [(1.0, card)]), cards=[card])
+    known = PLAN._known_products()
+    question = "이 절차 얼마나 걸려?"
+    injected = ["- 사용계획 있는 자금은 먼저 걸러낼 것 → 6번",
+                "이 고객 «원리금보장상품 편중» 상태에 걸린 화법 2건"]
+
+    quoted = [a for a in ("사용계획 있는 자금은 먼저 걸러내세요(6번). 60일 이내면 됩니다.",
+                          "말씀하신 화법 2건을 보여드릴게요. 60일 이내면 재입금이 됩니다.")
+              if not PLAN._screen(a, [ev], question, known, prompt_texts=injected)[0]]
+    hit = len(quoted) == 2
+    print(f"{'✓' if hit else '✗'} 프롬프트 인용: 가드·승낙 문구를 인용한 답변이 폐기되지 않는다")
+    ok += hit
+
+    # 넓힌 것은 «프롬프트에 실제로 들어간 수치» 하나뿐이다 — 지어낸 값은 그대로 걸린다.
+    still = [a for a in ("이 상품은 연 7.2% 수익을 보장해요.",
+                         "이 고객은 IRP에 2,000만원이 있어요.",
+                         "사용계획 있는 자금은 먼저 걸러내세요(9번).",
+                         "말씀하신 화법 5건을 보여드릴게요.")
+             if PLAN._screen(a, [ev], question, known, prompt_texts=injected)[0]]
+    hit = len(still) == 4
+    print(f"{'✓' if hit else '✗'} 프롬프트 인용: 프롬프트에 없던 수치는 여전히 걸린다")
+    ok += hit
+
+    # 상품명은 넓히지 않는다 — 이름만 대서 적합성 게이트를 뚫는 길을 열지 않는다.
+    src = pathlib.Path("pension_agent/consult_agent/nodes/plan.py").read_text(encoding="utf-8")
+    hit = "echoable=[question, *(t for t in prompt_texts if t)]" in src
+    print(f"{'✓' if hit else '✗'} 프롬프트 인용: 넓히는 통로가 echoable(수치 전용) 하나다")
+    ok += hit
+    return ok
+
+
+def check_outreach() -> int:
+    """⑨ 안내 콘텐츠 — 대화 재료(outreach 도구)와 발송 화면 제안(§10 예정 확장의 구현).
+
+    회귀 대상:
+    ① 화면 ⑨ 는 이벤트·세미나를 골라 두는데 그 산출이 **대화 쪽 재료로 없었다.** "이 고객한테
+       보낼 만한 세미나 있어?"·"왜 이거야?"·"다른 건 없어?"가 전부 재료 0건으로 끝났고,
+       문구를 다듬어 달라는 요청도 일정·링크가 원장에 없어 검증기에 잘렸다.
+    ② LMS 발송 화면은 직원이 문구를 따옴표로 옮겨 적어야만(lms_link) 열렸다.
+    ③ 그 제안이 **매 턴 붙지 않는가** — 예전 따옴표 휴리스틱 갈래가 지워진 이유다.
+    """
+    from pension_agent.consult_agent import tools
+    from pension_agent.consult_agent.nodes import act
+    from pension_agent.strategy_agent.customer import PERSONAS
+
+    ok = 0
+    cid = PERSONAS[0].id
+    state = {"customer_id": cid, "question": "이 고객한테 안내할 세미나 있어?"}
+    ev = tools.run("outreach", state, "안내할 세미나")
+
+    hit = ev is not None and ev["tool"] == "outreach"
+    print(f"{'✓' if hit else '✗'} outreach: 열려 있는 고객의 안내 콘텐츠를 재료로 낸다")
+    ok += hit
+    if ev is None:
+        return ok
+
+    text = ev["text"]
+    hit = ("발송 문구:" in text and "다른 세미나 후보 4건:" in text
+           and "매칭 키워드:" in text and "안내 링크:" in text
+           and "지금 안내할 것 2건" in text)
+    print(f"{'✓' if hit else '✗'} outreach: 문구·다른 후보·매칭 키워드·링크가 재료에 함께 실린다")
+    ok += hit
+
+    # 링크는 한 글자만 달라도 죽는다 — 답변이 그 값을 말하면 원문 그대로여야 한다.
+    hit = bool(ev["atomic"]) and all(a.startswith("http") for a in ev["atomic"])
+    print(f"{'✓' if hit else '✗'} outreach: 안내 링크를 원문 스팬으로 선언한다", )
+    ok += hit
+
+    # **개수와 열거 번호가 재료에 있어야 답이 살아남는다.**
+    #
+    # 회귀 대상(실측): 이벤트 1건 + 세미나 1건을 고른 답이 "2건을 추천드려요" 라고 쓰자
+    # verify_texts 가 «원장 밖 수치 2» 로 판정해 **생성문을 통째로 폐기**했고, compose 가
+    # 이 근거 블록을 그대로 덤프했다 — 직원에게 발송 문구·다른 후보·문제상황이 뒤섞인
+    # 내부 블록이 답변으로 나갔다. 세는 것은 코드가 이미 아는 사실이라 재료에 싣는다
+    # (`suitable` 이 「안내할 수 있는 상품 N종」을 싣는 것과 같은 처리).
+    from pension_agent.verify import verify_texts
+    _natural = ["김현수 고객님께는 2건을 추천드려요.",
+                "이벤트 1건과 세미나 1건, 총 2건을 안내해보세요.",
+                "1. 잠자는 IRP 자금 깨우기 운용 이벤트\n2. 예금만으로 괜찮을까?",
+                "다른 이벤트 후보도 3건 더 있어요."]
+    _killed = [t for t in _natural
+               if not verify_texts(t, [ev["text"]], echoable=[state["question"]])[0]]
+    hit = not _killed
+    print(f"{'✓' if hit else '✗'} outreach: 개수·열거 번호를 쓴 답이 폐기되지 않는다"
+          + (f" (잘린 것: {_killed})" if _killed else ""))
+    ok += hit
+
+    # 그렇다고 재료 밖 수치가 통과하면 안 된다 — 넓힌 것은 «코드가 센 개수» 하나뿐이다.
+    hit = not verify_texts("이 세미나는 연 7.2% 수익을 보장해요.", [ev["text"]])[0]
+    print(f"{'✓' if hit else '✗'} outreach: 지어낸 수치는 그대로 걸린다")
+    ok += hit
+
+    # 고객 화면이 닫혀 있으면 성립하지 않는 재료다(§3).
+    hit = (tools.run("outreach", {"question": "세미나 있어?"}, "세미나") is None
+           and "outreach" not in tools.usable({}))
+    print(f"{'✓' if hit else '✗'} outreach: 고객 화면이 닫혀 있으면 부를 수 없다")
+    ok += hit
+
+    # ② 답변이 그 콘텐츠를 가리키면 발송 화면 연계를 제안한다.
+    name = (ev["meta"]["lms"].get("seminar") or ev["meta"]["lms"]["event"])["name"]
+    offered = act.offer({**state, "evidence": [ev], "answer": f"«{name}» 를 안내해보세요."})
+    pending = offered.get("pending_action")
+    hit = (bool(pending) and pending["kind"] == "lms" and name in pending["label"]
+           and pending["message"] == (ev["meta"]["lms"].get("seminar")
+                                      or ev["meta"]["lms"]["event"])["message"])
+    print(f"{'✓' if hit else '✗'} 답변이 가리킨 콘텐츠의 발송 화면을 제안한다(문구는 브리핑 산출 그대로)")
+    ok += hit
+
+    # ③ 재료만 있고 답변이 아무것도 고르지 않았으면 붙지 않는다 — 매 턴 붙는 제안은
+    # 직원이 읽지 않게 되고, 그게 §10 이 경계하는 상태다.
+    hit = not act.offer({**state, "evidence": [ev],
+                         "answer": "열려 있는 세미나가 몇 건 있어요."}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 콘텐츠를 가리키지 않은 답변에는 제안이 붙지 않는다")
+    ok += hit
+
+    # ④ 답변이 등록 이름 끝의 종류 낱말(«이벤트»·«세미나»)을 떼고 불러도 그 콘텐츠를
+    # 가리킨 것이다. 글자 그대로 대조하던 동안 확정본 E1 에서 「…절세혜택 챙기기 (9/30까지)」가
+    # «언급 안 함»으로 탈락하고, 같은 답변이 그대로 옮긴 세미나 이름에 제안이 붙었다 —
+    # 승낙 턴이 ISA 만기 고객에게 자산배분 세미나 문자를 열었다(2026-09-03 실측).
+    event = ev["meta"]["lms"].get("event")
+    seminar = ev["meta"]["lms"].get("seminar")
+    _stem = event["name"].removesuffix("이벤트").strip() if event else ""
+    both = f"{_stem} (9/30까지)를 안내해보세요. 세미나는 «{seminar['name']}» 가 있어요." \
+        if event and seminar else ""
+    pending = act.offer({**state, "evidence": [ev], "answer": both}).get("pending_action") \
+        if both else None
+    hit = bool(pending) and pending["content_id"] == event["id"]
+    print(f"{'✓' if hit else '✗'} 종류 낱말을 뗀 이벤트 이름도 가리킨 것으로 보고, "
+          f"둘 다 불렀으면 이벤트를 먼저 제안한다")
+    ok += hit
+
+    # 이름의 앞부분만 잘라 부른 것은 여전히 «가리킨 것»이 아니다 — 넓힌 것은 끝의 종류
+    # 낱말과 공백뿐이다.
+    half = _stem[: max(len(_stem) // 2, 1)] if _stem else ""
+    hit = bool(half) and not act.offer({**state, "evidence": [ev],
+                                        "answer": f"{half}… 같은 게 있어요."}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 이름을 앞부분만 잘라 부른 답변에는 붙지 않는다")
+    ok += hit
+
+    # 이름을 바꿔 썼어도 **그 콘텐츠의 링크를 인용했으면** 가리킨 것이다(2026-09-07 실측,
+    # 김서연 SE6 — 「ISA 만기자금, IRP로 이어가는 절세 이벤트」를 「…IRP 이전 절세 이벤트」로
+    # 써서 제안이 빠졌고 다음 턴 승낙이 공중에 떴다). 링크는 원문 스팬이라 바꿔 쓸 수 없다.
+    url = (event or {}).get("url") or ""
+    paraphrased = f"ISA 만기자금 IRP 이전 절세 행사가 있어요. ▶ {url}" if url else ""
+    pending = act.offer({**state, "evidence": [ev], "answer": paraphrased}).get("pending_action") \
+        if paraphrased else None
+    hit = bool(url) and bool(pending) and pending["content_id"] == event["id"]
+    print(f"{'✓' if hit else '✗'} 이름을 바꿔 써도 링크를 인용한 답변에는 그 콘텐츠의 제안이 붙는다")
+    ok += hit
+
+    # 재료에 요건 코드(isa·tax·add)가 실리면 답변이 그대로 옮긴다(§5 「재료에 개발 용어를
+    # 쓰지 않는다」) — 실측: 「세액공제 활용 가능(tax)과 추가입금 여력 보유(add) 요건」.
+    import re as _re
+    _code = _re.compile(r"(?<![A-Za-z])[a-z]{3}:")
+    _cust = tools.run("customer", {"customer_id": cid}, "현황")
+    hit = not _code.search(text) and bool(_cust) and not _code.search(_cust["text"])
+    print(f"{'✓' if hit else '✗'} outreach·customer 재료의 성립 요건에 요건 코드가 실리지 않는다")
+    ok += hit
+
+    # 이번 턴이 안내 콘텐츠를 안 다뤘으면(원장에 outreach 근거가 없으면) 붙지 않는다.
+    hit = not act.offer({**state, "evidence": [],
+                         "answer": f"«{name}» 라는 세미나가 있어요."}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 원장에 안내 콘텐츠 근거가 없으면 제안하지 않는다")
+    ok += hit
+
+    # 문구는 대화가 새로 만들지 않는다 — 화면 ⑨ 와 같은 값이어야 같은 문자가 나간다.
+    from pension_agent.strategy_agent import agent as strategy_agent
+    from pension_agent.strategy_agent import customer as strategy_customer
+    facts = strategy_agent.propose(strategy_customer.get_profile(cid))["facts"]
+    hit = all(ev["meta"]["lms"][k]["message"] == facts["outreach"][k]["lms_message"]
+              for k in ev["meta"]["lms"])
+    print(f"{'✓' if hit else '✗'} 대화가 싣는 문구가 브리핑 ⑨ 의 문구와 같다")
+    ok += hit
+
+    # ⑤ 요건에 맞는 콘텐츠와 임박 순 폴백을 재료가 가른다.
+    #
+    # 회귀 대상(2026-09-07 실측, 최서윤): 이 고객 요건에 걸린 콘텐츠가 0건인데 화면 ⑨ 의
+    # 임박순 폴백 2건이 요건에 맞는 것과 같은 모양으로 실렸고, 답변이 그것을 «이 고객에게
+    # 적합»으로 세우고 사유까지 붙였다. 그 답 끝에 발송 화면 제안이 붙어 고객과 무관한
+    # 문자가 나가는 경로가 됐다. 판정은 추천 질문 칩과 같은 함수(relevant_outreach)다.
+    from pension_agent.strategy_agent import support as strategy_support
+    from pension_agent.strategy_agent import situations as strategy_situations
+    none_cid = next((p.id for p in PERSONAS if not strategy_support.relevant_outreach(
+        strategy_situations.problem_situations(p))), None)
+    hit = none_cid is not None
+    print(f"{'✓' if hit else '✗'} 요건에 걸린 콘텐츠가 0건인 고객이 시연 로스터에 있다"
+          + (f" ({none_cid})" if none_cid else ""))
+    ok += hit
+    if none_cid:
+        none_state = {"customer_id": none_cid, "question": "이 고객한테 안내할 만한 세미나나 이벤트 있어?"}
+        none_ev = tools.run("outreach", none_state, "안내할 세미나 이벤트")
+        none_text = (none_ev or {}).get("text", "")
+        hit = (bool(none_ev) and "지금 안내할 것 0건" in none_text
+               and "요건 일치: 없음" in none_text and "추천 사유:" not in none_text
+               and "요건에 맞는 콘텐츠는 없다" in none_text)
+        print(f"{'✓' if hit else '✗'} 걸린 콘텐츠 0건이면 재료가 «0건»과 «요건 일치: 없음»을 적고 "
+              f"추천 사유를 싣지 않는다")
+        ok += hit
+        # 폴백 문구로는 발송 화면을 제안하지 않는다 — 답변이 이름을 그대로 불러도.
+        fb_name = (facts_none := strategy_agent.propose(
+            strategy_customer.get_profile(none_cid))["facts"].get("outreach") or {})
+        fb_name = next((v["name"] for v in fb_name.values() if v), "")
+        hit = (bool(none_ev) and not none_ev["meta"]["lms"]
+               and not act.offer({**none_state, "evidence": [none_ev],
+                                  "answer": f"«{fb_name}» 를 안내해보세요."}).get("pending_action"))
+        print(f"{'✓' if hit else '✗'} 폴백 콘텐츠에는 발송 화면 제안이 붙지 않는다")
+        ok += hit
+        del facts_none
+    # 요건에 맞는 고객(PERSONAS[0])은 «요건 일치: <요건 이름>»이 붙고 추천 사유가 남는다.
+    hit = "요건 일치: " in text and "요건 일치: 없음" not in text and "지금 안내할 것 2건" in text
+    print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 «요건 일치: <요건 이름>»이 붙는다")
+    ok += hit
+    return ok
+
+
 def check_screen_link() -> int:
     """화면 연계 — 제안 → 확인 → 연계 (§10 · gap 14·15).
 
@@ -460,17 +836,24 @@ def check_screen_link() -> int:
     ok += hit
 
     # 더미 문구는 코드가 막는다 — 화면에 채우면 직원이 그대로 보낼 수 있기 때문이다.
+    #
+    # 등록된 안내 콘텐츠 9건은 연금사업부 DB 에서 와 전부 dummy 가 아니다. 그래서 검사용
+    # 자산을 하나 끼워 넣어 확인한다 — 레지스트리에 더미가 남아 있을 때만 도는 검사였다면
+    # 실데이터로 갈아탄 지금 **조용히 사라졌을** 자리다.
     from pension_agent.strategy_agent import support
-    dummy = next((a for a in support.ASSETS if a.get("dummy") and a.get("lms_message")), None)
-    if dummy:
+    probe = {"id": "TEST-DUMMY", "name": "게이트 검사용 더미", "content_type": "이벤트",
+             "url": "https://example.invalid/demo/gate-probe", "dummy": True}
+    support.ASSETS.append(probe)
+    try:
         blocked = act.confirm_action({
             "question": "네",
             "history": [{"question": "...", "pending_action": {
-                **lms_pending, "message": dummy["lms_message"]}}],
+                **lms_pending,
+                "message": support.lms_frame("검사", "안내드려요.", probe["url"])}}],
             "customer_id": "TEST_ACT"})
         hit = "연계하지 않았어요" in blocked["answer"] and screens.SCHEME not in blocked["answer"]
-    else:
-        hit = True
+    finally:
+        support.ASSETS.remove(probe)
     print(f"{'✓' if hit else '✗'} 더미 문구는 화면에 채우지 않는다(코드가 막는다)")
     ok += hit
 
@@ -520,7 +903,7 @@ def check_verify_gate() -> bool:
     agent = G.build_agent()
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: []
     try:
         out = agent.invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
     finally:
@@ -601,6 +984,13 @@ def check_briefing_shared() -> int:
     orig_gen, orig_avail = SA.llm.generate, SA.llm.available
     profile = CUST.PERSONAS[0]
 
+    # 파일 저장소(briefing_cache/)를 끈다 — `scripts.prebuild_briefings` 를 돌린 체크아웃에는
+    # 저장분이 있어 첫 호출이 LLM 0회로 그것을 읽고, «한 번만 만든다»의 1회차가 0 이 된다.
+    # 여기서 재는 것은 프로세스 캐시이지 파일 저장소가 아니다(test_engine 의 같은 격리).
+    from pension_agent import config as _cfg
+    saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir / "__off__"   # 없는 디렉터리 = 꺼짐
+
     SA.clear_briefing_cache()
     SA.llm.available = lambda: True
     # 부를 때마다 다른 문장을 내는 LLM — 캐시가 없으면 두 호출이 갈린다.
@@ -665,6 +1055,7 @@ def check_briefing_shared() -> int:
         SA.clear_briefing_cache()
     print(f"{'✓' if hit else '✗'} 캐시가 상한({SA._BRIEFING_MAX})에서 오래된 것부터 밀어낸다")
     ok += hit
+    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir
     return ok
 
 
@@ -860,6 +1251,25 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 고객 재료의 출처에는 관련도를 붙이지 않는다")
     ok += hit
 
+    # 같은 카드가 검색으로 오면 원천 게시글 URL 이 붙는데(sources_of) 이 재료로 오면 안
+    # 붙던 자리다 — strategy_agent 가 넘겨주는 항목에 문서명만 있어서, 「출처에 URL 을
+    # 싣는다」는 변경이 이 경로만 비껴갔다. 화면에는 ↗ 줄이 붙는 근거와 안 붙는 근거가
+    # 섞여 나갔고, 직원은 왜 어떤 것만 원문으로 갈 수 있는지 알 수 없었다.
+    from pension_agent.consult_agent.kb import card_source_meta
+    from pension_agent.consult_agent.state import KB as _KB
+    hit = all("url" in s and s["url"] == card_source_meta(_KB, s["id"]).get("url")
+              for s in ev["sources"] if s["id"] in card_ids)
+    print(f"{'✓' if hit else '✗'} 고객 재료의 카드 출처가 검색 경로와 같은 URL 을 싣는다")
+    ok += hit
+
+    # 위 대조가 «둘 다 None» 으로 늘 참이 되지 않게, 되짚기가 실제로 도는지 따로 잰다 —
+    # 송도윤의 ⑥⑦⑧ 은 본부 자료라 URL 이 없어서(핫팁 게시글이 아니다) 그 고객만으로는
+    # 판정할 수 없다. 어느 고객에게 어떤 카드가 뽑히느냐에 이 회귀가 좌우되면 안 된다.
+    linked = [c["id"] for c in _KB.cards if card_source_meta(_KB, c["id"]).get("url")]
+    hit = len(linked) > 10
+    print(f"{'✓' if hit else '✗'} 카드 id 로 원천 게시글 URL 을 되짚을 수 있다({len(linked)}건)")
+    ok += hit
+
     # ② 후보는 strategy_agent 매칭에서만 나온다 — 대화형이 자기 매칭을 만들지 않는다.
     hits = tools.playbook_hits({"customer_id": SONG, "question": "증권사 얘기를 꺼내네요"})
     from pension_agent.strategy_agent.support import matching as M
@@ -955,6 +1365,45 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 승낙 턴이 근거만 싣고 답변 문장을 손으로 만들지 않는다")
     ok += hit
 
+    # ④-b 승낙받은 자료가 «없는 자료»가 되어 나가면 안 된다.
+    #
+    #     실측(2026-09-02 김현수 세션): 화법 2건을 승낙받아 원장에 싣고도 답변은 "해당
+    #     질문에 대응하는 대사가 지금 준비된 자료에는 없어요"로 시작했고, 직원에게
+    #     디폴트옵션 등록 현황을 되물으며 끝났다. 작성 프롬프트에 실리는 것이 「직원 질문:
+    #     네」와 이전 대화뿐이라, LLM 이 <자료>를 **직전 턴의 질문**에 대고 재고 안 맞으니
+    #     시스템 규칙 9(핵심 대상이 자료에 없으면 그것이 결론)를 적용한 것이다. 그 판정은
+    #     여기서 성립하지 않는다 — 자료를 고른 것은 질문이 아니라 고객 상태이고, 무엇을
+    #     보여줄지는 제안한 턴이 이미 정했다(§10). 그래서 **코드가** 그 사실을 실어 준다.
+    hit = out.get("accepted") == action["label"]
+    print(f"{'✓' if hit else '✗'} 승낙 턴이 무엇을 승낙받았는지 남긴다(작성 단계가 볼 수 있게)")
+    ok += hit
+
+    # 선언이 없으면 LangGraph 가 노드 반환값에서 그 키를 **조용히** 버린다(state.py 주석).
+    # 그러면 위 검사는 통과하는데 그래프로 돌린 턴만 옛 증상으로 돌아간다.
+    from pension_agent.consult_agent.state import AgentState as _AS
+    hit = "accepted" in _AS.__annotations__
+    print(f"{'✓' if hit else '✗'} 그 값이 상태에 선언돼 있다(선언 없으면 그래프가 버린다)")
+    ok += hit
+
+    seen: dict[str, str] = {}
+    orig_gen = plan.generate
+    plan.generate = lambda p, **kw: seen.setdefault("p", p) or "답변"
+    try:
+        plan.compose({"question": "네", "customer_id": SONG, **out})
+        hit = ("승낙에 대한 답이다" in seen["p"] and action["label"] in seen["p"]
+               and '"준비된 자료가 없다"고 말하지 않는다' in seen["p"])
+        print(f"{'✓' if hit else '✗'} 승낙 턴의 작성 프롬프트가 «이 자료를 보여주라»고 말한다")
+        ok += hit
+
+        seen.clear()
+        plan.compose({"question": "실물이전 절차 알려줘", "customer_id": SONG,
+                      "evidence": out["evidence"]})
+        hit = "승낙에 대한 답이다" not in seen["p"]
+        print(f"{'✓' if hit else '✗'} 승낙 턴이 아니면 그 블록이 붙지 않는다")
+        ok += hit
+    finally:
+        plan.generate = orig_gen
+
     # 도착지는 `compose`(답변 작성) 다 — 되묻기 판정과 답변 작성이 그 노드에서 함께
     # 끝난다. 라벨이 상태 키 `answer` 와 다른 이유는 graph.py 의 add_node 주석 참고.
     hit = R.route_confirm(out) == "compose" and R.route_confirm(
@@ -964,8 +1413,13 @@ def check_playbook_material() -> int:
 
     # 그 턴에는 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자라 판정할 질문이 없다(§10).
     from pension_agent.consult_agent.nodes import clarify as _CL
+    # 대조군은 지식베이스 검색 재료로 둔다 — 승낙 턴의 재료는 고객 상태에 걸린 카드(playbook)
+    # 라서 그것만으로는 의도와 무관하게 판정이 돌지 않는다(지워진 gap 30).
+    kb_evidence = [{"tool": "procedure", "query": "q", "text": "실물이전 절차", "atomic": [],
+                    "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
     hit = not _CL.applicable({**out, "intent": "confirm_action"}) \
-        and _CL.applicable({**out, "intent": "situation", "question": "실물이전 절차"})
+        and _CL.applicable({**out, "intent": "situation", "question": "실물이전 절차",
+                            "evidence": kb_evidence})
     print(f"{'✓' if hit else '✗'} 승낙 턴은 되묻기 판정을 돌리지 않는다")
     ok += hit
 
@@ -1086,7 +1540,10 @@ def check_context_and_clarify() -> int:
     # 되묻지 않기로 하면 그대로 답변으로 흘러간다.
     CL.generate = lambda prompt, **kw: '{"ask": null}'
     try:
-        hit = CL.clarify({"question": "한도 얼마야?", "evidence": evidence}) == {}
+        # 등급은 남는다(계측용) — 막지 않는다는 것은 «되묻지도, 다시 쓰게 하지도 않는다»다.
+        out = CL.clarify({"question": "한도 얼마야?", "evidence": evidence})
+        hit = not out.get("clarify") and not out.get("judge_note") \
+            and out.get("judge_verdict") == CL.ANSWER
     finally:
         CL.generate = orig_gen
     print(f"{'✓' if hit else '✗'} 되묻지 않기로 하면 답변 경로를 막지 않는다")
@@ -1177,13 +1634,13 @@ def check_adequacy_and_shape() -> int:
        값을 물었는데 화법이 나오면 답이 아니다.
     """
     from pension_agent.consult_agent.nodes import plan as P, procedure_qa
-    from pension_agent.consult_agent.prompts import ANSWER_SHAPES
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
 
     ok = 0
 
     # ① 게이트가 재료 종류를 가리지 않는가 — 전부 버리면 어느 도구도 근거를 못 내놓는다.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: []
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: []
     try:
         blocked = [name for name in ("fact", "procedure", "segment", "method", "fieldtip", "pitch")
                    if tools.run(name, {"question": "세액공제 한도가 얼마야?"},
@@ -1197,7 +1654,7 @@ def check_adequacy_and_shape() -> int:
 
     # 0건이면 게이트를 부르지 않는다 — 부를 이유가 없는 자리에서 LLM 을 쓰지 않는다.
     called: list[str] = []
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: (called.append(kind), h)[1]
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: (called.append(kind), h)[1]
     try:
         tools.run("fact", {"question": "오늘 서울 날씨 어때?"}, "오늘 서울 날씨 어때?")
     finally:
@@ -1220,7 +1677,7 @@ def check_adequacy_and_shape() -> int:
     q = "디폴트옵션 변경 화면번호 알려줘"
     candidates = procedure_qa.search(q)
     keep = candidates[-1][1]["id"] if candidates else ""
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: [x for x in h if x[1]["id"] == keep]
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: [x for x in h if x[1]["id"] == keep]
     try:
         found = tools.run("procedure", {"question": q}, q)
     finally:
@@ -1231,7 +1688,7 @@ def check_adequacy_and_shape() -> int:
     ok += hit
 
     # 남길 것이 하나도 없을 때만 근거 없음이다.
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: []
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: []
     try:
         hit = tools.run("procedure", {"question": q}, q) is None
     finally:
@@ -1272,6 +1729,14 @@ def check_adequacy_and_shape() -> int:
           + ("" if hit else f" — 빠진 도구 {missing}"))
     ok += hit
 
+    # 출처는 화면의 근거 목록이 전담한다(§5 「출처는 본문 문장이 아니다」). 형태 요구가
+    # 본문에 출처를 요구하던 동안 LLM 이 재료의 「· 기준시점 … · 출처 …」 메타 줄을 통째로
+    # 복사했다(gemma 실측 — 카드 덤프체 답변). 기준시점은 시효성 요구라 남는다.
+    hit = ("출처" not in ANSWER_SHAPES["fact"] and "기준시점" in ANSWER_SHAPES["fact"]
+           and "재료 블록의 형식은 옮기지 않는다" in COMPOSE_SYSTEM)
+    print(f"{'✓' if hit else '✗'} 출처는 형태 요구가 아니라 근거 목록이 전담한다")
+    ok += hit
+
     # 실제 프롬프트에 그 요구가 실리는가.
     seen: dict[str, str] = {}
     orig_gen = P.generate
@@ -1298,7 +1763,7 @@ def check_material_marks() -> int:
        본부 지침으로 읽히면 그게 곧 잘못된 안내다.
     """
     from pension_agent.consult_agent import marks as M
-    from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.nodes import facts_qa, plan as P, procedure_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -1322,6 +1787,38 @@ def check_material_marks() -> int:
            and M.notes_for(KB, [facing]) == []
            and M.notes_for(KB, [undeclared]) == [])
     print(f"{'✓' if hit else '✗'} 내부용 주의는 customer_facing 선언이 거짓일 때만 붙는다")
+    ok += hit
+
+    # ③ **재료에도 같은 선언이 보여야 한다.** 주의(notes_for)는 거짓을 보는데 재료 조립은
+    #    참일 때만 표시를 붙였다 — 그래서 답변 아래에는 "고객에게 안내하지 마세요"가 서고
+    #    본문은 그 카드를 근거로 "고객에게 이렇게 안내하는 게 핵심"이라고 썼다(송도윤 S6).
+    #    작성 프롬프트의 「'내부용'으로 표시된 재료는…」 규칙이 가리킬 표시가 없었다.
+    hit = (M.facing_note(internal) == M.FACING_NOTE[False]
+           and M.facing_note(facing) == M.FACING_NOTE[True]
+           and M.facing_note(undeclared) is None)
+    print(f"{'✓' if hit else '✗'} 재료 표시는 참·거짓을 둘 다 싣고 선언 없음은 비운다")
+    ok += hit
+
+    # 실제 재료 블록에 실리는가 — 두 종류 모두. 여기가 끊기면 위 단위 판정이 통과해도
+    # LLM 은 여전히 내부용 카드를 구분하지 못한다.
+    internal_fact = next(f for f in KB.facts.values() if f.get("customer_facing") is False)
+    hit = M.FACING_NOTE[False] in "\n".join(facts_qa._render(internal_fact))
+    print(f"{'✓' if hit else '✗'} 내부용 팩트의 재료 블록에 내부용 표시가 실린다")
+    ok += hit
+
+    def proc(card):
+        return "\n".join(procedure_qa._render({**card, "title": "t"}))
+
+    hit = (M.FACING_NOTE[False] in proc(internal)
+           and M.FACING_NOTE[True] in proc(facing)
+           and not any(n in proc(undeclared) for n in M.FACING_NOTE.values()))
+    print(f"{'✓' if hit else '✗'} 절차 재료 블록도 같은 표시를 쓴다")
+    ok += hit
+
+    # 작성 프롬프트가 그 표시를 실제로 가리키는가. 문구가 갈리면 규칙이 다시 헛돈다.
+    from pension_agent.consult_agent import prompts as PR
+    hit = "내부용" in PR.COMPOSE_SYSTEM and "고객에게 할 말로 옮기지" in PR.COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 규칙이 내부용 재료를 고객 안내로 옮기지 말라고 못 박는다")
     ok += hit
 
     # 같은 등급을 여러 장 썼다고 같은 문장을 여러 번 세우지 않는다.
@@ -1362,7 +1859,7 @@ def check_material_marks() -> int:
 
     # 도구가 실제로 표시를 실어 보내는가(선언이 아니라 배선을 본다).
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "사전 고지를 안 하면 민원으로 돌아온다는데 현장에서는 어떻게 하나요?"
         found = tools.run("fieldtip", {"question": q}, q)
@@ -1424,6 +1921,22 @@ def check_relations() -> int:
     print(f"{'✓' if hit else '✗'} 오답 문구를 «틀렸다»고 짚는 정정은 막지 않는다")
     ok += hit
 
+    # **정정 표지 목록은 카드가 실제로 쓰는 낱말을 덮어야 한다.** 「오답」이 빠져 있던 동안
+    # F47(퇴직금 60일 내 IRP 입금)의 verify_points 가 «"이미 통장으로 받았으면 끝" = 오답»
+    # 이라 적혀 있는데, 그 줄대로 짚어준 답변이 폐기되고 근거 원문이 덤프됐다 — 위와 똑같이
+    # 데이터가 시킨 일을 했다고 벌하는 자리다(2026-09-02 실측).
+    f47 = KB.facts.get("fact.k04.f47")
+    pf47 = (f47 or {}).get("pitfalls") or []
+    hit = bool(pf47) and not R.known_wrong(
+        '"이미 통장으로 받았으면 끝"이라고 생각하기 쉽지만 오답이에요. 60일 이내면 됩니다.', pf47)
+    print(f"{'✓' if hit else '✗'} 카드가 「오답」이라 부르는 문구를 그 말로 짚는 정정도 막지 않는다")
+    ok += hit
+
+    # 그렇다고 헐거워지지 않는다 — 따옴표 없이 그대로 주장하면 여전히 잡힌다.
+    hit = R.known_wrong("이미 통장으로 받았으면 끝이니 어쩔 수 없다고 안내하세요.", pf47) != []
+    print(f"{'✓' if hit else '✗'} 표지가 늘어도 그대로 주장한 오답은 잡는다")
+    ok += hit
+
     # 정정으로 보는 조건은 둘 다다 — 하나만으로는 헐겁다.
     hit = R.known_wrong("오기 주의하시고, 5,500만원 이상 13.2% 로 안내하세요.", pf) != []
     print(f"{'✓' if hit else '✗'} 정정 표지만 곁에 있고 문구는 주장했으면 잡는다")
@@ -1461,7 +1974,7 @@ def check_relations() -> int:
     with_rel = next(f for f in by_id.values() if R.declared(f) and f.get("value"))
     without_rel = next(f for f in by_id.values() if not R.declared(f) and f.get("value"))
     orig_fits, orig_search = tools.fits_question, facts_qa.search
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
     facts_qa.search = lambda question: [(2.0, with_rel), (2.0, without_rel)]
     try:
         found = tools.run("fact", {"question": "q"}, "세액공제 공제율")
@@ -1538,7 +2051,7 @@ def check_turn_cost() -> int:
     ok += hit
 
     # ② 계획이 한 호출로 끝난다("last": true) — 그 도구가 실제로 재료를 내놨을 때만.
-    hit = state.get("plan_done") is True and len(state.get("plan_calls") or []) == 1
+    hit = state.get("plan_done") is True and len(state.get("steps") or []) == 1
     print(f"{'✓' if hit else '✗'} 재료 하나로 끝나는 질문은 계획 호출 1번으로 끝난다")
     ok += hit
 
@@ -1572,7 +2085,7 @@ def check_turn_cost() -> int:
     orig_fits = tools.fits_question
     pitch.extract_slots = lambda st: called.append("slots") or {}
     tools.llm_pick = lambda kinds, q: []
-    tools.fits_question = lambda question, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
     try:
         tools.run("pitch", {"question": "수수료 부담된다고 하시네요"}, "수수료 부담")
     finally:
@@ -1641,7 +2154,7 @@ def check_miss_recovery() -> int:
     question = "포트폴리오 운용현황 조회 화면 번호는?"
     shrunk = "운용현황 조회 화면번호"
     orig_fits = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         hit = (not procedure_qa.search(shrunk)                       # 줄여 쓰면 0건인데
                and bool(procedure_qa.search(question))               # 원문으로는 찾고
@@ -1677,7 +2190,8 @@ def check_miss_recovery() -> int:
     ok += hit
 
     # ③ '없다'가 무엇을 찾아봤는지 말한다.
-    answer = P._no_evidence({"plan_calls": ["procedure:운용현황 조회 화면번호"]})
+    answer = P._no_evidence({"steps": [{"tool": "procedure",
+                                    "query": "운용현황 조회 화면번호", "outcome": "miss"}]})
     hit = "찾아본 곳" in answer and "운용현황 조회 화면번호" in answer
     print(f"{'✓' if hit else '✗'} '근거 없음'이 무엇을 어떤 말로 찾아봤는지 밝힌다")
     ok += hit
@@ -1694,6 +2208,82 @@ def check_miss_recovery() -> int:
 #: 옮기는 변경(예: 작성과 동시 실행)이 답을 바꾸지 않았다고 말할 수 있다.
 #:
 #: (질문, 도구, 판정, 되묻기로 끝나야 하나, 근거에 있어야 할 갈래 표시)
+def check_clarify_settled() -> int:
+    """되묻기 판정이 열린 고객 화면의 값을 본다 — 갈래가 아니라 «정해진 것»으로 (§5 · gap 30).
+
+    2026-09-04 gemma 실측: 만기 임박 고객(원리금보장 32.4%)을 열고 「뭐라고 말하면 좋아?」를
+    물으니, 고객 상태에 걸린 화법 2장(「만기 임박+디폴트옵션 미등록 고객에게」·「원리금보장
+    100% 운용 고객에게」)을 갈래로 읽어 **직원에게 고객 상태를 되물었다.** 상태 코드는 코드가
+    원장에서 계산한 값이다(§3 「축을 가르는 것은 코드다」).
+    """
+    from pension_agent.consult_agent.nodes import clarify as CL
+
+    ok = 0
+    cid = "198734-1205842"          # 이준호 — 성립 요건 mat(만기예금 보유) 하나, 디폴트옵션 설정
+    playbook = [{"tool": "playbook", "query": "q",
+                 "text": "만기 임박+디폴트옵션 미등록 고객에게 → … / 원리금보장 100% 운용 고객에게 → …",
+                 "atomic": [], "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
+    fact = [{"tool": "fact", "query": "q", "text": "세액공제 한도 900만원 / 연금저축 단독 600만원",
+             "atomic": [], "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
+    customer = [{"tool": "customer", "query": "q", "text": "■ 고객 — 퇴직급여 5.2억 · 개인부담금 0원",
+                 "atomic": [], "notices": [], "notice_scopes": [], "allow": [], "sources": [], "meta": {}}]
+
+    # ① 고객 상태에 걸린 카드(playbook)만 있는 턴은 판정을 돌리지 않는다 — 그 카드를 고른
+    #    기준(어느 상태인가)은 코드가 이미 정했다.
+    hit = not CL.applicable({"question": "뭐라고 말하면 좋아?", "customer_id": cid, "evidence": playbook})
+    print(f"{'✓' if hit else '✗'} playbook 근거만 있는 턴은 되묻기 판정을 돌리지 않는다")
+    ok += hit
+
+    # ② 고객이 열려 있으면 판정 프롬프트에 코드가 아는 상태가 «이미 정해진 것»으로 실린다 —
+    #    <근거> 밖에. 고객 도구가 안 불린 턴에도(재료는 fact 만) 실린다.
+    seen: list[str] = []
+    orig = CL.generate
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"ask": null}')[1]
+    try:
+        CL.clarify({"question": "이 고객 세액공제 얼마나 더 받아?", "customer_id": cid, "evidence": fact})
+        prompt = seen[-1] if seen else ""
+        settled = prompt.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in prompt else ""
+        hit = ("만기예금 보유" in settled and "디폴트옵션 설정" in settled
+               and "거래채널 대면" in settled and "소득구간" not in settled)
+        print(f"{'✓' if hit else '✗'} 판정 프롬프트에 성립 요건·계좌 상태·거래채널이 «정해진 것»으로 실린다"
+              " — 모르는 값(소득구간)은 싣지 않는다")
+        ok += hit
+        hit = bool(settled) and "만기예금 보유" not in prompt.split("<근거>")[-1].split("</근거>")[0]
+        print(f"{'✓' if hit else '✗'} 정해진 것은 <근거>(갈래 후보) 밖에 실린다")
+        ok += hit
+
+        # ②-2 부담금 종류도 «정해진 것»이다(2026-09-07). 수수료율표(fact.k04.f50)가 갈리는
+        #     축 셋 중 둘(부담금 종류·거래채널)이 원장 값이라, 이 블록에 없으면 T8 이 다시
+        #     직원에게 되묻는다. 고객 도구가 안 불린 턴에도 실려야 한다 — 재료는 fact 뿐이다.
+        hit = "사용자부담금" in settled and "가입자부담금" in settled
+        print(f"{'✓' if hit else '✗'} 부담금 종류(사용자/가입자)가 «정해진 것»에 실린다")
+        ok += hit
+
+        # ③ 원장에 이미 실린 고객 재료 본문도 같은 블록에 온다.
+        seen.clear()
+        CL.clarify({"question": "수수료 얼마야?", "customer_id": cid, "evidence": customer + fact})
+        prompt = seen[-1] if seen else ""
+        settled = prompt.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in prompt else ""
+        hit = "개인부담금 0원" in settled
+        print(f"{'✓' if hit else '✗'} 원장의 고객 재료 본문이 «정해진 것»에 실린다")
+        ok += hit
+
+        # ④ 고객이 없으면 블록도 없다 — 지식 질의응답의 판정은 그대로다.
+        seen.clear()
+        CL.clarify({"question": "실물이전 어떻게 해?", "evidence": fact})
+        hit = bool(seen) and "<이미 정해진 것>" not in seen[-1]
+        print(f"{'✓' if hit else '✗'} 고객이 열려 있지 않으면 «정해진 것» 블록이 없다")
+        ok += hit
+    finally:
+        CL.generate = orig
+
+    # ⑤ 블록은 LLM 없이 만들어진다 — 프로파일이 없는 id 면 비고, 예외를 내지 않는다.
+    hit = CL.settled_block({"customer_id": "000000-0000000", "evidence": []}) == ""
+    print(f"{'✓' if hit else '✗'} 없는 고객 id 는 빈 블록이고 예외가 아니다")
+    ok += hit
+    return ok
+
+
 _CLARIFY_GOLDEN = (
     # ① 진짜 갈래 — 근거에 신청 경로가 셋이라 어느 쪽인지 정해야 답이 갈린다.
     ("계약이전 어떻게 신청해?", "procedure",
@@ -1740,7 +2330,8 @@ def check_clarify_golden() -> int:
         try:
             agent = G.build_agent()
             out = agent.invoke({"question": question, "evidence": [found],
-                                "plan_calls": [f"{tool}:{question}"]})
+                                "steps": [{"tool": tool, "query": question,
+                                           "outcome": "found"}]})
         finally:
             CL.generate, G.plan_step, P.generate = orig_cl, orig_plan_node, orig_gen
 
@@ -1784,7 +2375,8 @@ def check_clarify_golden() -> int:
                           "history": history, "evidence": evidence})
     finally:
         CL.generate = orig_cl
-    hit = bool(seen) and "타행에서 퇴직금 가져오려는 고객" in seen[0] and out == {}
+    hit = bool(seen) and "타행에서 퇴직금 가져오려는 고객" in seen[0] \
+        and not out.get("clarify") and not out.get("judge_note")
     print(f"{'✓' if hit else '✗'} 판정 프롬프트가 이전 대화를 본다(맥락으로 갈래가 정해진 후속 질문)")
     ok += hit
 
@@ -1956,7 +2548,8 @@ def check_replan_on_empty() -> int:
     # 근거를 모았으면 done 을 바로 존중한다 — 재계획은 0건일 때만이다.
     P.generate = lambda prompt, **kw: '{"done": true}'
     try:
-        st2 = {"question": "질문", "evidence": [ev_customer], "plan_calls": ["customer:q"]}
+        st2 = {"question": "질문", "evidence": [ev_customer],
+               "steps": [{"tool": "customer", "query": "q", "outcome": "found"}]}
         st2.update(P.plan_step(st2))
     finally:
         P.generate = orig_gen
@@ -2001,7 +2594,7 @@ def check_screen_registry() -> int:
 
     # 화면번호 질문이 그 카드에 닿는가.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "포트폴리오 운용현황 조회 화면 번호는?"
         found = tools.run("screen", {"question": q}, q)
@@ -2045,7 +2638,7 @@ def check_screen_registry() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "고객이 스타뱅킹에서 직접 상품변경 하려면 어느 메뉴로 가나요"
         found = tools.run("channel", {"question": q}, q)
@@ -2075,7 +2668,8 @@ def check_screen_registry() -> int:
     ok += hit
 
     # 기준시점이 코드에 박혀 있지 않은가 — 두 곳에 있으면 원문이 바뀔 때 갈린다.
-    src = pathlib.Path(tools.__file__).read_text(encoding="utf-8")
+    src = "".join(f.read_text(encoding="utf-8")
+                  for f in pathlib.Path(tools.__file__).parent.glob("*.py"))  # tools/ 패키지 전체
     hit = "2025.03.31" not in src and not hasattr(tools, "CHANNEL_MARK")
     print(f"{'✓' if hit else '✗'} 기준시점·경고 문구가 코드 상수로 남아 있지 않다")
     ok += hit
@@ -2292,8 +2886,16 @@ def check_product_advice() -> int:
     print(f"{'✓' if hit else '✗'} 선언이 없으면 고지를 붙이지 않는다")
     ok += hit
 
-    hit = "권유하지 않는다" in COMPOSE_SYSTEM and "직원이 정한다" in COMPOSE_SYSTEM
-    print(f"{'✓' if hit else '✗'} 생성 지시가 한 상품을 골라 권유하는 것을 금지한다")
+    # 2026-09-02 개정(§8 관리대장): 직원 대상 도구라 특정 상품을 짚어 말하는 것은 허용하고,
+    # 남는 경계는 표현이다 — «이런 상품이 있습니다» 톤까지, 권유(«추천드립니다»)는 금지.
+    hit = ("특정해 말하" in COMPOSE_SYSTEM
+           and "권유 표현은 쓰지 않는다" in COMPOSE_SYSTEM
+           and "직원이 정한다" in COMPOSE_SYSTEM)
+    print(f"{'✓' if hit else '✗'} 생성 지시가 상품 특정을 허용하되 권유 표현을 금지한다")
+    ok += hit
+
+    hit = "권유 표현" in ANSWER_SHAPES["lineup"]
+    print(f"{'✓' if hit else '✗'} lineup 의 답변 형태도 권유 표현 금지를 요구한다")
     ok += hit
 
     hit = "투자권유가 아니라는 표시" in ANSWER_SHAPES["suitable"]
@@ -2463,6 +3065,38 @@ def check_suitable_shape() -> int:
     hit = "자료에 없는 항목은 쓰지 않는다" in SHAPE_BLOCK
     print(f"{'✓' if hit else '✗'} 형태 머리말이 «없으면 안 쓴다»를 전역으로 건다")
     ok += hit
+
+    # 재료가 말하는 수와 보여주는 목록은 같아야 한다 — 12명 전원.
+    #
+    # 회귀 대상(2026-09-07 실측, 오세훈·박정호): 제외 목록을 5건에서 자르던 상한 때문에
+    # 안정추구형(제외 6건) 재료가 «안내할 수 없는 상품 6종»이라 쓰고 5건만 실었다. LLM 이
+    # 목록을 세어 «5종»이라 쓰자 verify 가 원장에 없는 수로 답을 버리고 이 블록을 덤프했다.
+    import re as _re
+    from pension_agent.strategy_agent.customer import PERSONAS
+    _head = _re.compile(r"^── 안내할 수 (있는|없는) 상품 (\d+)종")
+    mismatch: list[str] = []
+    for p in PERSONAS:
+        ev = tools._suitable({"customer_id": p.id}, "q")
+        if not ev:
+            continue
+        section, said, listed = None, {}, {}
+        for line in ev["text"].splitlines():
+            m = _head.match(line)
+            if m:
+                section = m.group(1)
+                said[section] = int(m.group(2))
+                listed.setdefault(section, 0)
+            elif line.startswith("── "):
+                section = None
+            elif section and line.startswith("· ") and not line.startswith("· [포트폴리오]"):
+                listed[section] += 1
+        for section, n in said.items():
+            if listed.get(section) != n:
+                mismatch.append(f"{p.nm}:{section} {n}종 ≠ 목록 {listed.get(section)}줄")
+    hit = not mismatch
+    print(f"{'✓' if hit else '✗'} 머리말의 종수와 목록 줄 수가 12명 전원에서 같다"
+          + (f" ({', '.join(mismatch)})" if mismatch else ""))
+    ok += hit
     return ok
 
 
@@ -2609,7 +3243,7 @@ def check_caution_roles() -> int:
     from pension_agent.consult_agent.nodes import procedure_qa as PQ
     by_id = {c["id"]: c for c in KB.cards}
     orig_search, orig_fits = PQ.search, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         PQ.search = lambda q: [(2.0, by_id["proc.001"])]
         found = tools.run("procedure", {"question": "q"}, "적립금 조회 절차")
@@ -2621,7 +3255,7 @@ def check_caution_roles() -> int:
 
     # ④ caution 은 표시로 나간다 — 역할을 나눈 목적은 진짜 주의를 살리는 것이다.
     orig_pick, orig_fits = tools.pick, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         tools.pick = lambda kinds, q, **kw: [(2.0, by_id["screen.06-10-182"])]
         found = tools.run("screen", {"question": "q"}, "연금납입정보 조회 화면")
@@ -2709,12 +3343,17 @@ def check_tax_credit_calc() -> int:
     금지라(§5) 직원이 실제로 묻는 것에 답할 방법이 없었다. 그 장이 근거로 든 것이 이것이다 —
     직원 두 명이 각자 엑셀 계산기를 만들어 배포했을 만큼 니즈가 강하다.
 
-    여기서 재는 것 넷:
+    여기서 재는 것 다섯:
       ① 입력 금액은 **직원이 친 말**에서 뽑는다(계획 LLM 의 재작성본이 아니라)
       ② 총급여 구간이 미확인이면 두 경우를 다 낸다
       ③ 한도를 이미 채웠으면 «추가 공제 없음»으로 갈리고, 그 갈래에는 결정세액 단서를
          붙이지 않는다 — 최대 환급액을 단정할 때 걸리는 단서라 여기서는 무관하다(§7)
       ④ 계산 결과는 인용할 수 있고, 계산 밖 금액은 잘린다
+      ⑤ **«어디에 넣는 금액인가»가 재료에 있다** — 질문("300만원 더 넣으면")에는 계좌가
+         없다. 갈래가 있어서가 아니라 직원이 말하지 않을 뿐이고, 열려 있는 고객의 계좌가
+         개인형IRP 다. 재료가 비워 두면 답변도 비우고, 직원은 어느 계좌에 넣는 300만원인지
+         적히지 않은 금액을 고객에게 옮긴다. 한도 쪽은 반대로 계좌를 가리지 않는다 —
+         연금저축과 함께 쓰는 한도라(fact.k04.f2) 그 사실도 함께 적혀야 한다
     """
     ok = 0
     from pension_agent.consult_agent import relations as REL
@@ -2772,12 +3411,112 @@ def check_tax_credit_calc() -> int:
     print(f"{'✓' if hit else '✗'} 재료는 자기대조를 통과하고, 공제율 오짝은 잡힌다")
     ok += hit
 
+    # ⑤ 어디에 넣는 금액인지가 재료에 있다. 없으면 답변도 말하지 않는다.
+    hit = "개인형IRP 계좌 추가 납입" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 어느 계좌에 넣는 금액인지를 재료가 적는다")
+    ok += hit
+
+    # 정해져 있는 값이라 «가정하면» 으로 적지 않는다 — 추측처럼 적으면 직원은 확인해야
+    # 할 것이 있는 줄 안다. 되묻기 대상도 아니다(갈래가 없다).
+    hit = not any(w in ev["text"] for w in ("가정", "~라면", "로 보고 계산"))
+    print(f"{'✓' if hit else '✗'} 계좌를 가정 어법으로 적지 않는다(정해져 있는 값이다)")
+    ok += hit
+
+    # 한도 쪽은 반대로 계좌를 가리지 않는다 — 「IRP 에 900만원까지」로 읽히면 안 된다.
+    hit = "연금저축 납입분까지 합산한 값" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 한도·잔여한도가 연금저축과 합산된 값이라는 것을 함께 적는다")
+    ok += hit
+
     # 브리핑과 계산기가 같은 산식을 쓴다 — 두 곳이 각자 곱하면 화면과 답변이 갈린다.
     from pension_agent.strategy_agent import agent as SA
     shown = SA.propose(room)["facts"]["briefing"]["예상_세액공제액"]
     now = CUST.tax_credit(room.pension_paid_ytd, room.tax_credit_rate)
     hit = f"{now // 10_000:,}만원" in shown or f"{now:,}" in shown
     print(f"{'✓' if hit else '✗'} 화면의 예상 세액공제액과 같은 산식을 쓴다 ({shown})")
+    ok += hit
+    return ok + check_tax_credit_isa()
+
+
+def check_tax_credit_isa() -> int:
+    """ISA 만기자금 전환 — 900만원 한도 «안»이 아니라 그 한도에 **더해지는** 축.
+
+    이 갈래가 없던 동안 「ISA 8,000만원 중 일부만 옮기면 세액공제 어떻게 돼?」에 잔여한도
+    500만원으로 답했다 — 같은 대화에서 방금 인용한 카드(fact.k04.f4 「최대 1,200만원」)와
+    어긋나는 금액이었고, 카드가 오답으로 못박은 「전환금 전액이 공제 대상」의 반대편 오답
+    (「전환해도 잔여한도까지만」)이었다.
+
+    재는 것 다섯:
+      ① ISA 보유 고객이면 질문에 'ISA' 라는 말이 없어도 전환 축이 실린다(되묻기 뒤의
+         한 마디 답 "초과야" 가 그 자리다 — 말에서 찾으면 정작 필요한 턴에 빠진다)
+      ② 늘어나는 것은 전환액의 10%(300만원 상한)이지 전환액 전체가 아니다
+      ③ 잔여한도가 0이어도 전환으로는 더 받을 수 있다 — 두 축이 다르다는 것의 실증
+      ④ 60일이 지난 자금에는 싣지 않는다
+      ⑤ ISA 가 없는 고객의 답은 예전과 같다(축을 늘리지 않는다)
+    """
+    ok = 0
+    from pension_agent.strategy_agent import customer as CUST
+
+    isa = next(p for p in CUST.PERSONAS if p.isa and p.room > 0)
+    ev = tools.TOOLS["tax_credit"].run({"customer_id": isa.id, "question": "초과야"}, "세액공제")
+    text = (ev or {}).get("text", "")
+
+    hit = ev is not None and "ISA 만기자금을 전환하는 경우" in text
+    print(f"{'✓' if hit else '✗'} 질문에 'ISA' 가 없어도 보유 고객이면 전환 축이 실린다")
+    ok += hit
+
+    # ② 전환액 전체가 아니라 10%·300만원 상한. 상한에 닿는 전환액도 함께 있어야
+    #    「일부만 옮기면?」이 금액과 이어진다.
+    cap = CUST.ISA_ROLLOVER_CREDIT_CAP_WON
+    at_cap = int(cap / CUST.ISA_ROLLOVER_CREDIT_RATE)
+    add = CUST.isa_rollover_credit(isa.isa["amount"])
+    hit = (add == cap and CUST.isa_rollover_credit(10_000_000) == 1_000_000
+           and f"{at_cap // 10_000:,}만원에서 상한에 닿는다" in text
+           and "전환금 전액이 공제 대상이 되는 것이 아니다" in text)
+    print(f"{'✓' if hit else '✗'} 늘어나는 몫은 전환액의 10%(상한 {cap // 10_000:,}만원)다")
+    ok += hit
+
+    # 환급액은 «늘어난 공제 대상»에만 공제율을 곱한 값이다. 전환액을 tax_credit() 에 그대로
+    # 넣으면 8,000만원이 한도를 채운 것으로 계산된다 — 그 오답이 여기서 갈린다.
+    gain = CUST.tax_credit(add, CUST.TAX_CREDIT_RATE["5500초과"])
+    hit = f"{gain:,}원" in text and _vt(f"이 전환으로 {gain:,}원 더 돌려받아요.", ev["allow"])[0]
+    print(f"{'✓' if hit else '✗'} 전환 환급액은 늘어난 공제 대상 × 공제율이다 ({gain:,}원)")
+    ok += hit
+
+    # 카드가 못박은 1,200만원 한도와 코드의 두 상수가 같은 값을 말한다.
+    hit = f"{(CUST.TAX_CREDIT_CAP_WON + cap) // 10_000:,}만원" in text
+    print(f"{'✓' if hit else '✗'} 공제 대상 한도가 900만원 → 1,200만원으로 늘어난다고 싣는다")
+    ok += hit
+
+    # ③ 잔여한도가 0인데 ISA 가 있는 고객 — 예전에는 "더 넣어도 안 늘어난다"로 끝났다.
+    full_isa = next((p for p in CUST.PERSONAS if p.isa and p.room == 0), None)
+    if full_isa is not None:
+        zero = tools.TOOLS["tax_credit"].run({"customer_id": full_isa.id, "question": "얼마 더 받아?"}, "q")
+        hit = (zero is not None and "추가 공제 대상이 없다" in zero["text"]
+               and "ISA 만기자금을 전환하는 경우" in zero["text"] and bool(zero["notices"]))
+        print(f"{'✓' if hit else '✗'} 잔여한도 0이어도 전환 축은 따로 답한다 + 결정세액 단서가 붙는다")
+        ok += hit
+
+    # ④ 60일이 지나면 안내할 수 없는 것이라 싣지 않는다.
+    keep = isa.isa
+    try:
+        isa.isa = dict(keep, dd=-(CUST.ISA_ROLLOVER_DEADLINE_DAYS + 1))
+        late = tools.TOOLS["tax_credit"].run({"customer_id": isa.id, "question": "얼마 더 받아?"}, "q")
+        hit = late is not None and "ISA 만기자금을 전환하는 경우" not in late["text"]
+        print(f"{'✓' if hit else '✗'} 전환 기한(60일)이 지난 자금에는 싣지 않는다")
+        ok += hit
+        isa.isa = dict(keep, dd=-10)
+        mid = tools.TOOLS["tax_credit"].run({"customer_id": isa.id, "question": "얼마 더 받아?"}, "q")
+        hit = mid is not None and "만기 10일 경과 · 전환 기한 50일 남음" in mid["text"]
+        print(f"{'✓' if hit else '✗'} 만기가 지났어도 60일 안이면 남은 기한을 싣는다")
+        ok += hit
+    finally:
+        isa.isa = keep
+
+    # ⑤ ISA 가 없는 고객에게는 축을 늘리지 않는다.
+    plain = next(p for p in CUST.PERSONAS if not p.isa and p.room > 0)
+    ev2 = tools.TOOLS["tax_credit"].run({"customer_id": plain.id, "question": "300만원 더 넣으면?"}, "q")
+    hit = ev2 is not None and "ISA" not in ev2["text"] and "연금계좌에 현금을" not in ev2["text"]
+    print(f"{'✓' if hit else '✗'} ISA 가 없는 고객의 재료에는 전환 축도 축 이름도 없다")
     ok += hit
     return ok
 
@@ -2812,6 +3551,15 @@ def check_labeled_pairs() -> int:
     for i, row in enumerate(numeric):
         other = numeric[(i + 1) % len(numeric)]
         if other["value"] == row["value"]:
+            continue
+        # **판정 불가는 놓친 것이 아니다**(relations.py 머리말 · §6). 판정은 이름 뒤의 **첫
+        # 수치** 하나를 그 항목의 값과 견주는데(`labeled_mispaired`), 남의 값이 마침 그
+        # 수치부터 시작하면 두 문장이 구별되지 않는다 — 잔여한도 0만원인 고객에게 「0원
+        # …」으로 시작하는 남의 값을 붙이는 짝이 그렇다. 어떤 구현으로도 못 잡는 짝을
+        # 검출률에 넣으면, 재료에 줄이 하나 늘 때마다 회전 짝이 다시 섞여 이 비율이
+        # 흔들린다(2026-09-07 부담금별 구성이 실려 11/13 → 11/14 로 떨어졌다).
+        said = first_measure(other["value"][:REL.LABEL_NEAR])
+        if said is not None and said[1] & REL.numbers(row["value"]):
             continue
         cases += 1
         caught += bool(REL.check(f"{row['label']}은 {other['value']}이에요.", cards))
@@ -2871,21 +3619,49 @@ def check_account_state() -> int:
     "준비된 자료가 없어요" 가 나갔다 — 정확히 "네, 돼 있습니다" 라고 답해야 하는 자리에서.
 
     값이 없어서가 아니었다. 전부 Profile 에 있었고, 렌더 경로만 걸러냈다. 그래서 이 테스트는
-    **9명 전원**에 대해 재료가 있는지 본다 — 한 명이라도 빠지면 그 상태의 고객이 답을 못 받는
-    것이고, 그게 원래 증상이었다(고치기 전 0~3/9).
+    **로스터 전원**에 대해 재료가 있는지 본다 — 한 명이라도 빠지면 그 상태의 고객이 답을 못
+    받는 것이고, 그게 원래 증상이었다(고치기 전 0~3/9).
+
+    **부담금별 구성은 «렌더 경로»가 아니라 한 단계 앞에서 끊겨 있었다**(2026-09-07). 원장
+    06_PENSION 에 `퇴직급여금액`·`개인부담금금액` 이 있는데 `Profile` 이 접지 않아 재료까지
+    오지 못했고, 그래서 수수료율표(fact.k04.f50)가 갈리는 축을 대화형이 직원에게 되물었다
+    (기준서 §12 지워진 gap 30). 같은 줄에서 함께 재는 이유는 증상이 하나이기 때문이다 —
+    «원장에는 있는데 답을 못 한다».
     """
     ok = 0
     from pension_agent.strategy_agent import customer as CUST
 
     STATES = ("디폴트옵션", "연금개시", "연금개시요건", "세액공제 잔여한도",
-              "판매중단 보유상품", "ISA 만기자금", "IRP 가입일")
+              "판매중단 보유상품", "ISA 만기자금", "IRP 가입일", "부담금별 구성")
     texts = {p.id: ((tools.TOOLS["customer"].run({"customer_id": p.id}, "확인") or {}).get("text", ""))
              for p in CUST.PERSONAS}
     for key in STATES:
         missing = [pid for pid, t in texts.items() if key not in t]
         hit = not missing
-        print(f"{'✓' if hit else '✗'} 계좌 상태 «{key}» 가 9명 전원 재료에 있다"
+        print(f"{'✓' if hit else '✗'} 계좌 상태 «{key}» 가 {len(texts)}명 전원 재료에 있다"
               + ("" if hit else f" — 빠진 고객 {len(missing)}명"))
+        ok += hit
+
+    # 부담금 재원 구성은 **원장 두 컬럼을 옮긴 값**이라, 재료의 금액이 원장과 같아야 한다.
+    # 그리고 그 값을 인용한 답변이 통과해야 되묻기가 실제로 줄어든다 — 재료에 실렸는데
+    # 검증기가 자르면 gap 30 이 이름만 바뀐 채 남는다.
+    split = next((p for p in CUST.PERSONAS if p.severance_amt and p.own_contrib_amt), None)
+    only_one = next((p for p in CUST.PERSONAS if not p.severance_amt), None)
+    hit = split is not None and only_one is not None
+    print(f"{'✓' if hit else '✗'} 두 부담금이 섞인 고객과 한쪽뿐인 고객이 로스터에 다 있다")
+    ok += hit
+    if split is not None:
+        ev = tools.TOOLS["customer"].run({"customer_id": split.id}, "수수료 얼마야?")
+        from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
+        said = (f"이 고객 적립금은 사용자부담금(퇴직급여) {won(split.severance_amt)}, "
+                f"가입자부담금(개인부담금) {won(split.own_contrib_amt)}이에요.")
+        hit = _vt(said, (ev or {}).get("allow") or [])[0]
+        print(f"{'✓' if hit else '✗'} 두 부담금 금액을 그대로 인용한 답변이 통과한다")
+        ok += hit
+        # 경계는 넓어지지 않았다 — 원장에 없는 금액은 여전히 막힌다.
+        wrong = f"사용자부담금은 {won(split.severance_amt + 7_777_000)}이에요."
+        hit = not _vt(wrong, (ev or {}).get("allow") or [])[0]
+        print(f"{'✓' if hit else '✗'} 원장에 없는 부담금 금액은 막힌다")
         ok += hit
 
     # 값이 «정상»인 쪽도 말할 수 있어야 한다. 미설정만 실리던 것이 원래 증상이라, 설정된
@@ -3049,8 +3825,19 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 시효 표시를 재료가 달고 나온다(빠지면 코드가 채운다)")
     ok += hit
 
-    hit = closed is None and unseen is None
-    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혔거나 기록이 없으면 지어내지 않는다")
+    # 고객 화면이 닫혀 있으면 어느 고객인지가 없다 — «확인하지 못함»이라 None 이고, 계획은
+    # 다른 도구를 써 볼 여지가 남는다.
+    hit = closed is None
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혔으면 지어내지 않는다")
+    ok += hit
+
+    # **기록 0건은 «확인한 값»이라 재료다**(2026-09-02). None 이던 동안 이것이 «질의가
+    # 빗나감»과 구별되지 않아, 계획이 재계획으로 `customer` 를 끌어와 브리핑 한 편을
+    # 원장에 싣고 질문과 무관한 ⑥⑦⑧ 화법 카드를 «근거»로 세웠다. 시효 표시는 붙지
+    # 않는다 — 낡을 값 자체가 없다.
+    hit = (bool(unseen) and tools.HISTORY_NONE in unseen["text"]
+           and tools.HISTORY_MARK not in unseen["notices"])
+    print(f"{'✓' if hit else '✗'} 기록 0건도 재료로 올라온다(없다고 답할 근거)")
     ok += hit
 
     hit = "history" not in tools.catalog({}) and "history" in tools.catalog({"customer_id": "CX"})
@@ -3100,6 +3887,249 @@ def check_history_material() -> int:
     return ok
 
 
+def check_memo() -> int:
+    """이번 턴의 재료 → WorkB 쪽지(§3 «이번 상담 대화» 재료 · §10 쪽지 제안·발송).
+
+      ① `transcript` 는 **이번 세션만** 싣고 `history` 는 이번 세션을 뺀다 — 둘이 겹치면 방금
+         한 말이 «지난 상담»이 되고, 둘 다 비면 요약할 재료가 없다.
+      ② 기록에 붙은 제안 문구·도구 실행 줄은 재료에서 뗀다(안내가 아니라 화면 장치).
+      ③ 제안은 «쪽지»를 말한 턴에만 붙는다. **고객 화면은 조건이 아니다** — 화면 유무는
+         재료를 가르지(그 고객 / 오늘의 타겟 목록) 쪽지를 막지 않는다.
+      ④ 받는 사람은 코드가 정한다 — 기본은 본인이고, **사번을 적었을 때만** 타인이다.
+      ⑤ 본문·제목은 LLM 이 가이드라인 안에서 쓰고, 코드가 화면 답변과 **같은 검사**에 건다.
+         걸리면 보내지 않고 사유를 말한다(폴백 없음). 꼴(HTML)은 코드가 만든다.
+      ⑥ 승낙하면 제안한 턴의 초안 그대로 보내고 기록에 남긴다. 거절하면 보내지 않는다.
+      ⑦ 화면에서는 초안을 코드블록으로 감싸고, 보내는 본문과 기록 재료에는 펜스가 없다.
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from pension_agent import session_store, workb
+    from pension_agent import tools as REG
+    from pension_agent.consult_agent import memo, prompts
+    from pension_agent.consult_agent.nodes import act
+    from pension_agent.consult_agent.nodes import clarify as CL
+
+    def _dead(*a, **kw):
+        raise LLMError("no key")
+
+    #: 가짜 작성기 — 규격(JSON)만 맞추고 재료 안 값만 쓴다. 실제 문장은 LLM 이 쓴다.
+    def _writer(title: str, body: str):
+        return lambda prompt, **kw: json.dumps({"title": title, "body": body},
+                                               ensure_ascii=False)
+
+    ok = 0
+    orig_gen, orig_sender = memo.generate, workb.SENDER
+    orig_env = os.environ.get(workb.EMP_NO_ENV)
+    os.environ[workb.EMP_NO_ENV] = "3902172"
+    outbox: list[tuple] = []
+
+    async def _send(ids, title, body):
+        outbox.append((ids, title, body))
+        return '{"success": true}'
+
+    workb.use_sender(_send)
+    with tempfile.TemporaryDirectory() as tmp:
+        orig_dir = session_store.SESSION_DATA_DIR
+        session_store.SESSION_DATA_DIR = Path(tmp)
+        try:
+            now, old = "s-now", "s-old"
+            session_store.append_turn("CM", old, {"role": "user", "text": "지난 세션의 질문"})
+            session_store.append_turn("CM", now, {"role": "user", "text": "과세이연 등록은 어떻게 해?"})
+            session_store.append_turn("CM", now, {
+                "role": "agent",
+                "text": "[06-12-501] 후선업무 의뢰등록부터 해요. 60일 내 입금이에요.\n\n"
+                        "— 06-12-501 화면 열기, 연계해드릴까요? (네 / 아니오)"})
+            session_store.append_turn("CM", now, {"role": "tool", "text": "[발송 화면 연계] 문구"})
+            # 앞선 쪽지 제안 턴이 기록에 남은 꼴 — 펜스와 제안 문구는 화면 장치라 재료에서 뗀다.
+            session_store.append_turn("CM", now, {
+                "role": "agent",
+                "text": f"{memo.FENCE}\n앞선 쪽지 본문\n{memo.FENCE}\n\n"
+                        "— 이 요약을 쪽지로 보낼까요? 받는 사람은 본인이에요. (네 / 아니오)"})
+            state = {"question": "대화 내용 요약해서 쪽지로 보내줘", "customer_id": "CM",
+                     "session_id": now}
+            found = tools.run("transcript", state, "이번 상담 요약")
+            past = tools.run("history", state, "지난 상담")
+            closed = tools.run("transcript", {"question": "q", "session_id": now}, "요약")
+            nosess = tools.run("transcript", {"question": "q", "customer_id": "CM"}, "요약")
+            empty = tools.run("transcript", {"question": "q", "customer_id": "CM",
+                                             "session_id": "s-new"}, "요약")
+
+            summary = "직원이 과세이연 등록 절차를 물었고, [06-12-501] 등록부터 60일 내 입금까지 안내했어요."
+            turn = {**state, "answer": summary, "evidence": [found]}
+
+            memo.generate = _writer("과세이연 등록 상담 정리",
+                                    "과세이연 등록 절차를 확인했어요.\n- 후선업무 의뢰등록부터 시작")
+            offered = act.offer(turn)
+            pending = offered.get("pending_action")
+            plain = act.offer({**turn, "question": "지금까지 대화 내용 요약해줘"})
+            shut = act.offer({**turn, "customer_id": None})
+            noev = act.offer({**turn, "evidence": []})
+            other = act.offer({**turn, "question": "이 내용 사번 3902173한테 쪽지로 보내줘"})
+
+            # 검증에 걸리는 초안 — 원장에 없는 수치를 쓴다. 보내지 않고 사유를 말한다.
+            memo.generate = _writer("한도 정리", "세액공제 한도는 1,234만원이에요.")
+            screened = act.offer(turn)
+            # LLM 미연결 — «보냈다»로 접지 않는다.
+            memo.generate = _dead
+            down = act.offer(turn)
+            memo.generate = _writer("과세이연 등록 상담 정리", "확인한 내용을 남겨둡니다.")
+
+            history = [{"question": state["question"], "pending_action": pending}]
+            yes = act.confirm_action({"question": "응, 보내줘", "history": history, "customer_id": "CM"})
+            sent = [t for s2 in session_store.list_sessions("CM") for t in s2["turns"]
+                    if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
+            no = act.confirm_action({"question": "아니 괜찮아", "history": history, "customer_id": "CM"})
+            sent_after_no = [t for s2 in session_store.list_sessions("CM") for t in s2["turns"]
+                             if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
+        finally:
+            session_store.SESSION_DATA_DIR = orig_dir
+            memo.generate, workb.SENDER = orig_gen, orig_sender
+            if orig_env is None:
+                os.environ.pop(workb.EMP_NO_ENV, None)
+            else:
+                os.environ[workb.EMP_NO_ENV] = orig_env
+
+    # ① 시점으로 갈린다.
+    hit = (bool(found) and "과세이연 등록은 어떻게 해?" in found["text"]
+           and "지난 세션의 질문" not in found["text"]
+           and found["sources"][0]["id"] == f"session.CM.{now}")
+    print(f"{'✓' if hit else '✗'} transcript 는 이번 세션의 대화만 싣는다")
+    ok += hit
+
+    hit = bool(past) and "지난 세션의 질문" in past["text"] and "과세이연" not in past["text"]
+    print(f"{'✓' if hit else '✗'} history 는 이번 세션을 빼고 싣는다(둘이 겹치지 않는다)")
+    ok += hit
+
+    # ② 화면 장치는 재료가 아니다 — 답변 안의 화면번호·기한은 남는다(요약이 옮길 값).
+    hit = (bool(found) and "연계해드릴까요" not in found["text"] and "도구실행" not in found["text"]
+           and "[06-12-501]" in found["text"] and "60일" in found["text"]
+           and memo.FENCE not in found["text"] and "쪽지로 보낼까요" not in found["text"]
+           and "앞선 쪽지 본문" in found["text"])
+    print(f"{'✓' if hit else '✗'} 제안 문구·도구 실행 줄·코드블록 펜스는 떼고 답변 본문은 그대로 싣는다")
+    ok += hit
+
+    hit = closed is None and nosess is None and bool(empty) and tools.TRANSCRIPT_NONE in empty["text"]
+    print(f"{'✓' if hit else '✗'} 고객·세션이 없으면 None, 세션은 있는데 0건이면 «기록 없음» 재료")
+    ok += hit
+
+    hit = ("transcript" in tools._NEEDS_CUSTOMER and "transcript" in CL._NO_BRANCH
+           and "transcript" in prompts.ANSWER_SHAPES
+           and "transcript" not in tools.catalog({}) and "transcript" in tools.catalog({"customer_id": "CM"}))
+    print(f"{'✓' if hit else '✗'} 고객 전제 도구이고 갈래가 없으며 답의 형태 요구가 등록돼 있다")
+    ok += hit
+
+    # ③ 제안 조건 — «쪽지»를 말한 턴 · 재료가 있는 턴. 고객 화면은 조건이 아니다.
+    hit = (bool(pending) and pending["kind"] == "memo"
+           and not plain.get("pending_action") and not noev.get("pending_action")
+           and bool(shut.get("pending_action")))
+    print(f"{'✓' if hit else '✗'} «쪽지»를 말하고 재료가 있는 턴에만 붙는다 — 고객 화면은 조건이 아니다")
+    ok += hit
+
+    # ④ 받는 사람 — 코드가 정한다. 사번을 적었을 때만 타인이고, 금액 7자리는 사번이 아니다.
+    hit = (act.employee_no("사번 3902172로 보내줘") == "3902172"
+           and act.employee_no("3902172한테 쪽지 보내줘") == "3902172"
+           and act.employee_no("3902172님께 보내줘") == "3902172"
+           and act.employee_no("잔액이 5000000원인 고객 쪽지로 보내줘") is None
+           and act.employee_no("쪽지로 보내줘") is None)
+    print(f"{'✓' if hit else '✗'} 수신자 사번은 «사번» 이나 사람 조사가 붙었을 때만 읽는다(금액과 갈린다)")
+    ok += hit
+
+    hit = (pending["recipients"] == ["3902172"] and pending["to"] == REG.MEMO_DEFAULT_TO
+           and (other.get("pending_action") or {}).get("recipients") == ["3902173"]
+           and "3902173" in (other.get("pending_action") or {}).get("to", ""))
+    print(f"{'✓' if hit else '✗'} 기본은 본인이고, 사번을 적으면 그 사번으로 간다")
+    ok += hit
+
+    # ⑤ LLM 이 쓰고 코드가 검사한다 — 걸리면 «보내지 않고 사유». 꼴은 코드가 만든다.
+    hit = (pending["title"] == "과세이연 등록 상담 정리"
+           and "쪽지" not in pending["title"] and not any(c.isdigit() for c in pending["title"])
+           and "<br>" in pending["html"] and "<b>" not in pending["text"]
+           # 펜스는 화면 장치다 — 초안은 코드블록 안에 서고, 나가는 본문에는 없다.
+           and memo.FENCE not in pending["text"] and memo.FENCE not in pending["html"]
+           and offered["answer"].startswith(f"{memo.FENCE}\n[제목] 과세이연 등록 상담 정리")
+           and f"\n{memo.FENCE}\n\n— " in offered["answer"]
+           and offered["answer"].endswith("(네 / 아니오)"))
+    print(f"{'✓' if hit else '✗'} 제목·본문은 LLM 이 쓰고 HTML 은 코드가 만든다(화면에는 코드블록 안 평문)")
+    ok += hit
+
+    hit = (not screened.get("pending_action") and "보내지 않았어요" in screened["answer"]
+           and "1,234" in screened["answer"] and screened["answer"].startswith(summary))
+    print(f"{'✓' if hit else '✗'} 근거 밖 수치가 있으면 보내지 않고 걸린 자리를 말한다(폴백 없음)")
+    ok += hit
+
+    hit = not down.get("pending_action") and "쓰지 못했어요" in down["answer"]
+    print(f"{'✓' if hit else '✗'} LLM 이 죽으면 초안을 «보냈다»로 접지 않는다")
+    ok += hit
+
+    # 꼴 변환 — 태그는 이스케이프하고 마크다운 표는 걷어낸다(WorkB 가 렌더하지 않는다).
+    made = memo.to_html("[고객 주요 정보]\n  들여쓴 줄\n\n<script>")
+    hit = ("<b>[고객 주요 정보]</b>" in made and "&nbsp;&nbsp;들여쓴 줄" in made
+           and "<script>" not in made and "&lt;script&gt;" in made
+           and made.count("<br>") == 3
+           and memo._clean_body("| 항목 | 값 |\n|---|---|\n| 잔액 | 1원 |") == "항목 · 값\n잔액 · 1원")
+    print(f"{'✓' if hit else '✗'} 평문 → 쪽지 HTML: 소제목만 굵게 · 들여쓰기 보존 · 태그 이스케이프")
+    ok += hit
+
+    # ⑥ 승낙 → 초안 그대로 발송. 답변은 한 줄 — 본문을 반복하지 않는다. 거절 → 보내지 않는다.
+    hit = (yes["pending_action"] is None and "쪽지를 보냈어요" in yes["answer"]
+           and "\n" not in yes["answer"].strip()
+           and len(sent) == 1 and len(outbox) == 1
+           and outbox[0] == (["3902172"], pending["title"], pending["html"])
+           and sent[0]["tool_calls"][0]["args"]["title"] == pending["title"])
+    print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 초안 그대로 WorkB 로 보내고 상담이력에 남긴다")
+    ok += hit
+
+    hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1
+    print(f"{'✓' if hit else '✗'} '아니' 면 보내지 않는다")
+    ok += hit
+
+    # 코드가 붙이는 값 표 — 화면 유무가 무엇을 붙일지 가른다(종류가 아니라 화면이다).
+    from pension_agent.strategy_agent import customer as CUST, engine
+    who = CUST.PERSONAS[0]
+    facts = engine.prepare(who)
+    _kt, _kwhat = memo.table_for({"customer_id": who.id}, [])
+    _tt, _twhat = memo.table_for({}, [{"tool": "targets"}])
+    hit = (memo.KEY_INFO_HEADER in _kt and _kt.count("<tr>") == 6
+           and str(facts["customer"]["평가금액"]) in _kt
+           and str(facts["account_state"]["세액공제_잔여한도"]) in _kt
+           and ":" not in _kt.split("관리 사유")[1].split("</tr>")[0]   # 요건 코드는 뺀다
+           and _tt.startswith("<table ") and who.nm not in _twhat
+           and not memo.table_for({}, [])[0])                          # 재료가 없으면 안 붙인다
+    print(f"{'✓' if hit else '✗'} 값 표는 화면이 가른다 — 고객이 열렸으면 그 고객, 아니면 오늘의 목록")
+    ok += hit
+
+    # 꼬리말의 «선정 기준» 줄은 목록 표에만 붙는다 — 고객 한 명을 담은 쪽지에는 고를 목록이 없다.
+    _foot_one, _foot_two = memo._footer_html(rule=False), memo._footer_html(rule=True)
+    hit = (CUST.AS_OF.isoformat() in _foot_one and memo.today().isoformat() in _foot_one
+           and workb.FOOTER_RULE not in _foot_one and workb.FOOTER_RULE in _foot_two)
+    print(f"{'✓' if hit else '✗'} 기준일 안내는 늘 붙고 «선정 기준»은 목록 쪽지에만 붙는다")
+    ok += hit
+
+    # 조립식이던 동안은 화면 답변이 곧 쪽지 본문이라, LLM 이 얹은 도입 문장(2026-09-03 실측 —
+    # 「쪽지 발송 여부는 시스템이 답변 뒤에 따로 안내해요」)을 코드가 항목 줄만 취해 걸렀다
+    # (`memo.items_of`). 지금 화면 답변은 초안의 **출발점**일 뿐이고 본문은 쪽지 가이드라인이
+    # 따로 쓰므로 그 거름은 사라졌다 — 대신 그 지시가 가이드라인 쪽에 서 있어야 한다.
+    hit = ("쪽지로 보내드립니다" in prompts.MEMO_SYSTEM          # 쪽지 자신에 대해 쓰지 않는다
+           and "복사해서 붙여넣으세요" in prompts.MEMO_SYSTEM
+           and "인사말·맺음말" in prompts.MEMO_SELF_GUIDE       # 내 기록에는 도입·맺음이 없다
+           and "인사" in prompts.MEMO_OTHER_GUIDE               # 남에게 보내는 쪽에는 한 줄 둔다
+           and not hasattr(memo, "items_of"))                   # 부르는 곳 없는 거름을 남기지 않는다
+    print(f"{'✓' if hit else '✗'} 쪽지 자신을 말하지 말라는 지시가 가이드라인 쪽에 서 있다")
+    ok += hit
+
+    shape = prompts.ANSWER_SHAPES["transcript"]
+    hit = ("쪽지" in shape and "도입" in shape and "「- 물은 것 — 안내 요지」" in shape
+           and "시스템이" not in shape and "답변 뒤에" not in shape)   # 옮겨 적힌 지시 문장(실측)
+    print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지하며, 시스템이 무엇을 하는지는 적지 않는다")
+    ok += hit
+
+    hit = ("send_memo" in REG.TOOL_REGISTRY and "쪽지로 보내줘" in prompts.ROUTE_PROMPT
+           and prompts.MEMO_SELF_GUIDE != prompts.MEMO_OTHER_GUIDE)
+    print(f"{'✓' if hit else '✗'} 발송이 레지스트리에 있고, 가이드라인이 받는 사람으로 갈린다")
+    ok += hit
+    return ok
 
 
 def check_history_selection() -> int:
@@ -3256,6 +4286,53 @@ def check_followups() -> int:
         {"evidence": [ev("customer")], "history": [], "customer_id": PERSONAS[0].id})
     hit = closed == [] and opened and all("이 고객" in q for q in opened)
     print(f"{'✓' if hit else '✗'} 고객 화면이 닫히면 고객 질문은 안 뜬다(닫힘 {len(closed)} · 열림 {len(opened)})")
+    ok += hit
+
+    # ④-b 안내 콘텐츠 칩은 **이 고객 상태에 걸린 콘텐츠가 실제로 열려 있을 때만** 뜬다.
+    #      화면 ⑨ 는 섹션을 비우지 않으려고 관련 없는 콘텐츠도 한 건 세우는데(화면 요건이다),
+    #      그 폴백을 «있다»로 세면 칩이 어느 고객에게나 떠서 배경이 된다.
+    from pension_agent.strategy_agent import situations as _sit
+    from pension_agent.strategy_agent import support as _sup
+    matched = [p for p in PERSONAS if _sup.relevant_outreach(_sit.problem_situations(p))]
+    unmatched = [p for p in PERSONAS if not _sup.relevant_outreach(_sit.problem_situations(p))]
+    _CHIP = "이 고객한테 안내할 만한 세미나나 이벤트 있어?"
+    hit = bool(matched) and _CHIP in suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": matched[0].id})
+    print(f"{'✓' if hit else '✗'} 걸린 콘텐츠가 있는 고객에게는 안내 콘텐츠 질문이 뜬다"
+          + (f" ({matched[0].nm})" if matched else " — 대상 고객 없음"))
+    ok += hit
+
+    hit = bool(unmatched) and _CHIP not in suggest.followup_questions(
+        {"evidence": [ev("customer")], "history": [], "customer_id": unmatched[0].id})
+    print(f"{'✓' if hit else '✗'} 걸린 콘텐츠가 없는 고객에게는 안 뜬다"
+          + (f" ({unmatched[0].nm})" if unmatched else " — 대조군 없음: 전원이 매칭되면 «조건이 맞을 때만»이 검증되지 않는다"))
+    ok += hit
+
+    # 화면을 여는 칩도 같은 판정이다 — 문구 자체가 «지금 이 고객에게 맞는 세미나가 열려
+    # 있다»는 알림이라, 조건이 아닌 고객에게 뜨면 알림이 아니라 배경이 된다.
+    hit = (bool(matched) and suggest.outreach_chips(matched[0].id)
+           and (not unmatched or not suggest.outreach_chips(unmatched[0].id))
+           and not suggest.outreach_chips(None))
+    print(f"{'✓' if hit else '✗'} 입구 칩도 조건이 맞는 고객에게만 뜬다")
+    ok += hit
+
+    # **칩 판정은 LLM 을 부르지 않는다.** 칩 하나 띄우자고 브리핑 한 편(LLM 11회)을
+    # 돌리면 답변 지연이 그대로 늘고, LLM 이 죽으면 칩이 통째로 사라진다.
+    from pension_agent import llm as _llm
+    _orig_gen = _llm.generate
+    try:
+        _llm.generate = lambda *a, **k: (_ for _ in ()).throw(AssertionError("칩이 LLM 을 불렀다"))
+        chips = suggest.outreach_chips(matched[0].id) if matched else []
+        follow = suggest.followup_questions(
+            {"evidence": [ev("customer")], "history": [],
+             "customer_id": matched[0].id if matched else None})
+        no_llm = True
+    except AssertionError:
+        chips, follow, no_llm = [], [], False
+    finally:
+        _llm.generate = _orig_gen
+    hit = no_llm and bool(chips) and bool(follow)
+    print(f"{'✓' if hit else '✗'} 안내 콘텐츠 칩 판정에 LLM 을 부르지 않는다")
     ok += hit
 
     # ⑤ 이번 턴에 이미 쓴 재료로 다시 보내지 않는다 — 방금 답한 것을 또 묻게 된다.
@@ -3609,7 +4686,7 @@ def check_progress() -> int:
     #    알리면 하지 않은 일을 화면이 말하는 것이 된다.
     events.clear()
     with PROG.reporting(events.append):
-        out = P.compose({"question": "질문", "evidence": [], "plan_calls": []})
+        out = P.compose({"question": "질문", "evidence": [], "steps": []})
     hit = events == [] and bool(out["answer"])
     print(f"{'✓' if hit else '✗'} 재료 0건 턴은 작성 진행을 알리지 않는다 — {events}")
     ok += hit
@@ -3619,7 +4696,7 @@ def check_progress() -> int:
         raise RuntimeError("표시 실패")
 
     with PROG.reporting(broken):
-        out = P.compose({"question": "질문", "evidence": [], "plan_calls": []})
+        out = P.compose({"question": "질문", "evidence": [], "steps": []})
     hit = bool(out["answer"])
     print(f"{'✓' if hit else '✗'} 진행 콜백이 죽어도 답변은 나온다")
     ok += hit
@@ -3646,7 +4723,7 @@ def check_order_flipped() -> int:
         return []
 
     orig_pick, orig_retrieve, orig_verify = tools.llm_pick, tools.retrieve, tools.fits_question
-    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None: h
+    tools.retrieve, tools.fits_question = spy_retrieve, lambda q, h, kind="", history=None, query=None, sink=None: h
     ok = 0
     try:
         # ① LLM 이 골랐으면 n-gram 은 아예 돌지 않는다.
@@ -3665,7 +4742,7 @@ def check_order_flipped() -> int:
 
         # ③ LLM 의 선택도 게이트를 그대로 통과해야 한다(1차가 됐다고 면제 아님).
         tools.llm_pick = lambda kinds, query: [(2.0, target)]
-        tools.fits_question = lambda q, h, kind="", history=None, query=None: []
+        tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: []
         hit = tools._pitch({"question": "질문"}, "질문") is None
         print(f"{'✓' if hit else '✗'} LLM 선택도 적합성 게이트 적용")
         ok += hit
@@ -3683,7 +4760,7 @@ def check_tool_loop() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
 
     # 절차 카드는 검색 1위가 아니라 **이름으로 고정**한다. 예전에는 "디폴트옵션 변경 화면번호"
     # 의 1위(proc.018)에 기댔는데, 그 카드의 화면번호는 ⚠ 유의 박스에서 잘못 딸려 온 것이라
@@ -3746,23 +4823,23 @@ def check_tool_loop() -> int:
             st.update(plan.plan_step(st))
             if st.get("plan_done"):
                 break
-        hit = len(st.get("plan_calls") or []) <= plan.MAX_STEPS
-        print(f"{'✓' if hit else '✗'} MAX_STEPS 상한 준수(호출 {len(st.get('plan_calls') or [])}회 ≤ {plan.MAX_STEPS})")
+        hit = len(st.get("steps") or []) <= plan.MAX_STEPS
+        print(f"{'✓' if hit else '✗'} MAX_STEPS 상한 준수(호출 {len(st.get('steps') or [])}회 ≤ {plan.MAX_STEPS})")
         ok += hit
 
         # ⑤ 같은 도구를 같은 질의로 다시 부르면 진전이 없으므로 도구를 다시 돌리지 않는다.
         #    근거가 0건이면 바로 끝내는 대신 한 번 재계획으로 되돌리고(check_replan_on_empty),
         #    그 뒤에도 반복이면 끝낸다.
-        st2 = {"question": "질문", "plan_calls": ["fact:무한"]}
+        st2 = {"question": "질문", "steps": [{"tool": "fact", "query": "무한", "outcome": "miss"}]}
         st2.update(plan.plan_step(st2))
         first = st2.get("plan_retry") is True and not st2.get("plan_done")
         st2.update(plan.plan_step(st2))
-        hit = first and st2.get("plan_done") is True and len(st2["plan_calls"]) == 1
+        hit = first and st2.get("plan_done") is True and len(st2["steps"]) == 1
         print(f"{'✓' if hit else '✗'} 같은 호출 반복 차단(재계획 한 번 뒤 종료)")
         ok += hit
 
         # 근거를 이미 모은 턴이면 반복은 재계획 없이 바로 끝낸다 — 되돌릴 이유가 없다.
-        st2e = {"question": "질문", "plan_calls": ["fact:무한"],
+        st2e = {"question": "질문", "steps": [{"tool": "fact", "query": "무한", "outcome": "miss"}],
                 "evidence": [{"tool": "fact", "query": "q", "text": "블록", "atomic": [],
                               "notices": [], "notice_scopes": [], "marks": [], "related": [],
                               "allow": ["블록"], "sources": [], "meta": {}}]}
@@ -3790,6 +4867,20 @@ def check_tool_loop() -> int:
                and "customer" in tools.catalog({"customer_id": "CX"}))
         print(f"{'✓' if hit else '✗'} 쓸 수 없는 도구는 카탈로그에서 제외")
         ok += hit
+
+        # ⑨ 계획이 **남은 호출 수**를 본다. 상한을 쥔 것은 코드인데, 「한 재료로 답할 수
+        #    있으면 last: true 로 한 바퀴를 아껴라」라고 시키면서 몇 바퀴가 남았는지는
+        #    안 알려주던 자리다(§5 「형태 요구는 재료에 없는 것을 요구하지 않는다」).
+        seen: list[str] = []
+        plan.generate = lambda prompt, **kw: (seen.append(prompt) or '{"done": true}')
+        plan.plan_step({"question": "질문"})
+        plan.plan_step({"question": "질문",
+                        "steps": [{"tool": "fact", "query": "q", "outcome": "miss"}]})
+        hit = (len(seen) == 2
+               and f"남은 호출: {plan.MAX_STEPS}회" in seen[0]
+               and f"남은 호출: {plan.MAX_STEPS - 1}회" in seen[1])
+        print(f"{'✓' if hit else '✗'} 계획 프롬프트가 남은 호출 수를 싣고 바퀴마다 준다")
+        ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
         _proc_qa.search = _orig_proc_search
@@ -3802,8 +4893,8 @@ def check_all_kinds_reachable() -> int:
     쓰이는 경로가 없던 것이 이 변경의 동기 중 하나였다(guard 가 caution 8건만 썼다).
     market 23장은 적재 경로 자체가 없어 통째로 닿지 않던 자리다(check_market_material).
 
-    두 경로를 다 본다. 이 종류들은 trigger_examples 가 제목과 거의 같아서 n-gram 폴백이
-    화법보다 약하다 — 사실상 LLM 선택이 주 경로다.
+    두 경로를 다 본다. 2026-09-04 까지 이 종류들은 trigger_examples 가 제목과 거의 같아서
+    n-gram 폴백이 화법보다 약했다 — 지금은 본문 절이 입구다(check_trigger_entrances).
     """
     ok = 0
     hit = ({"fact", "procedure", "segment", "method", "fieldtip", "market", "lineup"}
@@ -3837,6 +4928,71 @@ def check_all_kinds_reachable() -> int:
     tip = next(c for c in tools.KB.cards if c["_kind"] == "fieldtip")
     hit = "본부 공식 지침이 아닙니다" in tools._render_fieldtip(tip)
     print(f"{'✓' if hit else '✗'} fieldtip 근거에 '본부 지침 아님' 표시")
+    ok += hit
+    return ok
+
+
+def check_trigger_entrances() -> int:
+    """카드의 검색 입구(trigger_examples)가 목록 한 줄에 정보를 더하는가 (CLAUDE.md §3).
+
+    LLM 카드 목록 한 줄은 제목 뒤에 예상질문 2개까지만 싣는다(kb._card_line). 변환기가 첫
+    칸에 제목을 그대로 넣던 동안(2026-09-04 이전, 633장 중 388장) 정보 칸은 하나뿐이었고,
+    fieldtip 은 제목 하나뿐이었고, 절 자르기가 「1,800만원」의 쉼표에서 끊겨 팩트 11장의
+    입구가 「연간 납입한도는 1」로 잘렸다. 세 결함의 재발을 막는다.
+    """
+    import re
+    from pension_agent.knowledge.similarity import ngram_sim
+    ok = 0
+    cards = tools.KB.cards
+
+    # ① 제목을 예상질문 첫 칸에 중복해 싣지 않는다(pitch 는 원문 발화라 애초에 제목이 아니다).
+    dup = [c["id"] for c in cards
+           if (c.get("trigger_examples") or [""])[0] == (c.get("title") or c.get("label"))]
+    hit = not dup
+    print(f"{'✓' if hit else '✗'} 예상질문 첫 칸이 제목의 중복이 아니다"
+          + ("" if hit else f" — {dup[:3]} 외 {len(dup)}장"))
+    ok += hit
+
+    # ② 숫자 자릿수 쉼표에서 잘린 입구가 없다 — 본문 절이 숫자로 끝나면서 원문에서는 그 뒤에
+    #    ",digit" 이 이어지는 경우.
+    def body_of(c):
+        return " ".join(str(c.get(k) or "") for k in ("value", "situation", "action",
+                                                       "condition_text", "summary"))
+    cut = [(c["id"], t) for c in cards for t in (c.get("trigger_examples") or [])
+           if re.search(r"\d$", t) and (t + ",") in body_of(c)
+           and re.search(re.escape(t) + r",\d", body_of(c))]
+    hit = not cut
+    print(f"{'✓' if hit else '✗'} 숫자 사이 쉼표에서 잘린 예상질문이 없다"
+          + ("" if hit else f" — {cut[:2]}"))
+    ok += hit
+
+    # ③ 종류마다 제목과 뚜렷이 다른 입구가 있다(screen·channel 은 패턴이 제목을 품으므로 제외).
+    for kind in ("fact", "segment", "method", "procedure", "fieldtip", "market", "lineup"):
+        weak = [c["id"] for c in cards if c["_kind"] == kind
+                and not [e for e in (c.get("trigger_examples") or [])
+                         if ngram_sim(c.get("title") or "", e) <= 0.6]]
+        hit = not weak
+        print(f"{'✓' if hit else '✗'} {kind} — 제목 밖의 검색 단서가 전 카드에 있다"
+              + ("" if hit else f" — {weak[:3]} 외 {len(weak)}장"))
+        ok += hit
+
+    # ④ 보강표는 실재하는 카드만 가리키고, 그 카드의 주제어를 담는다(지어낸 입구 금지).
+    from scripts.kb_build import config as kb_config
+    from scripts.kb_build.build_kb import useful_trigger
+    by_id = {c["id"]: c for c in cards}
+    bad = [(cid, e[:20]) for cid, extras in kb_config.TRIGGER_EXTRA.items() for e in extras
+           if cid not in by_id or not useful_trigger(e, by_id[cid].get("title") or "")]
+    hit = not bad
+    print(f"{'✓' if hit else '✗'} TRIGGER_EXTRA 는 실재 카드의 주제어만 담는다"
+          + ("" if hit else f" — {bad[:3]}"))
+    ok += hit
+
+    # ⑤ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
+    card = next(c for c in cards if c["_kind"] == "method")
+    from pension_agent.consult_agent import kb as KBMOD
+    _, with_title = KBMOD.score_parts(card, utterance=card["title"])
+    hit = with_title >= 4.0
+    print(f"{'✓' if hit else '✗'} 제목 그대로의 질문이 n-gram 점수 상한을 받는다 ({with_title:.2f})")
     ok += hit
     return ok
 
@@ -3897,7 +5053,7 @@ def check_market_material() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "디폴트옵션 알파드림 구성상품이 뭐야"
         found = tools.run("lineup", {"question": q}, q)
@@ -4013,7 +5169,7 @@ def check_market_material() -> int:
     ok += hit
 
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         q = "1975년생이면 TDF 몇 년짜리 골라야 해?"
         found = tools.run("lineup", {"question": q}, q)
@@ -4042,7 +5198,7 @@ def check_market_material() -> int:
     # ② 같은 문서의 절이 걸리면 개요 카드는 자리를 비켜준다. 개요는 문서 키워드를 통째로
     #    들고 있어 어떤 질문에나 걸리는데, **답이 든 표는 절에 있다**.
     orig = tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     try:
         found = tools.run("lineup", {"question": "지켜드림 금리 얼마야"}, "지켜드림 금리 얼마야")
     finally:
@@ -4163,7 +5319,7 @@ def check_atomic_spans() -> int:
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))
         orig_fits, orig_search = tools.fits_question, FQ.search
-        tools.fits_question = lambda question, h, kind="", history=None, query=None: h
+        tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
         FQ.search = lambda question: [(2.0, bare)]
         try:
             f = tools.run("fact", {"question": "q"}, "확정값")
@@ -4265,7 +5421,7 @@ def check_plan_failure() -> int:
     """
     ok = 0
     orig_gen, orig_verify = plan.generate, tools.fits_question
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     question = "고객이 주식이 더 낫다는데 뭐라고 하지?"
     base = {"question": question, "utterance": question}
 
@@ -4306,6 +5462,60 @@ def check_plan_failure() -> int:
         # 질문을 되받아 적어도 잘리지 않을 만큼은 준다(80 토큰에서 잘려 도구를 못 부르던 자리).
         hit = plan.PLAN_MAX_TOKENS >= 200
         print(f"{'✓' if hit else '✗'} 계획 응답 토큰 상한 {plan.PLAN_MAX_TOKENS}")
+        ok += hit
+
+        # ── 도구가 **죽은** 턴. 위 LLM 실패와 같은 사고의 세 번째 갈래다(지워진 gap 35).
+        # 예전에는 tools.run 이 예외를 삼키고 None 을 돌려줘서, 렌더러에서 난 KeyError 하나가
+        # 계획에는 «질의가 빗나갔다»로, 답에는 «지식베이스에서 찾지 못했습니다»로 나갔다.
+        orig_run = plan.tools.run
+
+        def crash(name, state, query):
+            raise tools.ToolFailure(name, "KeyError: 'as_of'")
+
+        plan.tools.run = crash
+        try:
+            state, answer = drive(lambda p, **kw: '{"tool": "screen", "query": "운용현황"}')
+        finally:
+            plan.tools.run = orig_run
+
+        hit = (bool([s for s in state.get("steps") or [] if s["outcome"] == "failed"])
+               and plan.NO_EVIDENCE not in answer
+               and "지식베이스에 자료가 없다는 뜻이 아니" in answer
+               and "KeyError" in answer)
+        print(f"{'✓' if hit else '✗'} 도구가 죽은 것을 '근거 없음'으로 둔갑시키지 않는다")
+        ok += hit
+
+        # 고장은 LLM 이 죽은 것과 **다르게** 기록된다 — 둘을 한 칸에 접으면 «LLM 을 고쳐라»와
+        # «도구를 고쳐라»가 같은 말이 되고, 계획 루프의 처분(루프 유지 vs 중단)도 갈릴 수 없다.
+        hit = not state.get("llm_error")
+        print(f"{'✓' if hit else '✗'} 도구 고장을 LLM 실패로 기록하지 않는다")
+        ok += hit
+
+        # 죽은 도구는 이번 턴의 능력 표면에서 빠진다 — 다시 보여주면 계획이 같은 도구를
+        # 다시 골라 바퀴를 버린다(빗나간 호출과 처방이 다른 자리).
+        broken = {"steps": [{"tool": "screen", "query": "운용현황",
+                             "outcome": "failed", "reason": "KeyError"}]}
+        hit = "screen" not in tools.usable(broken) and "screen" in tools.usable({})
+        print(f"{'✓' if hit else '✗'} 죽은 도구는 이번 턴 카탈로그에서 빠진다")
+        ok += hit
+
+        # 죽은 호출은 '찾아본 곳'에도 서지 않는다 — 지식베이스를 보지도 못했으므로
+        # 거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
+        tried = plan._no_evidence({"steps": [
+            {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "KeyError"},
+            {"tool": "fact", "query": "수수료", "outcome": "miss"}]})
+        hit = "fact:수수료" in tried and "screen:운용현황" not in tried
+        print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
+        ok += hit
+
+        # 답이 갈리는 것은 **원장이 끝내 비었을 때**다. LLM 실패 안내와 같은 꼴로 끝나야
+        # 한다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 그 자체가 진단을 어렵게 한다.
+        notice = plan.compose({"question": "q", "evidence": [], "steps": [
+            {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "x"}]})["answer"]
+        hit = (notice.startswith("지금은 답변을 만들 수 없어요")
+               and plan.LLM_FAILED.format(reason="x") != notice
+               and "단말 화면번호" in notice)     # 도구 선언의 말로 무엇이 실패했는지 밝힌다
+        print(f"{'✓' if hit else '✗'} 실패 안내가 무엇을 못 읽었는지 밝힌다")
         ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
@@ -4396,6 +5606,68 @@ def check_llm_down() -> int:
     return ok
 
 
+def check_compose_retry() -> int:
+    """점검에 걸린 생성문을 **한 번 다시 쓰게** 한다 (§6 — 처분은 구현이 정한다).
+
+    회귀 대상: 처분이 «근거 원문 덤프» 하나뿐이던 동안, 걸린 자리가 한 문장이어도 답이
+    통째로 버려지고 화면에는 카드 원문이 답변처럼 떨어졌다(■ 제목 줄 · 「· 기준시점 … ·
+    출처 …」 메타 줄). 직원 쪽에서는 에이전트가 갑자기 다른 말투로 말하는 것으로 보인다.
+
+    걸린 자리를 재작성 프롬프트에 실어야 같은 문장이 다시 나오지 않는다 — 「다시 쓰세요」
+    만으로는 처분이 한 바퀴 늘 뿐이다.
+    """
+    from pension_agent.consult_agent.nodes import plan
+
+    ok = 0
+    evidence = [{"tool": "fact", "query": "한도", "text": "■ 세액공제 한도\n\n한도는 900만원이다.",
+                 "atomic": [], "notices": [], "notice_scopes": [],
+                 "allow": ["한도는 900만원이다."], "sources": [{"id": "f1"}],
+                 "related": [], "marks": [], "meta": {}}]
+    state = {"question": "한도가 얼마야?", "evidence": evidence}
+
+    # ① 첫 생성문이 원장 밖 수치를 말하면, 두 번째 시도의 결과가 답이 된다.
+    seen: list[str] = []
+
+    def twice(prompt, **kw):
+        seen.append(prompt)
+        return ("한도는 1,234만원이에요." if len(seen) == 1 else "한도는 900만원이에요.")
+
+    orig = plan.generate
+    plan.generate = twice
+    try:
+        answer = plan.compose(dict(state))["answer"]
+    finally:
+        plan.generate = orig
+    hit = len(seen) == 2 and answer.startswith("한도는 900만원이에요")
+    print(f"{'✓' if hit else '✗'} 걸린 생성문을 한 번 다시 쓰고, 통과하면 그것이 답이다")
+    ok += hit
+
+    # ② 재작성 프롬프트가 **무엇이 걸렸는지**를 싣는다. 안 실으면 같은 문장이 다시 나온다.
+    hit = len(seen) == 2 and "1,234" in seen[1] and "다시 쓴다" in seen[1]
+    print(f"{'✓' if hit else '✗'} 재작성 프롬프트에 걸린 자리가 실린다")
+    ok += hit
+
+    # ③ 두 번째도 걸리면 예전 그대로 근거 원문이 답이다 — 틀린 문장이 나가는 선택지는 없다.
+    #    무한히 다시 쓰지 않는다는 것도 여기서 잰다(상한은 코드가 쥔다).
+    tries: list[str] = []
+
+    def always_bad(prompt, **kw):
+        tries.append(prompt)
+        return "한도는 1,234만원이에요."
+
+    plan.generate = always_bad
+    try:
+        answer = plan.compose(dict(state))["answer"]
+    finally:
+        plan.generate = orig
+    hit = (len(tries) == plan.COMPOSE_RETRIES + 1
+           and answer.startswith(evidence[0]["text"]) and "1,234" not in answer)
+    print(f"{'✓' if hit else '✗'} 계속 걸리면 상한에서 멈추고 근거 원문이 답이다({len(tries)}회)")
+    ok += hit
+
+    return ok
+
+
 def check_origin() -> int:
     """출처는 **원문 문서명**으로 말한다 — 적재 json 의 이름표가 새어나가면 안 된다.
 
@@ -4420,6 +5692,42 @@ def check_origin() -> int:
     hit = not empty
     print(f"{'✓' if hit else '✗'} 출처 줄이 비는 카드 없음(못 찾으면 '확인 필요'라고 말한다)"
           + ("" if hit else f" — {empty[:3]}"))
+    ok += hit
+
+    # 출처 터미널 표기는 공용 함수 하나다(tools.source_lines). 운영 CLI 와 디버그 실행기가
+    # 표기를 각자 복사해 갖고 있던 동안, URL 을 싣는 변경이 운영 CLI 에만 적용되고 디버그
+    # 화면($CAD·$CADR)에는 빠졌다 — 한쪽만 고쳐지는 사고의 재발을 여기서 막는다.
+    s_full = {"id": "x.1", "title": "제목", "doc": "문서", "score": 1.0, "url": "https://u"}
+    s_bare = {"id": "x.2", "title": "제목", "doc": "문서"}   # 검색으로 오지 않은 재료
+    full, bare = tools.source_lines(s_full), tools.source_lines(s_bare)
+    compact = tools.source_lines(s_full, compact=True)
+    hit = (full[-1] == "     ↗ https://u" and "관련도 1.0" in full[1]
+           and "관련도" not in "".join(bare) and "↗" not in "".join(bare)
+           and len(compact) == 2 and compact[0].startswith("   · 문서 — 제목 [x.1]"))
+    print(f"{'✓' if hit else '✗'} source_lines — URL·관련도는 있을 때만, compact 는 한 줄")
+    ok += hit
+
+    # 네 진입점이 전부 그 함수에 닿는가. 운영 CLI 와 행내 API 는 «답변 + 출처 블록»을
+    # 통째로 텍스트로 펴야 해서 `render.sources_block` 을 경유하고, 그 안에서 source_lines
+    # 를 부른다 — 경유가 하나 늘었을 뿐 표기를 정하는 함수는 여전히 하나다. 그 경유까지
+    # 따라가서 본다(중간에 표기를 복사해 갖는 순간 이 검사가 깨진다).
+    # 운영 CLI 는 모듈 최상위에서 REPL 이 돌아 **임포트하면 안 되므로**(스크립트다)
+    # 파일 텍스트로 확인한다. main.py 도 uvicorn 이 부르는 진입점이라 같게 다룬다.
+    import inspect
+
+    from pension_agent.consult_agent import render
+    from tests.debug import __main__ as dbg_main
+    from tests.debug import reps as dbg_reps
+    # 경로를 되짚지 않고 config 에서 받는다(루트 CLAUDE.md 규칙 4).
+    from pension_agent import config as _config
+    ops_src = (_config.PACKAGE_ROOT / "consult_agent/__main__.py").read_text(encoding="utf-8")
+    api_src = (_config.SRC_ROOT / "main.py").read_text(encoding="utf-8")
+    hit = ("source_lines" in inspect.getsource(render)
+           and "render.sources_block" in ops_src
+           and "render.sources_block" in api_src
+           and "source_lines" in inspect.getsource(dbg_main._print_source)
+           and "source_lines" in inspect.getsource(dbg_reps._print_source_line))
+    print(f"{'✓' if hit else '✗'} 운영 CLI·행내 API·$CAD·$CADR 이 같은 출처 표기 함수에 닿는다")
     ok += hit
 
     # 카드가 밝힌 원천 문서(source.doc)가 레지스트리로 이어져 문서명으로 나온다.
@@ -4478,6 +5786,354 @@ def check_node_label_collision() -> int:
     return hit
 
 
+def check_graded_judge() -> int:
+    """등급형 판정 — 답한다 · 전제를 밝히고 답한다 · 되묻는다 · 없다 (§5 · gap 30).
+
+    판정의 출력이 「되물을까/말까」 둘이던 동안 §5 의 나머지 두 결론은 **출력을 갖지
+    못했다**: 판정자가 갈래를 알아내고도 그 사실이 작성자에게 건너가지 않았고(전제),
+    핵심 대상이 없다는 판단은 작성 지시로만 걸려 있었다(대본 T12). 여기서 재는 것은
+    네 등급이 각자 다른 일을 하는지, 그리고 **판정이 경계를 넓히지 못하는지**다.
+    """
+    from pension_agent.consult_agent.nodes import answer as ANS, clarify as CL
+    ok = 0
+    print("\n[등급형 판정 — 네 결론이 각자 출력을 갖는다 (§5)]")
+
+    def ev(tool="procedure", text="타행→당행 절차 / 당행→타행 절차"):
+        # allow 는 `_ev` 의 기본값과 같게 둔다 — `_quotable` 이 보는 원장 텍스트가
+        # compose 의 검증기가 보는 것과 같아야 «통과할 전제»와 «폐기될 답»이 어긋나지 않는다.
+        return {"tool": tool, "query": "q", "text": text, "atomic": [], "notices": [],
+                "notice_scopes": [], "marks": [], "related": [], "allow": [text],
+                "sources": [{"id": "proc.020", "title": "계약이전", "doc": "d",
+                             "score": None, "page": None}], "meta": {}}
+
+    orig_gen = CL.generate
+    try:
+        # ① assume — 갈래를 «정해 주는» 재료가 있으면 되묻지 말고 전제를 밝히고 답한다.
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "타행에서 당행으로 가져오는 경우"}'
+        out = CL.clarify({"question": "실물이전 어떻게 처리해?", "customer_id": "198734-1205842",
+                          "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASSUME and "타행에서 당행으로" in (out.get("judge_note") or "") \
+            and not out.get("clarify")
+        print(f"{'✓' if hit else '✗'} assume — 되묻지 않고 전제를 작성 지시로 넘긴다")
+        ok += hit
+
+        # ② none — 질문의 핵심 대상이 재료에 없다(§5 · 대본 T12 타행 수수료).
+        CL.generate = lambda prompt, **kw: '{"verdict": "none", "missing": "타행 IRP 수수료"}'
+        out = CL.clarify({"question": "타행 IRP 수수료는 우리보다 싼가?", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.NONE and "타행 IRP 수수료" in (out.get("judge_note") or "")
+        print(f"{'✓' if hit else '✗'} none — 없다는 사실을 첫 문장에 세우라고 넘긴다")
+        ok += hit
+
+        # ②-b **정해 줄 것이 없으면 전제를 만들 수 없다.** 열린 고객도 이전 대화도 없는
+        #      턴에서 assume 이 나오면 그것은 무엇을 읽고 정한 것이 아니라 지어낸 전제다
+        #      (2026-09-07 리허설 케이스 1 — 첫 턴·고객 없음인데 전제를 세워 답을 ISA 쪽으로
+        #      밀었고, 카드가 못박은 오답에 걸려 폐기됐다).
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "ISA 만기 전환 포함"}'
+        out = CL.clarify({"question": "IRP 세액공제 한도가 얼마야?", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASSUME and not out.get("judge_note")
+        print(f"{'✓' if hit else '✗'} 고객도 이전 대화도 없으면 전제를 버린다(지어낸 전제)")
+        ok += hit
+
+        out = CL.clarify({"question": "IRP 세액공제 한도가 얼마야?", "evidence": [ev()],
+                          "customer_id": "198734-1205842"})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 고객이 열려 있으면 전제가 산다")
+        ok += hit
+
+        out = CL.clarify({"question": "그럼 얼마야?", "evidence": [ev()],
+                          "history": [{"question": "앞 질문"}]})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 이전 대화가 있으면 전제가 산다(맥락도 정해 주는 재료다)")
+        ok += hit
+
+        # ③ 판정이 **수치를 새로 만들 수 없다** — 원장 밖 숫자가 든 전제는 버린다.
+        #    작성 프롬프트에 들어가면 작성자가 되받고, 그 수치는 원장 밖이라 답이 통째로
+        #    폐기된다(§6). 넓히는 대신 넓힐 필요가 없는 문장만 통과시킨다.
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "총급여 7,700만원 구간"}'
+        out = CL.clarify({"question": "얼마 돌려받아?", "customer_id": "198734-1205842",
+                          "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
+        hit = out.get("judge_verdict") == CL.ASSUME and not out.get("judge_note")
+        print(f"{'✓' if hit else '✗'} 원장 밖 수치가 든 전제는 버린다(경계는 코드가 쥔다)")
+        ok += hit
+
+        # 원장 안 수치면 통과한다 — 잃는 쪽으로만 기울지 않는다.
+        CL.generate = lambda prompt, **kw: '{"verdict": "assume", "premise": "총급여 5,500만원 이하 구간"}'
+        out = CL.clarify({"question": "얼마 돌려받아?", "customer_id": "198734-1205842",
+                          "evidence": [ev(text="총급여 5,500만원 이하 16.5%")]})
+        hit = bool(out.get("judge_note"))
+        print(f"{'✓' if hit else '✗'} 원장 안 수치를 쓴 전제는 통과한다")
+        ok += hit
+
+        # ④ 옛 규격(`{"ask": …}`)도 되묻기로 읽는다 — 등급을 늘린 변경이 있던 기능을
+        #    없애는 쪽으로 작동하면 안 된다(작은 모델이 규격을 못 맞추는 일이 있다).
+        CL.generate = lambda prompt, **kw: '{"ask": "어느 방향인가요?", "options": ["타행 → 당행", "당행 → 타행"]}'
+        out = CL.clarify({"question": "실물이전", "evidence": [ev()]})
+        hit = out.get("judge_verdict") == CL.ASK and bool(out.get("clarify")) and bool(out.get("sources"))
+        print(f"{'✓' if hit else '✗'} 등급 칸이 없는 옛 응답도 되묻기로 읽는다")
+        ok += hit
+    finally:
+        CL.generate = orig_gen
+
+    # 관문은 그대로다 — 고객 재료뿐이면 판정을 아예 돌리지 않는다(오판의 기회를 없앤다).
+    hit = not CL.applicable({"question": "평가금액 얼마야",
+                             "evidence": [ev(tool="customer", text="· 개인부담금 0원")]})
+    print(f"{'✓' if hit else '✗'} 관문은 그대로 — 갈래를 만드는 재료가 없으면 판정을 안 돌린다")
+    ok += hit
+
+    # ⑥ 게이트가 표시한 갈래가 판정 프롬프트에 실린다. 없으면 블록 자체가 안 붙는다 —
+    #    없는데 「갈래: 없음」을 세우면 판정 LLM 이 없는 갈래를 만든다(§7 과 같은 이유).
+    seen: list[str] = []
+    CL.generate = lambda prompt, **kw: (seen.append(prompt), '{"verdict": "answer"}')[1]
+    try:
+        CL.clarify({"question": "실물이전", "evidence": [ev()],
+                    "branches": [{"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]})
+        CL.clarify({"question": "실물이전", "evidence": [ev()]})
+    finally:
+        CL.generate = orig_gen
+    hit = len(seen) == 2 and "이전 방향" in seen[0] and "<갈래" not in seen[1]
+    print(f"{'✓' if hit else '✗'} 게이트가 표시한 갈래가 실리고, 없으면 블록이 안 붙는다")
+    ok += hit
+
+    # ⑦ 게이트 응답 읽기 — 객체·배열 둘 다 읽는다. 규격을 못 맞췄다고 후보를 전멸시키면
+    #    갈래를 적게 한 변경이 «맞는 답을 지우는» 쪽으로 작동한다(§6).
+    keep, br = tools._adequacy_verdict(
+        '{"keep": ["proc.020", "proc.031"],'
+        ' "branches": [{"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]}')
+    hit = keep == {"proc.020", "proc.031"} and br == [
+        {"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]
+    print(f"{'✓' if hit else '✗'} 게이트 응답: 채택과 갈래를 함께 읽는다")
+    ok += hit
+
+    hit = tools._adequacy_verdict('["proc.020"]') == ({"proc.020"}, [])
+    print(f"{'✓' if hit else '✗'} 옛 배열 규격도 채택으로 읽는다(후보를 전멸시키지 않는다)")
+    ok += hit
+
+    # 선택지가 하나뿐이면 갈래가 아니다 — 갈래를 보여주지 못하는 표시는 아무것도 정해주지 않는다.
+    hit = tools._adequacy_verdict('{"keep": [], "branches": [{"axis": "축", "options": ["하나"]}]}')[1] == []
+    print(f"{'✓' if hit else '✗'} 선택지가 2개 미만이면 갈래로 세지 않는다")
+    ok += hit
+
+    # ⑧ 갈래는 축 이름으로 중복이 걷힌다 — `tools.run` 이 질의를 바꿔 게이트를 두 번 돌린다.
+    st: dict = {}
+    axis = [{"axis": "이전 방향", "options": ["타행 → 당행", "당행 → 타행"]}]
+    tools.record_branches(st, axis)
+    tools.record_branches(st, axis)
+    hit = st.get("branches") == axis
+    print(f"{'✓' if hit else '✗'} 같은 갈래가 두 줄로 서지 않는다(원문 재검색 대비)")
+    ok += hit
+
+    # ⑨ 배선 — assume 이면 **다시 쓴 답**이 나가고, 다시 쓴 것이 비면 처음 것이 나간다.
+    #    판정을 도우려던 장치가 답을 없애면 안 된다(§6 의 «옳은 답의 거부»가 판정 쪽에서
+    #    재현되는 자리다).
+    calls: list[dict] = []
+
+    def fake_compose(state):
+        calls.append(dict(state))
+        return {"answer": "다시 쓴 답" if state.get("judge_note") else "처음 답"}
+
+    orig_compose, orig_clarify = ANS.compose, ANS.clarify
+    ANS.compose = fake_compose
+    ANS.clarify = lambda state: {"judge_verdict": "assume", "judge_note": "<전제>"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify = orig_compose, orig_clarify
+    hit = out.get("answer") == "다시 쓴 답" and len(calls) == 2 and not calls[0].get("judge_note")
+    print(f"{'✓' if hit else '✗'} assume — 첫 작성은 판정을 못 보고, 그 뒤 한 번 다시 쓴다")
+    ok += hit
+
+    calls.clear()
+    ANS.compose = lambda state: (calls.append(1), {"answer": "" if state.get("judge_note") else "처음 답"})[1]
+    ANS.clarify = lambda state: {"judge_verdict": "none", "judge_note": "<없다>"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify = orig_compose, orig_clarify
+    hit = out.get("answer") == "처음 답"
+    print(f"{'✓' if hit else '✗'} 다시 쓴 것이 비면 처음 답이 나간다(답을 잃지 않는다)")
+    ok += hit
+
+    # ⑩ 되묻기는 그대로 — 판정이 되묻자고 하면 써 둔 답은 나가지 않는다(§5 의 지위는 불변).
+    ANS.compose = lambda state: {"answer": "써 둔 답"}
+    ANS.clarify = lambda state: {"judge_verdict": "ask", "clarify": {"question": "?"},
+                                 "answer": "되묻기"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify = orig_compose, orig_clarify
+    hit = out.get("answer") == "되묻기" and bool(out.get("clarify"))
+    print(f"{'✓' if hit else '✗'} ask — 써 둔 답을 버리고 되묻기로 턴이 끝난다")
+    ok += hit
+
+    # ⑪ 게이트가 갈래를 **남긴 후보 위에서** 찾는지. 이 지시가 「빼려는 후보들이 서로
+    #    갈래면」이던 동안 갈래 절은 «뺄 후보가 있는 턴»에만 읽혔고, 실측 11턴 내내
+    #    `branches` 가 한 번도 안 찍혔다(gap 34). 갈래가 걸리는 질문일수록 갈래마다 답이
+    #    되는 카드가 전부 맞는 카드라 하나도 안 빠지기 때문이다 — 장치가 붙어 있는데
+    #    입력이 영원히 비는 형태라, 되묻기가 잘 되는 동안 아무도 눈치채지 못한다.
+    #    문구를 재는 테스트인 이유는 **여기서 갈래가 생기지 않으면 아래 배선이 전부 죽은
+    #    코드**이기 때문이다(⑥⑦⑧ 이 전부 통과해도 실전에서 안 돈다).
+    from pension_agent.consult_agent.prompts import ADEQUACY_PROMPT
+    text = ADEQUACY_PROMPT
+    hit = "남긴 후보 중에" in text and "빼려는 후보들이" not in text
+    print(f"{'✓' if hit else '✗'} 게이트는 갈래를 «남긴 후보» 위에서 찾는다(뺄 때만이 아니다)")
+    ok += hit
+
+    return ok
+
+
+def check_tool_axes() -> int:
+    """`pitch` 와 `playbook` 의 설명이 «무엇으로 찾나»로 갈리는가 (gap 35).
+
+    도구 설명은 계획 LLM 이 읽는 **유일한** 판단 재료다(`tools.catalog`). 둘 다 「반론」을
+    말하고 축을 말하지 않던 동안, 고객 화면이 열린 턴의 반론 질문이 통째로 `playbook` 으로
+    갔다 — 그쪽은 후보를 **고객 계좌 상태**로 고르고 질문은 좁히기만 해서, 「손실만 나는데
+    해지하겠다」로 조회하면 관련도 0.09 의 절차 카드 한 장이 남는다. 같은 질문이 `pitch` 로
+    가면 pitch.k03.012(해지 대신 연금개시 후 부분인출)가 1등이다.
+
+    **재료가 있는데 도구가 안 불린 것**이라, 검색을 고쳐서는 안 닫힌다. 같은 처방을 이
+    저장소가 이미 두 번 썼다(`suitable` vs `lineup` · `history` vs `transcript`).
+    """
+    from pension_agent.consult_agent.state import KB
+    ok = 0
+    print("\n[도구 설명 — pitch 와 playbook 이 «무엇으로 찾나»로 갈린다 (gap 35)]")
+
+    pitch, playbook = tools.TOOLS["pitch"].desc, tools.TOOLS["playbook"].desc
+
+    hit = "고객의 말" in pitch and "고객 화면이 열려 있어도" in pitch
+    print(f"{'✓' if hit else '✗'} pitch — 질문에 담긴 «고객이 한 말»로 찾는다고 밝힌다")
+    ok += hit
+
+    hit = "계좌 상태" in playbook and "좁히기만 한다" in playbook
+    print(f"{'✓' if hit else '✗'} playbook — 후보를 고르는 것은 상태이고 질문이 아니라고 밝힌다")
+    ok += hit
+
+    # 서로를 가리켜야 계획이 잘못 든 자리에서 되돌아 나올 수 있다. 한쪽 설명만 고치면
+    # 다른 쪽은 여전히 「화법·예상반론」을 내걸고 서 있다.
+    hit = "pitch" in playbook
+    print(f"{'✓' if hit else '✗'} playbook 이 고객의 말은 pitch 라고 되돌려 보낸다")
+    ok += hit
+
+    # 재료가 실제로 그쪽에 있다는 것 — 설명만 갈라 두고 검색이 못 찾으면 아무것도 아니다.
+    # 슬롯(거절유형)이 붙으면 n-gram 폴백만으로도 해지 화법이 1등으로 올라온다.
+    hits = tools.retrieve(KB, top_k=3, kinds=["pitch"],
+                          utterance="고객이 '손실만 나는데 그냥 해지하겠다'는데 어떻게 대응하지?",
+                          objection_type="해지·망설임")
+    hit = bool(hits) and hits[0][1]["tags"].get("objection_type") == "해지·망설임"
+    print(f"{'✓' if hit else '✗'} 그 질문의 화법이 pitch 쪽 검색에 실재한다"
+          f" ({hits[0][1]['id'] if hits else '0건'})")
+    ok += hit
+
+    return ok
+
+
+def check_rehearsal_expectations() -> int:
+    """리허설 기대값 — `sees` 중 기계가 판정할 수 있는 부분 (tests/debug/scenarios.EXPECT).
+
+    실 LLM 없이 재는 것은 **판정 장치 자체**다: 기대가 실재하는 턴을 가리키는가 · 무엇을
+    어긋남으로 보는가 · 실행 사실을 어떻게 읽는가. 실제 대본을 도는 것은 `reps` 의 일이고
+    그건 LLM 이 있어야 한다.
+    """
+    from tests.debug import reps as REPS, scenarios as SCEN, trace as TR
+    ok = 0
+    print("\n[리허설 기대값 — sees 를 기계가 판정한다]")
+
+    # 기대는 실재하는 턴을 가리켜야 한다. 없는 라벨을 적으면 그 기대는 영원히 판정되지
+    # 않으면서 통과처럼 보인다 — 검사 표가 거짓말하는 가장 나쁜 형태다.
+    hit = bool(SCEN.EXPECT) and all(
+        label in SCEN._labels_of(script) for script, label in SCEN.EXPECT)
+    print(f"{'✓' if hit else '✗'} 모든 기대가 실재하는 턴을 가리킨다 ({len(SCEN.EXPECT)}건)")
+    ok += hit
+
+    saved = dict(SCEN.EXPECT)
+    try:
+        SCEN.EXPECT[("cases", "없는턴")] = SCEN.Expect(outcome="answer")
+        try:
+            SCEN._validate_expectations()
+            raised = False
+        except ValueError:
+            raised = True
+    finally:
+        SCEN.EXPECT.clear()
+        SCEN.EXPECT.update(saved)
+    print(f"{'✓' if raised else '✗'} 없는 턴을 가리키면 임포트가 실패한다(조용히 지나가지 않는다)")
+    ok += raised
+
+    # ── diff 의 규약 ──────────────────────────────────────
+    want = SCEN.Expect(tools=("fact",), outcome="answer", verdict="assume", sources=True)
+    base = {"tools": ["fact", "customer"], "outcome": "answer", "verdict": "assume",
+            "sources": True}
+    hit = want.diff(base) == []
+    print(f"{'✓' if hit else '✗'} tools 는 부분집합 판정 — 여분의 도구는 어긋남이 아니다")
+    ok += hit
+
+    hit = len(SCEN.Expect(tools=("screen",)).diff(base)) == 1
+    print(f"{'✓' if hit else '✗'} 기대한 도구가 안 불리면 어긋남")
+    ok += hit
+
+    hit = SCEN.Expect().diff({}) == [] and SCEN.Expect(outcome="").diff({"outcome": "clarify"}) == []
+    print(f"{'✓' if hit else '✗'} 비워 둔 항목은 판정하지 않는다(확신 없는 기대를 강요하지 않는다)")
+    ok += hit
+
+    hit = SCEN.Expect(sources=False).diff({"sources": True}) != [] \
+        and SCEN.Expect(sources=False).diff({}) == []
+    print(f"{'✓' if hit else '✗'} 참/거짓 항목은 False 도 기대로 판정한다")
+    ok += hit
+
+    # ── 실행 사실을 어떻게 읽나(_observed) ────────────────
+    def turn(nodes):
+        t = TR.Turn(question="q")
+        t.nodes.extend(nodes)
+        return t
+
+    answered = turn([TR.Node(name="answer", delta={"judge_verdict": "assume"},
+                             gates=[TR.Gate("verify_texts", True), TR.Gate("span", True)])])
+    got = REPS._observed({"history": [{"tools": ["fact"]}], "sources": [{"id": "x"}],
+                          "pending_action": {"label": "화면"}}, answered)
+    hit = (got["outcome"] == "answer" and got["verdict"] == "assume"
+           and got["tools"] == ["fact"] and got["gates_passed"] and got["offered"]
+           and got["sources"])
+    print(f"{'✓' if hit else '✗'} 답변 턴 — 도구·등급·게이트·출처·연계를 읽는다")
+    ok += hit
+
+    asked = turn([TR.Node(name="answer", delta={"judge_verdict": "ask", "clarify": {"question": "?"}})])
+    got = REPS._observed({"history": [{"tools": ["fact"]}], "clarify": {"question": "?"},
+                          "sources": [{"id": "x"}]}, asked)
+    hit = got["outcome"] == "clarify" and got["verdict"] == "ask"
+    print(f"{'✓' if hit else '✗'} 되묻기 턴 — 답변으로 세지 않는다")
+    ok += hit
+
+    # LLM 이 죽은 턴은 «되묻지도 답하지도 않은» 세 번째 결말이다(§11). 답변으로 세면
+    # 장애가 난 실행이 통과로 보고된다 — 실제로 리허설 11턴 중 10턴이 그랬던 날이 있다.
+    dead = turn([TR.Node(name="plan_step", delta={"llm_error": "HTTPError"}),
+                 TR.Node(name="answer", delta={})])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, dead)
+    hit = got["outcome"] == "llm_down" and not got["gates_passed"]
+    print(f"{'✓' if hit else '✗'} LLM 이 죽은 턴 — 답변으로도 «게이트 통과»로도 세지 않는다")
+    ok += hit
+
+    stopped = turn([TR.Node(name="answer", delta={},
+                            gates=[TR.Gate("verify_texts", True), TR.Gate("span", False)])])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, stopped)
+    hit = not got["gates_passed"]
+    print(f"{'✓' if hit else '✗'} 게이트가 생성문을 버렸으면 통과로 세지 않는다")
+    ok += hit
+
+    replanned = turn([TR.Node(name="plan_step", delta={"plan_retry": True}),
+                      TR.Node(name="answer", delta={})])
+    got = REPS._observed({"history": [{"tools": []}], "sources": []}, replanned)
+    hit = got["replanned"]
+    print(f"{'✓' if hit else '✗'} 재계획이 돌았는지 읽는다 (gap 23 이 만든 경로)")
+    ok += hit
+
+    # 기대가 없는 턴은 아무것도 찍지 않는다 — 대부분의 턴이 그렇다.
+    line, misses = REPS._expect_line("cases", "9", {}, answered)
+    hit = line == "" and misses == []
+    print(f"{'✓' if hit else '✗'} 기대가 없는 턴은 판정하지 않는다")
+    ok += hit
+
+    return ok
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -4490,7 +6146,7 @@ def main() -> int:
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성
-    tools.fits_question = lambda q, h, kind="", history=None, query=None: h
+    tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     agent = G.build_agent()
 
     for question, expected in CASES:
@@ -4524,8 +6180,12 @@ def main() -> int:
         check_turn_cost()
         check_miss_recovery()
         check_clarify_golden()
+        check_clarify_settled()
         check_answer_parallel()
         check_replan_on_empty()
+        check_outreach()
+        check_prompt_is_quotable()
+        check_branch_answer_amount()
         check_screen_registry()
         check_market_material()
         check_product_advice()
@@ -4535,6 +6195,7 @@ def main() -> int:
         check_no_repeat()
         check_suitable_shape()
         check_history_material()
+        check_memo()
         check_today_material()
         check_account_state()
         check_labeled_pairs()
@@ -4548,10 +6209,15 @@ def main() -> int:
         check_order_flipped()
         check_tool_loop()
         check_all_kinds_reachable()
+        check_trigger_entrances()
         check_atomic_spans()
         check_origin()
         check_plan_failure()
         check_llm_down()
+        check_compose_retry()
+        check_graded_judge()
+        check_tool_axes()
+        check_rehearsal_expectations()
         check_notice_scope()
         check_guard()
         check_architecture_doc()

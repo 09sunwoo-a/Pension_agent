@@ -51,6 +51,10 @@ NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
 #: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
 ANSWER_NODE = "answer"
 
+#: LLM 이 죽어 분류조차 못 한 턴의 노드(§11). 「되묻지도 답하지도 않은」 세 번째 결말이라
+#: 기대값 판정이 이것을 답변으로 세면 안 된다(reps._observed).
+LLM_DOWN_NODE = "llm_down"
+
 #: compose 가 순서대로 거는 검사. 이 순서를 여기 적어두는 이유는 **실행되지 않은 게이트**를
 #: 말하기 위해서다 — 앞에서 끊기면 뒤는 아예 안 불리고, 그 사실이 진단의 핵심이다.
 GATES = ("verify_texts", "relations", "span")
@@ -208,9 +212,21 @@ _TARGETS: tuple[tuple[object, str], ...] = (
 )
 
 
+def missing_targets() -> list[str]:
+    """계측 대상 중 사라진 것. 비어 있으면 계측을 걸 수 있다.
+
+    `instrument()` 는 하나라도 없으면 예외를 던진다 — 덜 보는 쪽이 아니라 크게 실패하는
+    쪽으로 기운다는 이 파일의 원칙 그대로다. 다만 그 «크게 실패»를 **답변 차단**으로
+    번역하면 안 되는 호출자가 있다: 평가 화면(app.py)의 디버그 토글은 켜져 있을 뿐이고,
+    계측이 망가졌다고 상담 테스트 자체를 못 하게 만들 이유는 없다. 그런 호출자가 미리
+    물어보고 «트레이스만 끄고 답변은 낸다»를 고를 수 있게 판정을 따로 낸다.
+    """
+    return [f"{getattr(mod, '__name__', mod)}.{attr}"
+            for mod, attr in _TARGETS if not hasattr(mod, attr)]
+
+
 def _check_targets() -> None:
-    missing = [f"{getattr(mod, '__name__', mod)}.{attr}"
-               for mod, attr in _TARGETS if not hasattr(mod, attr)]
+    missing = missing_targets()
     if missing:
         raise AttributeError(
             "계측 대상이 사라졌습니다 — 운영 코드가 바뀌어 트레이스가 덜 보게 됩니다: "
@@ -219,8 +235,20 @@ def _check_targets() -> None:
 
 def _summary(delta: dict) -> dict:
     """상태 변경 중 트레이스에 남길 것만. 답변 원문은 길어서 길이만 남긴다."""
+    # judge_verdict 가 여기 없으면 리허설이 «되물었나»만 보고 «전제를 밝히고 답했나»·
+    # «없다고 답했나»를 못 본다 — 판정이 넷으로 갈린 뒤로는 그 셋이 다른 사건이다.
     out = {k: v for k, v in delta.items()
-           if k in ("intent", "plan_done", "llm_error", "clarify")}
+           if k in ("intent", "plan_done", "llm_error", "clarify", "judge_verdict",
+                    "plan_retry")}
+    # 게이트가 표시한 갈래(tools.record_branches). 이게 안 보이면 «판정이 왜 되물었나»를
+    # 되짚을 수 없다 — 갈래 블록은 판정 프롬프트에 실리는 가장 센 신호인데, 트레이스에는
+    # 판정 «결과»만 있고 그 입력이 없었다.
+    if delta.get("branches"):
+        out["branches"] = " / ".join(b.get("axis", "?") for b in delta["branches"])
+    # 전제·빠진 대상은 블록 통째로 찍으면 트레이스 한 줄이 열 줄이 된다. 판정이 무엇을
+    # 정했는지만 남긴다 — 답변 원문에 그 전제가 실제로 실렸는지는 답변을 보면 된다.
+    if delta.get("judge_note"):
+        out["judge_note"] = " ".join(delta["judge_note"].split())[:60] + "…"
     if delta.get("pending_action"):
         out["제안"] = delta["pending_action"].get("label")
     if "answer" in delta:
@@ -233,14 +261,18 @@ def _summary(delta: dict) -> dict:
 def _plan_note(state: dict, delta: dict) -> str:
     """이 계획 단계가 무엇을 했는지 한 줄. 도구·질의·채택 카드는 상태 차분에서 읽는다 —
     `tools.run` 을 따로 감싸지 않아도 여기 다 나온다."""
-    before = len(state.get("plan_calls") or [])
-    calls = delta.get("plan_calls") or []
-    if len(calls) <= before:
+    before = len(state.get("steps") or [])
+    steps = delta.get("steps") or []
+    if len(steps) <= before:
         if delta.get("llm_error"):
             return f"중단 — {delta['llm_error'][:60]}"
         return "done" if delta.get("plan_done") else "변화 없음"
 
-    signature = calls[-1]
+    step = steps[-1]
+    signature = f"{step.get('tool')}:{step.get('query')}"
+    # 고장은 «자료 없음»과 다른 사건이다(§3) — 장부가 갈라 적으므로 트레이스도 갈라 읽는다.
+    if step.get("outcome") == "failed":
+        return f"{signature} → 도구 고장: {step.get('reason') or '원인 미상'}"
     ev_before = len(state.get("evidence") or [])
     ev_after = delta.get("evidence")
     if ev_after is None or len(ev_after) <= ev_before:
@@ -329,8 +361,10 @@ def instrument(trace: Trace):
 
     real_span = P._span_verdict
 
-    def span_wrapper(found, answer):
-        verdict, gaps = real_span(found, answer)
+    def span_wrapper(found, answer, *args, **kwargs):
+        # 인자를 그대로 넘긴다 — 판정 함수가 «원장이 아는 화면» 집합을 세 번째 인자로 받는다
+        # (plan._ledger_screens). 래퍼가 그것을 떨어뜨리면 계측을 건 실행만 다른 판정을 한다.
+        verdict, gaps = real_span(found, answer, *args, **kwargs)
         trace.add_gate(Gate(name="span", passed=verdict != P.DISCARD,
                             detail=[verdict, *[label for label, _ in gaps]]))
         return verdict, gaps

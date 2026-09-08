@@ -201,7 +201,8 @@ from pension_agent.strategy_agent import agent
 from pension_agent.strategy_agent.customer import PERSONAS
 
 BY_NAME = {p.nm: p for p in PERSONAS}
-check(len(PERSONAS) == 9, "목업 9케이스 적재", str(len(PERSONAS)))
+check(len(PERSONAS) == 12, "목업 고객 적재 (xlsx 9케이스 + 데모 골든 케이스 3명)",
+      str(len(PERSONAS)))
 
 # ── 배지 골든셋 ──────────────────────────────────────────────
 # 첫 화면 배지(원본 08_BADGES)는 기획자가 지식베이스 세그먼트를 읽고 9케이스에 부여한
@@ -321,6 +322,12 @@ check(_tax is not None, "박지민: 세액공제 전략 성립")
 if _tax:
     check(_tax["amount"] == engine.won(3_000_000), "박지민: 세액공제 대상액 = 잔여 한도 300만원",
           str(_tax["amount"]))
+# «확인 필요»는 직원이 고객과 확인할 항목만이다. 저작자에게 하는 말(자료 미등록 — assets.json
+# 확인)이 여기 섞이면 대화형 customer 재료로 실려 «하면 안 되는 것» 답변에 그대로 나간다
+# (2026-09-07 실측, 송도윤). 자료 미등록은 docs/DEMO_STATUS.md 가 센다.
+check(not any(("assets.json" in n or "customer_facing" in n)
+              for p in PERSONAS for n in FACTS[p.nm]["needs_confirm"]),
+      "확인 필요 목록에 저작자용 문장(assets.json·customer_facing)이 없다")
 check(any("총급여 구간 미확인" in n for n in FACTS["한지우"]["needs_confirm"]),
       "한지우: 소득 구간 미확인이 확인 항목으로 노출")
 
@@ -405,16 +412,23 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 # **입력이 바뀐 셈인 스텁 교체 때마다 캐시를 비운다.** 실행 중에 LLM 이 바뀌는 것은
 # 테스트에서만 있는 일이라, 이 호출이 필요한 것도 여기뿐이다.
 _saved = (agent.llm.available, agent.llm.generate)
+# 파일 저장소(briefing_store)도 끈다 — `scripts.prebuild_briefings` 를 한 번이라도 돌린
+# 체크아웃에는 `briefing_cache/` 가 있어 저장소가 켜지고, 그러면 첫 스텁이 만든 브리핑이
+# 파일로 남아 두 번째 스텁의 propose 가 **그 파일을 읽는다**(프로세스 캐시만 비워서는
+# 안 지워진다). 재료 이탈 검사가 «LLM판단 · rejected 없음»으로 갈리는 것이 그 증상이다.
+from pension_agent import config as _cfg  # noqa: E402
+_saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+_cfg.BRIEFING_CACHE_DIR = _cfg.BRIEFING_CACHE_DIR / "__off__"   # 없는 디렉터리 = 꺼짐
 try:
     agent.llm.available = lambda: True
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "현 구성 양호", '
         '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
     agent.clear_briefing_cache()
     _r2 = agent.propose(_calm, use_llm=True)
     check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
           "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
-    agent.llm.generate = lambda prompt, system="": (
+    agent.llm.generate = lambda prompt, system="", **kw: (
         '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
     agent.clear_briefing_cache()
     _r3 = agent.propose(_calm, use_llm=True)
@@ -422,8 +436,43 @@ try:
           "재료 이탈 산출은 폴백(tier=미매칭)", str(_r3["rejected"])[:40])
 finally:
     agent.llm.available, agent.llm.generate = _saved
+    _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
     # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
     agent.clear_briefing_cache()
+
+# ── 미리 만들어 둔 브리핑(briefing_store) ────────────────────────────
+# 프로세스 캐시는 프로세스가 끝나면 사라져서, 리허설이 매 실행 앞에서 브리핑 생성(LLM 11회)을
+# 다시 치른다. 파일로 남겨 그것을 건너뛰되, **입력이 달라진 저장분은 절대 읽지 않는다** —
+# 낡은 브리핑이 화면에 뜨는 것은 이 저장소가 가장 경계하는 «화면과 값이 갈리는» 실패의
+# 조용한 형태다(캐시라서 아무도 안 본다).
+import pathlib as _pathlib  # noqa: E402
+import shutil as _shutil  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+from pension_agent import config as _config  # noqa: E402
+from pension_agent.strategy_agent import briefing_store as _store  # noqa: E402
+
+_saved_dir, _saved_fp = _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT
+_tmp = _pathlib.Path(_tempfile.mkdtemp(prefix="briefing-store-"))
+try:
+    # 디렉터리가 없으면 저장소는 통째로 꺼진 것이다 — 돌린 적 없는 사람에게는 무변경이다.
+    _config.BRIEFING_CACHE_DIR = _tmp / "none"
+    check(not _store.enabled(), "디렉터리가 없으면 브리핑 저장소는 꺼져 있다")
+
+    _config.BRIEFING_CACHE_DIR = _tmp
+    _store._FINGERPRINT = "fp-A"
+    _store.save("k1", {"sentence": "저장본"})
+    check((_store.load("k1") or {}).get("sentence") == "저장본", "저장한 브리핑을 다시 읽는다")
+
+    # 지식 카드·프롬프트·날짜 중 하나라도 바뀌면 지문이 달라진다.
+    _store._FINGERPRINT = "fp-B"
+    check(_store.load("k1") is None, "입력(지문)이 바뀐 저장분은 읽지 않는다")
+
+    _store._FINGERPRINT = "fp-A"
+    check(_store.load("없는키") is None, "저장된 적 없는 키는 None")
+finally:
+    _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT = _saved_dir, _saved_fp
+    _shutil.rmtree(_tmp, ignore_errors=True)
 
 # dorm=None 이어도 브리핑이 죽지 않는다 (김현수는 실제로 상담이력이 없어 dorm=None 이다).
 check(BY_NAME["김현수"].dorm is None, "김현수: 상담이력 없음 → dorm=None")
@@ -467,6 +516,27 @@ check("납입여력" not in _pb and "연금수령" in _pb, "연금개시 계좌:
 _pens.pension_started = False
 check("tax" in conditions(_pens), "미개시 계좌(대조군): tax 성립")
 check("납입여력" in engine.prepare(_pens)["briefing"], "미개시 계좌(대조군): 납입여력 노출")
+
+# 「납입여력」과 「세액공제_잔여한도」는 **다른 축이다.** 한때 브리핑이 같은 수(p.room)를
+# 두 이름으로 실었고 — 라벨은 1,800만원 납입한도를 가리키는데 값은 900만원 공제한도에서
+# 왔다 — 그러자 화면이 «잔여한도 500만원 · 납입여력도 500만원»으로 한 숫자를 두 근거처럼
+# 말했고, 대화형은 ISA 8,000만원 전환 질문에 그 500만원을 상한으로 답했다.
+_room = Profile(id="T2", nm="T2", ag=52, bal=45_000_000, rk="위험중립형", grade="보통위험",
+                port=[67, 33, 0, 0], ret=3.1, retPct=50, dopt="설정", room=500, dorm=0,
+                nchM=0, pension_paid_ytd=4_000_000, paid_ytd_total=4_000_000)
+check(_room.deposit_room == 14_000_000,
+      "납입여력은 1,800만원 − 당해 실납입액이다 (세액공제 잔여한도가 아니다)",
+      f"{_room.deposit_room:,}원")
+_rb = engine.prepare(_room)["briefing"]
+check("1,400만원" in _rb["납입여력"] and "500만원" in _rb["납입여력"],
+      "브리핑이 두 축을 한 줄에서 갈라 적는다 (납입 가능액 · 그중 공제 대상)", _rb["납입여력"])
+check(_rb["납입여력"].split("(")[0].strip() != f"{_room.room:,}만원",
+      "납입여력의 값이 세액공제 잔여한도와 같은 수가 아니다", _rb["납입여력"])
+# 실납입액 컬럼이 없으면 인정액으로 떨어진다 — 여력을 과대 산출하지 않는 방향이다.
+check(Profile(id="T3", nm="T3", ag=50, bal=1, rk="안정형", grade="낮은위험",
+              port=[100, 0, 0, 0], ret=0.0, retPct=50, dopt="설정", room=0, dorm=0,
+              nchM=0).deposit_room == 18_000_000,
+      "실납입액을 모르면 납입여력은 한도 전액이다(기본값 0)")
 
 
 # ─────────────────────────────────────────────────────────────

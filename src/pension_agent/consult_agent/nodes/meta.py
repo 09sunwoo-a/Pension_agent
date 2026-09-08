@@ -52,6 +52,7 @@ def agent_help(state: AgentState) -> dict[str, Any]:
     # 성립하는 재료이므로 그때만 안내한다 — 못 쓰는 능력을 목록에 세우지 않는다(§3).
     if state.get("customer_id"):
         lines.append("· 지난 상담 기록 — 이 고객과 언제 무슨 얘기를 했는지")
+        lines.append("· 이번 상담 요약 — 지금까지 나눈 대화를 정리하고, 원하시면 쪽지로 보내기")
 
     lines += [
         "",

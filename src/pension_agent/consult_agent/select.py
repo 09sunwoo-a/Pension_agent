@@ -28,7 +28,8 @@ from __future__ import annotations
 import json
 import re
 
-from pension_agent.consult_agent.kb import index_catalog, index_slice, retrieve, whole_index
+from pension_agent.consult_agent.kb import index_catalog, index_slice, whole_index
+from pension_agent.knowledge.kb import retrieve
 from pension_agent.consult_agent.prompts import BUCKET_PROMPT, SELECT_PROMPT
 from pension_agent.consult_agent.state import KB
 from pension_agent.llm import generate
@@ -63,12 +64,14 @@ def llm_pick(kinds: tuple[str, ...], query: str) -> list[tuple[float, dict]]:
         codes = _json_list(generate(
             BUCKET_PROMPT.format(catalog=index_catalog(KB, kinds), question=query),
             max_tokens=60,
+            name="consult.select.bucket",
         ))
         card_slice = index_slice(KB, codes, kinds=kinds)
     # 고른 버킷이 없으면 2차 호출은 낭비다 — 빈 결과로 두고 호출부가 폴백하게 한다.
     picked = _json_list(generate(
         SELECT_PROMPT.format(card_slice=card_slice, question=query),
         max_tokens=200,
+        name="consult.select.card",
     )) if card_slice else []
 
     by_id = {c["id"]: c for c in KB.cards if c["_kind"] in kinds}

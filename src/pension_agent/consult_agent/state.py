@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TypedDict
 
-from pension_agent.consult_agent.kb import load_kb
+from pension_agent.knowledge.kb import load_kb
 
 HISTORY_LIMIT = 4  # 프롬프트에 넣는 최근 대화 턴 수 (understand·situation_slots 공통)
 
@@ -63,6 +63,10 @@ class AgentState(TypedDict, total=False):
     # 답할 때 이 세션을 제외하기 위해 있다 — 이번 세션의 직전 턴들은 이미 대화 맥락으로
     # 프롬프트에 실려 있어서, 상담 기록 재료에 다시 실리면 방금 한 말이 «지난 상담»이 된다.
     session_id: str | None
+    # [입력] 로그인한 직원의 사번(호출자가 넘김). WorkB 쪽지의 수신자가 이 값이다 —
+    # 코드가 정하므로 LLM 이 수신자를 만들어낼 자리가 없다. 없으면 환경변수로 떨어지고,
+    # 그것도 없으면 쪽지 발송을 제안하지 않는다(workb.employee_id).
+    employee_id: str | None
     intent: str                      # understand 가 채움 — routing.INTENTS 중 하나
     customer_type: str | None
     objection_type: str | None
@@ -71,18 +75,43 @@ class AgentState(TypedDict, total=False):
     # 이번 턴이 답변 대신 판별 질문으로 끝났다면 그 질문과 선택지(§5). 있으면 compose 를
     # 건너뛰고 턴이 끝나며, 화면 연계 제안도 붙지 않는다 — 되묻기와 연계 확인은 다르다.
     clarify: dict | None
+    # 적합성 게이트가 표시한 «답이 갈리는 축»(tools.record_branches). 근거가 아니라 후보가
+    # 어떻게 갈렸나의 기록이라 원장(evidence)에 싣지 않는다 — 원장에 실으면 답변 재료가
+    # 되어 compose 가 그 문구를 인용한다. 쓰는 곳은 되묻기 판정 하나다(nodes/clarify.py).
+    branches: list
+    # 판정이 «전제를 밝히고 답하라»(assume) 또는 «핵심 대상이 자료에 없다»(none)로 끝났을
+    # 때 작성 프롬프트에 끼울 블록(§5). 판정과 작성이 동시에 도는 구조라(nodes/answer.py)
+    # 이 값이 있으면 이미 써 둔 답을 버리고 블록을 얹어 한 번 다시 쓴다.
+    judge_note: str
+    # 판정이 실제로 돈 턴의 등급(answer/assume/ask/none). 관문에서 걸러 판정을 **안 돌린**
+    # 턴에는 없다 — 「판정 안 함」과 「answer 로 판정」은 다른 사건이라 계측이 갈라 센다.
+    judge_verdict: str
     # 근거 원장 — 이번 턴에 도구들이 반환한 근거의 누적. 답변은 이 안에서만 쓰인다.
     # (예전의 hits·broaden_count·verified 를 대신한다 — 화법 체인이 도구 하나로 접혔다.)
     evidence: list                   # [tools.Evidence, ...] 도구별 근거 블록
-    plan_calls: list[str]            # 이번 턴에 부른 "도구:질의" 목록 (반복 호출 차단·상한 계산)
-    # 부른 것 중 근거를 내놓지 못한 호출. 원장에는 성공한 재료만 실려서, 이게 없으면
-    # 계획이 자기가 뭘 불러봤는지 모른 채 같은 호출을 반복한다(반복은 코드가 끊고, 그러면
-    # 턴이 '근거 없음'으로 끝난다) — 계획 프롬프트에 실려 질의·도구를 바꾸게 한다.
-    plan_misses: list[str]
+    # 이번 턴에 **해 본 것**의 기록 — 호출 하나가 한 항목이다.
+    #   {"tool": 이름, "query": 물은 말, "outcome": found|miss|failed, "reason": 원인(failed)}
+    #
+    # 예전에는 이 한 사건이 리스트 셋에 흩어져 있었다(`plan_calls`·`plan_misses`·
+    # `plan_failed`). 그러면 «저 호출은 어떻게 됐나»를 알려면 서명 문자열(`"screen:질의"`)을
+    # 잘라 다른 리스트의 dict 와 맞춰 봐야 하고, 결과 종류가 하나 늘 때마다 리스트가 하나씩
+    # 늘었다. 지금은 종류가 `outcome` 한 칸이라, 새 결과를 더해도 늘어나는 것은 값 하나다.
+    #
+    # **원장(evidence)은 여기 접지 않는다.** 승낙 턴(nodes/act.py)은 도구 호출 없이 원장에
+    # 근거를 싣는다 — «모든 근거에는 그것을 만든 스텝이 있다»가 성립하지 않는다. 게다가
+    # 원장은 인용 허용 집합의 재료라(§6) 소비처가 많고, 그 경계를 이 리팩터로 건드리면
+    # «옳은 문장을 거부하는» 쪽으로 틀릴 수 있다. 여기 있는 것은 계획의 장부뿐이다.
+    steps: list[dict]
     # 근거 0건인 채 계획이 끝나려 해서 코드가 한 번 되돌려 보냈다는 표시(§5). 이 표시가
     # 있는데 또 끝내려 하면 그때는 존중한다 — 정직한 '없음' 경로를 막지 않는다.
     plan_retry: bool
     plan_done: bool                  # 계획 루프 종료 신호 (LLM 의 done, 또는 코드가 상한에서 끊음)
+    # 이번 턴이 «직전 제안을 승낙받아 재료를 싣는 턴»이면 그 제안 문구(act._show_playbook 이
+    # 채운다). 이 턴의 질문은 "네" 한 마디라, 이게 없으면 작성 LLM 은 무엇을 쓰라는 것인지
+    # 알 방법이 없어 <자료> 를 **직전 턴의 질문**에 대고 재고 "그 자료는 없어요"로 답한다
+    # (nodes/plan.py::compose 의 ACCEPTED_BLOCK 주석). 무엇을 보여주기로 했는지는 제안한
+    # 턴이 이미 정했으므로, 그 사실을 코드가 실어 준다(CLAUDE.md §10).
+    accepted: str | None
     # LLM 단계가 **깨져서** 끝났을 때의 이유(호출 실패·규격 밖 응답). 정상이면 비어 있다.
     # 슬롯 분해(situation_slots)·계획(plan_step)·문장 작성(compose) 어디서 실패해도 같은
     # 키에 남긴다 — 어느 단계에서 실패했든 직원이 받는 답은 같아야 한다(CLAUDE.md §11).

@@ -21,14 +21,18 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 
-from pension_agent.consult_agent import guard, progress, relations, tools
+from pension_agent import observability
+from pension_agent.consult_agent import guard, progress, relations, screens, tools
 from pension_agent.consult_agent import kb as KBMOD
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
-    ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_SYSTEM, MUST_BLOCK, PLAN_MISSES_BLOCK,
-    PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
+    ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
+    MUST_BLOCK,
+    PLAN_BUDGET_BLOCK, PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK,
+    SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -57,9 +61,77 @@ NO_EVIDENCE = (
 TRIED = "\n\n찾아본 곳: {calls}\n다른 말로 다시 물어보시면 찾을 수도 있어요."
 
 
+#: 재료를 **읽지 못한** 턴의 답. NO_EVIDENCE 와 절대 같은 말을 하면 안 된다 — 찾아보고
+#: 없는 것과 도구가 죽어 확인하지 못한 것은 다른 사건이고, 뒤를 앞으로 말하면 지식베이스에
+#: 있는 자료를 없다고 답하는 셈이 된다(LLM_FAILED 와 같은 자리 · §11). 문장 꼴을 LLM_FAILED
+#: 에 맞춘 것도 같은 이유다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 진단이 어렵다.
+TOOL_FAILED = (
+    "지금은 답변을 만들 수 없어요 — {what} 자료를 읽는 데 실패했습니다. "
+    "지식베이스에 자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reasons})"
+)
+
+
+# ─────────────────────────────────────────────────────────────
+# 이번 턴에 해 본 것 — `state["steps"]` 를 읽는 자리는 전부 여기를 거친다
+#
+# 항목 하나가 호출 하나다: {"tool", "query", "outcome": found|miss|failed, "reason"}.
+# 결과 종류를 `outcome` 한 칸에 둔 이유는 state.py 의 `steps` 주석에 적어 뒀다 — 종류마다
+# 리스트를 하나씩 늘리면 «저 호출은 어떻게 됐나»가 서명 문자열을 잘라 맞추는 일이 된다.
+# ─────────────────────────────────────────────────────────────
+
+FOUND, MISS, FAILED = "found", "miss", "failed"
+
+
+def _steps(state: AgentState) -> list[dict]:
+    return list(state.get("steps") or [])
+
+
+def _step(tool: str, query: str, outcome: str, reason: str = "") -> dict:
+    """장부 한 줄. `reason` 은 고장에만 있다 — 빈 값을 넣어 두면 «원인 미상»과 구분이 없어진다."""
+    entry = {"tool": tool, "query": query, "outcome": outcome}
+    if reason:
+        entry["reason"] = reason
+    return entry
+
+
+def _of(steps: list[dict], outcome: str) -> list[dict]:
+    return [s for s in steps if s.get("outcome") == outcome]
+
+
+def _label(step: dict) -> str:
+    """계획·답변에 보이는 호출 표기. 서명(`"도구:질의"`)과 같은 꼴이다 — 예전에는 이 문자열이
+    **기록 그 자체**여서 다시 잘라 써야 했고, 지금은 표시할 때만 만든다."""
+    return f"{step.get('tool')}:{step.get('query')}"
+
+
+def _repeated(steps: list[dict], tool: str, query: str) -> bool:
+    """같은 도구를 같은 말로 이미 불렀나. 문자열을 합쳐 비교하지 않는다 — 두 칸을 그대로 잰다."""
+    return any(s.get("tool") == tool and s.get("query") == query for s in steps)
+
+
+def _failed_label(name: str) -> str:
+    """죽은 도구를 직원이 읽는 말로. 문구는 도구 선언에서 온다(progress.py ①)."""
+    tool = tools.TOOLS.get(name)
+    return (tool.progress if tool and tool.progress else name)
+
+
+def _tool_failed(state: AgentState) -> str:
+    """도구가 죽어 재료를 못 읽은 턴의 답. 무엇이 왜 실패했는지를 함께 남긴다 —
+    진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유)."""
+    failed = [s for s in _of(_steps(state), FAILED) if s.get("tool")]
+    return TOOL_FAILED.format(
+        what=" · ".join(dict.fromkeys(_failed_label(s["tool"]) for s in failed)),
+        reasons="; ".join(s.get("reason") or "원인 미상" for s in failed))
+
+
 def _no_evidence(state: AgentState) -> str:
-    """근거 0건 답변. 무엇을 찾아봤는지 함께 말한다."""
-    calls = [c for c in (state.get("plan_calls") or []) if c]
+    """근거 0건 답변. 무엇을 찾아봤는지 함께 말한다.
+
+    죽은 호출은 «찾아본 곳»에 세지 않는다 — 그 도구는 지식베이스를 보지도 못했으므로,
+    거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다. 장부가 하나가 된 뒤로는
+    그 판정이 `outcome` 한 칸이다(예전에는 서명을 잘라 죽은 도구 목록과 맞춰 봤다).
+    """
+    calls = [_label(s) for s in _steps(state) if s.get("outcome") != FAILED]
     if not calls:
         return NO_EVIDENCE
     return NO_EVIDENCE + TRIED.format(calls=" · ".join(calls))
@@ -98,13 +170,13 @@ def _json_obj(text: str) -> dict:
 # Node. plan_step — 다음 도구 하나를 고르고 실행해 원장에 쌓는다
 # ─────────────────────────────────────────────────────────────
 
-def _untried(state: AgentState, calls: list[str]) -> list[str]:
+def _untried(state: AgentState, steps: list[dict]) -> list[str]:
     """이 턴에 아직 안 불러본 도구 이름. 재계획 관문(_wrap_up)과 재계획 지시가 함께 쓴다."""
-    used = {c.split(":", 1)[0] for c in calls}
+    used = {s.get("tool") for s in steps}
     return [name for name in tools.usable(state) if name not in used]
 
 
-def _wrap_up(state: AgentState, evidence: list, calls: list[str]) -> dict[str, Any]:
+def _wrap_up(state: AgentState, evidence: list, steps: list[dict]) -> dict[str, Any]:
     """계획을 끝내기 전 마지막 관문 — **근거 0건이면 한 번은 다시 계획한다**(§5).
 
     LLM 이 done 을 말했든, 같은 호출을 반복했든, 없는 도구를 골랐든 끝내려는 사건은
@@ -113,31 +185,42 @@ def _wrap_up(state: AgentState, evidence: list, calls: list[str]) -> dict[str, A
     한 번 만든다(재계획 프롬프트에는 빗나간 호출과 안 써 본 도구가 실린다). 두 번째
     끝내기는 존중한다: 정직한 '없음' 경로를 막지 않는다.
     """
-    if evidence or state.get("plan_retry") or not _untried(state, calls):
+    if evidence or state.get("plan_retry") or not _untried(state, steps):
         return {"plan_done": True}
     return {"plan_retry": True}
 
 
-def _misses_block(state: AgentState, misses: list[str], calls: list[str]) -> str:
+def _misses_block(state: AgentState, steps: list[dict]) -> str:
     """계획 프롬프트에 끼우는 '빗나간 호출' + (재계획 턴이면) '아직 안 써 본 도구' 블록.
 
     원장에는 성공한 재료만 실리므로, 이 블록이 없으면 계획은 자기가 뭘 불러봤는지 모르고
     같은 호출을 반복한다 — 반복은 코드가 끊고, 그러면 턴이 '근거 없음'으로 끝난다.
+
+    **성공한 호출은 여기 세우지 않는다** — 그건 원장(ledger)이 이미 말하고 있고, 두 번
+    세우면 관계있는 지시가 묻힌다(§7 과 같은 이유). 고장 난 호출도 세우지 않는다: 그
+    도구는 이미 카탈로그에서 빠져 있어(`tools.usable`) 계획이 고를 수 없다.
     """
     parts: list[str] = []
+    misses = [_label(s) for s in _of(steps, MISS)]
     if misses:
         parts.append(PLAN_MISSES_BLOCK.format(misses="\n".join(f"- {m}" for m in misses)))
     if state.get("plan_retry"):
-        parts.append(PLAN_RETRY_BLOCK.format(untried=", ".join(_untried(state, calls))))
+        parts.append(PLAN_RETRY_BLOCK.format(untried=", ".join(_untried(state, steps))))
     return "".join(parts)
+
+
+def _budget_block(steps: list[dict]) -> str:
+    """계획 프롬프트에 끼우는 '남은 호출 수'. 상한을 쥔 것은 코드인데 계획은 그 값을 못
+    봤다 — `last: true` 로 한 바퀴를 아끼라고 시키면서 몇 바퀴가 남았는지는 안 알려주던
+    자리다(PLAN_BUDGET_BLOCK 머리말). 계산은 장부 길이 하나다."""
+    return PLAN_BUDGET_BLOCK.format(left=max(MAX_STEPS - len(steps), 0))
 
 
 def plan_step(state: AgentState) -> dict[str, Any]:
     evidence = list(state.get("evidence") or [])
-    calls = list(state.get("plan_calls") or [])
-    misses = list(state.get("plan_misses") or [])
+    steps = _steps(state)
 
-    if len(calls) >= MAX_STEPS:
+    if len(steps) >= MAX_STEPS:
         return {"plan_done": True}
 
     # 진행 표시 — 실제로 계획 LLM 을 부르기 직전에만 찍는다(위의 상한 조기 종료는 계획이
@@ -150,13 +233,15 @@ def plan_step(state: AgentState) -> dict[str, Any]:
             PLAN_PROMPT.format(
                 catalog=tools.catalog(state),
                 ledger=tools.summarize(evidence),
-                misses_block=_misses_block(state, misses, calls),
+                misses_block=_misses_block(state, steps),
+                budget_block=_budget_block(steps),
                 # 후속 질문("그럼 안 된다고 하면요?")은 이전 턴을 이어받아야 무엇을 묻는지
                 # 정해진다. 이 줄이 없으면 계획이 이번 질문 한 줄만 보고 재료를 고른다(§2-1).
                 history_block=format_history(state.get("history")),
                 question=question,
             ),
             max_tokens=PLAN_MAX_TOKENS,
+            name="consult.plan",
         )
     except LLMError as exc:
         # LLM 이 없거나 죽으면 계획을 세울 수 없다. **왜 못 했는지를 남긴다** — 예전에는
@@ -178,7 +263,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
 
     name = action.get("tool")
     if action.get("done") or not isinstance(name, str) or name not in tools.TOOLS:
-        return {**alive, **_wrap_up(state, evidence, calls)}
+        return {**alive, **_wrap_up(state, evidence, steps)}
 
     # 이 도구가 마지막이라고 말했으면 한 바퀴를 아낀다 — 재료 하나로 끝나는 질문
     # ("이 고객 예금 잔액 얼마지")도 계획에만 LLM 을 두 번 쓰던 자리다. 상한은 그대로
@@ -188,11 +273,10 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     query = action.get("query") or state.get("utterance") or question
     if not isinstance(query, str):
         query = question
-    signature = f"{name}:{query}"
-    if signature in calls:
+    if _repeated(steps, name, query):
         # 같은 호출을 반복하면 진전이 없다 — 도구를 다시 돌리지는 않되, 근거 0건이면
         # _wrap_up 이 한 번 되돌려 보낸다(빗나간 호출 목록을 보여주며).
-        return {**alive, **_wrap_up(state, evidence, calls)}
+        return {**alive, **_wrap_up(state, evidence, steps)}
 
     try:
         found = tools.run(name, state, query)
@@ -200,14 +284,26 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         # 도구 안에서 LLM 이 죽었다(카드 선택·적합성 판정). 이걸 "근거를 못 찾았다"로
         # 접으면 있는 자료를 없다고 답하게 된다 — 계획 실패와 같은 사건으로 다룬다.
         return {"plan_done": True, "llm_error": f"{type(exc).__name__}: {exc}"}
-    update: dict[str, Any] = {**alive, "plan_calls": calls + [signature]}
+    except tools.ToolFailure as exc:
+        # 도구가 죽었다. **루프는 끊지 않는다** — LLM 이 죽은 것과 달리 나머지 도구로 답이
+        # 나올 수 있고, 죽은 도구는 다음 바퀴의 카탈로그에서 빠진다(tools.usable). 빗나간
+        # 호출로 접지 않는 이유는 그쪽의 처방이 «질의의 말을 바꿔라»여서다 — 고장에는
+        # 그 말이 틀렸고, 원장이 끝내 비었을 때 답도 갈린다(compose).
+        return {**alive, "steps": steps + [_step(name, query, FAILED, exc.reason)]}
+
+    # 무슨 일이 있었는지는 한 번만 적는다 — 예전에는 성공·빗나감·고장이 각자 리스트를
+    # 갖고 있어서, 결과 종류가 늘 때마다 반환값의 키가 늘었다(state.py 의 `steps` 주석).
+    update: dict[str, Any] = {
+        "steps": steps + [_step(name, query, FOUND if found is not None else MISS)], **alive}
+    # 게이트가 이번 호출에서 표시한 갈래(tools.record_branches 가 state 에 쌓아 둔 것)를
+    # **자기 반환값으로** 넘긴다. 그래프 상태 전파를 in-place 변경에 기대지 않는다 —
+    # 노드가 돌려준 것만 다음 노드가 본다는 규약이 여기서도 지켜져야, 계획이 여러 바퀴
+    # 도는 동안 갈래가 조용히 사라지거나 두 벌이 되는 일이 없다.
+    branches = state.get("branches")
+    if branches:
+        update["branches"] = list(branches)
     if found is not None:
         update["evidence"] = evidence + [found]
-    else:
-        # 빗나간 호출로 기록한다 — 다음 계획 프롬프트가 이걸 보고 같은 호출을 반복하는
-        # 대신 질의를 바꾸거나 다른 도구를 고른다(원장에는 성공한 재료만 실리므로,
-        # 이 기록이 없으면 계획은 자기가 뭘 불러봤는지 모른다).
-        update["plan_misses"] = misses + [signature]
 
     # `last` 는 **재료를 얻었을 때만** 존중한다. 근거를 못 찾았는데 루프를 끝내면 다른 도구를 써
     # 볼 기회가 없이 그 턴이 '근거 없음'으로 끝난다 — 계획이 고른 도구·질의가 빗나갔을
@@ -262,8 +358,36 @@ def _known_products() -> set[str]:
     return {r["name"] for r in engine.PRODUCTS} | KBMOD.product_names(KB)
 
 
-def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
+#: 근거 카드의 화면번호 스팬 꼴(`[04-12-646]`). 다른 `atomic` 스팬과 갈라 판정하기 위한 것이라
+#: 대괄호까지 포함해 본다 — 도구가 그 꼴로 선언한다(`tools._procedure_decls`).
+_SCREEN_SPAN = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
+
+#: 답변에서 화면번호를 찾는 꼴. **대괄호를 요구하지 않는다** — 직원이 읽는 문장에서는
+#: 「04-12-646 지급/해지조회」처럼 괄호 없이 쓰는 것이 정상이고, 표기 차이로 옳은 답변을
+#: 버리지 않는다(§6 「이름 표기도 같다」와 같은 자리).
+_SCREEN_IN_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}(?![0-9A-Za-z-])")
+
+
+def _ledger_screens(evidence: Iterable[tools.Evidence]) -> set[str]:
+    """이번 턴 원장 **전체**가 아는 화면번호(정규형). 근거 한 건이 아니라 합집합이다.
+
+    화면번호 판정은 «답변이 원장에 없는 화면을 가리키는가»인데, 근거 한 건씩 재면 다른
+    근거가 아는 화면이 «없는 화면»이 된다. 실측(2026-09-07 — 오세훈 SH5 · 박정호 PJ5):
+    원장에 절차 카드([06-12-622] → [02-12-221] 2단계)와 화면 카드([02-12-221] 한 장)가 함께
+    있었고, 답변이 절차 본문의 [06-12-622] 를 인용하자 **화면 카드 근거를 재는 차례에서**
+    «이 근거에 없는 화면»으로 답이 통째로 버려졌다. 절차 근거 차례에서는 통과한 번호다.
+    """
+    return {screens.normalize(s) for e in evidence for s in e["atomic"]
+            if _SCREEN_SPAN.fullmatch(s.strip())}
+
+
+def _span_verdict(found: tools.Evidence, answer: str,
+                  known_screens: set[str] | None = None) -> tuple[str, list[str]]:
     """이 근거의 원문 스팬이 답변에서 어떻게 어긋났는지 판정한다. 종류는 도구가 선언한다.
+
+    `known_screens` — 화면번호 판정에 쓸 «원장이 아는 화면» 집합. 호출부(`_screen`)가
+    원장 전체의 합집합(`_ledger_screens`)을 넘긴다. 넘기지 않으면 이 근거 것만 본다
+    (근거 하나로 재는 검사용).
 
     · `atomic` — 값 + 조건이 붙은 한 덩이. 그 숫자를 쓰면서 원문을 안 실었다 → **DISCARD**.
       블록을 덧붙이는 복구로는 안 된다. 틀린 문장이 옳은 블록 옆에 그대로 남기 때문이다.
@@ -278,7 +402,29 @@ def _span_verdict(found: tools.Evidence, answer: str) -> tuple[str, list[str]]:
     따라 나오던 자리다). 판단은 값 스팬의 등장 여부로 하고, 걸 스팬이 없는 도구
     (화법·고객재료)는 판단할 수 없으므로 표시를 유지한다 — 잃는 쪽으로 기울지 않는다.
     """
+    # 화면번호는 **식별자**라 다른 스팬과 판정이 다르다(§12 gap 2). 이름을 정확히 부르거나
+    # 아예 안 부르거나이고, 흩어진 토큰으로 재면 안 된다 — 번호끼리 앞 마디를 공유하기
+    # 때문이다(`04-12-…`·`06-12-…`). 예전 규칙(스팬이 답변에 없는데 숫자가 겹치면 폐기)은
+    # 그래서 **답변이 화면번호를 일부만 인용하면 걸렸다**: 안 쓴 번호의 04·12 가 쓴 번호와
+    # 겹쳐 «숫자는 썼는데 원문을 안 실었다»로 오판됐다. 원장 화면이 일곱 개인 절차 답변이
+    # 여섯 개를 정확히 인용하고도 폐기돼 카드 원문이 덤프됐다(2026-09-02 실측 — 박정호 P3).
+    #
+    # 지금 재는 것은 «답변이 이 턴 원장에 **없는** 화면을 가리키는가» 하나다. 빠뜨린 것은
+    # 위반이 아니고(안 부른 것이다), 대괄호 유무는 같은 화면이다(`screens.normalize`).
+    # 지어낸 번호는 여기서도 걸리고 수치 검사에도 걸린다 — 마지막 마디가 원장에 없다.
+    # 아는 화면은 원장 전체로 본다(`_ledger_screens` 머리말) — 이 근거만 보면 다른 근거의
+    # 화면이 «없는 화면»이 된다.
+    if known_screens is None:
+        known_screens = _ledger_screens([found])
+    if known_screens:
+        for m in _SCREEN_IN_TEXT.finditer(answer):
+            said = screens.normalize(m.group())
+            if said not in known_screens:
+                return DISCARD, [(m.group(), [])]
+
     for span in found["atomic"]:
+        if _SCREEN_SPAN.fullmatch(span.strip()):
+            continue                      # 위에서 식별자 규칙으로 이미 판정했다
         if span not in answer and (numbers(span) & numbers(answer)):
             # 걸린 스팬을 함께 돌려준다 — DISCARD 처분에는 안 쓰이지만, 계측(trace)이 이걸
             # 실어야 리허설 로그가 «무엇을 그대로 안 실어서 잘렸나»를 말할 수 있다. 판정
@@ -337,7 +483,8 @@ def _sources(evidence: list[tools.Evidence], guards: list, alts: list) -> list[d
         if len(excerpt) > 60:
             excerpt = excerpt[:60] + "…"
         out.append({"id": card, "title": item.get("title") or excerpt,
-                    "doc": item.get("doc"), "score": None, "page": None, "role": CAUTION})
+                    "doc": item.get("doc"), "url": item.get("url"),
+                    "score": None, "page": None, "role": CAUTION})
     return out
 
 
@@ -379,27 +526,126 @@ def _repeated_materials(state: AgentState, evidence: list[tools.Evidence]) -> li
 
 
 # ─────────────────────────────────────────────────────────────
+# 생성문 점검 — 걸리면 한 번 다시 쓰게 한다
+#
+# 점검 자체는 §6 그대로다(수치·관계·스팬). 바뀐 것은 **걸렸을 때의 처분**이다. 예전에는
+# 처분이 하나였다 — 근거 원문을 통째로 내보내기. 안전하지만 화면에서는 답변처럼 보이고,
+# 말투가 갑자기 카드 덤프로 바뀐다(■ 제목 줄 · 「· 출처 …」 메타 줄). 걸린 이유가 한 문장인
+# 경우가 대부분이라, 그 한 문장만 고치면 되는 답이 통째로 버려지고 있었다.
+#
+# §6 은 "걸린 생성문이 화면에 나가지 않는다"만 요구하고 그 뒤의 처분은 «재생성 · 근거 원문
+# 제시» 중 구현이 정한다고 적어 뒀다. 재생성을 **한 번** 붙인다. 상한이 코드에 있는 것은
+# 계획 루프의 MAX_STEPS 와 같은 이유다 — 통과할 때까지 돌면 한 턴의 비용이 열리게 된다.
+# 두 번째도 걸리면 예전 그대로 근거 원문이 나간다(틀린 문장이 나가는 선택지는 없다).
+# ─────────────────────────────────────────────────────────────
+
+#: 재작성 시도 횟수. 0 이면 예전 동작(걸리면 바로 근거 원문 폴백)이다.
+COMPOSE_RETRIES = 1
+
+#: 재작성 프롬프트에 싣는 «걸린 자리» 최대 건수. 전부 실으면 지시가 길어져 정작 고쳐야 할
+#: 자리가 묻힌다(§7 과 같은 이유 — 무관한 지시가 늘수록 관계있는 지시가 묻힌다).
+FAULTS_SHOWN = 8
+
+
+def _screen(answer: str, evidence: list[tools.Evidence],
+            question: str, known: set[str],
+            prompt_texts: Iterable[str] = ()) -> tuple[list[str], list[str]]:
+    """생성문을 §6 의 세 검사에 건다. 반환: (걸린 자리, 덧붙일 표시).
+
+    걸린 자리가 비어 있으면 통과다. 검사 순서는 예전과 같고(수치 → 관계 → 스팬), 앞에서
+    걸리면 뒤는 돌리지 않는다 — 계측(trace)이 「앞에서 끊김」을 그대로 말할 수 있어야 한다.
+
+    ━━ 프롬프트에 들어간 것은 인용도 허용된다 (§6) ━━
+    `prompt_texts` 는 원장 밖이면서 **코드가 이번 턴 프롬프트에 실어 보낸** 텍스트다 —
+    「하지 말 것」 가드와 승낙 턴의 제안 문구. 둘 다 코드가 LLM 에게 읽히기로 정한 것인데
+    원장에는 없어서, 시킨 대로 인용하면 «자료 밖 수치»로 답이 통째로 버려졌다(실측:
+    가드의 「…→ 6번」 → `수치 '6'`, 승낙 문구의 「화법 2건」 → `수치 '2'`). 가드는
+    `_sources()` 가 이미 **출처로도 싣는다** — 「이게 근거다」라고 세워 놓고 인용은 막는
+    상태였다.
+
+    넓히는 것은 **수치뿐**이다(`echoable` 규약 그대로). 상품명은 넓히지 않는다 — 이름만
+    대서 적합성 게이트를 뚫는 길을 열지 않기 위해서다(verify.verify_texts 머리말).
+    그리고 이번 턴 프롬프트에 **실제로 들어간 것**만 넣는다: `_POOL_KEYS` 가 경고한
+    «답변이 쓰지도 않을 후보 더미»와 다른 점이 그것이다.
+    """
+    # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을 지어낸
+    # 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
+    ok, bad = verify_texts(answer, tools.ledger_texts(evidence), known_products=known,
+                           echoable=[question, *(t for t in prompt_texts if t)])
+    if not ok:
+        return [f"자료에 없는 수치·상품명: {b}" for b in (bad or [])] or ["자료 밖 수치"], []
+
+    # 관계 위반 — 값–조건 오짝 · 알려진 오답. 원장 밖 수치 검사가 못 잡는 자리다.
+    broken = relations.check(answer, tools.ledger_related(evidence))
+    if broken:
+        return [f"자료가 「틀린 표현」으로 적어둔 것을 그대로 말함: {b}" for b in broken], []
+
+    ledger_screens = _ledger_screens(evidence)
+    verdicts = [_span_verdict(e, answer, ledger_screens) for e in evidence]
+    if any(v == DISCARD for v, _ in verdicts):
+        spans = [span for e, (v, detail) in zip(evidence, verdicts) if v == DISCARD
+                 for span, _ in detail]
+        return [f"그대로 옮겨야 하는 문장을 풀어 씀: {s}" for s in spans] or ["원문 스팬 누락"], []
+
+    # 채우는 것은 **빠진 표시**다. 예전에는 근거 블록을 통째로 덧붙여서, ⚠ 한 줄이 모자란
+    # 답변 아래에 카드 전문 1,000자가 붙었다 — 정작 그 한 줄이 묻힌다.
+    appends: list[str] = []
+    for _found, (verdict, gaps) in zip(evidence, verdicts):
+        if verdict != APPEND:
+            continue
+        appends += [f"· {label}\n" + "\n".join(f"  {m}" for m in missing)
+                    for label, missing in gaps]
+    return [], appends
+
+
+def screen(answer: str, evidence: list[tools.Evidence], question: str,
+           *, prompt_texts: Iterable[str] = ()) -> list[str]:
+    """§6 검사 한 벌 — 걸린 자리 목록(비어 있으면 통과). 화면 답변 밖에서 쓰는 공개 이름.
+
+    **쪽지 본문도 같은 검사를 받는다**(§10 · `consult_agent/memo.py`). 쪽지는 화면 답변과
+    달리 되돌릴 수 없고, 검사를 따로 구현하면 두 벌이 곧 갈린다 — 한쪽만 관계 선언을 보고
+    한쪽만 상품 등록부를 보는 식으로. 그래서 검사는 여기 하나이고, 갈리는 것은 **걸렸을 때의
+    처분**뿐이다: 화면은 다시 쓰게 하고(compose), 쪽지는 보내지 않는다(폴백 없음).
+
+    덧붙일 표시(`appends`)는 돌려주지 않는다 — 그것은 답변을 «채우는» 처분이고, 쪽지에는
+    채우는 처분이 없다.
+    """
+    faults, _appends = _screen(answer, evidence, question, _known_products(),
+                               prompt_texts=prompt_texts)
+    return faults
+
+
+# ─────────────────────────────────────────────────────────────
 # Node. compose — 원장만으로 답을 만든다
 # ─────────────────────────────────────────────────────────────
 
 def compose(state: AgentState) -> dict[str, Any]:
     """모은 근거로 답을 만든다 — 도구 종류에 따라 방식이 갈리지 않는다.
 
-    한 번의 생성으로 답변 전체를 쓰고, 그 뒤에 코드가 세 가지를 집행한다.
+    한 번의 생성으로 답변 전체를 쓰고, 그 뒤에 코드가 세 가지를 집행한다(`_screen`).
       ① 원장 밖 수치가 있으면 생성문을 버린다(지어낸 값이므로 복구 불가).
       ② **데이터가 선언한 관계**를 어겼으면 생성문을 버린다 — 조건과 값을 잘못 짝지었거나
          행원들이 적어둔 알려진 오답을 그대로 말한 경우다(relations.py).
       ③ 관계 선언이 없는 카드는 아직 값 스팬 강제로 지킨다. 어기면 역시 버린다.
       ④ 필수 표시가 빠졌으면 **그 표시만** 덧붙인다(덜 갖춰진 것이므로 모자란 것을 채운다).
     통과한 답변은 근거 안에서만 나온 것이고, 그 안에서 문장은 자유롭다.
+
+    ①~③ 에 걸리면 **무엇이 걸렸는지를 실어 한 번 다시 쓰게 한다**(COMPOSE_RETRIES). 그래도
+    걸리면 근거 원문이 답이다 — 틀린 문장이 나가는 선택지는 없다(§6).
     """
     evidence: list[tools.Evidence] = list(state.get("evidence") or [])
     if not evidence:
-        # 재료가 없는 이유가 둘이다. 찾아봤는데 없는 것(NO_EVIDENCE)과 LLM 이 깨져 찾아보지도
-        # 못한 것(LLM_FAILED). 둘을 같은 문장으로 답하면 있는 자료를 없다고 말하게 된다.
+        # 재료가 없는 이유가 셋이다. 찾아봤는데 없는 것(NO_EVIDENCE) · LLM 이 깨져 찾아보지도
+        # 못한 것(LLM_FAILED) · **도구가 죽어 읽지 못한 것**(TOOL_FAILED). 뒤의 둘을 앞으로
+        # 말하면 있는 자료를 없다고 답하게 된다 — 셋을 갈라 답한다.
         failure = state.get("llm_error")
-        return {"answer": LLM_FAILED.format(reason=failure) if failure else _no_evidence(state),
-                "sources": []}
+        if failure:
+            answer = LLM_FAILED.format(reason=failure)
+        elif _of(_steps(state), FAILED):
+            answer = _tool_failed(state)
+        else:
+            answer = _no_evidence(state)
+        return {"answer": answer, "sources": []}
 
     # 「하지 말 것」 — 고객 화면이 열려 있으면 **코드가** 그 고객 상태를 읽어 붙인다.
     # LLM 이 customer 도구를 불렀는지에 의존하지 않는다(§8). 지식베이스에 금지 문장이
@@ -421,13 +667,61 @@ def compose(state: AgentState) -> dict[str, Any]:
     # 답변 원문이 없어서(state.Turn) LLM 은 자기가 방금 무엇을 나열했는지 볼 수 없다.
     if _repeated_materials(state, evidence):
         prompt = f"{prompt}\n{REPEAT_BLOCK}"
+    # 승낙 턴 — 이번 턴의 질문은 "네" 한 마디다. 그 말에는 무엇을 쓰라는 것인지가 없어서,
+    # 알려주지 않으면 LLM 은 <자료> 를 직전 턴의 질문에 대고 재고 「그 자료는 없어요」로
+    # 답한다(ACCEPTED_BLOCK 주석의 실측). 무엇을 보여주기로 했는지는 제안한 턴이 정했고,
+    # 그것을 아는 것은 코드다 — 이번 턴의 말에서 다시 추측하지 않는다(§10).
+    if state.get("accepted"):
+        prompt = f"{prompt}\n{ACCEPTED_BLOCK.format(label=state['accepted'])}"
+    # 판정이 «전제를 밝히고 답하라»(assume)·«핵심 대상이 자료에 없다»(none)로 끝났으면 그
+    # 블록을 얹는다(§5 · nodes/clarify.py). 판정과 작성은 동시에 도므로 이 값이 붙는 것은
+    # **다시 쓰는 호출**뿐이다(nodes/answer.py) — 첫 호출은 판정 결과를 볼 수 없다.
+    # 블록 안의 문장은 판정 LLM 이 썼지만 **원장 밖 수치가 없음이 이미 확인된 것**이라
+    # (clarify._quotable) 인용 허용을 넓히지 않아도 된다.
+    if state.get("judge_note"):
+        prompt = f"{prompt}\n{state['judge_note']}"
     note = guard.prompt_note(guards, alts)
     if note:
         prompt = f"{prompt}\n\n{note}"
+    # 위에서 프롬프트에 실어 보낸 것 중 **원장 밖인 것**. 인용해도 되는 값이어야 한다
+    # (`_screen` 머리말). 원장에서 온 블록(재료·필수 스팬)은 이미 원장이라 넣지 않는다.
+    injected = [note, state.get("accepted") or ""]
 
     progress.emit("모은 근거로 답변을 작성하고 있어요")
+    known = _known_products()
+    appends: list[str] = []
     try:
-        answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM).strip()
+        # 관측 span — 작성과 게이트를 한 묶음으로 세운다. 「몇 번 다시 썼나 · 무엇에
+        # 걸렸나」는 점수로도 나가 대시보드가 집계한다(observability.score).
+        with observability.span("compose", metadata={"evidence": len(evidence)}) as sp:
+            answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM,
+                              name="consult.compose").strip()
+            faults: list[str] = []
+            for attempt in range(COMPOSE_RETRIES + 1):
+                if not answer:
+                    break
+                # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
+                # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
+                progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
+                faults, appends = _screen(answer, evidence, state["question"], known,
+                                          prompt_texts=injected)
+                if not faults:
+                    break
+                answer = ""
+                if attempt >= COMPOSE_RETRIES:
+                    break
+                # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
+                progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
+                retry = prompt + COMPOSE_RETRY_BLOCK.format(
+                    faults="\n".join(f"- {f}" for f in faults[:FAULTS_SHOWN]))
+                answer = generate(retry, max_tokens=1500, system=COMPOSE_SYSTEM,
+                                  name="consult.compose.retry").strip()
+            sp.update(output=answer or None, retries=attempt, faults=faults[:FAULTS_SHOWN])
+            # 「지난 30번 중 몇 번이 게이트에 걸렸나」는 트레이스를 한 건씩 열어서는 못
+            # 센다. 값은 전부 코드가 아는 사실이다 — LLM 이 자기 답을 채점하지 않는다.
+            observability.score("compose_passed", bool(answer),
+                                comment="; ".join(faults[:FAULTS_SHOWN]) or None)
+            observability.score("compose_retries", attempt)
     except LLMError as exc:
         # 재료는 모았는데 문장을 못 쓴 것이다. 아래 폴백(근거 원문 그대로 싣기)으로 흘려보내면
         # 완성된 답변처럼 보이는 카드 덩어리가 나간다 — LLM 이 죽었을 때 다른 단계가 내는
@@ -438,38 +732,6 @@ def compose(state: AgentState) -> dict[str, Any]:
         return {"answer": LLM_FAILED.format(reason=f"{type(exc).__name__}: {exc}"),
                 "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}
-
-    if answer:
-        # 여기부터가 이 에이전트가 느린 이유의 절반이다 — 그 사실을 화면이 말하게 한다.
-        # 지연이 «생각이 느린 것»이 아니라 «검증을 하는 것»으로 보여야 신뢰의 근거가 된다.
-        progress.emit("답변이 근거를 벗어나지 않았는지 검증하고 있어요")
-        # 질문은 «되받아 말해도 되는 값»이다 — 직원이 방금 말한 수치를 옮겨 적은 것을
-        # 지어낸 값으로 보면 맞는 답이 버려진다(verify.verify_texts 의 echoable 머리말).
-        ok, _bad = verify_texts(answer, tools.ledger_texts(evidence),
-                                known_products=_known_products(),
-                                echoable=[state["question"]])
-        if not ok:
-            answer = ""
-
-    # 관계 위반 — 값–조건 오짝 · 알려진 오답. 원장 밖 수치 검사가 못 잡는 자리다.
-    if answer:
-        broken = relations.check(answer, tools.ledger_related(evidence))
-        if broken:
-            answer = ""
-
-    appends: list[str] = []
-    if answer:
-        verdicts = [_span_verdict(e, answer) for e in evidence]
-        if any(v == DISCARD for v, _ in verdicts):
-            answer = ""
-        else:
-            # 채우는 것은 **빠진 표시**다. 예전에는 근거 블록을 통째로 덧붙여서, ⚠ 한 줄이
-            # 모자란 답변 아래에 카드 전문 1,000자가 붙었다 — 정작 그 한 줄이 묻힌다.
-            for _found, (verdict, gaps) in zip(evidence, verdicts):
-                if verdict != APPEND:
-                    continue
-                appends += [f"· {label}\n" + "\n".join(f"  {m}" for m in missing)
-                            for label, missing in gaps]
 
     if answer:
         parts = [answer] + ([MISSING_NOTICES, *appends] if appends else [])

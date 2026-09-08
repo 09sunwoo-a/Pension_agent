@@ -20,3 +20,11 @@ venv/
 
 # 원본 PDF·스캔본은 대외비 — 추출 결과(knowledge/data/*.json)만 버전관리
 sources/
+
+# 대화형 에이전트 평가 신고 로그 (app.py 💬 탭)
+**/chat_feedback.csv
+
+# 미리 만들어 둔 브리핑 (scripts/prebuild_briefings.py — 리허설을 빨리 시작하기 위한 것).
+# **커밋하지 않는다**: 브리핑은 LLM 이 쓴 산문이라, 저장소에 넣으면 사람이 검토하지 않은
+# 문장이 자산으로 굳는다. 지우고 다시 만들면 그만인 파생물이다(briefing_store.py 머리말).
+briefing_cache/

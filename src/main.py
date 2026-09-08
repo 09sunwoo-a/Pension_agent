@@ -52,7 +52,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from pension_agent import llm
+from pension_agent import env, llm
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import render
 
@@ -142,6 +142,9 @@ def health() -> dict[str, Any]:
     """
     return {
         "status": "ok",
+        # 어느 .env 가 읽혔나 — 프로파일이 셋이라(bank·local·aiden) 이것이 진단의 첫 질문이다.
+        # `python -m pension_agent.env` 가 터미널에 찍는 것과 같은 내용이다.
+        "env": env.active(),
         "llm": {
             "provider": llm.PROVIDER,
             "available": llm.available(),

@@ -21,6 +21,10 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 os.environ.setdefault("ANTHROPIC_API_KEY", "dummy")  # llm.available() 만 통과시킨다
+# 브리핑 파일 저장소(briefing_cache/)를 끈다 — `scripts.prebuild_briefings` 를 돌린 체크아웃에서는
+# 스텁 LLM 으로 만든 propose() 산출 대신 저장분이 읽혀 «폴백·거부» 검사 두 건이 갈린다
+# (test_engine · test_consult_agent 와 같은 격리). 스텁을 재는 스위트는 파일 저장소를 보지 않는다.
+os.environ.setdefault("PENSION_BRIEFING_CACHE", "0")
 
 from pension_agent.strategy_agent import agent as A
 from pension_agent.strategy_agent import engine
@@ -250,7 +254,128 @@ def check_recommend_rejects_fabricated_number() -> None:
     _restore_llm()
 
 
+def check_outreach_prompt_has_no_condition_codes() -> None:
+    """⑨ 선별 프롬프트에 요건 코드(isa·tax·add)가 실리지 않는다.
+
+    회귀 대상(2026-09-03 확정본 E1 실측): 성립 요건을 `코드:이름` 그대로, 후보를 `conds`
+    코드 목록 그대로 프롬프트에 실었더니 추천 사유가 「세액공제 활용 가능(tax)과 추가입금
+    여력 보유(add) 요건」이라 나왔고, 그 사유가 대화 재료로 실려 답변까지 그대로 나갔다.
+    """
+    import re
+
+    p = _BY_NAME.get("김서연")
+    if p is None:
+        check(False, "⑨ 선별 프롬프트: 전제조건 불충족 — 김서연 없음")
+        return
+    facts = engine.prepare(p)
+    pools = (facts.get("pools") or {}).get("outreach") or {}
+    candidates = pools.get("event") or []
+    if len(candidates) < 2 or not any(c.get("conds") for c in candidates):
+        check(False, "⑨ 선별 프롬프트: 전제조건 불충족 — 요건이 걸린 이벤트 후보 2건 이상 필요")
+        return
+    seen: list[str] = []
+
+    def _capture(prompt, *a, **k):
+        seen.append(prompt)
+        return json.dumps({"pick": 0, "reason": "세액공제 여력이 있는 고객이에요."}, ensure_ascii=False)
+
+    llm.available = lambda: True
+    llm.generate = _capture
+    A.llm = llm
+    A._select_outreach(p, facts, "outreach_event", "이벤트", candidates)
+    _restore_llm()
+
+    code = re.compile(r"(?<![A-Za-z])(isa|tax|add|dep|nod|idl|mat|mis|pen|dor|hlt|nch|out)(?![A-Za-z])")
+    hit = bool(seen) and not code.search(seen[0]) and "성립 요건" in seen[0]
+    check(hit, "⑨ _select_outreach(): 프롬프트의 성립 요건·후보 목록에 요건 코드가 없다",
+          detail=(code.search(seen[0]).group(0) if seen and code.search(seen[0]) else "프롬프트 없음"))
+
+
+def check_shown_state_is_quotable() -> None:
+    """프롬프트가 **보여준** 고객 상태 값을 생성문이 인용할 수 있다.
+
+    회귀 대상(2026-09-07 실측 · 고객 188406-7352194): 선별·생성 프롬프트는 고객 상태를
+    `_customer_state` 로 보여주는데 검증기가 펴는 것은 `facts["customer"]` 다. 두 스냅샷이
+    같지 않아서 — 포트폴리오 4칸·투자기간·운용이력은 앞쪽에만 있다 — **코드가 보여준
+    숫자를 LLM 이 옮겨 적으면 코드가 그 문장을 버렸다.** ⑨ 추천 사유가 「생성 사유가 재료를
+    벗어남」으로 반려됐고, 대화 쪽은 그 반려 사실을 원장으로 받아 「구체적인 생성 사유는
+    확인되지 않아요」로 답했다(리허설 케이스 11).
+
+    살아남은 판은 LLM 이 우연히 13.7 을 「13개월 이상」으로 반올림한 것이었다 — 통과가
+    운에 달려 있었다. 그래서 «반려되던 문장이 이제 통과한다»만 재면 부족하고, **넓힌 것이
+    보여준 값에서 멈추는지**를 함께 잰다. 지어낸 값·계산한 값까지 열리면 이 수정은 §6 이
+    막으려는 것을 정확히 뚫는다.
+    """
+    p = _BY_NAME.get("송도윤")
+    if p is None:
+        check(False, "보여준 값 인용: 전제조건 불충족 — 송도윤 없음")
+        return
+    facts = engine.prepare(p)
+    extra = A._state_blob(p)
+
+    # 프롬프트가 실제로 보여주는 값에서 그대로 뽑는다 — 상수로 적으면 더미가 바뀌었을 때
+    # 테스트만 통과하고 회귀는 되살아난다.
+    state = A._customer_state(p)
+    shown = f"최종 운용변경 이후 {p.nchM}개월이 지났고 투자기간은 {state['투자기간']}이에요."
+    ok, bad = engine.verify(shown, facts, extra=extra)
+    check(ok, "프롬프트가 보여준 고객 상태 값을 생성문이 인용할 수 있다", detail=str(bad))
+
+    port = state["포트폴리오"]
+    label, share = next(iter(port.items()))
+    ok, bad = engine.verify(f"{label} 비중이 {share} 입니다.", facts, extra=extra)
+    check(ok, "포트폴리오 칸의 비중도 인용할 수 있다(한 겹 더 들어가 있다)", detail=str(bad))
+
+    # 넓힌 폭은 «보여준 값» 하나뿐이다.
+    ok, _ = engine.verify("예상 수익률은 연 7.5% 입니다.", facts, extra=extra)
+    check(not ok, "보여주지 않은 값은 여전히 막힌다(지어낸 수치)")
+
+    ok, _ = engine.verify(f"{p.nchM}개월 중 9개월은 방치였어요.", facts, extra=extra)
+    check(not ok, "보여준 값으로 **계산한** 값도 여전히 막힌다")
+
+
+def check_owned_products_are_quotable() -> None:
+    """이 고객이 **가진** 상품 이름을 생성문이 말할 수 있다.
+
+    회귀 대상(2026-09-07 실측 · 송도윤): briefing 의 «보유상품»·«동연령대비교» 칸이 상품
+    이름을 프롬프트로 내보내는데, 검증기의 허용 상품 집합은 `items[*].products`(=이번에
+    권할 상품)만 봤다. 그래서 ② 선정 사유의 「판매중단 상품인 KB 퇴직연금 배당 (주식)
+    8,000만원을 보유하고 계세요」와 ④ 해석이 «상품명 미등록»으로 폐기됐다 — **화면이 이미
+    띄운 사실을 그대로 옮긴 문장**이다.
+
+    허가는 «이 고객의 원장에 이름이 있는 것»까지다. 상품명 상한이 살아 있는지를 같이
+    잰다 — 지어낸 이름과, 다른 고객이 가진 이름은 여전히 막혀야 한다. 그 둘까지 열리면
+    이 수정은 닫힌 목록이 막으려던 순환을 그대로 되살린다.
+    """
+    p = _BY_NAME.get("송도윤")
+    if p is None:
+        check(False, "보유 상품 인용: 전제조건 불충족 — 송도윤 없음")
+        return
+    facts = engine.prepare(p)
+    owned = facts.get("owned_products") or []
+    mine = next((n for n in owned if n.startswith("KB ")), "")
+    if not mine:
+        check(False, "보유 상품 인용: 전제조건 불충족 — 검사기가 보는 'KB ' 이름이 없다")
+        return
+
+    ok, bad = engine.verify(f"판매중단 상품인 {mine} 을 보유하고 계세요.", facts)
+    check(ok, f"이 고객이 가진 상품 이름을 말할 수 있다 ({mine})", detail=str(bad))
+
+    ok, _ = engine.verify("KB 무지개 성장 펀드를 권해보세요.", facts)
+    check(not ok, "지어낸 상품 이름은 여전히 막힌다")
+
+    # 다른 고객의 보유 상품 — facts 는 고객 한 명당 하나이므로 넘어오면 안 된다.
+    others = {n for q in PERSONAS if q.nm != p.nm
+              for n in (engine.prepare(q).get("owned_products") or [])}
+    alien = next((n for n in sorted(others - set(owned)) if n.startswith("KB ")), "")
+    if alien:
+        ok, _ = engine.verify(f"{alien} 를 보유 중이세요.", facts)
+        check(not ok, f"다른 고객이 가진 상품 이름은 막힌다 ({alien})")
+
+
 def main() -> int:
+    check_outreach_prompt_has_no_condition_codes()
+    check_shown_state_is_quotable()
+    check_owned_products_are_quotable()
     check_order_mismatch_fallback()
     check_sentence_verify_rejects_fabrication()
     check_why_customer_accepts_grounded()

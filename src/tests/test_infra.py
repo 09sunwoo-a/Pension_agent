@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -78,6 +79,10 @@ check("open_lms_screen" in tools.TOOL_REGISTRY,
       "tools.TOOL_REGISTRY: open_lms_screen 등록됨")
 check("send_lms" not in tools.TOOL_REGISTRY,
       "tools.TOOL_REGISTRY: 발송 수행 도구는 남아 있지 않음 (§10 — 화면만 연다)")
+# 쪽지는 예외다 — 고객이 아니라 직원 본인에게 가는 행내 메모라 대외 행위가 아니고,
+# register_consult_note 와 같은 «내부 기록» 부류다. 승낙 뒤에만 불린다(act.confirm_action).
+check("send_memo" in tools.TOOL_REGISTRY,
+      "tools.TOOL_REGISTRY: send_memo 등록됨 (직원 본인 쪽지 — 대외 발송이 아니다)")
 
 _clean_session_data()
 
@@ -108,6 +113,105 @@ import pension_agent  # noqa: E402
 check(not any("sys.path" in (f.read_text(encoding="utf-8"))
               for f in Path(pension_agent.__file__).parent.rglob("*.py")),
       "패키지 안에 sys.path 조작이 남아 있지 않다")
+
+# 에이전트 사이의 의존은 한 방향이다 — knowledge ← strategy_agent ← consult_agent (루트 CLAUDE.md
+# 「구조 규칙」). 예전에는 strategy_agent.support 가 consult_agent.kb 를 거꾸로 임포트했고, 그
+# 간선 하나 때문에 공용 모듈에 순환 회피용 지연 임포트가 늘었다. 공용 카드 지식베이스를
+# knowledge/kb.py 로 옮겨 없앤 간선이 다시 생기지 않게 여기서 고정한다.
+_PKG = Path(pension_agent.__file__).parent
+_ONE_WAY = (*_PKG.glob("*.py"), *_PKG.joinpath("knowledge").rglob("*.py"),
+            *_PKG.joinpath("market").rglob("*.py"), *_PKG.joinpath("strategy_agent").rglob("*.py"))
+_back_edges = sorted(
+    str(f.relative_to(_PKG)) for f in _ONE_WAY
+    if any(line.lstrip().startswith(("from pension_agent.consult_agent", "import pension_agent.consult_agent"))
+           for line in f.read_text(encoding="utf-8").splitlines()))
+check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임포트하지 않는다", str(_back_edges))
+
+
+# ─────────────────────────────────────────────────────────────
+# env — 실행 환경(프로파일) 선택 · 값의 우선순위 (env.py 머리말 ①~④)
+#
+# 환경이 셋(행내·로컬·aiden)이라 파일을 환경마다 하나씩 두고 env.py 가 고른다. 고정하는 것:
+#   · 실제 환경변수 PENSION_ENV > .env 의 PENSION_ENV= 줄 > 프로파일 파일이 하나뿐이면 그것
+#   · 여럿 있고 지정이 없으면 고르지 않는다(짐작하지 않는다)
+#   · 값은 실제 환경변수 > .env.<프로파일> > .env — 프로파일이 공통을 덮는다
+# ─────────────────────────────────────────────────────────────
+
+import os  # noqa: E402
+import tempfile  # noqa: E402
+
+from pension_agent import env as _env  # noqa: E402
+
+_ENV_KEYS = ("PENSION_ENV", "LLM_PROVIDER", "LLM_MODEL", "LLM_DOTENV", "PENSION_TEST_MARK")
+_saved_profile_env = {k: os.environ.get(k) for k in _ENV_KEYS}
+
+
+def _clear_env():
+    for k in _ENV_KEYS:
+        os.environ.pop(k, None)
+
+
+try:
+    with tempfile.TemporaryDirectory() as _td:
+        _root = Path(_td)
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] is None and _env.active()["files"] == [],
+              "env: 파일이 하나도 없으면 프로파일 없음·읽은 파일 없음", str(_env.active()))
+
+        # ③ 프로파일 파일이 하나뿐이면 지정 없이 그것이 잡힌다 (행내 머신에 .env.bank 만 두는 경우)
+        (_root / ".env.bank").write_text("LLM_PROVIDER=genai\nLLM_MODEL=bank-model\n", encoding="utf-8")
+        (_root / ".env.bank.example").write_text("LLM_PROVIDER=xxx\n", encoding="utf-8")   # 견본은 세지 않는다
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] == "bank" and os.environ.get("LLM_PROVIDER") == "genai",
+              "env: 프로파일 파일이 하나뿐이면 그것이 잡힌다(견본 .example 은 세지 않는다)", str(_env.active()))
+        check(os.environ.get("PENSION_ENV") == "bank", "env: 잡힌 프로파일 이름을 PENSION_ENV 로 남긴다")
+
+        # 여럿 있고 지정이 없으면 고르지 않는다
+        (_root / ".env.local").write_text("LLM_PROVIDER=anthropic\n", encoding="utf-8")
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] is None and "LLM_PROVIDER" not in os.environ,
+              "env: 프로파일 파일이 여럿인데 지정이 없으면 고르지 않는다", _env.active()["how"])
+
+        # ② .env 의 PENSION_ENV= 줄이 기본을 정한다. 프로파일 값이 공통 값을 덮는다.
+        (_root / ".env").write_text("PENSION_ENV=local\nLLM_MODEL=common-model\nPENSION_TEST_MARK=shared\n",
+                                    encoding="utf-8")
+        (_root / ".env.local").write_text("LLM_PROVIDER=anthropic\nLLM_MODEL=local-model\n", encoding="utf-8")
+        _clear_env()
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] == "local" and os.environ.get("LLM_PROVIDER") == "anthropic",
+              "env: .env 의 PENSION_ENV= 줄로 기본 프로파일을 고정한다", str(_env.active()))
+        check(os.environ.get("LLM_MODEL") == "local-model", "env: 같은 키는 프로파일 파일이 공통 파일을 덮는다",
+              os.environ.get("LLM_MODEL"))
+        check(os.environ.get("PENSION_TEST_MARK") == "shared", "env: 공통 파일의 나머지 값은 그대로 들어온다")
+
+        # ① 실제 환경변수 PENSION_ENV 가 .env 의 줄보다 앞선다 (잠깐 바꿔 돌릴 때)
+        _clear_env()
+        os.environ["PENSION_ENV"] = "bank"
+        _env.load(force=True, root=_root)
+        check(_env.active()["profile"] == "bank" and os.environ.get("LLM_MODEL") == "bank-model",
+              "env: 실제 환경변수 PENSION_ENV 가 .env 의 줄보다 앞선다", str(_env.active()))
+
+        # 실제 환경변수는 어느 파일도 덮지 못한다
+        _clear_env()
+        os.environ["LLM_MODEL"] = "from-shell"
+        _env.load(force=True, root=_root)
+        check(os.environ.get("LLM_MODEL") == "from-shell", "env: 실제 환경변수는 파일이 덮지 못한다")
+
+        # 지정한 프로파일 파일이 없으면 그 사실을 남긴다(조용히 넘어가지 않는다)
+        _clear_env()
+        os.environ["PENSION_ENV"] = "aiden"
+        _env.load(force=True, root=_root)
+        check("파일이 없다" in _env.active()["how"], "env: 지정한 프로파일 파일이 없으면 그 사실을 남긴다",
+              _env.active()["how"])
+finally:
+    _clear_env()
+    for _k, _v in _saved_profile_env.items():
+        if _v is not None:
+            os.environ[_k] = _v
+    _env.load(force=True)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -404,17 +508,24 @@ finally:
 
 
 # ─────────────────────────────────────────────────────────────
-# llm — 429(속도 제한) 게이트
+# llm — 429(속도 제한)·5xx(서버 오류) 재시도
 #
-# 행내 게이트웨이가 몰린 호출(브리핑 9~11연쇄·앱 기동 선생성)에 429 를 냈고 턴이 통째로
-# 죽었다. 방어는 세 겹이고 셋 다 여기서 본다:
-#   ① 재시도    — 429 두 번 뒤 성공하는 서버를 흉내 낸다. Retry-After 를 지키는가.
-#                  다른 HTTP 에러(500)까지 재시도해 진단을 늦추지는 않는가.
-#   ② 동시성    — 동시에 나가는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
-#   ③ 적응형 감속 — 한 스레드가 429 를 맞으면 **아직 안 맞은 스레드도** 쉬는가.
-#                  맞은 쪽만 쉬면 나머지가 그 틈을 메워 압력이 안 준다.
-# 그리고 x-client-user 가 실제로 헤더에 실리는가 — 전부 "anonymous" 로 나가면 쿼터가
-# 한 버킷에 몰려 429 를 자초한다.
+# 행내 게이트웨이가 몰린 호출(브리핑 11연쇄·앱 기동 선생성)에 429 를 냈고, 재시도가
+# 없어서 턴이 통째로 죽었다. 5xx 는 예전에 재시도 대상이 아니었는데(「기다려도 안
+# 풀린다」는 전제였다) 실측이 그 전제를 뒤집었다 — gemma 리허설 한 블록의 11턴 중
+# 10턴이 500 으로 죽었고 같은 프롬프트가 재시도에서 200 이었다.
+#
+# 재시도가 실제로 도는지, Retry-After 를 기다리는지, **요청이 잘못된 에러(4xx)는
+# 재시도하지 않는지**를 본다. 마지막 것이 요건인 이유는 401·404 를 반복해 던지면
+# 결과는 그대로인 채 진단만 늦어지기 때문이다.
+#
+# 재시도는 이미 맞은 뒤의 처방이라, 걸리지 않게 하는 처방이 함께 있다(llm 「호출 게이트」).
+# 그쪽도 여기서 본다:
+#   ② 동시성      — 동시에 나가는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
+#   ③ 적응형 감속 — 한 스레드가 맞으면 **아직 안 맞은 스레드도** 쉬는가. 맞은 쪽만 쉬면
+#                   나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다.
+# 그리고 x-client-user 가 실제로 헤더에 실리는가 — 전부 한 값으로 나가면 쿼터가 한 버킷에
+# 몰려 429 를 자초한다.
 # ─────────────────────────────────────────────────────────────
 
 import io
@@ -430,13 +541,13 @@ from pension_agent import llm as _llm
 _saved_llm = (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
               _llm.urllib.request.urlopen, _llm.MIN_INTERVAL)
 _llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY = "genai", "http://fake", "k"
-# 간격 제한은 여기서 끈다 — 재시도 대기와 섞이면 무엇 때문에 잤는지 갈리지 않는다.
-# 간격·동시성은 아래 ②③ 에서 따로 본다.
+# 간격 제한은 재시도 검사 동안 끈다 — 재시도 대기와 섞이면 무엇 때문에 잤는지 갈리지
+# 않는다. 간격·동시성 자체는 아래 ②③ 에서 따로 본다.
 _llm.MIN_INTERVAL = 0.0
 _llm._next_free = 0.0
 _sleeps: list[float] = []
-# _llm.time 은 stdlib time 모듈 그 자체다 — 여기에 스텁을 꽂으면 이 테스트 파일의
-# time.sleep 도 같이 바뀐다. 진짜로 재워야 하는 곳(동시성 검사)을 위해 원본을 잡아 둔다.
+# _llm.time 은 stdlib time 모듈 그 자체다 — 여기에 스텁을 꽂으면 이 파일의 time.sleep 도
+# 같이 바뀐다. 진짜로 재워야 하는 곳(동시성 검사)을 위해 원본을 잡아 둔다.
 _real_sleep = _llm.time.sleep
 _llm.time.sleep = _sleeps.append
 
@@ -486,32 +597,46 @@ try:
     check(_raised is not None and "429" in _raised,
           "llm: 계속 429 면 상한에서 멈추고 LLMError 로 올린다", str(_raised))
 
+    # 5xx 는 재시도한다 — 두 번 죽고 세 번째에 살아나는 서버를 흉내 낸다.
+    calls["n"], _sleeps[:] = 0, []
+
+    def _urlopen_500_twice(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise _http_error(500)
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_500_twice
+    out = _llm.generate("q")
+    check(out == "답" and calls["n"] == 3, "llm: 500 두 번 뒤 재시도로 성공한다",
+          f"calls={calls['n']} out={out!r}")
+
+    # 계속 5xx 면 상한에서 멈추고, 원인이 «속도 제한»이 아니라 «서버 오류»로 나간다 —
+    # 직원이 할 일이 다르다(쿼터를 본다 / 잠시 후 다시 시도한다).
+    calls["n"], _sleeps[:] = 0, []
+    _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+        _http_error(503))
+    try:
+        _llm.generate("q")
+        _raised = None
+    except _llm.LLMError as exc:
+        _raised = str(exc)
+    check(_raised is not None and "503" in _raised and "서버 오류" in _raised,
+          "llm: 계속 5xx 면 상한에서 멈추고 서버 오류로 말한다", str(_raised))
+
+    # 요청이 잘못된 에러는 재시도하지 않는다 — 반복해도 결과가 같고 진단만 늦어진다.
     calls["n"] = 0
 
-    def _urlopen_500(req, timeout=None):
+    def _urlopen_401(req, timeout=None):
         calls["n"] += 1
-        raise _http_error(500)
+        raise _http_error(401)
 
-    _llm.urllib.request.urlopen = _urlopen_500
+    _llm.urllib.request.urlopen = _urlopen_401
     try:
         _llm.generate("q")
     except _llm.LLMError:
         pass
-    check(calls["n"] == 1, "llm: 429 아닌 HTTP 에러는 재시도하지 않는다", f"calls={calls['n']}")
-
-    # 503(게이트웨이 과부하)은 기다리면 풀린다 — 429 와 같이 재시도한다.
-    calls["n"], _sleeps[:] = 0, []
-    _llm._next_free = 0.0
-
-    def _urlopen_503_once(req, timeout=None):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise _http_error(503)
-        return _FakeResp()
-
-    _llm.urllib.request.urlopen = _urlopen_503_once
-    check(_llm.generate("q") == "답" and calls["n"] == 2,
-          "llm: 503(과부하)도 재시도한다", f"calls={calls['n']}")
+    check(calls["n"] == 1, "llm: 4xx(요청이 잘못된 에러)는 재시도하지 않는다", f"calls={calls['n']}")
 
     # x-client-user — 호출부가 준 주체가 실제 헤더로 나가는가.
     _llm._next_free = 0.0
@@ -556,17 +681,187 @@ try:
           f"llm: 동시 호출이 상한({_llm.MAX_CONCURRENCY})을 넘지 않는다",
           f"관측 최대 {_inflight['max']}")
 
-    # ③ 적응형 감속 — 429 를 맞은 스레드가 아니라 **게이트 전체**가 밀리는가.
+    # ③ 적응형 감속 — 맞은 스레드가 아니라 **게이트 전체**가 밀리는가.
     _llm._next_free = 0.0
     _llm._slow_down(5.0)
     _pushed = _llm._next_free - _time.monotonic()
     check(4.0 < _pushed <= 5.0,
-          "llm: 429 를 맞으면 프로세스 전체의 다음 호출 시각이 밀린다", f"{_pushed:.2f}초")
+          "llm: 429·5xx 를 맞으면 프로세스 전체의 다음 호출 시각이 밀린다", f"{_pushed:.2f}초")
     _llm._next_free = 0.0
 finally:
     (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
      _llm.urllib.request.urlopen, _llm.MIN_INTERVAL) = _saved_llm
     _llm._next_free = 0.0
+
+
+# ─────────────────────────────────────────────────────────────
+# observability — Langfuse 관측
+#
+# 고정하는 것은 셋이다.
+#   ① 키가 없으면 통째로 꺼진다 — 테스트·시연이 키 없이 그대로 돈다.
+#   ② 켜지면 LLM 호출 한 건이 이벤트 한 건으로 나가고, 트레이스 안에서 부른 호출은
+#      같은 traceId 로 묶인다(브리핑 11연쇄·대화 4~7회를 되짚는 근거가 이 묶음이다).
+#   ③ 전송이 깨져도 LLM 호출은 성공한다 — 관측은 부산물이지 기능이 아니다.
+# ─────────────────────────────────────────────────────────────
+
+from pension_agent import observability as _obs  # noqa: E402
+
+_obs.reset()
+check(not _obs.enabled(), "observability: 키가 없으면 꺼져 있다")
+with _obs.trace("noop") as _null:
+    _null.update(output="버려진다")
+check(_obs.current_trace_id() is None, "observability: 꺼져 있으면 트레이스 id 도 없다")
+
+_saved_env = {k: os.environ.get(k) for k in
+              ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
+               "LANGFUSE_CAPTURE_CONTENT")}
+_saved_llm2 = (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.urllib.request.urlopen)
+_sent: list[dict] = []
+
+
+def _fake_urlopen(req, timeout=None):
+    """LLM 게이트웨이와 Langfuse 수집 API 를 URL 로 갈라 받는다.
+
+    둘 다 같은 `urllib.request.urlopen` 을 쓰므로(같은 모듈 객체) 한 자리에서 갈라야 한다.
+    """
+    if "langfuse" in req.full_url:
+        _sent.append(json.loads(req.data.decode("utf-8")))
+        return _FakeResp()
+    return _FakeResp()
+
+
+try:
+    os.environ.update({"LANGFUSE_PUBLIC_KEY": "pk-test", "LANGFUSE_SECRET_KEY": "sk-test",
+                       "LANGFUSE_HOST": "https://langfuse.invalid"})
+    os.environ.pop("LANGFUSE_CAPTURE_CONTENT", None)
+    _obs.reset()
+    _llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY = "genai", "http://fake", "k"
+    _llm.urllib.request.urlopen = _fake_urlopen
+
+    check(_obs.enabled(), "observability: 키가 있으면 켜진다")
+
+    with _obs.trace("test.turn", input="질문", session_id="sess-x") as _tr:
+        _inside = _obs.current_trace_id()
+        _llm.generate("q", name="test.call")
+        _tr.update(output="답")
+    check(_obs.flush(timeout=5.0), "observability: flush 가 큐를 비운다")
+
+    _events = [e for batch in _sent for e in batch["batch"]]
+    _gens = [e for e in _events if e["type"] == "generation-create"]
+    _traces = [e for e in _events if e["type"] == "trace-create"]
+    check(len(_gens) == 1, "observability: LLM 호출 한 건이 generation 한 건으로 나간다",
+          str(len(_gens)))
+    check(bool(_gens) and _gens[0]["body"]["traceId"] == _inside,
+          "observability: 트레이스 안의 호출은 그 트레이스에 묶인다")
+    check(bool(_gens) and _gens[0]["body"]["name"] == "test.call",
+          "observability: 호출부가 준 이름이 그대로 실린다")
+    check(bool(_gens) and _gens[0]["body"]["input"] == "q"
+          and _gens[0]["body"]["output"] == "답",
+          "observability: 프롬프트와 응답이 실린다")
+    check(bool(_traces) and all(t["body"]["id"] == _inside for t in _traces)
+          and any(t["body"].get("output") == "답" for t in _traces),
+          "observability: 트레이스가 열릴 때와 닫힐 때 같은 id 로 나간다")
+    check(all(t["body"].get("sessionId") == "sess-x" for t in _traces),
+          "observability: 상담 세션 id 가 여는·닫는 이벤트 양쪽에 실린다",
+          str([t["body"].get("sessionId") for t in _traces]))
+
+    # span 중첩 — 트레이스가 평면이 아니라 실행 구조를 닮은 트리가 된다
+    _sent.clear()
+    with _obs.trace("test.turn2") as _tr2:
+        with _obs.span("tool:fact", input="세액공제") as _sp:
+            _llm.generate("q", name="test.in_span")
+            _sp.update(output="카드 1건", found=True)
+        _obs.score("compose_passed", True)
+        _obs.score("retries", 2)
+        _obs.score("outcome", "answer")
+    _obs.flush(timeout=5.0)
+    _ev = [e for batch in _sent for e in batch["batch"]]
+    _span = next((e["body"] for e in _ev if e["type"] == "span-create"), None)
+    _gen2 = next((e["body"] for e in _ev if e["type"] == "generation-create"), None)
+    _scores = [e["body"] for e in _ev if e["type"] == "score-create"]
+    check(bool(_span) and _span["name"] == "tool:fact" and _span["output"] == "카드 1건",
+          "observability: span 이 이름과 결과를 싣는다", str(_span))
+    check(bool(_span) and _span["metadata"].get("found") is True,
+          "observability: span 에 얹은 값은 메타데이터로 실린다")
+    check(bool(_gen2) and _gen2.get("parentObservationId") == (_span or {}).get("id"),
+          "observability: span 안의 LLM 호출은 그 span 밑에 붙는다")
+    check(bool(_span) and _span["traceId"] == _tr2.id,
+          "observability: span 이 열려 있는 트레이스에 묶인다")
+    check({(s["name"], s["value"], s["dataType"]) for s in _scores} ==
+          {("compose_passed", 1, "BOOLEAN"), ("retries", 2, "NUMERIC"),
+           ("outcome", "answer", "CATEGORICAL")},
+          "observability: 점수가 bool·숫자·문자열별로 형을 갈라 나간다", str(_scores))
+    check(all(s["traceId"] == _tr2.id for s in _scores),
+          "observability: 점수가 그 트레이스에 붙는다")
+
+    # 고객 표기 — Users 목록이 user_id 문자열 하나만 보여주므로 이름을 거기 넣는다
+    _who = _obs.customer_ref("171203-4815062", "김서연", ["isa", "tax"])
+    check(_who["user_id"] == "김서연(171203-4815062)",
+          "observability: user_id 에 이름과 id 가 함께 실린다", str(_who["user_id"]))
+    check(_who["tags"] == ["고객:김서연", "요건:isa", "요건:tax"],
+          "observability: 고객 이름·성립 요건이 태그로 붙는다", str(_who["tags"]))
+    check(_who["metadata"] == {"customer_id": "171203-4815062", "customer": "김서연",
+                               "conditions": ["isa", "tax"]},
+          "observability: 같은 값이 메타데이터에도 실린다", str(_who["metadata"]))
+    check(_obs.customer_ref(None, None) == {"user_id": None, "metadata": {}, "tags": []},
+          "observability: 고객이 없으면 아무것도 붙지 않는다")
+
+    # 트레이스가 없으면 점수는 나가지 않는다 — 붙을 데가 없는 점수는 찾을 방법이 없다
+    _sent.clear()
+    _obs.score("orphan", 1)
+    _obs.flush(timeout=5.0)
+    check(not [e for batch in _sent for e in batch["batch"]],
+          "observability: 트레이스 밖 점수는 보내지 않는다")
+
+    # 본문 차단 — 개인정보를 외부로 내보내지 않는 스위치
+    _sent.clear()
+    os.environ["LANGFUSE_CAPTURE_CONTENT"] = "0"
+    _obs.reset()
+    _secret = "고객 홍길동의 잔액"
+    _llm.generate(_secret, name="test.masked")
+    _obs.flush(timeout=5.0)
+    _masked = [e for batch in _sent for e in batch["batch"] if e["type"] == "generation-create"]
+    # 그 스위치는 «개인정보를 내보내지 않는다»는 약속이다. 본문만 가리고 이름을 user_id·
+    # 태그로 내보내면 약속이 거짓이 된다 — id 만 남고 이름은 전부 빠져야 한다.
+    # 요건 코드는 이름이 아니지만 «그 고객의 상태»라 함께 가린다.
+    _masked_who = _obs.customer_ref("171203-4815062", "김서연", ["isa", "tax"])
+    check(_masked_who == {"user_id": "171203-4815062",
+                          "metadata": {"customer_id": "171203-4815062"}, "tags": []},
+          "observability: CAPTURE_CONTENT=0 이면 고객 이름·요건이 전부 빠진다",
+          str(_masked_who))
+
+    check(bool(_masked)
+          and _masked[0]["body"]["input"] == {"omitted": True, "chars": len(_secret)},
+          "observability: CAPTURE_CONTENT=0 이면 본문 대신 길이만 나간다",
+          str(_masked[0]["body"]["input"]) if _masked else "이벤트 없음")
+
+    # 전송이 깨져도 LLM 호출은 산다
+    os.environ.pop("LANGFUSE_CAPTURE_CONTENT", None)
+    _obs.reset()
+    _before = _obs.stats()["failed"]
+
+    def _urlopen_langfuse_down(req, timeout=None):
+        if "langfuse" in req.full_url:
+            raise _http_error(500)
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_langfuse_down
+    check(_llm.generate("q", name="test.down") == "답",
+          "observability: 관측 전송이 깨져도 LLM 호출은 성공한다")
+    _obs.flush(timeout=5.0)
+    check(_obs.stats()["failed"] > _before,
+          "observability: 전송 실패는 예외 대신 stats 에 쌓인다")
+    # 삼키되 침묵하지는 않는다 — 원인이 남아야 «전송이 깨졌다»와 «안 켜졌다»가 갈린다.
+    check("HTTP Error 500" in (_obs.last_error() or ""),
+          "observability: 실패 원인이 last_error 에 남는다", str(_obs.last_error()))
+finally:
+    for _k, _v in _saved_env.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+    _obs.reset()
+    (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.urllib.request.urlopen) = _saved_llm2
 
 
 # ─────────────────────────────────────────────────────────────
@@ -609,6 +904,210 @@ for _py in sorted(Path(".").rglob("*.py")):
                            if "*" in _PY311_ONLY.get(a.name.split(".")[0], ())]
 check(not _offenders, "3.11+ 전용 이름을 임포트하지 않는다 (로컬 3.10 호환)",
       "; ".join(_offenders))
+
+
+# ─────────────────────────────────────────────────────────────
+# 시연 대본의 판 이력 — tests/debug/scenarios.py
+#
+# 판은 첫 판에 변경을 접어서 만든다. 변경이 가리키는 라벨이 그 시점 판에 없으면 이력이
+# 조용히 거짓말을 하므로 `_apply` 가 예외를 낸다 — 여기서 **모든 판을 한 번 만들어** 그
+# 예외를 잡는다. 이 모듈은 langgraph 를 타지 않아 키·설치 없이 돈다.
+# ─────────────────────────────────────────────────────────────
+
+from tests.debug import scenarios as _SCEN  # noqa: E402 — 위 임포트 경계 검사 뒤에 온다
+
+_built: dict[str, tuple] = {}
+_build_error = ""
+try:
+    _built = {v.name: _SCEN.review_blocks(v.name) for v in _SCEN.REVIEW}
+except ValueError as exc:
+    _build_error = str(exc)
+check(not _build_error, "시연 대본: 모든 판이 만들어진다 (변경이 가리키는 라벨이 실재한다)",
+      _build_error)
+
+check(_SCEN.LATEST == _SCEN.REVIEW[-1].name, "시연 대본: 지금 판은 이력의 맨 끝이다")
+
+_dupes = []
+for _name, _blocks in _built.items():
+    _labels = [label for _, _, _, turns in _blocks for label, _ in turns]
+    if len(_labels) != len(set(_labels)):
+        _dupes.append(_name)
+check(not _dupes, "시연 대본: 판마다 턴 라벨이 유일하다 (변경이 라벨로 대상을 찾는다)",
+      " ".join(_dupes))
+
+_bad_edits = []
+for _v in _SCEN.REVIEW:
+    for _e in _v.edits:
+        if _e.op not in ("고침", "뺌", "더함"):
+            _bad_edits.append(f"{_v.name} {_e.label}: 모르는 op {_e.op}")
+        if _e.op in ("고침", "더함") and not _e.question:
+            _bad_edits.append(f"{_v.name} {_e.label}: 바꾼 질문이 비었다")
+        if _e.op == "더함" and not _e.after:
+            _bad_edits.append(f"{_v.name} {_e.label}: 넣을 자리(after)가 없다")
+        if not _e.why:
+            _bad_edits.append(f"{_v.name} {_e.label}: 왜 바꿨는지가 없다")
+check(not _bad_edits, "시연 대본: 변경마다 무엇을·왜 가 채워져 있다", " · ".join(_bad_edits))
+
+# 판이 실제로 갈라져 있어야 «이전 것과 비교»가 뜻을 갖는다 — 변경을 적고 질문은 그대로면
+# 이력만 늘어난다.
+_same = [v.name for v in _SCEN.REVIEW[1:]
+         if _built[v.name] == _built[_SCEN.REVIEW[_SCEN.REVIEW.index(v) - 1].name]]
+check(not _same, "시연 대본: 변경을 적은 판은 직전 판과 실제로 다르다", " ".join(_same))
+
+check(_SCEN.questions_of()["④"] == "고객이 '그 돈 그냥 예금으로 둬도 되지 않나요?' 하는데 뭐라고 하지?",
+      "시연 대본: 이수민 ④ 는 «예금으로» 반론이다 (v6)")
+
+# ─────────────────────────────────────────────────────────────
+# WorkB 쪽지 — 오늘의 타겟 고객 본문
+#
+# 고정하는 것은 «본문이 무엇을 말하는가»다. 문장을 LLM 이 쓰지 않으므로 같은 입력이면 같은
+# 글이 나와야 하고, 자를 때도 값이 반쪽으로 남지 않아야 한다(보내고 나면 못 되돌린다).
+# ─────────────────────────────────────────────────────────────
+
+from pension_agent import workb  # noqa: E402
+from pension_agent.strategy_agent import customer as _customer  # noqa: E402
+from pension_agent.strategy_agent.target_list import today_targets  # noqa: E402
+
+_targets = today_targets()
+check(bool(_targets), "target_list: 오늘의 타겟 고객이 산출된다", str(len(_targets)))
+check(all(t.conds for t in _targets),
+      "target_list: 요건이 하나도 없는 고객은 목록에 오르지 않는다")
+check([t.rank for t in _targets] == sorted(t.rank for t in _targets),
+      "target_list: PRIO → 요건수 → id 순으로 정렬된다(결정론)")
+check(all(c in _customer.CONDS for t in _targets for c in t.conds),
+      "target_list: 요건 코드가 customer.CONDS 안에서만 나온다 — 새 판정을 만들지 않는다")
+
+# 형식 둘(텍스트·HTML)은 **같은 사실을 말해야 한다** — 표로 바꾸면서 정보가 빠지면
+# 직원이 보는 목록이 형식에 따라 달라진다.
+# 잘라내기 상한은 형식마다 다르게 잡는다 — HTML 은 표 뼈대(머리·머리행·꼬리)만 700자를
+# 넘어서, 텍스트 기준 상한을 그대로 쓰면 «한 명은 담는다» 하한에 걸려 상한을 넘게 된다.
+for _fmt, _cap in (("text", 700), ("html", 1800)):
+    _n = workb.daily_targets_note(fmt=_fmt)
+    check(_n.body == workb.daily_targets_note(fmt=_fmt).body,
+          f"workb[{_fmt}]: 같은 입력이면 같은 본문 (LLM 을 타지 않는다)")
+    check(_n.count == len(_targets) and not _n.truncated,
+          f"workb[{_fmt}]: 기본 상한에서는 전원이 실린다", f"{_n.shown}/{_n.count}")
+    check(_customer.AS_OF.isoformat() in _n.body,
+          f"workb[{_fmt}]: 원장 기준일이 본문에 남는다 — 평가금액이 오늘 값으로 읽히지 않게")
+    check(all(t.profile.nm in _n.body for t in _targets),
+          f"workb[{_fmt}]: 목록에 오른 고객이 본문에서 빠지지 않는다")
+    check(all(t.profile.id not in _n.body for t in _targets),
+          f"workb[{_fmt}]: 고객 id 원문이 본문에 실리지 않는다 (MASK_ID 기본값)")
+    _cb, _cs = workb.RENDERERS[_fmt](_targets, max_chars=_cap)
+    check(0 < _cs < len(_targets) and len(_cb) <= _cap,
+          f"workb[{_fmt}]: 상한을 넘으면 고객 수가 줄고 본문이 상한 안에 든다",
+          f"{_cs}/{len(_targets)} · {len(_cb)}자 (상한 {_cap})")
+    check(f"외 {len(_targets) - _cs}명" in _cb,
+          f"workb[{_fmt}]: 몇 명이 빠졌는지 본문이 밝힌다")
+    check(workb.RENDERERS[_fmt]([], max_chars=_cap)[1] == 0,
+          f"workb[{_fmt}]: 타겟이 0명이어도 렌더가 죽지 않는다")
+
+# HTML 은 뷰어·위생처리기가 걷어내는 것을 처음부터 쓰지 않는다(이메일 HTML 규율).
+_html = workb.daily_targets_note(fmt="html").body
+check("<table" in _html and _html.count("<tr") == len(_targets) + 1,
+      "workb[html]: 고객 한 명이 표의 한 줄이다(머리행 포함)", str(_html.count("<tr")))
+check("<style" not in _html and "class=" not in _html,
+      "workb[html]: <style> 블록·클래스를 쓰지 않는다 — 위생처리기가 걷어낸다")
+check("http://" not in _html and "https://" not in _html,
+      "workb[html]: 바깥 자원을 부르지 않는다 — 막히면 표가 무너진다")
+# 행 단위로 덜어내도 표가 깨지지 않아야 한다.
+# WorkB 쪽지 뷰어는 **인라인 style 을 걷어낸다**(2026-09-03 실물 확인). 그래서 여백·크기를
+# style 로 만들려는 시도는 무효였고, 블록 요소도 뷰어가 자기 간격을 얹는다 — 남는 것은
+# <br>·<b>·표의 옛 속성뿐이다. 여기가 다시 늘면 화면에서 조용히 어긋난다.
+check(not any(t in _html for t in ("<p ", "<p>", "<div", "<h1", "<h2", "<ul", "<li")),
+      "workb[html]: 블록 요소를 쓰지 않는다 — 뷰어가 자기 간격을 얹는다")
+
+# 표를 만드는 곳은 하나다. 둘이 되면 한쪽만 마스킹하거나 한쪽만 잘라내는 상태가 곧 생긴다.
+_bare, _bare_shown = workb.targets_table(_targets)
+check(_bare.startswith("<table ") and _bare.endswith("</table>") and _bare in _html
+      and _bare_shown == len(_targets),
+      "workb.targets_table: 표만 따로 내고, 목록 쪽지는 그 표를 그대로 쓴다")
+
+_cut_html = workb.render_html(_targets, max_chars=1200)[0]
+check(_cut_html.count("<table") == _cut_html.count("</table") == 1,
+      "workb[html]: 잘라내도 표가 열고 닫힌다")
+# 속성이 중복되면 뒤엣것이 통째로 무시된다(실제로 style 이 두 번 붙어 font-size 가 죽었다).
+import re as _re
+check(not [t for t in _re.findall(r"<[^>]+>", _html) if t.count("style=") > 1],
+      "workb[html]: 한 태그에 같은 속성을 두 번 쓰지 않는다")
+
+_note = workb.daily_targets_note()
+
+# 요건 이름은 CONDS 원문 그대로 실린다 — 쪽지가 요건 이름을 새로 지어내면 화면과 갈린다.
+_lead = _targets[0]
+check(_customer.CONDS[_lead.conds[0]] in _note.body,
+      "workb: 요건 이름이 CONDS 원문 그대로 실린다", _customer.CONDS[_lead.conds[0]])
+
+# 고객 id 는 기본으로 가린다 (KB-PIN 앞자리가 생년월일이고, 쪽지는 받은편지함에 남는다).
+check(all(t.profile.id.partition("-")[0] in _note.body for t in _targets),
+      "workb: 마스킹해도 앞자리는 남아 화면과 대조할 수 있다")
+
+# 자를 때는 고객 블록 단위 — 줄 중간에서 끊으면 반쪽 수치가 남고, 그건 틀린 값을 보낸 것이다.
+
+# 한 명도 못 담는 상한이어도 한 명은 담는다 — 빈 쪽지가 «장애»처럼 읽히는 것보다 낫다.
+check(workb.EMPTY_BODY in workb.render([])[0],
+      "workb: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
+
+_min_body, _min_shown = workb.render(_targets, max_chars=1)
+check(_min_shown == 1, "workb: 상한이 아무리 작아도 고객 한 명은 담는다", str(_min_shown))
+
+
+# ── 발송 ───────────────────────────────────────────────────
+# 수신자는 리스트다. 문자열 하나를 넘기면 WorkB 가 64;ETC_ERR(기타 오류)로 거부하는데,
+# 파이썬은 문자열도 시퀀스라 타입 오류 없이 거기까지 가고 서버 사유도 «기타»라 어디가
+# 틀렸는지 아무 데서도 안 나온다(실제로 그렇게 한 번 잡았다).
+try:
+    workb.validate_recipients("3902172")
+    check(False, "workb: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
+except TypeError as _exc:
+    check("리스트" in str(_exc), "workb: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
+for _bad in ([], ["", "3902172"], None):
+    try:
+        workb.validate_recipients(_bad)
+        check(False, f"workb: 빈 수신자를 막는다 ({_bad!r})")
+    except (TypeError, ValueError):
+        check(True, f"workb: 빈 수신자를 막는다 ({_bad!r})")
+
+# 어댑터의 성공은 서버의 성공이 아니다 — WorkB 는 실패를 isError 가 아니라 본문에 담는다.
+# 아래 두 형태는 실제로 관측된 응답이다.
+_REFUSED = [{"type": "text", "text": '{\n  "success": false,\n  "error": "64;ETC_ERR"\n}'}]
+check(workb.parse_result(_REFUSED)["status"] == "failed",
+      "workb.parse_result: 본문의 success:false 를 «발송 완료»로 보고하지 않는다",
+      str(workb.parse_result(_REFUSED)))
+check(workb.parse_result(_REFUSED).get("error") == "64;ETC_ERR",
+      "workb.parse_result: 서버 오류코드를 그대로 남긴다")
+check(workb.parse_result([{"type": "text", "text": '{"success": true}'}])["status"] == "sent",
+      "workb.parse_result: success:true 는 발송으로 본다")
+check(workb.parse_result('{"success": true}')["status"] == "sent",
+      "workb.parse_result: 문자열로 온 응답도 읽는다")
+check(workb.parse_result(([{"type": "text", "text": '{"success": true}'}], None))["status"] == "sent",
+      "workb.parse_result: (content, artifact) 튜플도 읽는다")
+# 판정하지 못한 것을 성공 쪽으로 접지 않는다 — 그게 안 한 일을 했다고 말하는 경로다.
+for _amb in ("", "OK", '{"result": 1}', None):
+    check(workb.parse_result(_amb)["status"] == "unknown",
+          f"workb.parse_result: 판정 불가는 unknown 이다 ({_amb!r})",
+          str(workb.parse_result(_amb)))
+
+_sent = asyncio.run(workb.send_note(["E00000"], _note))
+check(_sent["status"] == "not_connected" and _sent["body"] == _note.body,
+      "workb.send_note: 클라이언트 미주입을 «보냄»으로 보고하지 않는다", str(_sent["status"]))
+
+async def _fake_send(recipients, title, body):
+    _fake_send.seen = (recipients, title, body)
+    return [{"type": "text", "text": '{"success": true}'}]
+
+_ok = asyncio.run(workb.send_note(["3902172"], _note, send=_fake_send))
+check(_ok["status"] == "sent" and _fake_send.seen[0] == ["3902172"],
+      "workb.send_note: 주입한 클라이언트로 수신자·제목·본문을 그대로 넘긴다", str(_ok))
+check(_fake_send.seen[2] == _note.body, "workb.send_note: 본문을 손대지 않고 넘긴다")
+
+async def _boom(recipients, title, body):
+    raise RuntimeError("전송 끊김")
+
+_err = asyncio.run(workb.send_note(["3902172"], _note, send=_boom))
+check(_err["status"] == "failed" and "전송 끊김" in _err["detail"],
+      "workb.send_note: 호출이 죽으면 실패로 보고한다(삼키지 않는다)", str(_err))
+
 
 # ─────────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from pension_agent.strategy_agent.customer import (
+    DEPOSIT_CAP_WON,
     RISK_ASSET_CAP_PCT,
     TAX_CREDIT_CAP_WON,
     Profile,
@@ -200,6 +201,21 @@ def _account_state(p: Profile) -> dict[str, Any]:
         "판매중단_보유상품": " · ".join(blocked) if blocked else "없음",
         "ISA_만기자금": "보유" if p.isa else "없음",
     }
+    # 부담금 재원별 구성 — 수수료율표(fact.k04.f50)가 「사용자부담금(퇴직금)」과 「가입자부담금」
+    # 으로 행이 갈리는데, 그 갈래를 정하는 값이 **원장에 있으면서** 여기까지 오지 않아 대화형이
+    # 직원에게 «어느 부담금이냐»를 되물었다(consult_agent/CLAUDE.md §12 지워진 gap 30).
+    # 판정을 새로 만들지 않는다 — 원장 두 컬럼(퇴직급여금액·개인부담금금액)을 옮겨 적을 뿐이다.
+    # 카드의 행 이름과 원장 컬럼명을 **함께** 적는다: 답변이 어느 행을 말하는지 대조가 되려면
+    # 카드 표기가 필요하고(relations.py 의 괄호 별칭), 직원이 원장에서 확인하려면 원장 표기가
+    # 필요하다. 둘 다 0 인 프로파일(원장 없이 조립된 합성 케이스)에는 줄을 만들지 않는다 —
+    # "0원 · 0원"은 «적립금이 없다»로 읽힌다.
+    # 두 몫을 가르는 것은 `·` 가 아니라 쉼표다 — 되묻기 판정 블록은 계좌 상태 **항목들**을
+    # `·` 로 이어 붙이므로(clarify.settled_block), 값 안에 `·` 를 쓰면 「가입자부담금 …」이
+    # 별개 항목처럼 읽힌다.
+    if p.severance_amt or p.own_contrib_amt:
+        state["부담금별_구성"] = (
+            f"사용자부담금(퇴직급여) {won(p.severance_amt)}, "
+            f"가입자부담금(개인부담금) {won(p.own_contrib_amt)}")
     # 가입일은 날짜로 싣는다. 경과연수만 주면 LLM 이 오늘에서 빼서 날짜를 «만들어» 말한다
     # (matDate 가 이미 같은 이유로 있다).
     if p.joined:
@@ -283,7 +299,17 @@ def _briefing(p: Profile) -> dict:
     if p.pension_started:
         snap["연금수령"] = "수령 중 · 추가납입 불가(연금지급설계 등록 계좌)"
     elif p.room > 0:
-        snap["납입여력"] = f"{won(p.room * 10000)} (연 납입한도 1,800만원 이내)"
+        # **한 숫자를 두 이름으로 싣지 않는다.** 예전에는 이 줄이 세액공제 잔여한도(p.room)를
+        # 「납입여력」이라는 이름으로 다시 실었다 — 라벨은 1,800만원 납입한도를 가리키는데
+        # 값은 900만원 공제한도에서 온 값이었다. 두 축이 한 이름이 되면 작은 쪽이 납입
+        # 상한으로 읽힌다(김서연: 실제 납입 여력 1,400만원인데 화면은 500만원을 말했고,
+        # 대화형은 ISA 8,000만원 전환 질문에 그 500만원으로 답했다).
+        # 그래서 값은 납입한도 축(deposit_room)으로 바꾸고, 그중 얼마가 공제 대상인지를
+        # 같은 줄에서 갈라 적는다. 요건 판정(add·tax)이 보는 값은 계속 p.room 이다.
+        snap["납입여력"] = (
+            f"{won(p.deposit_room)} (연 납입한도 {won(DEPOSIT_CAP_WON)} − 당해 납입 "
+            f"{won(p.paid_ytd_total)}) · 이 중 세액공제 대상은 잔여한도 "
+            f"{won(p.room * 10_000)}까지 (초과분은 과세이연·이연공제)")
 
     # 보유상품 개별 종목. 자산군별 합계로는 "무슨 상품 들고 있어"·"판매중단된 거 있어"에
     # 답할 수 없다. 수익률은 **고객 보유수익률**(그 고객이 실제로 얻은 것)을 쓴다 —

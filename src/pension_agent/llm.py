@@ -16,23 +16,33 @@
            LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
+━━ 실행 환경(프로파일) ━━
+환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(OpenAI 호환 게이트웨이의 Sonnet, genai
+경로). 환경마다 `src/.env.<이름>`
+한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
+잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
+
 ━━ 환경변수 ━━
-  LLM_DOTENV        .env 파일 경로(명시). 없으면 ENV_PATH → src/.env 순으로 찾는다
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
   LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
   LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
+  LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
-  LLM_MIN_INTERVAL  호출 사이 최소 간격(초). 기본 0.2
-  LLM_RETRY_ATTEMPTS  속도 제한 재시도 횟수(첫 호출 포함). 기본 5
-  LLM_COOLDOWN      429 를 맞은 뒤 프로세스 전체가 쉬는 시간의 기준값(초). 기본 2
+  LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
+  LLM_COOLDOWN      429·5xx 를 맞은 뒤 프로세스 전체가 쉬는 시간의 기준값(초). 기본 2
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
   GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
   ANTHROPIC_API_KEY anthropic 프로바이더용 (테스트 경로)
   IRP_AGENT_MODEL   anthropic 모델. 기본 claude-sonnet-5
+
+━━ 관측 ━━
+모든 호출은 성공·실패 양쪽 다 `observability.record_generation()` 으로 한 건씩 남는다
+(Langfuse). 키가 없으면 통째로 꺼지고, 켜져 있어도 전송은 백그라운드라 호출을 늦추지
+않는다 — 자세한 것은 `observability.py`.
 
 available() 가 False 면 strategy_agent 는 규칙 기반 폴백으로 동작한다(그쪽 규약).
 consult_agent 는 폴백하지 않는다 — LLM 이 없으면 답을 만들지 않고 그렇게 말한다
@@ -55,53 +65,13 @@ import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from pathlib import Path
+from typing import Any
 
-from pension_agent import config
+from pension_agent import env, observability
 
-
-# ─────────────────────────────────────────────────────────────
-# .env 로딩 — export 대신 파일로 환경변수를 관리한다.
-#   외부 의존성(python-dotenv) 없이 표준 라이브러리만 쓴다(망분리 대비).
-#   이미 실제 환경에 설정된 값은 덮어쓰지 않는다(os.environ 이 .env 보다 우선).
-# ─────────────────────────────────────────────────────────────
-
-def _load_env_file(path: str | Path) -> None:
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except (FileNotFoundError, NotADirectoryError):
-        return
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export "):]
-        if "=" not in line:
-            continue
-        key, val = line.split("=", 1)
-        key = key.strip()
-        val = val.strip().strip('"').strip("'")
-        if key:
-            os.environ.setdefault(key, val)  # 실제 환경변수가 있으면 그것이 이긴다
-
-
-def _bootstrap_env() -> None:
-    """LLM_DOTENV → ENV_PATH → src/.env 순으로 읽는다. 먼저 읽힌 값이 이긴다.
-
-    config.DOTENV(= src/.env) 는 두 에이전트가 공유하는 단일 설정 파일이다.
-    ENV_PATH 는 행내 플랫폼이 컨테이너에 넣어주는 이름이다(Dockerfile 의
-    ARG ENV_FILE_PATH → ENV ENV_PATH). 플랫폼이 .env 를 다른 경로에 마운트해도
-    코드를 고치지 않아도 되도록 여기서 함께 본다.
-    """
-    for var in ("LLM_DOTENV", "ENV_PATH"):
-        path = os.getenv(var)
-        if path:
-            _load_env_file(path)
-    _load_env_file(config.DOTENV)
-
-
-_bootstrap_env()
+# .env(= src/.env)를 먼저 읽는다 — 아래 모듈 상수가 그 값으로 정해진다.
+# 파싱은 env.py 가 한다(관측 설정도 같은 파일에서 와야 하므로 아래층으로 내렸다).
+env.load()
 
 PROVIDER = os.getenv("LLM_PROVIDER") or (
     "genai" if os.getenv("LLM_BASE_URL")
@@ -117,30 +87,33 @@ BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
 API_KEY = os.getenv("LLM_API_KEY", "")
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
-#: 429 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai 경로만 쓴다.
+#: 429·5xx 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
 RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
 
 # ─────────────────────────────────────────────────────────────
 # 호출 게이트 — 429 는 «재시도»가 아니라 «덜 몰아치기»로 막는다
 #
-# 이 코드는 몰아서 부르는 자리가 구조적으로 많다: 브리핑 1건 = 9~11 연쇄 호출,
-# 대화 한 턴 = 계획 루프 최대 4바퀴 + compose·되묻기 «동시» 호출(answer.py 의
-# ThreadPoolExecutor). 행내에서 429 로 턴이 통째로 죽은 것이 이 버스트다.
+# 이 코드는 몰아서 부르는 자리가 구조적으로 많다: 브리핑 1건 = 9~11 연쇄 호출, 대화 한 턴
+# = 계획 루프 최대 4바퀴 + compose·되묻기 «동시» 호출(nodes/answer.py 의 ThreadPoolExecutor).
+# 행내 게이트웨이에서도, 무료 쿼터의 generativelanguage 에서도 이 버스트로 턴이 죽었다.
 #
-# 재시도만으로는 못 막는다 — 재시도는 이미 맞은 뒤의 대응이고, 여러 스레드가 동시에
-# 맞으면 같이 재시도해서 다시 같이 맞는다. 그래서 세 겹을 둔다:
+# 재시도만으로는 못 막는다 — 재시도는 이미 맞은 뒤의 대응이고, 여러 스레드가 동시에 맞으면
+# 같이 재시도해서 다시 같이 맞는다. 그래서 세 겹을 둔다:
 #   ① 동시성 상한  — 한 프로세스에서 동시에 나가는 호출 수를 세마포어로 묶는다
 #   ② 최소 간격    — 호출 사이를 벌려 초당 요청 수를 눌러 둔다
-#   ③ 적응형 감속  — 누가 429 를 맞으면 **프로세스 전체**가 그만큼 쉰다. 맞은 스레드만
-#                    쉬면 나머지가 그 사이를 메워 게이트웨이 입장에선 압력이 안 준다
+#   ③ 적응형 감속  — 누가 429·5xx 를 맞으면 **프로세스 전체**가 그만큼 쉰다. 맞은 스레드만
+#                    쉬면 나머지가 그 사이를 메워 서버가 느끼는 압력이 안 준다
 #
-# 셋 다 이 파일 안에서 끝난다 — 호출부는 게이트를 볼 수도, 지날 수도 없다.
+# 게이트는 `_post_json` 이 감싸는 genai·gemma 경로에만 선다. anthropic 은 SDK 가 자체
+# 재시도·백오프를 갖고 있고 행내에서는 쓰지 않는 경로다(RETRY_ATTEMPTS 주석과 같은 이유).
 # ─────────────────────────────────────────────────────────────
 
 #: 동시에 나가는 호출 수 상한. 1 이면 완전 직렬.
 MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
 #: 호출 사이 최소 간격(초). 0 이면 간격 제한 없음(테스트가 이렇게 끈다).
-MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL", "0.2"))
+#: 기본을 0 에서 0.2 로 올린 근거는 행내 실측이다 — 게이트웨이가 이 버스트에 429 를 냈다.
+#: 브리핑 11연쇄에 +2.2초라 감당할 수 있는 값이고, 모자라면 .env 에서 올린다.
+MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
 #: 서버가 Retry-After 를 안 줄 때 쓰는 지수 백오프의 기준값(초).
 COOLDOWN = float(os.getenv("LLM_COOLDOWN", "2"))
 #: 한 번에 쉬는 최대 시간(초). Retry-After 가 터무니없이 커도 여기서 끊는다.
@@ -169,8 +142,8 @@ def _pace() -> None:
 
 
 def _slow_down(seconds: float) -> None:
-    """지금부터 seconds 동안 **모든** 호출을 세운다(위 ③). 429 를 맞은 스레드만이 아니라
-    아직 안 맞은 스레드도 같이 쉬어야 게이트웨이가 느끼는 압력이 실제로 준다."""
+    """지금부터 seconds 동안 **모든** 호출을 세운다(위 ③). 맞은 스레드만이 아니라 아직 안
+    맞은 스레드도 같이 쉬어야 서버가 느끼는 압력이 실제로 준다."""
     global _next_free
     with _PACE_LOCK:
         _next_free = max(_next_free, time.monotonic() + seconds)
@@ -178,44 +151,23 @@ def _slow_down(seconds: float) -> None:
 
 @contextmanager
 def _gate() -> Iterator[None]:
-    """동시성 상한 + 최소 간격. genai 경로의 HTTP 호출 한 번을 감싼다."""
+    """동시성 상한 + 최소 간격. HTTP 호출 한 번(재시도 한 바퀴)을 감싼다."""
     with _SLOTS:
         _pace()
         yield
 
 
-#: 기다리면 풀리는 상태코드. 429 는 속도 제한, 502·503·504 는 게이트웨이 과부하다.
-RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
-
-
-def _backoff(exc: urllib.error.HTTPError, attempt: int) -> float:
-    """다음 시도까지 프로세스 전체가 쉴 시간(초).
-
-    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_BACKOFF) — 게이트웨이가
-    아는 회복 시각을 우리가 추측으로 덮을 이유가 없다. 없으면 지수 백오프에 지터를 섞는다.
-    지터가 필요한 이유: 동시에 429 를 맞은 스레드들이 같은 시간을 기다리면 같은 순간에
-    한꺼번에 다시 몰려가 또 같이 맞는다.
-    """
-    retry_after = (exc.headers.get("Retry-After") or "").strip() if exc.headers else ""
-    try:
-        return min(float(retry_after), MAX_BACKOFF)
-    except ValueError:
-        pass
-    base = COOLDOWN * (2 ** attempt)
-    return min(base * (0.5 + random.random()), MAX_BACKOFF)
-
-
 # ─────────────────────────────────────────────────────────────
 # 호출 주체(x-client-user)
 #
-# 플랫폼 규격은 이 값을 «input_value JSON 에서 추출»하라고 못박는다(refs/genai-platform.md).
-# 감사 기록이자 게이트웨이의 쿼터 버킷이라, 전부 한 값으로 나가면 모든 호출이 한 버킷에
-# 몰린다 — 429 를 스스로 부르는 설정이다.
+# 플랫폼 규격은 이 값을 «input_value JSON 에서 추출»하라고 못박는다. 감사 기록이자
+# 게이트웨이의 쿼터 버킷이라, 전부 한 값("anonymous")으로 나가면 모든 호출이 한 버킷에
+# 몰린다 — 429 를 스스로 부르는 설정이다. 관측(Langfuse) 메타데이터에도 같은 값이 실린다.
 #
 # 전달은 ContextVar 로 한다. 노드·도구 수십 곳의 시그니처에 인자를 하나씩 꿰는 대신,
 # 진입점(main.py·graph.ask)이 턴 전체를 감싸면 그 안의 모든 호출이 따라간다.
-# consult_agent 의 진행 표시(progress.py)가 같은 방식이고, answer.py 의 스레드는 이미
-# contextvars.copy_context() 로 컨텍스트를 복사해 넘기므로 스레드 경계도 넘는다.
+# consult_agent 의 진행 표시(progress.py)가 같은 방식이고, nodes/answer.py 의 스레드는
+# 이미 contextvars.copy_context() 로 컨텍스트를 복사하므로 스레드 경계도 넘는다.
 # ─────────────────────────────────────────────────────────────
 
 #: 호출부가 아무것도 주지 않았을 때 쓰는 값. 사람이 아니라 «이 배치/화면»이라는 표시다.
@@ -283,7 +235,7 @@ def available() -> bool:
 
 
 def _generate_genai(prompt: str, system: str | None, max_tokens: int,
-                    temperature: float, x_client_user: str) -> str:
+                    temperature: float, x_client_user: str) -> tuple[str, dict]:
     """OpenAI 호환 /chat/completions 를 표준 라이브러리로 호출한다."""
     messages = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt}
@@ -303,23 +255,62 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
         },
         method="POST",
     )
-    # 속도 제한(429)과 게이트웨이 과부하(502·503·504)만 재시도한다 — 잠깐 쉬면 풀리는
-    # 에러다. 그 밖의 HTTP 에러는 재시도하지 않는다: 401·404·500 은 기다려도 안 풀리고,
-    # 같은 요청을 반복하면 진단만 늦어진다.
-    #
-    # 기다림은 **여기서 자지 않는다.** _slow_down() 으로 게이트의 «다음 호출 가능 시각»만
-    # 밀어 두면, 다음 바퀴의 _gate() 가 그만큼 재운다. 이렇게 해야 대기가 한 곳에서만
-    # 일어나고(이중 대기 없음), 같은 대기를 **다른 스레드도 함께** 받는다 — 맞은 스레드만
-    # 쉬면 나머지가 그 틈을 메워 게이트웨이 입장에선 압력이 안 준다.
+    body = _post_json(req)
+    usage = body.get("usage") or {}
+    return body["choices"][0]["message"]["content"], {
+        "model": body.get("model") or MODEL or "(gateway-default)",
+        "usage": _usage(usage.get("prompt_tokens"), usage.get("completion_tokens"),
+                        usage.get("total_tokens")),
+    }
+
+
+def _usage(prompt_tokens: Any, completion_tokens: Any, total_tokens: Any = None) -> dict | None:
+    """토큰 사용량을 Langfuse 가 읽는 모양으로 맞춘다. 프로바이더가 안 주면 None."""
+    if prompt_tokens is None and completion_tokens is None:
+        return None
+    used = {"unit": "TOKENS"}
+    if prompt_tokens is not None:
+        used["input"] = int(prompt_tokens)
+    if completion_tokens is not None:
+        used["output"] = int(completion_tokens)
+    if total_tokens is not None:
+        used["total"] = int(total_tokens)
+    elif "input" in used and "output" in used:
+        used["total"] = used["input"] + used["output"]
+    return used
+
+
+def _post_json(req: urllib.request.Request) -> dict:
+    """urlopen + JSON 파싱. genai·gemma 경로가 함께 쓴다.
+
+    **429 와 5xx 를 재시도한다.** 둘 다 «서버 사정이라 잠깐 쉬면 풀리는» 에러이고, 이 코드는
+    몰아서 부르는 자리가 많다(브리핑 1회 = 11연쇄 호출, app.py 기동 시 고객 선생성, 대화
+    한 턴 4~7회 + compose·판정 동시 호출). 행내 게이트웨이(genai)에서도, 무료 쿼터의
+    generativelanguage(gemma)에서도 실제로 429 로 턴이 통째로 죽었다.
+
+    5xx 는 예전에 재시도 대상이 아니었다 — 「401·500 은 기다려도 안 풀린다」는 전제였는데,
+    **실측이 그 전제를 뒤집었다**(2026-09-07 · gemma-4-31b-it): 리허설 대본 한 블록의 11턴
+    중 10턴이 `HTTP 500` 으로 죽었고, 같은 프롬프트를 그대로 다시 던지면 200 으로 통과했다.
+    그 상태에서는 실 LLM 리허설이 «에이전트가 무엇을 답하나»가 아니라 «오늘 엔드포인트가
+    살아 있나»를 재게 된다. 401·403·404 처럼 **요청이 잘못된** 에러는 그대로 올린다 —
+    같은 요청을 반복해도 결과가 같고, 반복하면 진단만 늦어진다.
+
+    재시도해도 계속 실패하면 `LLMError` 다. 그 예외를 삼켜 "자료가 없다"로 답하지 않는 것은
+    호출부의 규약이고(consult_agent/CLAUDE.md §11), 여기서는 **원인을 문장에 남기는 것**까지
+    한다 — 429 와 5xx 는 직원이 할 일이 다르다(기다린다 / 잠시 후 다시 시도한다).
+
+    기다림은 **여기서 자지 않는다.** `_slow_down()` 으로 게이트의 «다음 호출 가능 시각»만
+    밀어 두면 다음 바퀴의 `_gate()` 가 그만큼 재운다. 이렇게 해야 대기가 한 곳에서만
+    일어나고(이중 대기 없음), 같은 대기를 **다른 스레드도 함께** 받는다 — 맞은 스레드만
+    쉬면 나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다(게이트 ③).
+    """
     last: urllib.error.HTTPError | None = None
     for attempt in range(RETRY_ATTEMPTS):
         try:
-            with _gate():
-                with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
-            return body["choices"][0]["message"]["content"]
+            with _gate(), urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+                return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            if exc.code not in RETRYABLE_STATUS:
+            if not _retryable(exc.code):
                 raise
             last = exc
             if attempt == RETRY_ATTEMPTS - 1:
@@ -328,16 +319,38 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
             _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d)",
                          exc.code, wait, attempt + 1, RETRY_ATTEMPTS)
             _slow_down(wait)
-    code = last.code if last is not None else 429
+    code = last.code if last else 0
+    detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
+              else "서버 오류. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다).")
     raise LLMError(
-        f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 속도 제한/과부하가 풀리지 않았습니다. "
-        f"LLM_MAX_CONCURRENCY(현재 {MAX_CONCURRENCY})를 낮추거나 "
-        f"LLM_MIN_INTERVAL(현재 {MIN_INTERVAL}초)을 늘리고, 게이트웨이 쿼터를 확인하십시오."
-    ) from last
+        f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
+        f"(동시 {MAX_CONCURRENCY} · 간격 {MIN_INTERVAL}초 — LLM_MAX_CONCURRENCY 를 낮추거나 "
+        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)") from last
+
+
+def _retryable(code: int) -> bool:
+    """다시 던지면 결과가 달라질 수 있는 에러인가. 429 와 5xx 만 그렇다."""
+    return code == 429 or 500 <= code < 600
+
+
+def _backoff(exc: urllib.error.HTTPError, attempt: int) -> float:
+    """다음 시도까지 프로세스 전체가 쉴 초.
+
+    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_BACKOFF) — 서버가 아는
+    회복 시각을 우리가 추측으로 덮을 이유가 없다. 없으면 지수 백오프에 지터를 섞는다.
+    지터가 필요한 이유: 동시에 맞은 스레드들이 같은 시간을 기다리면 같은 순간에 한꺼번에
+    다시 몰려가 또 같이 맞는다.
+    """
+    retry_after = (exc.headers.get("Retry-After") or "").strip() if exc.headers else ""
+    try:
+        return min(float(retry_after), MAX_BACKOFF)
+    except ValueError:
+        pass
+    return min(COOLDOWN * (2 ** attempt) * (0.5 + random.random()), MAX_BACKOFF)
 
 
 def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
-                    temperature: float) -> str:
+                    temperature: float) -> tuple[str, dict]:
     """Google generativelanguage :generateContent 를 표준 라이브러리로 호출한다.
 
     Gemma 모델은 이 API 에서 systemInstruction 을 받지 않으므로(요청이 거부된다)
@@ -362,21 +375,26 @@ def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    payload = _post_json(req)
     candidates = payload.get("candidates") or []
     if not candidates:
         raise LLMError(f"gemma 응답에 candidates 가 없습니다: {payload}")
     parts = candidates[0].get("content", {}).get("parts", [])
     # thought=True 인 hidden reasoning 파트는 답변이 아니다 — 제외한다.
-    return "".join(
+    text_out = "".join(
         p.get("text", "") for p in parts
         if isinstance(p, dict) and "text" in p and not p.get("thought")
     ).strip()
+    meta = payload.get("usageMetadata") or {}
+    return text_out, {
+        "model": GEMMA_MODEL,
+        "usage": _usage(meta.get("promptTokenCount"), meta.get("candidatesTokenCount"),
+                        meta.get("totalTokenCount")),
+    }
 
 
 def _generate_anthropic(prompt: str, system: str | None, max_tokens: int,
-                        temperature: float) -> str:
+                        temperature: float) -> tuple[str, dict]:
     """Anthropic SDK 호출 (테스트 경로). 패키지는 이 분기에서만 lazy import 한다."""
     global _anthropic_client
     if _anthropic_client is None:
@@ -392,42 +410,106 @@ def _generate_anthropic(prompt: str, system: str | None, max_tokens: int,
     if system is not None:
         kwargs["system"] = system
     msg = _anthropic_client.messages.create(**kwargs)
-    return "".join(b.text for b in msg.content if b.type == "text")
+    used = getattr(msg, "usage", None)
+    return "".join(b.text for b in msg.content if b.type == "text"), {
+        "model": getattr(msg, "model", None) or ANTHROPIC_MODEL,
+        "usage": _usage(getattr(used, "input_tokens", None),
+                        getattr(used, "output_tokens", None)),
+    }
 
 
 def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str | None = None,
-             temperature: float = 0.2, x_client_user: str = "") -> str:
+             temperature: float = 0.2, x_client_user: str = "",
+             name: str = "llm.generate") -> str:
     """단발 생성. 응답 본문 문자열을 반환하며, 실패는 전부 `LLMError` 로 올린다.
 
     프로바이더별 예외(urllib 의 HTTPError·socket.timeout, anthropic SDK 의 APIError,
     응답 스키마가 어긋났을 때의 KeyError …)를 한 종류로 모으는 이유는 호출부가 "삼켜도
     되는 예외"와 "삼키면 안 되는 예외"를 구분할 수 있어야 하기 때문이다(LLMError 주석).
     원인 문자열은 그대로 보존한다 — 진단이 화면에서 끝나야 한다.
+
+    name: Langfuse 대시보드에 뜨는 이 호출의 이름(예: "briefing.talking_scripts").
+    브리핑 한 건이 11연쇄, 대화 한 턴이 4~7회라 이름이 없으면 어느 호출이 어느 단계인지
+    구분되지 않는다. 호출부가 자기 단계 이름을 준다 — 관측이 꺼져 있으면 쓰이지 않는다.
+
+    x_client_user: 비우면 이 턴의 주체(client_user 컨텍스트)로 채운다. 진입점이 턴 전체를
+    감싸므로 호출부는 대개 주지 않는다.
     """
     system = system or None   # "" 은 시스템 메시지 없음으로 본다(프로바이더가 빈 문자열을 싫어한다)
+    # 헤더에도 관측 메타데이터에도 같은 값이 실려야 한다 — 여기서 한 번만 정한다.
+    x_client_user = x_client_user or current_client_user()
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "
-            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오."
+            "gemma 는 GEMINI_API_KEY, anthropic 은 ANTHROPIC_API_KEY 를 확인하십시오. "
+            "어느 .env 가 읽혔는지는 python -m pension_agent.env 로 봅니다."
             % PROVIDER
         )
+    started = time.time()
     try:
         if PROVIDER == "anthropic":
-            return _generate_anthropic(prompt, system, max_tokens, temperature)
-        if PROVIDER == "gemma":
-            return _generate_gemma(prompt, system, max_tokens, temperature)
-        return _generate_genai(prompt, system, max_tokens, temperature,
-                               x_client_user or current_client_user())
-    except LLMError:
-        raise
+            text, meta = _generate_anthropic(prompt, system, max_tokens, temperature)
+        elif PROVIDER == "gemma":
+            text, meta = _generate_gemma(prompt, system, max_tokens, temperature)
+        else:
+            text, meta = _generate_genai(prompt, system, max_tokens, temperature, x_client_user)
     except Exception as exc:
+        # 실패도 남긴다 — 대시보드에 «호출이 아예 없었다» 와 «호출이 깨졌다» 가 같은
+        # 모양으로 보이면 장애를 되짚을 수 없다.
+        _observe(name, started, prompt, system, max_tokens, temperature, x_client_user,
+                 meta={}, output=None, error=f"{type(exc).__name__}: {exc}")
+        if isinstance(exc, LLMError):
+            raise
         raise LLMError(f"{type(exc).__name__}: {exc}") from exc
+    _observe(name, started, prompt, system, max_tokens, temperature, x_client_user,
+             meta=meta, output=text, error=None)
+    return text
+
+
+def _observe(name: str, started: float, prompt: str, system: str | None, max_tokens: int,
+             temperature: float, x_client_user: str, *, meta: dict, output: str | None,
+             error: str | None) -> None:
+    """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability).
+
+    **system 이 있는 호출은 채팅 메시지 꼴로 싣는다.** Langfuse 는 `[{role, content}, …]`
+    를 대화로 알아보고 역할별로 갈라 렌더하지만, 그 밖의 dict 는 JSON 한 덩어리로
+    직렬화해 보여준다 — `\\n`·`\\"` 가 이스케이프된 채 한 칸에 들어차서 프롬프트를 읽을
+    수 없다. 대시보드에서 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
+    system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
+    """
+    observability.record_generation(
+        name,
+        model=meta.get("model") or _default_model_label(),
+        input=([{"role": "system", "content": system},
+                {"role": "user", "content": prompt}] if system else prompt),
+        output=output,
+        usage=meta.get("usage"),
+        start=started,
+        end=time.time(),
+        parameters={"max_tokens": max_tokens, "temperature": temperature},
+        metadata={"provider": PROVIDER, "x_client_user": x_client_user},
+        error=error,
+    )
+
+
+def _default_model_label() -> str:
+    """응답이 모델명을 안 주거나(게이트웨이 기본 라우팅) 호출이 깨졌을 때 쓸 표기."""
+    if PROVIDER == "anthropic":
+        return ANTHROPIC_MODEL
+    if PROVIDER == "gemma":
+        return GEMMA_MODEL
+    return MODEL or "(gateway-default)"
 
 
 async def agenerate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str | None = None,
-                    temperature: float = 0.2, x_client_user: str = "") -> str:
-    """비동기 호출. 동기 구현을 스레드로 넘겨 blocking I/O 를 이벤트 루프에서 뺀다."""
+                    temperature: float = 0.2, x_client_user: str = "",
+                    name: str = "llm.agenerate") -> str:
+    """비동기 호출. 동기 구현을 스레드로 넘겨 blocking I/O 를 이벤트 루프에서 뺀다.
+
+    `asyncio.to_thread` 는 현재 컨텍스트를 복사해 넘기므로 트레이스 묶음(ContextVar)도
+    그대로 따라간다 — 이 경로로 부른 호출도 같은 트레이스 아래 붙는다.
+    """
     return await asyncio.to_thread(
         generate, prompt, max_tokens=max_tokens, system=system,
-        temperature=temperature, x_client_user=x_client_user,
+        temperature=temperature, x_client_user=x_client_user, name=name,
     )

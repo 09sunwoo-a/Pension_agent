@@ -30,10 +30,11 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
-from pension_agent import llm
+from pension_agent import llm, observability
 from pension_agent.session_store import append_turn
+from pension_agent.strategy_agent import customer as CUST
 
-from pension_agent.consult_agent import progress, suggest
+from pension_agent.consult_agent import guard, progress, suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -96,6 +97,21 @@ def build_agent():
 _AGENT = None
 
 
+def _customer_name(customer_id: str | None) -> str | None:
+    """관측 표시용 고객 이름. 없으면 None — 답변 경로는 이 값을 쓰지 않는다.
+
+    이름을 못 찾아도 조용히 지나간다(로스터에 없는 id·원장 미적재). 관측이 답변을
+    막지 않는다는 규약이 여기에도 적용된다.
+    """
+    if not customer_id:
+        return None
+    try:
+        profile = CUST.get_profile(customer_id)
+    except Exception:                          # noqa: BLE001 — 표시용 값이 턴을 죽이지 않는다
+        return None
+    return getattr(profile, "nm", None)
+
+
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
@@ -125,11 +141,61 @@ def ask(
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
-    with llm.client_user(x_client_user), progress.reporting(on_progress):
-        out = _AGENT.invoke(
-            {"question": question, "history": history or [], "customer_id": customer_id,
-             # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
-             "session_id": session_id})
+    # 관측 트레이스 — 이 턴에서 나가는 LLM 호출(계획·판정·작성, 보통 4~7회)이 전부 이
+    # 하나에 묶인다. 키가 없으면 통째로 꺼진다(observability). session_id 를 넘겨 같은
+    # 상담의 턴들이 대시보드에서 한 줄로 이어지게 한다.
+    # 관측의 «누구인가» — 고객이다. Langfuse 의 user 는 보통 최종 사용자를 뜻하지만,
+    # 대시보드를 열고 찾는 것은 「이 고객에 대한 실행 전부」(브리핑 + 대화 턴)이고, 두
+    # 진입점에 함께 있는 안정된 id 는 이것뿐이다(직원 id 는 아직 진입점이 받지 않는다).
+    # 표기 꼴은 브리핑 쪽과 어긋나면 안 되므로 `customer_ref` 한 곳이 정한다.
+    # 직원 id(x_client_user)는 user_id 가 아니라 메타데이터로 싣는다 — 위 이유대로 이
+    # 대시보드의 축은 고객이고, 직원은 «누가 이 턴을 돌렸나»라는 부가 정보다.
+    # 고객 «상태»(성립 요건)도 함께 태그로 단다 — 「어떤 상태의 고객에게 무슨 일이
+    # 생기나」가 대시보드에서 가장 쓸모 있는 축이다. 판정은 새로 만들지 않고
+    # strategy_agent 것을 그대로 쓴다(§3 — 같은 판정을 두 번 구현하지 않는다).
+    who = observability.customer_ref(
+        customer_id, _customer_name(customer_id), guard.conditions_of(customer_id))
+    tags = ["consult", *who["tags"]]
+    # client_user 는 트레이스 바깥에 둔다 — 이 턴에서 나가는 **모든** LLM 호출의
+    # x-client-user 헤더가 되고(감사 기록이자 게이트웨이 쿼터 버킷), 관측 메타데이터에도
+    # 같은 값이 실린다. 한 턴이 노드·도구 수십 갈래로 흩어지므로 인자 대신 ContextVar 로
+    # 흘린다(llm.client_user 주석).
+    with llm.client_user(x_client_user), observability.trace(
+        "consult.turn", input=question, session_id=session_id,
+        user_id=who["user_id"], tags=tags,
+        metadata={**who["metadata"], "x_client_user": llm.current_client_user()},
+    ) as span:
+        with progress.reporting(on_progress):
+            out = _AGENT.invoke(
+                {"question": question, "history": history or [], "customer_id": customer_id,
+                 # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
+                 "session_id": session_id})
+        evidence = out.get("evidence") or []
+        # intent 는 턴이 끝나야 정해지므로 닫을 때 태그를 다시 채운다 — 여는 이벤트의
+        # 태그를 덮어쓰므로 그때 준 것을 함께 실어야 한다. intent 는 «직원이 무엇을
+        # 물었나»라 고객 정보가 아니고, 그래서 마스킹 대상이 아니다.
+        span.update(output=out.get("answer"), intent=out.get("intent"),
+                    tools=sorted({e["tool"] for e in evidence}),
+                    tags=[*tags, *observability.tag("intent", out.get("intent"))])
+        # 턴 하나가 어떻게 끝났는지. 「되묻기가 몇 %인가 · 근거 0건이 몇 %인가 · LLM 이
+        # 죽은 턴이 있었나」를 대시보드가 집계한다 — 트레이스를 한 건씩 열어서는 못 센다.
+        # **도구가 죽어 재료를 못 읽은 턴은 정상 턴으로 세지 않는다**(tool_failed). 이걸
+        # 'answer' 로 세면 대시보드에서는 답이 나간 턴처럼 보이는데 화면에는 실패 안내가
+        # 떠 있다 — 고장이 지표에서 사라지는 방향의 실패다. 재료를 얻은 턴의 부분 고장은
+        # 여기 안 뜨고 도구 span(`failed`)에만 남는다.
+        failed = [s for s in (out.get("steps") or []) if s.get("outcome") == "failed"]
+        observability.score(
+            "turn_outcome",
+            "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify")
+            else "tool_failed" if failed and not evidence else "answer",
+            comment=out.get("llm_error")
+            or ("; ".join(f.get("reason") or "" for f in failed) if failed else None))
+        observability.score("evidence_count", len(evidence))
+        # 답의 형태 판정 등급(§5 · nodes/clarify.py). 「되묻기가 몇 %인가」만으로는 부족하다 —
+        # 전제를 밝히고 답한 턴(assume)과 핵심 대상이 없다고 답한 턴(none)이 얼마나 나오는지가
+        # 이 판정을 등급으로 늘린 이유이므로, 그 분포가 대시보드에 잡혀야 한다. 판정을 아예
+        # 안 돌린 턴(관문에서 걸린 턴)은 "n/a" 로 갈라 센다.
+        observability.score("judge_verdict", out.get("judge_verdict") or "n/a")
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

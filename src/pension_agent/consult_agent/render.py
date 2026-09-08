@@ -1,36 +1,22 @@
-"""답변을 **텍스트 한 덩어리**로 펴는 곳 — 출처 표기 규약의 단일 출처.
+"""답변을 **텍스트 한 덩어리**로 펴는 곳 — 답변 + 출처 블록.
 
-화면이 여럿이다: CLI(`__main__.py`), 행내 플랫폼 API(`main.py`), 개발용 Streamlit
-(`app.py`). 앞의 둘은 «글자만» 낼 수 있고, 그래서 같은 것을 두 번 조립하게 된다 —
-그러다 한쪽만 관련도를 찍거나 한쪽만 문서명을 빠뜨리면, **같은 질문에 같은 답인데
-근거가 다르게 보인다.** 신뢰 표시가 화면마다 다른 것은 신뢰 표시가 없는 것보다 나쁘다.
+글자만 낼 수 있는 화면이 둘이다: 운영 CLI(`__main__.py`)와 행내 플랫폼 API(`main.py`).
+둘이 각자 조립하면 한쪽만 «주의» 갈래를 빠뜨리거나 한쪽만 «근거: 없음»을 안 적는다 —
+**같은 질문에 같은 답인데 근거가 다르게 보이는 것은 근거가 없는 것보다 나쁘다.**
 
-Streamlit 은 여기를 쓰지 않는다. 접기·열기와 링크를 가진 진짜 UI 라서 텍스트로 펴는 것이
-손해다 — 다만 **무엇을 어떤 라벨로 가르는지**는 같아야 하므로 그 규약(아래 두 상수)만
-공유한다.
+출처 «한 건»의 표기(문서명·id·관련도·↗URL)는 여기서 정하지 않는다. `tools.source_lines`
+하나가 정하고 디버그 실행기($CAD·$CADR)도 같은 것을 쓴다 — 이 파일은 그 위에서 **갈래와
+머리말**만 얹는다. Streamlit(app.py)은 매체가 달라 별도로 렌더한다(마크다운 링크).
 """
 
 from __future__ import annotations
+
+from pension_agent.consult_agent.tools import source_lines
 
 #: 답이 나온 재료 / 표현을 제한한 재료. 한 목록에 섞으면 질문과 무관한 고객 상태 가드가
 #: 답의 근거처럼 보인다(nodes/plan.py::_sources 주석).
 GROUND_HEADER = "─ 근거"
 CAUTION_HEADER = "─ 이 고객 상담에서 지켜야 할 것 (근거 카드)"
-
-
-def source_line(s: dict) -> str:
-    """출처 한 건 — 두 줄.
-
-    근거는 **원문 문서명**으로 읽어준다. 카드 id 는 역추적용으로 뒤에 남긴다 — id 만
-    찍으면 사내 json 안의 코드가 근거처럼 보인다.
-
-    관련도는 **있을 때만** 찍는다. 검색으로 오지 않은 재료(고객 브리핑·상담 기록·고객
-    상태에 걸린 가드)에는 관련도라는 것이 없고, 그 자리에 None 을 찍으면 "관련도를 못 잰
-    재료"가 "관련도가 없는 재료"로 읽힌다.
-    """
-    tail = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
-    return (f"   · {s.get('doc') or '출처 미상 — 확인 필요'}\n"
-            f"     — {s.get('title') or ''} [{s['id']}{tail}]")
 
 
 def sources_block(sources: list[dict] | None) -> str:
@@ -44,8 +30,10 @@ def sources_block(sources: list[dict] | None) -> str:
     caution = [s for s in items if s.get("role") == "주의"]
 
     lines = ["", GROUND_HEADER + ("" if ground else ": 없음")]
-    lines += [source_line(s) for s in ground]
+    for s in ground:
+        lines += source_lines(s)
     if caution:
         lines += ["", CAUTION_HEADER]
-        lines += [source_line(s) for s in caution]
+        for s in caution:
+            lines += source_lines(s)
     return "\n".join(lines)

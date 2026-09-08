@@ -153,6 +153,10 @@ def section_summaries(facts: dict, sentence: str, insight: str) -> dict[str, dic
 # ─────────────────────────────────────────────────────────────
 
 
-def verify(sentence: str, facts: dict) -> tuple[bool, list[str]]:
-    """재료에 없는 수치 또는 게이트 미통과·미등록 상품명이 포함되었는지 검사한다."""
-    return _verify(sentence, facts, known_products={r["name"] for r in PRODUCTS})
+def verify(sentence: str, facts: dict, *, extra=()) -> tuple[bool, list[str]]:
+    """재료에 없는 수치 또는 게이트 미통과·미등록 상품명이 포함되었는지 검사한다.
+
+    `extra` 는 facts 스키마 밖의 재료를 실어 주는 자리다(pension_agent/verify.py 참고).
+    ⑨ LMS 문구가 콘텐츠 DB 의 일정·링크를 인용할 때 쓴다.
+    """
+    return _verify(sentence, facts, known_products={r["name"] for r in PRODUCTS}, extra=extra)

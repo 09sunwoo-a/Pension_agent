@@ -70,7 +70,8 @@ def correction(state: AgentState) -> dict[str, Any]:
         question=state["question"],
     )
     try:
-        raw = generate(prompt, system=CORRECTION_SYSTEM, max_tokens=500)
+        raw = generate(prompt, system=CORRECTION_SYSTEM, max_tokens=500,
+                       name="consult.correction")
     except Exception:
         return {"answer": "지금은 수정 요청을 처리할 수 없어요. 잠시 후 다시 시도해주세요.", "sources": []}
 
