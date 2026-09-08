@@ -123,6 +123,7 @@ python -m tests.test_strategy_agent       # LLM 산출 검증·폴백
 python -m tests.test_consult_agent        # 라우팅·즉답·도구 루프·하지말것 가드
 python -m tests.test_infra                # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api                  # HTTP 진입점 — 행내 플랫폼 I/O 스키마
+python -m tests.debug.test_trace          # 트레이스 · $CAD/$CADR 이 쓰는 스텁이 실물과 맞나
 python -m scripts.kb_build.test_paths     # 경로·locator 실재
 python -m pension_agent.knowledge.schema validate pension_agent
 ```
