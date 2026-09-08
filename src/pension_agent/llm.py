@@ -243,16 +243,47 @@ def _speed_up() -> None:
 
 
 def reset_pace() -> None:
-    """간격·감속을 초기 상태로 되돌린다. 테스트가 검사 사이를 격리하는 자리다."""
+    """간격·감속·누적을 초기 상태로 되돌린다. 테스트가 검사 사이를 격리하는 자리다."""
     global _next_free, _interval
     with _PACE_LOCK:
         _next_free, _interval = 0.0, MIN_INTERVAL
+        _stats.update(retries=0, slept_sec=0.0)
 
 
 def pace_state() -> dict[str, float]:
-    """지금 게이트가 어떤 속도로 도는가 — /health 와 진단이 읽는다."""
-    return {"interval_sec": round(_interval, 2), "floor_sec": MIN_INTERVAL,
-            "max_sec": MAX_INTERVAL}
+    """지금 게이트가 어떤 속도로 도는가 — /health · prebuild 요약 · 진단이 읽는다.
+
+    누적(retries·slept_sec)이 여기 있는 이유는 로그에서 뺐기 때문이다 — 아래
+    「재시도 로그」 주석. 몇 번 걸렸는지는 **세면** 되지 같은 줄을 100번 읽을 일이 아니다.
+    """
+    with _PACE_LOCK:
+        return {"interval_sec": round(_interval, 2), "floor_sec": MIN_INTERVAL,
+                "max_sec": MAX_INTERVAL, "retries": _stats["retries"],
+                "slept_sec": round(_stats["slept_sec"], 1)}
+
+
+# ── 재시도 로그 — 같은 줄을 100번 찍지 않는다 ────────────────────────────────
+#
+# 행내 실측(2026-09-08 · 12명 선생성): 호출마다 429 를 한 번씩 맞으면서
+# 「LLM 429 — N.0초 감속 후 재시도 (1/5)」가 100줄 넘게 찍혔고, 정작 봐야 할 ✓ 진행 줄이
+# 그 사이에 묻혔다. 429 가 났다는 **사실**은 한 번이면 알고, 얼마나 났는지는 **숫자**로
+# 알면 된다(pace_state). 다만 둘은 남긴다:
+#   · 첫 건 — 지금 무슨 일이 벌어지는지 모르면 로그가 조용한 것도 불안하다.
+#   · 오래 기다리는 건 — 30초를 아무 말 없이 서 있으면 멈춘 것과 구별되지 않는다.
+# 나머지는 DEBUG 로 내린다(진단이 필요하면 로그 레벨을 낮춰 전부 본다).
+
+#: 이 시간 이상 기다리는 재시도는 조용히 넘기지 않는다(초).
+LONG_WAIT_LOG_SEC = float(os.getenv("LLM_LONG_WAIT_LOG_SEC", "10"))
+
+_stats: dict[str, Any] = {"retries": 0, "slept_sec": 0.0}
+
+
+def _count_retry(wait: float) -> bool:
+    """재시도 한 건을 센다. 이 프로세스에서 **처음**이면 True(그 한 건만 크게 남긴다)."""
+    with _PACE_LOCK:
+        _stats["retries"] += 1
+        _stats["slept_sec"] += wait
+        return _stats["retries"] == 1
 
 
 @contextmanager
@@ -441,9 +472,20 @@ def _post_json(req: urllib.request.Request) -> dict:
             wait, told = _backoff(exc, attempt)
             # 서버가 준 값인지 우리 추측인지를 남긴다 — 「30.0초」가 서버 말인지 상한에 걸린
             # 것인지 로그만 보고 갈려야 상한을 조정할 근거가 생긴다(MAX_RETRY_AFTER 주석).
-            _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
-                         exc.code, wait, attempt + 1, RETRY_ATTEMPTS,
-                         "서버 Retry-After" if told else "추정 백오프")
+            source = "서버 Retry-After" if told else "추정 백오프"
+            if _count_retry(wait):
+                _log.warning(
+                    "LLM %s — 게이트웨이가 속도를 제한합니다. %.1f초 감속 후 재시도 "
+                    "(%d/%d · %s). 이후 재시도는 %.0f초 이상 기다릴 때만 남깁니다 — "
+                    "누적은 /health 의 rate_gate 와 prebuild 요약이 셉니다.",
+                    exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source, LONG_WAIT_LOG_SEC)
+            elif wait >= LONG_WAIT_LOG_SEC:
+                # 오래 서 있는 것은 멈춘 것과 구별되지 않는다 — 이건 남긴다.
+                _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
+                             exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source)
+            else:
+                _log.debug("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
+                           exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source)
             _slow_down(wait)
         else:
             # 성공했다 — 넓혀 둔 간격을 한 걸음 좁힌다(감속이 영구가 되지 않게).

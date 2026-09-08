@@ -77,6 +77,15 @@ def _clear() -> int:
     return 0
 
 
+def _throttle_note(before: dict, after: dict) -> str:
+    """두 시점 사이에 429·5xx 가 몇 번 걸렸고 그중 얼마를 기다렸나. 없으면 빈 문자열."""
+    hits = int(after["retries"] - before["retries"])
+    if not hits:
+        return ""
+    slept = after["slept_sec"] - before["slept_sec"]
+    return f" · 429 {hits}회 · 감속 {slept:.0f}초 · 간격 {after['interval_sec']}초"
+
+
 def main(argv: list[str]) -> int:
     if "--status" in argv:
         return _status()
@@ -107,6 +116,7 @@ def main(argv: list[str]) -> int:
     config.BRIEFING_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     print(f"저장 위치: {config.BRIEFING_CACHE_DIR}")
 
+    run_start = LLM.pace_state()
     made = 0
     left = list(personas)
     try:
@@ -121,21 +131,25 @@ def main(argv: list[str]) -> int:
                 print(f"  · {persona.id} {persona.nm} — 이미 있음(지문 일치)")
                 continue
             started = time.monotonic()
+            before = LLM.pace_state()
             try:
                 out = SA.propose(profile)
             except Exception as exc:                  # noqa: BLE001 — 한 명이 죽어도 나머지는 돈다
                 print(f"  ✗ {persona.id} {persona.nm} — {type(exc).__name__}: {exc}")
                 continue
             took = time.monotonic() - started
+            # 이 한 명에게 429 가 몇 번 걸렸고 그중 얼마를 기다렸나. 재시도 로그를 한 줄씩
+            # 찍지 않는 대신(llm 「재시도 로그」) 여기서 센다 — 100줄보다 이 숫자가 낫다.
+            throttle = _throttle_note(before, LLM.pace_state())
             failed = SA.llm_failed(out)
             if not failed:
                 made += 1
-                print(f"  ✓ {persona.id} {persona.nm}  ({took:.1f}초)")
+                print(f"  ✓ {persona.id} {persona.nm}  ({took:.1f}초{throttle})")
                 continue
             # 호출이 죽어서 빈 섹션이 있는 브리핑은 propose 가 저장하지 않았다 — ✓ 로 적으면
             # 다음 실행이 「이미 있음」으로 건너뛴다고 믿게 된다. 무엇이 비었는지 그대로 적는다.
             first = next(iter(failed.values()))
-            print(f"  ✗ {persona.id} {persona.nm}  ({took:.1f}초) — 저장 안 함. "
+            print(f"  ✗ {persona.id} {persona.nm}  ({took:.1f}초{throttle}) — 저장 안 함. "
                   f"LLM 호출 실패 {len(failed)}곳: {', '.join(failed)}")
             print(f"      {first['error']}: {first['detail']}")
             if SA.rate_limited(out):
@@ -160,7 +174,10 @@ def main(argv: list[str]) -> int:
         print(f"\n중단했습니다. {made}명 저장됨 · 남은 {len(left) + 1}명은 다시 실행하면 이어서 만듭니다.")
         return 130
 
+    total = _throttle_note(run_start, LLM.pace_state())
     print(f"\n{made}명 새로 만들었습니다. 이제 $CADR --demo 가 브리핑 생성을 건너뜁니다.")
+    if total:
+        print(f"속도 제한 누계: {total.removeprefix(' · ')}")
     print("입력(지식 카드·프롬프트·날짜)이 바뀌면 저장분은 자동으로 버려집니다 — 다시 돌리세요.")
     return 0 if not left else 1
 

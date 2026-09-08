@@ -797,6 +797,63 @@ try:
     _llm._pace()          # 두 번째가 간격만큼 기다린다
     check(_sleeps and 3.9 < _sleeps[-1] <= 4.0,
           "llm: 넓어진 간격이 다음 호출의 실제 대기가 된다", str(_sleeps))
+
+    # ⑤ 재시도 로그가 진행 표시를 덮지 않는가 — 행내 실측(2026-09-08) 12명 선생성에서
+    # 「LLM 429 — N.0초 감속 후 재시도 (1/5)」가 100줄 넘게 찍혀 ✓ 줄이 묻혔다. 첫 건과
+    # 오래 기다리는 건만 남기고 나머지는 세기만 한다.
+    import logging as _logging
+
+    class _Catch(_logging.Handler):
+        def __init__(self) -> None:
+            super().__init__(level=_logging.WARNING)
+            self.lines: list[str] = []
+
+        def emit(self, record) -> None:
+            self.lines.append(record.getMessage())
+
+    _catch = _Catch()
+    _llm._log.addHandler(_catch)
+    _saved_level, _llm._log.level = _llm._log.level, _logging.WARNING
+    try:
+        _llm.reset_pace()
+        _short = {"n": 0}
+
+        def _urlopen_short_429(req, timeout=None):
+            # 짧은 대기(1초)로 한 번씩 걸리는 서버 — 행내에서 본 모양이다.
+            _short["n"] += 1
+            if _short["n"] % 2:
+                raise _http_error(429, {"Retry-After": "1"})
+            return _FakeResp()
+
+        _llm.urllib.request.urlopen = _urlopen_short_429
+        for _ in range(6):
+            _llm.generate("q")
+        check(len(_catch.lines) == 1,
+              "llm: 짧은 재시도는 첫 건만 남긴다(같은 줄이 진행 표시를 덮지 않는다)",
+              f"{len(_catch.lines)}줄")
+        check("게이트웨이가 속도를 제한합니다" in _catch.lines[0],
+              "llm: 그 첫 건이 무슨 일인지·이후는 어디서 보는지 말한다", _catch.lines[0])
+        _state = _llm.pace_state()
+        check(_state["retries"] == 6 and _state["slept_sec"] == 6.0,
+              "llm: 남기지 않은 재시도도 누적으로 센다(pace_state)", str(_state))
+
+        # 오래 기다리는 건은 조용히 넘기지 않는다 — 30초 침묵은 멈춘 것과 구별되지 않는다.
+        _catch.lines.clear()
+        _llm.reset_pace()
+        _long = str(int(_llm.LONG_WAIT_LOG_SEC) + 5)
+        _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+            _http_error(429, {"Retry-After": _long}))
+        try:
+            _llm.generate("q")
+        except _llm.LLMError:
+            pass
+        check(len(_catch.lines) == _llm.RETRY_ATTEMPTS - 1,
+              f"llm: {_llm.LONG_WAIT_LOG_SEC:.0f}초 이상 기다리는 재시도는 전부 남긴다",
+              f"{len(_catch.lines)}줄")
+    finally:
+        _llm._log.removeHandler(_catch)
+        _llm._log.level = _saved_level
+
     _llm.reset_pace()
 finally:
     (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.time.sleep,
