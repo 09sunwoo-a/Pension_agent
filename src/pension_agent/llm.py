@@ -24,8 +24,12 @@
 
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
-  LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
-  LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
+  ENV_PATH          실행 단계 train | serving. 비면 train(행내 로컬 기본). 플랫폼 규약
+  LLM_BASE_URL_TRAIN / _SERVING
+                    행내 GenAI 플랫폼 URL 두 벌(…/trnn/… · …/serv/…). ENV_PATH 로 고른다
+  LLM_BASE_URL      단계 구분이 없을 때의 하나짜리(Gateway·사외). 단계별 값이 없으면 이것
+  LLM_API_KEY       인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용).
+                    단계마다 다르면 LLM_API_KEY_TRAIN / _SERVING 으로 갈라 둘 수 있다
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
@@ -73,8 +77,16 @@ from pension_agent import env, observability
 # 파싱은 env.py 가 한다(관측 설정도 같은 파일에서 와야 하므로 아래층으로 내렸다).
 env.load()
 
+# ── genai (사내 플랫폼) — 값은 실행 단계(ENV_PATH: train | serving)에 따라 고른다 ──
+# 행내 .env 하나에 URL 이 두 벌 있다(…/trnn/… 과 …/serv/…). 워크스페이스는 train,
+# 배포 컨테이너는 플랫폼이 serving 을 넣어 준다. 어느 것을 읽었는지는 /health 와
+# `python -m pension_agent.env` 가 보여준다(STAGE).
+STAGE = env.stage()
+BASE_URL = env.staged("LLM_BASE_URL").rstrip("/")
+API_KEY = env.staged("LLM_API_KEY")
+
 PROVIDER = os.getenv("LLM_PROVIDER") or (
-    "genai" if os.getenv("LLM_BASE_URL")
+    "genai" if BASE_URL
     else "gemma" if os.getenv("GEMINI_API_KEY")
     else "anthropic"
 )
@@ -82,9 +94,6 @@ PROVIDER = os.getenv("LLM_PROVIDER") or (
 #: max_tokens 를 넘기지 않은 호출의 기본치. 브리핑 문장 한 편 분량.
 DEFAULT_MAX_TOKENS = 900
 
-# ── genai (사내 플랫폼) ──
-BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
-API_KEY = os.getenv("LLM_API_KEY", "")
 #: 모델 슬러그. **비우면 payload 에서 `model` 키를 아예 뺀다** — 그것이 기본이다.
 #:
 #: 규격 문서 셋이 여기서 갈린다. SKILL.md 는 LLM_MODEL 을 「필수」로 적고 예시 슬러그
@@ -94,8 +103,8 @@ API_KEY = os.getenv("LLM_API_KEY", "")
 #:
 #:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이
 #:                         라우팅 키다. 채워야 한다(.env.gateway.example 이 그 경우).
-#:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(.../trnn/gemma-4) → body 에 model 을
-#:                         함께 실으면 **404** 다(2026-09-08 행내 실측).
+#:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(…/trnn/gemma-4 · …/serv/gemma-4) → body 에
+#:                         model 을 함께 실으면 **404** 다(2026-09-08 행내 실측).
 #:
 #: 그래서 이 값의 정답은 «플랫폼별»이고, 코드는 둘 다 받는다 — 판단은 .env 가 한다.
 #: 콘솔이 모델 이름을 알려주더라도 그것은 «무엇이 서빙되는지»의 표시이지 body 에 실을

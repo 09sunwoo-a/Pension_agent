@@ -6,13 +6,14 @@
 FROM python:3.10-slim
 
 ARG ENV_FILE_PATH
+# 실행 단계(train | serving). 배포 시 플랫폼이 serving 을 넣어 주면 llm.py 가 같은 .env 안의
+# LLM_BASE_URL_SERVING(…/serv/…)을 읽는다. 워크스페이스(train)와 **같은 .env** 를 쓴다.
 ENV ENV_PATH=$ENV_FILE_PATH
 
 WORKDIR /custom
 
 COPY ./requirements.txt /custom/requirements.txt
-# 이미지가 갖는 설정 파일은 이 **하나**다 — `.env.bank` 같은 프로파일 파일은 담지 않는다.
-# 그래서 배포용 `.env` 에는 LLM 설정까지 전부 들어 있어야 한다(.env.example 머리말 ②).
+# 워크스페이스에서 쓰던 그 .env 가 그대로 들어간다(단계별 URL 두 벌이 함께 있다).
 # 없으면 여기서 빌드가 실패한다(refs/dockerfile.md).
 COPY .env /custom/.env
 

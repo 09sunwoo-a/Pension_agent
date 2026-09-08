@@ -142,11 +142,14 @@ def health() -> dict[str, Any]:
     """
     return {
         "status": "ok",
-        # 어느 .env 가 읽혔나 — 프로파일이 셋이라(bank·gateway·local) 이것이 진단의 첫 질문이다.
+        # 어느 .env 가 읽혔나 — 행내는 .env 하나, 그 밖은 프로파일(gateway·local)이라 첫 질문이다.
         # `python -m pension_agent.env` 가 터미널에 찍는 것과 같은 내용이다.
         "env": env.active(),
         "llm": {
             "provider": llm.PROVIDER,
+            # 어느 단계의 URL 을 읽었나 — train(…/trnn/…) 인지 serving(…/serv/…) 인지.
+            # 배포된 컨테이너가 train URL 을 보고 있으면 여기서 바로 드러난다.
+            "stage": llm.STAGE,
             "available": llm.available(),
             "base_url_set": bool(llm.BASE_URL),
             "api_key_set": bool(llm.API_KEY),

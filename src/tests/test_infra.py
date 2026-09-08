@@ -159,7 +159,7 @@ try:
         check(_env.active()["profile"] is None and _env.active()["files"] == [],
               "env: 파일이 하나도 없으면 프로파일 없음·읽은 파일 없음", str(_env.active()))
 
-        # ③ 프로파일 파일이 하나뿐이면 지정 없이 그것이 잡힌다 (행내 머신에 .env.bank 만 두는 경우)
+        # ③ 프로파일 파일이 하나뿐이면 지정 없이 그것이 잡힌다
         (_root / ".env.bank").write_text("LLM_PROVIDER=genai\nLLM_MODEL=bank-model\n", encoding="utf-8")
         (_root / ".env.bank.example").write_text("LLM_PROVIDER=xxx\n", encoding="utf-8")   # 견본은 세지 않는다
         _clear_env()
@@ -199,6 +199,28 @@ try:
         os.environ["LLM_MODEL"] = "from-shell"
         _env.load(force=True, root=_root)
         check(os.environ.get("LLM_MODEL") == "from-shell", "env: 실제 환경변수는 파일이 덮지 못한다")
+
+        # 실행 단계(ENV_PATH) — 행내 .env 하나에 URL 이 두 벌(…/trnn/… · …/serv/…) 있고
+        # 어느 것을 읽을지는 이 변수가 정한다. 워크스페이스에는 없으니 train, 배포 때는
+        # Jenkins 가 실제 환경변수로 serving 을 넣는다. 파일 경로로 잘못 읽던 때가 있었다.
+        for k in ("ENV_PATH", "LLM_BASE_URL", "LLM_BASE_URL_TRAIN", "LLM_BASE_URL_SERVING",
+                  "LLM_API_KEY", "LLM_API_KEY_SERVING"):
+            os.environ.pop(k, None)
+        os.environ.update({"LLM_BASE_URL_TRAIN": "https://h/trnn/m", "LLM_BASE_URL_SERVING": "https://h/serv/m",
+                           "LLM_API_KEY": "k-common", "LLM_API_KEY_SERVING": "k-serv"})
+        check(_env.stage() == "train", "env: ENV_PATH 가 없으면 train(행내 로컬 기본)", _env.stage())
+        check(_env.staged("LLM_BASE_URL") == "https://h/trnn/m", "env: train 이면 …/trnn/… URL 을 읽는다")
+        check(_env.staged("LLM_API_KEY") == "k-common", "env: 단계별 키가 없으면 접미사 없는 키로 폴백")
+        os.environ["ENV_PATH"] = "serving"
+        check(_env.staged("LLM_BASE_URL") == "https://h/serv/m", "env: serving 이면 …/serv/… URL 을 읽는다")
+        check(_env.staged("LLM_API_KEY") == "k-serv", "env: serving 이면 serving 키를 읽는다")
+        os.environ["ENV_PATH"] = "train"
+        for k in ("LLM_BASE_URL_TRAIN", "LLM_BASE_URL_SERVING"):
+            os.environ.pop(k)
+        os.environ["LLM_BASE_URL"] = "https://one"
+        check(_env.staged("LLM_BASE_URL") == "https://one", "env: 단계별 URL 이 없으면 하나짜리 LLM_BASE_URL(Gateway·사외)")
+        for k in ("ENV_PATH", "LLM_BASE_URL", "LLM_API_KEY", "LLM_API_KEY_SERVING"):
+            os.environ.pop(k, None)
 
         # 지정한 프로파일 파일이 없으면 그 사실을 남긴다(조용히 넘어가지 않는다)
         _clear_env()

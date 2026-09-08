@@ -90,6 +90,10 @@ try:
     # 프로파일이 셋이라(bank·gateway·local) «어느 .env 가 읽혔나»가 진단의 첫 질문이다.
     check("profile" in h["env"] and "files" in h["env"],
           "/health 가 어느 .env 프로파일이 읽혔는지 보여준다", str(h.get("env")))
+    # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는
+    # 사고를 여기서 바로 잡아야 한다.
+    check(h["llm"].get("stage") in ("train", "serving"),
+          "/health 가 어느 단계(ENV_PATH)의 URL 을 읽었는지 보여준다", str(h["llm"].get("stage")))
 
     # 행내 첫 연결에서 실제로 걸린 자리 — 인증도 쿼터도 아니고 DNS 였다. LLM Gateway 의
     # base_url 은 *.svc.cluster.local 이라 그 쿠버네티스 클러스터 안에서만 풀리는데,

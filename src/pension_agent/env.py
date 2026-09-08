@@ -8,10 +8,12 @@ LLM 을 쓸 수 있는 환경이 셋이고(행내 GenAI 플랫폼 · 행내 LLM 
 환경마다 프로바이더·엔드포인트·키가 다르다. 한 파일(`src/.env`)에 세 벌을 넣고 주석을 바꿔
 가며 쓰면 어느 줄이 살아 있는지 보이지 않는다. 그래서 **환경마다 파일 하나**다.
 
-    src/.env            공통 — 어느 환경에서나 같은 값(관측 스위치·PENSION_TODAY 등)과
-                        기본 프로파일 이름(`PENSION_ENV=local`)
-    src/.env.bank       행내  — GenAI 플랫폼 (LLM_BASE_URL · LLM_API_KEY, LLM_MODEL 은 비운다)
-    src/.env.gateway    행내  — LLM Gateway (LiteLLM). bank 와 택일. LLM_MODEL 을 채운다
+    src/.env            공통 — 어느 환경에서나 같은 값(관측 스위치·PENSION_TODAY 등).
+                        **행내에서는 이 파일 하나가 전부다** — GenAI 플랫폼 URL 두 벌
+                        (train 용 …/trnn/…, serving 용 …/serv/…)과 키를 여기 두고,
+                        워크스페이스에서도 배포 이미지에서도 같은 파일을 쓴다. 어느 URL 을
+                        쓸지는 ENV_PATH(train | serving)가 정한다 — `stage()`.
+    src/.env.gateway    행내 LLM Gateway (LiteLLM) 를 쓸 때. LLM_MODEL 을 채운다
     src/.env.local      로컬  — anthropic (ANTHROPIC_API_KEY)
 
 전부 gitignore 다(비밀). 저장소에는 `*.example` 만 있다 — 복사해서 채운다.
@@ -20,7 +22,7 @@ LLM 을 쓸 수 있는 환경이 셋이고(행내 GenAI 플랫폼 · 행내 LLM 
 프로파일은 이 순서로 정한다. 먼저 걸리는 것이 이긴다.
   ① 실제 환경변수 `PENSION_ENV`           — 한 번만 바꿔 돌릴 때(`PENSION_ENV=gateway python -m …`)
   ② `src/.env` 안의 `PENSION_ENV=` 줄      — 이 머신의 기본값을 고정해 둘 때
-  ③ `src/.env.<이름>` 이 **딱 하나만** 있으면 그것 — 행내 머신에는 `.env.bank` 만 두면 끝
+  ③ `src/.env.<이름>` 이 **딱 하나만** 있으면 그것
   ④ 없음                                  — 프로파일 파일 없이 `.env` 와 실제 환경변수만
 
 셋 이상의 프로파일 파일이 있는데 ①②가 없으면 고르지 않는다(어느 것인지 짐작하지 않는다).
@@ -46,17 +48,21 @@ from pension_agent import config
 
 #: 명시 경로를 주는 환경변수. 지정하면 프로파일·공통 파일보다 **먼저** 읽는다
 #: (먼저 읽힌 값이 이긴다 — setdefault).
-#: `ENV_PATH` 는 행내 플랫폼이 컨테이너에 넣어주는 이름이다(Dockerfile 의
-#: ARG ENV_FILE_PATH → ENV ENV_PATH). 플랫폼이 .env 를 다른 경로에 마운트해도 코드를
-#: 고치지 않아도 되도록 함께 본다. 우리 이름을 먼저 본다 — 손으로 지정한 쪽이 이긴다.
-DOTENV_ENVS = ("LLM_DOTENV", "ENV_PATH")
-DOTENV_ENV = DOTENV_ENVS[0]
+DOTENV_ENV = "LLM_DOTENV"
+
+#: 실행 단계를 주는 환경변수 — 행내 플랫폼 규약. 값은 `train`(워크스페이스·행내 로컬 기본)
+#: 또는 `serving`(배포된 컨테이너 — Dockerfile 의 ARG ENV_FILE_PATH → ENV ENV_PATH 로
+#: 플랫폼이 넣는다). **파일 경로가 아니다.** 한동안 .env 파일 경로로 잘못 읽고 있었다.
+#: 같은 .env 안에 단계별 값이 함께 있고(`LLM_BASE_URL_TRAIN` 은 …/trnn/…,
+#: `LLM_BASE_URL_SERVING` 은 …/serv/…), 어느 것을 쓸지를 이 변수가 정한다 — `stage()`.
+STAGE_ENV = "ENV_PATH"
+DEFAULT_STAGE = "train"
 
 #: 프로파일 이름을 주는 환경변수. 실제 환경변수로도, `.env` 안의 한 줄로도 줄 수 있다.
 PROFILE_ENV = "PENSION_ENV"
 
 #: 알려진 프로파일. 여기 없는 이름도 `.env.<이름>` 이 있으면 읽는다 — 목록은 안내용이다.
-PROFILES = ("bank", "gateway", "local")
+PROFILES = ("gateway", "local")
 
 _loaded = False
 _active: dict = {"profile": None, "how": "미적재", "files": []}
@@ -124,7 +130,7 @@ def detect_profile(root: Path | None = None) -> tuple[str | None, str]:
 
 
 def load(*, force: bool = False, root: Path | None = None) -> None:
-    """LLM_DOTENV·ENV_PATH(명시 경로) → `.env.<프로파일>` → `.env`(공통) 순으로 읽는다.
+    """LLM_DOTENV(명시 경로) → `.env.<프로파일>` → `.env`(공통) 순으로 읽는다.
 
     두 번째 호출부터는 아무것도 하지 않는다 — 같은 파일을 다시 읽어도 결과는 같지만
     (setdefault 라 멱등), 임포트가 잦은 모듈에서 매번 디스크를 치지 않게 한다.
@@ -136,10 +142,9 @@ def load(*, force: bool = False, root: Path | None = None) -> None:
     _loaded = True
     base = root or config.SRC_ROOT
     files: list[str] = []
-    for var in DOTENV_ENVS:
-        explicit = os.getenv(var)
-        if explicit and load_file(explicit):
-            files.append(explicit)
+    explicit = os.getenv(DOTENV_ENV)
+    if explicit and load_file(explicit):
+        files.append(explicit)
     name, how = detect_profile(base)
     if name:
         pf = profile_file(name, base)
@@ -152,6 +157,21 @@ def load(*, force: bool = False, root: Path | None = None) -> None:
     if load_file(dotenv):
         files.append(str(dotenv))
     _active = {"profile": name, "how": how, "files": files}
+
+
+def stage() -> str:
+    """지금 실행 단계 — `train` | `serving`. ENV_PATH 가 비면 train(행내 로컬 기본)."""
+    return (os.getenv(STAGE_ENV) or DEFAULT_STAGE).strip().lower() or DEFAULT_STAGE
+
+
+def staged(name: str, default: str = "") -> str:
+    """단계별 값 조회 — `<name>_<STAGE>` 가 있으면 그것, 없으면 `<name>`.
+
+    행내 .env 는 URL 을 두 벌 갖는다(`LLM_BASE_URL_TRAIN` · `LLM_BASE_URL_SERVING`).
+    단계 구분이 없는 엔드포인트(Gateway·로컬)는 접미사 없는 이름 하나만 둔다 — 그래서
+    접미사 없는 이름이 폴백이다. 키도 단계마다 다르면 같은 규칙으로 갈라 둘 수 있다.
+    """
+    return os.getenv(f"{name}_{stage().upper()}") or os.getenv(name) or default
 
 
 def active() -> dict:
@@ -174,6 +194,11 @@ def main() -> None:
     have = [p.name for p in profile_files()]
     print(f"있는 프로파일   {', '.join(have) or '(없음)'}   ← 견본: "
           + ", ".join(f".env.{n}.example" for n in PROFILES))
+    # 어느 단계의 URL 을 읽었나 — 행내 .env 에는 …/trnn/… 과 …/serv/… 가 함께 있어서,
+    # 값이 찍혀 있는데도 «왜 그쪽을 부르나»가 여기서 갈린다. 키 값은 찍지 않고 호스트만.
+    src = next((f"{'LLM_BASE_URL'}_{stage().upper()}" for _ in [0]
+                if os.getenv(f"LLM_BASE_URL_{stage().upper()}")), "LLM_BASE_URL")
+    print(f"단계(ENV_PATH)  {stage()}  — {os.getenv(STAGE_ENV) and '실제 환경변수' or '없음 → 기본'} · URL 은 {src}")
     print(f"프로바이더      {llm.PROVIDER}  · 모델 {llm._default_model_label()}")
     print(f"LLM 호출 가능   {'예' if llm.available() else '아니오 — 키·엔드포인트가 비어 있다'}")
     print(f"관측(Langfuse)  {'켜짐' if os.getenv('LANGFUSE_PUBLIC_KEY') else '꺼짐'}")

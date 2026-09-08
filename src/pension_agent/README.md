@@ -91,22 +91,25 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ### 실행 환경 셋 — 파일 하나씩
 
-LLM 을 쓸 수 있는 환경이 셋이고 환경마다 프로바이더·엔드포인트·키가 다르다. 한 파일에 세
-벌을 넣고 주석을 바꿔 가며 쓰지 않는다 — **환경마다 파일 하나**다(`env.py` 머리말).
+**행내는 `src/.env` 하나다.** GenAI 플랫폼 URL 두 벌(`LLM_BASE_URL_TRAIN` …/trnn/… ·
+`LLM_BASE_URL_SERVING` …/serv/…)과 키가 그 안에 있고, 실행 단계 `ENV_PATH`(없으면 `train`,
+배포 때 Jenkins 가 `serving` 을 넣는다)가 어느 것을 읽을지 정한다 — `env.stage()` ·
+`env.staged()`. 워크스페이스와 배포 이미지가 **같은 파일**을 쓴다. `LLM_MODEL` 은 비운다.
+
+사외·다른 게이트웨이는 프로파일 파일로 갈라 둔다 — 한 파일에 여러 벌을 넣고 주석을 바꿔
+가며 쓰지 않는다(`env.py` 머리말):
 
 | 프로파일 | 환경 | 파일 | 프로바이더 |
 |---|---|---|---|
-| `bank` | 행내 GenAI 플랫폼 | `src/.env.bank` | genai — `LLM_BASE_URL`·`LLM_API_KEY`, `LLM_MODEL` 은 **비운다** |
 | `local` | 개발 PC | `src/.env.local` | anthropic — `ANTHROPIC_API_KEY` |
 | `gateway` | 행내 LLM Gateway (LiteLLM) | `src/.env.gateway` | genai 경로 — `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL`(모델 슬러그를 **채운다**) |
 
-어느 파일을 읽을지는 이 순서로 정한다: 실제 환경변수 `PENSION_ENV` → `src/.env` 안의
-`PENSION_ENV=` 줄 → `.env.<이름>` 파일이 하나뿐이면 그것. 행내 머신에는 `.env.bank` 만
-두면 아무것도 지정하지 않아도 그쪽이 잡힌다. 여러 개를 두는 개발 PC 는 `.env` 에
+어느 프로파일을 읽을지는 이 순서로 정한다: 실제 환경변수 `PENSION_ENV` → `src/.env` 안의
+`PENSION_ENV=` 줄 → `.env.<이름>` 파일이 하나뿐이면 그것. 여러 개를 두는 개발 PC 는 `.env` 에
 `PENSION_ENV=local` 로 기본을 고정하고, 잠깐 바꿔 돌릴 때만 `PENSION_ENV=gateway python -m …`
 으로 앞에 붙인다. 프로파일 파일이 공통 파일을 덮는다.
 
 ```bash
-cp .env.bank.example .env.bank      # 견본 하나를 복사해 채운다(.env 는 선택)
-python -m pension_agent.env                                # 어느 파일·프로바이더가 잡혔나
+cp .env.example .env                 # 행내 — 이 하나
+python -m pension_agent.env          # 어느 파일·단계·프로바이더가 잡혔나
 ```

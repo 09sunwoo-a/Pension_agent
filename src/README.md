@@ -14,9 +14,8 @@ cd src
 pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 (Python 3.10)
 pip install -r requirements-dev.txt  # + Streamlit 화면·변환기·사외 프로바이더 (개발용)
 
-cp .env.local.example .env.local     # 이 머신의 LLM 환경. **이 파일 하나면 된다** —
-                                     # 프로파일 파일이 하나뿐이면 그것이 잡힌다.
-                                     # 행내는 .env.bank, LLM Gateway 는 .env.gateway
+cp .env.example .env                 # 행내: 이 파일 하나(train/serving URL 두 벌이 함께 있다)
+cp .env.local.example .env.local     # 사외 개발 PC 는 프로파일 파일(local · gateway)
 python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
@@ -52,38 +51,37 @@ pip install -r requirements.txt \
 #    설치되는 것은 셋뿐이다: fastapi · uvicorn · langgraph==0.4.8
 #    (Streamlit 화면까지 쓰려면 requirements-dev.txt 도. API·CLI 만 쓸 거면 불필요)
 
-# 2. LLM 설정 — 아래 표에서 한 줄 골라 **파일 하나만** 만든다.
+# 2. LLM 설정 — .env 하나. 워크스페이스에서도 배포 이미지에서도 같은 파일을 쓴다.
+cp .env.example .env
 ```
 
-### 2. LLM 프로파일 — 콘솔에서 **어느 카드의 키를 받았는지**로 갈린다
+### 2. `.env` 하나 — 단계(ENV_PATH)가 URL 을 고른다
 
-둘은 **택일**이고, 만드는 파일은 **하나**다. 프로파일 파일이 하나뿐이면 `env.py` 가 그것을
-잡으므로 `PENSION_ENV` 도 `src/.env` 도 필요 없다.
+행내 GenAI 플랫폼은 URL 이 **두 벌**이다: `…/trnn/…`(train) 과 `…/serv/…`(serving). 둘 다
+`.env` 에 두고, 어느 것을 읽을지는 실행 단계 `ENV_PATH` 가 정한다:
 
-| | 내부 GenAI 플랫폼 | LLM Gateway (LiteLLM) |
+| | 워크스페이스·행내 로컬 | 배포된 컨테이너 |
 |---|---|---|
-| 파일 | `cp .env.bank.example .env.bank` | `cp .env.gateway.example .env.gateway` |
-| `LLM_BASE_URL` | 콘솔의 GenAI 플랫폼 카드 URL 그대로 | `http://litellm.aidc-prod.svc.cluster.local:4000` |
-| `LLM_MODEL` | **비운다** — URL 경로가 곧 모델이다 | **채운다** — `claude-sonnet-4-6` |
-| 컴퓨트 인스턴스에서 | 닿는다(실측) | **안 닿는다** — 클러스터 내부 이름이라 DNS 가 안 풀린다 |
-| 확인된 상태 | 2026-09-08 실측 통과 | 미실측 — 배포된 컨테이너 안에서만 설 수 있다 |
+| `ENV_PATH` | **없음** → `train` | Jenkins 가 실제 환경변수로 `serving` 을 넣는다 |
+| 읽는 URL | `LLM_BASE_URL_TRAIN` | `LLM_BASE_URL_SERVING` |
+| 읽는 키 | `LLM_API_KEY_TRAIN` (없으면 `LLM_API_KEY`) | `LLM_API_KEY_SERVING` (없으면 `LLM_API_KEY`) |
+| `.env` 파일 | 이것 | **같은 파일** — `Dockerfile` 이 그대로 COPY 한다 |
+
+그래서 배포용 `.env` 를 따로 만들지 않는다. `.env` 에 `ENV_PATH` 를 적지도 않는다 —
+실제 환경변수가 파일보다 이기므로, 적어 두면 Jenkins 가 넣는 값과 헷갈릴 뿐이다.
+어느 단계·URL 을 읽었는지는 `python -m pension_agent.env` 와 `/health` 의 `stage` 가 보여준다.
+
+**LLM Gateway(LiteLLM)** 를 쓰는 경우는 따로다: `cp .env.gateway.example .env.gateway`.
+단계 구분이 없어 URL 하나(`LLM_BASE_URL`)이고 `LLM_MODEL` 을 **채운다**(`claude-sonnet-4-6`).
+base_url 이 클러스터 내부 이름이라 컴퓨트 인스턴스에서는 이름이 안 풀린다 — 배포된 컨테이너
+안에서만 설 수 있고, 미실측이다.
 
 `LLM_MODEL` 이 서로 반대인 이유는 `llm.py` 의 `MODEL` 상수 주석에 있다. **SKILL.md 는 이
 값을 「필수」로 적는데 그쪽은 Gateway 기준이다** — GenAI 플랫폼에서 콘솔이 알려준 모델
 이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
 
-`src/.env` 는 **로컬 실행에서는 선택**이다(프로파일 파일이 하나면 그것이 잡힌다). 관측을
-켜거나 「오늘」을 고정할 때, 프로파일이 둘 이상이라 고를 때만 만든다.
-
-**배포 이미지에서는 필수다.** `Dockerfile` 이 COPY 하는 설정 파일은 `.env` **하나뿐**이고
-프로파일 파일은 이미지에 들어가지 않는다 — 없으면 COPY 단계에서 빌드가 실패한다
-(refs/dockerfile.md). 그래서 배포용 `.env` 에는 **LLM 설정까지 전부** 넣는다:
-
-```bash
-cp .env.example .env      # LLM_BASE_URL · LLM_API_KEY · LLM_MODEL 이 들어 있다
-cat .env.bank >> .env     # 또는 프로파일에 채운 값을 그대로 합친다
-docker build -f Dockerfile -t pension-agent .
-```
+`Dockerfile` 이 COPY 하는 설정 파일은 `.env` 하나다 — 없으면 COPY 단계에서 빌드가 실패한다
+(refs/dockerfile.md). 프로파일 파일(`.env.gateway` · `.env.local`)은 이미지에 들어가지 않는다.
 
 ```bash
 # 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
@@ -126,7 +124,6 @@ $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을
 streamlit run app.py                                  # 평가 대시보드 (개발용 화면)
 
 # ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
-cp .env.bank.example .env.bank                        # 행내 프로파일(이 파일 하나만 두면 잡힌다)
 ./run_local.sh                                        # uvicorn main:app :8000
 ./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
 CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"   # 고객 화면이 열린 상태
