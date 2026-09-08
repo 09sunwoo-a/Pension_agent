@@ -446,6 +446,54 @@ def check_call_failure_is_not_persisted() -> None:
     _restore_llm()
 
 
+def check_llmless_briefing_is_not_persisted() -> None:
+    """LLM 을 안 부른 브리핑은 파일로 남지 않는다 — LLM 섹션이 통째로 빈 산출이다.
+
+    429 방어(`not llm_failed`)가 여기까지 덮지 못한다. 그 방어는 **호출이 죽은** 것을
+    보는데, 여기는 부르지 않은 것이다. 두 갈래가 있고 갈래마다 남는 흔적이 다르다.
+
+      · 키가 없다 — 섹션 대부분은 `llm.generate` 까지 가서 LLMError 를 받으므로
+        llm_failed 에 남는다. 즉 기존 방어가 이미 막는다. 다만 그건 «그 섹션까지 갔을
+        때»의 이야기고, 브리핑 문장처럼 `available()` 을 먼저 보고 부르지 않는 자리는
+        아무 흔적도 남기지 않는다 — 재료가 없어 지원 섹션이 전부 건너뛰어진 고객이면
+        llm_failed 가 빈 채로 저장될 수 있다.
+      · `use_llm=False` — 부르지 않기로 **정한** 것이라 llm_failed 가 확실히 비어 있다.
+        예전 방어를 그대로 통과해 저장됐다.
+
+    저장소를 커밋하기로 하면서(briefing_cache/) 이 자리가 위험해졌다. 키 없이 돌린
+    체크아웃에서 빈 브리핑이 파일로 생기고, 그것이 커밋되면 배포 이미지가 «출처는 진짜인데
+    내용이 빈» 브리핑을 미리 만들어 둔 것으로 읽는다.
+    """
+    p = _BY_NAME["이준호"]
+
+    def run(tmp) -> None:
+        llm.available = lambda: False       # 키 없는 체크아웃
+        A.llm = llm
+        A.clear_briefing_cache()
+        out = A.propose(p)
+        check(out["source"] != "LLM" and "LLM 미설정" in out["reason"],
+              "propose(): 키가 없으면 브리핑 문장을 비우고 사유를 남긴다",
+              f"source={out['source']} · reason={out['reason']}")
+        check(not list(tmp.glob("*.json")),
+              "propose(): LLM 없이 만든 브리핑은 파일 저장소에 쓰지 않는다",
+              str(list(tmp.glob("*.json"))))
+
+        # use_llm=False — llm_failed 가 확실히 비는 갈래다. 여기가 예전 방어의 구멍이었다.
+        llm.available = lambda: True
+        llm.generate = lambda *a, **k: '{"sentence": "x", "insight": "y", "order": []}'
+        A.clear_briefing_cache()
+        out2 = A.propose(p, use_llm=False)
+        check(not A.llm_failed(out2),
+              "propose(use_llm=False): 부르지 않기로 한 것은 «호출 실패»가 아니다",
+              str(A.llm_failed(out2))[:120])
+        check(not list(tmp.glob("*.json")),
+              "propose(use_llm=False): 그래도 저장하지 않는다 — 빈 산출이다",
+              str(list(tmp.glob("*.json"))))
+
+    _with_store(run)
+    _restore_llm()
+
+
 def check_prebuild_stops_on_rate_limit() -> None:
     """prebuild_briefings 는 429 를 만나면 다음 고객으로 넘어가지 않고 멈춘다.
 
@@ -486,6 +534,7 @@ def check_prebuild_stops_on_rate_limit() -> None:
 
 def main() -> int:
     check_call_failure_is_not_persisted()
+    check_llmless_briefing_is_not_persisted()
     check_prebuild_stops_on_rate_limit()
     check_outreach_prompt_has_no_condition_codes()
     check_shown_state_is_quotable()

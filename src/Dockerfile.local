@@ -23,8 +23,8 @@ COPY ./main.py /custom/main.py
 COPY ./pension_agent /custom/pension_agent
 COPY ./session_data /custom/session_data
 
-# 미리 만들어 둔 브리핑. 없으면 빌드가 실패한다 — `mkdir -p briefing_cache` 로 빈
-# 디렉터리만 만들어도 된다(비어 있어도 저장소가 켜져 런타임 저장이 동작한다).
+# 미리 만들어 둔 브리핑. 저장소에 있어서 따로 만들 것은 없고, 비어 있어도 디렉터리가
+# 있으면 저장소가 켜져 런타임 저장이 동작한다.
 # 배포 이미지(Dockerfile)와 같은 이유·같은 자리다 — 그쪽 주석에 설명이 있다.
 RUN mkdir -p /custom/briefing_cache
 COPY ./briefing_cache /custom/briefing_cache
