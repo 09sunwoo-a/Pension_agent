@@ -14,7 +14,7 @@ WORKDIR /custom
 
 COPY ./requirements.txt /custom/requirements.txt
 # 워크스페이스에서 쓰던 그 .env 가 그대로 들어간다(단계별 URL 두 벌이 함께 있다).
-# 없으면 여기서 빌드가 실패한다(refs/dockerfile.md).
+# 없으면 여기서 빌드가 실패한다(skills/genai-platform-agent-dev/refs/dockerfile.md).
 COPY .env /custom/.env
 
 RUN pip install --no-cache-dir -r /custom/requirements.txt

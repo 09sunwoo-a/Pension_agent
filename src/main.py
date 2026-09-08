@@ -1,7 +1,7 @@
 """행내 GenAI 플랫폼용 HTTP 진입점 — FastAPI.
 
 플랫폼이 요구하는 I/O 스키마는 **고정**이라 여기서 임의로 바꾸지 않는다
-(refs/genai-platform.md «API I/O 스키마 (고정)»):
+(skills/genai-platform-agent-dev/refs/genai-platform.md «API I/O 스키마 (고정)»):
 
     POST /chat   {"input_value": "<JSON 문자열>", "message_hists": null}
       → text/event-stream, 줄마다 {"event": "CHUNK", "content": "..."}
