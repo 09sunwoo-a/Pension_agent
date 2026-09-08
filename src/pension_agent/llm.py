@@ -474,11 +474,17 @@ def _post_json(req: urllib.request.Request) -> dict:
             # 것인지 로그만 보고 갈려야 상한을 조정할 근거가 생긴다(MAX_RETRY_AFTER 주석).
             source = "서버 Retry-After" if told else "추정 백오프"
             if _count_retry(wait):
+                # 첫 건에는 **응답 본문**을 싣는다. 「어느 한도에 걸렸나」(초당·분당·
+                # 토큰·일일)는 우리가 추측할 값이 아니라 서버가 본문에 적어 주는 값이고,
+                # 그것이 처방을 가른다 — 속도를 늦춰서 될 일인지, 쿼터를 올려야 할 일인지.
+                # 재시도로 성공한 429 는 예외가 안 나므로 여기서 안 남기면 본문을 볼 데가
+                # 없다(끝까지 실패한 429 만 LLMError 에 실린다).
                 _log.warning(
                     "LLM %s — 게이트웨이가 속도를 제한합니다. %.1f초 감속 후 재시도 "
                     "(%d/%d · %s). 이후 재시도는 %.0f초 이상 기다릴 때만 남깁니다 — "
-                    "누적은 /health 의 rate_gate 와 prebuild 요약이 셉니다.",
-                    exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source, LONG_WAIT_LOG_SEC)
+                    "누적은 /health 의 rate_gate 와 prebuild 요약이 셉니다.%s",
+                    exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source, LONG_WAIT_LOG_SEC,
+                    f"\n  응답: {body}" if body else "")
             elif wait >= LONG_WAIT_LOG_SEC:
                 # 오래 서 있는 것은 멈춘 것과 구별되지 않는다 — 이건 남긴다.
                 _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",

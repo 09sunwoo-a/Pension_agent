@@ -822,7 +822,8 @@ try:
             # 짧은 대기(1초)로 한 번씩 걸리는 서버 — 행내에서 본 모양이다.
             _short["n"] += 1
             if _short["n"] % 2:
-                raise _http_error(429, {"Retry-After": "1"})
+                raise _http_error(429, {"Retry-After": "1"},
+                                  body=b'{"error":"rate limit: 20000 tokens per minute"}')
             return _FakeResp()
 
         _llm.urllib.request.urlopen = _urlopen_short_429
@@ -833,6 +834,11 @@ try:
               f"{len(_catch.lines)}줄")
         check("게이트웨이가 속도를 제한합니다" in _catch.lines[0],
               "llm: 그 첫 건이 무슨 일인지·이후는 어디서 보는지 말한다", _catch.lines[0])
+        # 어느 한도에 걸렸나(초당·분당·토큰·일일)는 서버 본문에만 있다. 재시도로 성공한
+        # 429 는 예외가 안 나므로 여기서 안 남기면 볼 데가 없다 — 처방이 갈리는 값이다.
+        check("tokens per minute" in _catch.lines[0],
+              "llm: 첫 429 는 응답 본문을 함께 남긴다(어느 한도인지가 처방을 가른다)",
+              _catch.lines[0])
         _state = _llm.pace_state()
         check(_state["retries"] == 6 and _state["slept_sec"] == 6.0,
               "llm: 남기지 않은 재시도도 누적으로 센다(pace_state)", str(_state))
