@@ -101,9 +101,13 @@ def _repl(ask, tr, customer_id: str | None, debug: bool, show_llm: bool) -> int:
         print(f"(고객 화면 열림: {customer_id})")
     if debug:
         print("(--debug: 답변 아래에 이번 턴의 트레이스를 붙입니다)")
+    from pension_agent.session_store import scrub_text  # noqa: PLC0415 — graph 적재 뒤
+
     while True:
         try:
-            question = input("\n> ").strip()
+            # 로케일이 UTF-8 이 아닌 터미널에서 백스페이스가 남긴 반쪽 바이트를 지운다 —
+            # 그대로 두면 프롬프트에 실렸다가 상담이력 저장에서 턴이 통째로 죽는다.
+            question = scrub_text(input("\n> ")).strip()
         except EOFError:
             break
         if not question:

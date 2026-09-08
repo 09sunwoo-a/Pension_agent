@@ -46,11 +46,26 @@ def _load(customer_id: str) -> dict[str, Any]:
     return json.loads(fp.read_text(encoding="utf-8"))
 
 
+def scrub_text(text: str) -> str:
+    """UTF-8 로 쓸 수 없는 문자(짝 없는 서로게이트)를 지운다.
+
+    터미널 로케일이 UTF-8 이 아니면 readline 이 백스페이스에 한글 한 글자(3바이트) 중
+    1바이트만 지우고, Python 은 남은 2바이트를 `surrogateescape` 로 받아 `input()` 은
+    성공한다. 그 문자열은 프롬프트에도 실리고 여기까지 와서 **파일을 쓸 때** 죽는다 —
+    답변은 이미 만들어진 뒤라 턴 전체가 사라진다(2026-09-08 행내 실측: 「이 고객 왜 타겟
+    이야?」 뒤 `UnicodeEncodeError: surrogates not allowed`, 위치 261~262 = 질문 텍스트).
+    바꿔 넣지 않고 지우는 이유는 그 바이트가 «지우려던 글자»의 잔여물이기 때문이다.
+    """
+    return text.encode("utf-8", "ignore").decode("utf-8")
+
+
 def _save(customer_id: str, doc: dict[str, Any]) -> None:
     SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _path(customer_id).write_text(
-        json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    # 어떤 문자열이 들어와도 기록은 남아야 한다 — 입력 경계(REPL)가 이미 걸러 주지만
+    # 이 파일이 마지막 방어선이다(scrub_text 주석). 필드를 가리지 않도록 직렬화 결과에
+    # 바로 건다. 되돌릴 수 없게 지우는 것은 UTF-8 로 쓸 수 없는 문자뿐이다.
+    data = json.dumps(doc, ensure_ascii=False, indent=2)
+    _path(customer_id).write_bytes(data.encode("utf-8", "ignore"))
 
 
 def append_turn(

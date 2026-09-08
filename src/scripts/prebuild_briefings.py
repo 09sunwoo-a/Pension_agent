@@ -19,6 +19,13 @@
 **입력이 바뀌면 저장분은 자동으로 버려진다**(지문 대조 — `briefing_store` 머리말). 지식
 카드를 다시 만들었거나 프롬프트를 고쳤거나 날짜가 바뀌면 다시 돌리면 된다. 굳이 지울
 필요는 없다 — 안 맞는 저장분은 읽히지 않는다.
+
+**LLM 호출이 죽어서 빈 섹션이 있는 브리핑은 저장하지 않는다**(`agent.llm_failed`). 429·5xx·
+타임아웃은 다음 호출에서 풀릴 수 있는 실패라, 그 상태로 저장하면 지문이 같은 한 빈
+브리핑이 «미리 만들어 둔 것»으로 계속 읽힌다. 그런 고객은 ✗ 로 적히고 다음 실행이 다시
+만든다. 429 면 그 자리에서 멈춘다 — 다음 고객으로 넘어가 봐야 같은 429 를 재시도 횟수만큼
+더 맞을 뿐이다. 잠시 뒤 같은 명령을 다시 실행하면 저장된 고객은 건너뛰고 이어서 만든다.
+Ctrl+C 로 끊어도 같다 — 저장은 고객 한 명 단위다.
 """
 
 from __future__ import annotations
@@ -101,27 +108,54 @@ def main(argv: list[str]) -> int:
     print(f"저장 위치: {config.BRIEFING_CACHE_DIR}")
 
     made = 0
-    for persona in personas:
-        profile = SC.get_profile(persona.id)
-        if profile is None:
-            print(f"  ✗ {persona.id} {persona.nm} — 프로파일을 못 읽었습니다")
-            continue
-        key = SA._cache_key(profile, True, SA.engine.TOP_N)
-        if briefing_store.load(key) is not None:
-            print(f"  · {persona.id} {persona.nm} — 이미 있음(지문 일치)")
-            continue
-        started = time.monotonic()
-        try:
-            SA.propose(profile)
-        except Exception as exc:                      # noqa: BLE001 — 한 명이 죽어도 나머지는 돈다
-            print(f"  ✗ {persona.id} {persona.nm} — {type(exc).__name__}: {exc}")
-            continue
-        made += 1
-        print(f"  ✓ {persona.id} {persona.nm}  ({time.monotonic() - started:.1f}초)")
+    left = list(personas)
+    try:
+        while left:
+            persona = left.pop(0)
+            profile = SC.get_profile(persona.id)
+            if profile is None:
+                print(f"  ✗ {persona.id} {persona.nm} — 프로파일을 못 읽었습니다")
+                continue
+            key = SA._cache_key(profile, True, SA.engine.TOP_N)
+            if briefing_store.load(key) is not None:
+                print(f"  · {persona.id} {persona.nm} — 이미 있음(지문 일치)")
+                continue
+            started = time.monotonic()
+            try:
+                out = SA.propose(profile)
+            except Exception as exc:                  # noqa: BLE001 — 한 명이 죽어도 나머지는 돈다
+                print(f"  ✗ {persona.id} {persona.nm} — {type(exc).__name__}: {exc}")
+                continue
+            took = time.monotonic() - started
+            failed = SA.llm_failed(out)
+            if not failed:
+                made += 1
+                print(f"  ✓ {persona.id} {persona.nm}  ({took:.1f}초)")
+                continue
+            # 호출이 죽어서 빈 섹션이 있는 브리핑은 propose 가 저장하지 않았다 — ✓ 로 적으면
+            # 다음 실행이 「이미 있음」으로 건너뛴다고 믿게 된다. 무엇이 비었는지 그대로 적는다.
+            first = next(iter(failed.values()))
+            print(f"  ✗ {persona.id} {persona.nm}  ({took:.1f}초) — 저장 안 함. "
+                  f"LLM 호출 실패 {len(failed)}곳: {', '.join(failed)}")
+            print(f"      {first['error']}: {first['detail']}")
+            if SA.rate_limited(out):
+                # 429 는 «지금 더 부르면 같은 답»이다. 다음 고객으로 넘어가면 섹션마다 재시도
+                # 횟수를 다 쓰며 같은 429 를 맞는다 — 고객 한 명에 수십 분이 사라지고 남는
+                # 것은 없다(행내 실측 2026-09-08). 여기서 멈추고 나머지는 다음 실행에 맡긴다.
+                left.insert(0, persona)
+                print(f"\n속도 제한(429)입니다 — 여기서 멈춥니다. 남은 {len(left)}명: "
+                      + " · ".join(p.nm for p in left))
+                print("잠시 뒤 같은 명령을 다시 실행하면 저장된 고객은 건너뛰고 이어서 만듭니다.")
+                break
+    except KeyboardInterrupt:
+        # 감속 대기(llm._pace 의 sleep) 중에 끊는 일이 흔하다. 역추적 대신 어디까지 됐는지를
+        # 남긴다 — 저장은 고객 한 명 단위라, 끊긴 고객만 다음 실행이 다시 만든다.
+        print(f"\n중단했습니다. {made}명 저장됨 · 남은 {len(left) + 1}명은 다시 실행하면 이어서 만듭니다.")
+        return 130
 
     print(f"\n{made}명 새로 만들었습니다. 이제 $CADR --demo 가 브리핑 생성을 건너뜁니다.")
     print("입력(지식 카드·프롬프트·날짜)이 바뀌면 저장분은 자동으로 버려집니다 — 다시 돌리세요.")
-    return 0
+    return 0 if not left else 1
 
 
 if __name__ == "__main__":

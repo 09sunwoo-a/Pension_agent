@@ -109,7 +109,7 @@ $CA -c 198734-1205842 "이 고객 왜 관리 대상이야?"   # 브리핑 경로
 | `프로바이더 anthropic` | `.env` 가 안 읽혔거나 구역 ① 이 비어 있음 | `python -m pension_agent.env` 로 읽힌 파일 확인 |
 | `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
 | `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 함께 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
-| `HTTP 429` | 호출이 몰림 | `.env` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작 |
+| `HTTP 429` | 호출이 몰림 | `.env` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작. 서버가 Retry-After 를 주면 그만큼 쉰 뒤 재시도한다(로그에 «서버 Retry-After»). `prebuild_briefings` 는 429 면 그 자리에서 멈춘다 — 잠시 뒤 다시 실행하면 저장된 고객은 건너뛴다 |
 
 `.env` 는 **프로세스 기동 때 한 번만** 읽는다. 고쳤으면 서버를 다시 띄워야 한다
 (`--reload` 는 `.py` 변경만 본다).
