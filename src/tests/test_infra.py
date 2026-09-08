@@ -765,6 +765,16 @@ try:
     _llm._slow_down(1.0)
     check(_llm._interval == min(_first * _llm.SLOWDOWN_FACTOR, _llm.MAX_INTERVAL),
           "llm: 429 가 이어지면 간격이 곱으로 넓어진다", f"{_llm._interval}초")
+
+    # 대기 시간(①)이 길다고 간격(②)이 그만큼 넓어지지는 않는다 — Retry-After 는 «창이
+    # 언제 열리나»이지 «어느 속도면 안 걸리나»가 아니다(_slow_down 주석의 측정).
+    _llm.reset_pace()
+    _llm._slow_down(60.0)
+    check(_llm._interval == _llm.SLOWDOWN_FLOOR,
+          "llm: 긴 대기를 지시받아도 간격은 곱으로만 넓어진다", f"{_llm._interval}초")
+
+    _llm.reset_pace()
+    _llm._slow_down(1.0)
     for _ in range(200):
         _llm._slow_down(1.0)
     check(_llm._interval == _llm.MAX_INTERVAL,
