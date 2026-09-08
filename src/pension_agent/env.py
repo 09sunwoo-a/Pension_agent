@@ -41,8 +41,9 @@ def suffix() -> str:
 
 
 def staged(name: str, default: str = "") -> str:
-    """`<name>_TRNN|_SERV` 가 있으면 그것, 없으면 `<name>` — 단계 구분이 없는 Gateway·사외용 폴백."""
-    return os.getenv(f"{name}_{suffix()}") or os.getenv(name) or default
+    """`<name>_<단계>` → 없으면 `<name>_TRNN`(분석계가 기본) → 없으면 `<name>`(단계 구분이 없는 Gateway·사외)."""
+    return (os.getenv(f"{name}_{suffix()}") or os.getenv(f"{name}_TRNN")
+            or os.getenv(name) or default)
 
 
 if __name__ == "__main__":

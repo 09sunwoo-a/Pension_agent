@@ -190,6 +190,10 @@ try:
         check(_env.staged("LLM_API_KEY") == "k-serv", "env: serving 이면 serving 키를 읽는다")
         os.environ["ENV_PATH"] = "dev"
         check(_env.suffix() == "TRNN", "env: serving 이 아닌 값(dev 등)은 전부 분석계 — 가이드의 else 분기")
+        # 서빙계인데 _SERV 값이 없으면 분석계 값으로 떨어진다 — trnn 이 기본이다
+        os.environ["ENV_PATH"] = "serving"
+        os.environ.pop("LLM_BASE_URL_SERV")
+        check(_env.staged("LLM_BASE_URL") == "https://h/trnn/m", "env: 단계 값이 없으면 _TRNN 이 기본")
         _clear_env()
         os.environ["LLM_BASE_URL"] = "https://one"
         check(_env.staged("LLM_BASE_URL") == "https://one", "env: 단계별 URL 이 없으면 하나짜리 LLM_BASE_URL(Gateway·사외)")
