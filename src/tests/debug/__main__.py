@@ -31,6 +31,15 @@ REPL 로 들어가는 스크립트라, 불러오는 순간 이 CLI 가 아니라
 
 from __future__ import annotations
 
+import tests
+
+# «오늘» 고정을 되돌린다 — `pension_agent` 를 임포트하기 전에. 이 CLI 는 실제 상담 시점을
+# 재현하는 자리라 실제 날짜로 돈다(`tests.unpin_today` · reps.py 의 같은 자리).
+# 이 파일은 `python -m tests.debug` 로만 실행되지만, 회귀 테스트가 임포트해 검사하므로
+# (`tests/test_consult_agent.py`) reps.py 와 같은 관문을 둔다.
+if __name__ == "__main__":
+    tests.unpin_today()
+
 import sys
 
 from tests.debug import script, trace as TR

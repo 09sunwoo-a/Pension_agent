@@ -45,8 +45,9 @@ $CADR library                                         # 고객별 시나리오 5
 $CADR library 김서연 정민석 --why                      # 이름·번호로 골라서 (옵션은 대본과 무관하게 같다)
 $CADR review                                          # 중간점검 시연본 지금 판 (docs/DEMO_REVIEW.md)
 $CADR review 이수민 --why                              # 고객 골라서
-PENSION_TODAY=2026-09-07 $CADR qa                     # 고객 12명 예상질문 83턴 — 턴마다 «기대» 표시 (docs/QA_CUSTOMER_QUESTIONS.md)
-PENSION_TODAY=2026-09-07 $CADR qa 김현수 윤가영 --why --pause=20   # 고객 골라서 · 턴 사이 20초(분당 한도 키)
+$CADR qa                                              # 고객 12명 예상질문 83턴 — 턴마다 «기대» 표시 (docs/QA_CUSTOMER_QUESTIONS.md)
+$CADR qa 김현수 윤가영 --why --pause=20                # 고객 골라서 · 턴 사이 20초(분당 한도 키)
+PENSION_TODAY=2026-09-07 $CADR qa                     # 기대가 적힌 날짜로 얼려서 (scenarios.QA_TODAY — 안 맞추면 러너가 알린다)
 $CADR --versions                                      # 중간점검본 판 이력 — 무엇을 왜 바꿨나
 $CADR --diff v5 v6                                    # 두 판의 질문 차이
 $CADR review@v3                                       # 옛 판 그대로 돌려보기
@@ -269,6 +270,11 @@ LLM 연결 여부를 항상 보여준다 — 답이 이상할 때 «에이전트
   `clock.today()`(상담 시점 — 잔여일수·경과일의 기준). 하나로 붙여 두면 원장이 사흘만
   묵어도 "만기 D-17"(실제 D-14)·"연말까지 129일"(실제 126일)이 나간다. `PENSION_TODAY=
   YYYY-MM-DD` 로 고정하며, 테스트는 `tests/__init__.py` 가 `AS_OF` 로 고정한 채 돈다.
+  **리허설·디버그 CLI 는 실제 날짜로 돈다** — `tests` 안에 살아 그 고정을 물려받던 것을
+  진입에서 되돌린다(`tests.unpin_today`). 실행 머리에 오늘·원장 기준일을 찍는다.
+  **산출의 출구가 그 값을 함께 돌려준다** — `graph.ask()` 와 `agent.propose()` 의 `clock`
+  키({today, pinned, as_of, ledger_age_days}). 화면이 제 시계를 읽으면 오늘을 읽는 곳이
+  둘이 되고, 그때 화면 상단 날짜와 답변 속 D-day 가 갈린다.
   오늘이 며칠인지는 `date` 도구가 **재료로** 싣는다 — 재료 밖 날짜 계산은 금지이므로
   (§5) 싣지 않으면 시한을 아예 말하지 못한다.
 - **날짜는 통짜로 대조한다.** 연·월·일로 흩으면 원장 어딘가에 2026 과 11 과 10 이 있다는

@@ -442,6 +442,41 @@ check(tests.PINNED_TODAY == CUST.AS_OF.isoformat(),
       "테스트가 고정한 오늘 = 원장 기준일(AS_OF)",
       f"{tests.PINNED_TODAY} vs {CUST.AS_OF}")
 
+# ── 고정은 **회귀 테스트의 요건**이지 이 패키지를 지나는 모든 실행의 요건이 아니다.
+# 리허설 러너·디버그 CLI 가 이 패키지 안에 살아서 임포트만으로 고정을 물려받았고, 실제
+# 날짜로 도는 줄 알고 돌린 사람이 원장 기준일 기준의 경과일을 지어낸 수치로 의심했다
+# (2026-09-07). 되돌리는 관문이 `tests.unpin_today` 이고, 지켜야 할 것은 둘이다.
+_saved_pin = os.environ.get(tests.TODAY_ENV)
+try:
+    tests.unpin_today()
+    check(not os.environ.get(tests.TODAY_ENV, "").strip(),
+          "unpin_today() 가 테스트가 채운 고정을 되돌린다 — 리허설은 실제 날짜로 돈다")
+finally:
+    if _saved_pin is None:
+        os.environ.pop(tests.TODAY_ENV, None)
+    else:
+        os.environ[tests.TODAY_ENV] = _saved_pin
+check(os.environ.get(tests.TODAY_ENV) == tests.PINNED_TODAY,
+      "되돌린 뒤에도 이 스위트의 고정은 그대로다(위 복원)")
+
+# **밖에서 준 값은 건드리지 않는다.** 특정 날짜로 얼려 보려고 붙인 `PENSION_TODAY=…` 와
+# `app.py` 가 켤 때 채우는 값이 여기 걸린다 — 되돌려 버리면 그쪽이 조용히 실제 날짜로 샌다.
+check(tests.PINNED_BY_TESTS is True,
+      "이 스위트는 고정을 스스로 채웠다(밖에서 준 값이 아니다)")
+
+# 러너 진입이 그 관문을 **`pension_agent` 임포트보다 먼저** 통과해야 한다 — `customer` 가
+# 임포트 시점에 PERSONAS 를 만들며 잔여일수·경과일을 굳히므로, 순서가 뒤집히면 되돌려도
+# 그 값들은 이미 고정된 오늘로 계산돼 있다. 소스 순서로 잰다(실행해 보면 이 프로세스의
+# 고정이 풀린다).
+from pension_agent import config as _config  # noqa: E402 — 경로는 config 소유(구조 규칙)
+
+for _entry in ("tests/debug/reps.py", "tests/debug/__main__.py"):
+    _src = (_config.SRC_ROOT / _entry).read_text(encoding="utf-8")
+    _at_unpin = _src.find("unpin_today()")
+    _at_import = _src.find("\nfrom pension_agent")
+    check(_at_unpin > 0 and (_at_import < 0 or _at_unpin < _at_import),
+          f"{_entry} 가 pension_agent 임포트 전에 고정을 되돌린다")
+
 # 두 축이 이름부터 갈려 있어야 한다. 옛 이름이 살아 있으면 «원장 기준일»과 «오늘»을
 # 같은 것으로 아는 호출부가 조용히 남는다.
 check(not hasattr(CUST, "TODAY"),
