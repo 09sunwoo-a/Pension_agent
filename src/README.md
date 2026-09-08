@@ -13,8 +13,10 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 cd src
 pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 (Python 3.10)
 pip install -r requirements-dev.txt  # + Streamlit 화면·변환기·사외 프로바이더 (개발용)
-cp .env.example .env                 # 공통 설정 (기본 프로파일 이름 등)
-cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
+
+cp .env.local.example .env.local     # 이 머신의 LLM 환경. **이 파일 하나면 된다** —
+                                     # 프로파일 파일이 하나뿐이면 그것이 잡힌다.
+                                     # 행내는 .env.bank, LLM Gateway 는 .env.gateway
 python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
@@ -50,13 +52,13 @@ pip install -r requirements.txt \
 #    설치되는 것은 셋뿐이다: fastapi · uvicorn · langgraph==0.4.8
 #    (Streamlit 화면까지 쓰려면 requirements-dev.txt 도. API·CLI 만 쓸 거면 불필요)
 
-# 2. 공통 설정
-cp .env.example .env
+# 2. LLM 설정 — 아래 표에서 한 줄 골라 **파일 하나만** 만든다.
 ```
 
-### 2-b. LLM 프로파일 — 콘솔에서 **어느 카드의 키를 받았는지**로 갈린다
+### 2. LLM 프로파일 — 콘솔에서 **어느 카드의 키를 받았는지**로 갈린다
 
-둘은 **택일**이다. 프로파일 파일을 하나만 두면 `env.py` 가 알아서 그것을 잡는다.
+둘은 **택일**이고, 만드는 파일은 **하나**다. 프로파일 파일이 하나뿐이면 `env.py` 가 그것을
+잡으므로 `PENSION_ENV` 도 `src/.env` 도 필요 없다.
 
 | | 내부 GenAI 플랫폼 | LLM Gateway (LiteLLM) |
 |---|---|---|
@@ -69,6 +71,10 @@ cp .env.example .env
 `LLM_MODEL` 이 서로 반대인 이유는 `llm.py` 의 `MODEL` 상수 주석에 있다. **SKILL.md 는 이
 값을 「필수」로 적는데 그쪽은 Gateway 기준이다** — GenAI 플랫폼에서 콘솔이 알려준 모델
 이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
+
+`src/.env`(공통 파일)는 **선택**이다. 관측(Langfuse)을 켜거나 상담 시점의 «오늘»을 고정할
+때만 만든다(`cp .env.example .env`). 프로파일 파일을 둘 이상 둘 때 어느 것을 쓸지 고정하는
+자리이기도 하다 — 하나만 두면 그럴 일이 없다.
 
 ```bash
 # 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
