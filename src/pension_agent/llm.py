@@ -25,11 +25,11 @@
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
   ENV_PATH          실행 단계 train | serving. 비면 train(행내 로컬 기본). 플랫폼 규약
-  LLM_BASE_URL_TRAIN / _SERVING
+  LLM_BASE_URL_TRNN / _SERV
                     행내 GenAI 플랫폼 URL 두 벌(…/trnn/… · …/serv/…). ENV_PATH 로 고른다
   LLM_BASE_URL      단계 구분이 없을 때의 하나짜리(Gateway·사외). 단계별 값이 없으면 이것
   LLM_API_KEY       인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용).
-                    단계마다 다르면 LLM_API_KEY_TRAIN / _SERVING 으로 갈라 둘 수 있다
+                    단계마다 다르면 LLM_API_KEY_TRNN / _SERV 으로 갈라 둘 수 있다
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다

@@ -57,14 +57,14 @@ cp .env.example .env
 
 ### 2. `.env` 하나 — 단계(ENV_PATH)가 URL 을 고른다
 
-행내 GenAI 플랫폼은 URL 이 **두 벌**이다: `…/trnn/…`(train) 과 `…/serv/…`(serving). 둘 다
+행내 GenAI 플랫폼은 분석계(`…/trnn/…`)와 서빙계(`…/serv/…`)의 APIM 경로가 달라 URL 이 **두 벌**이다. 둘 다
 `.env` 에 두고, 어느 것을 읽을지는 실행 단계 `ENV_PATH` 가 정한다:
 
 | | 워크스페이스·행내 로컬 | 배포된 컨테이너 |
 |---|---|---|
-| `ENV_PATH` | **없음** → `train` | Jenkins 가 실제 환경변수로 `serving` 을 넣는다 |
-| 읽는 URL | `LLM_BASE_URL_TRAIN` | `LLM_BASE_URL_SERVING` |
-| 읽는 키 | `LLM_API_KEY_TRAIN` (없으면 `LLM_API_KEY`) | `LLM_API_KEY_SERVING` (없으면 `LLM_API_KEY`) |
+| `ENV_PATH` | **없음**(→ 분석계) | Jenkins 가 실제 환경변수로 `serving` 을 넣는다. 그 외 값은 전부 분석계 |
+| 읽는 URL | `LLM_BASE_URL_TRNN` | `LLM_BASE_URL_SERV` |
+| 읽는 키 | `LLM_API_KEY_TRNN` (없으면 `LLM_API_KEY`) | `LLM_API_KEY_SERV` (없으면 `LLM_API_KEY`) |
 | `.env` 파일 | 이것 | **같은 파일** — `Dockerfile` 이 그대로 COPY 한다 |
 
 그래서 배포용 `.env` 를 따로 만들지 않는다. `.env` 에 `ENV_PATH` 를 적지도 않는다 —

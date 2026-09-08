@@ -53,8 +53,8 @@ DOTENV_ENV = "LLM_DOTENV"
 #: 실행 단계를 주는 환경변수 — 행내 플랫폼 규약. 값은 `train`(워크스페이스·행내 로컬 기본)
 #: 또는 `serving`(배포된 컨테이너 — Dockerfile 의 ARG ENV_FILE_PATH → ENV ENV_PATH 로
 #: 플랫폼이 넣는다). **파일 경로가 아니다.** 한동안 .env 파일 경로로 잘못 읽고 있었다.
-#: 같은 .env 안에 단계별 값이 함께 있고(`LLM_BASE_URL_TRAIN` 은 …/trnn/…,
-#: `LLM_BASE_URL_SERVING` 은 …/serv/…), 어느 것을 쓸지를 이 변수가 정한다 — `stage()`.
+#: 같은 .env 안에 단계별 값이 함께 있고(`LLM_BASE_URL_TRNN` 은 분석계 …/trnn/…,
+#: `LLM_BASE_URL_SERV` 는 서빙계 …/serv/…), 어느 것을 쓸지를 이 변수가 정한다 — `suffix()`.
 STAGE_ENV = "ENV_PATH"
 DEFAULT_STAGE = "train"
 
@@ -160,18 +160,24 @@ def load(*, force: bool = False, root: Path | None = None) -> None:
 
 
 def stage() -> str:
-    """지금 실행 단계 — `train` | `serving`. ENV_PATH 가 비면 train(행내 로컬 기본)."""
+    """지금 실행 단계. ENV_PATH 값 그대로(소문자), 비면 `train`(행내 로컬 기본)."""
     return (os.getenv(STAGE_ENV) or DEFAULT_STAGE).strip().lower() or DEFAULT_STAGE
 
 
-def staged(name: str, default: str = "") -> str:
-    """단계별 값 조회 — `<name>_<STAGE>` 가 있으면 그것, 없으면 `<name>`.
+def suffix() -> str:
+    """단계 → 환경변수 접미사. 플랫폼 가이드의 분기 그대로다:
+    `ENV == "serving"` 이면 서빙계(SERV), **그 외 전부** 분석계(TRNN). 개발계·검증계도 같다."""
+    return "SERV" if stage() == "serving" else "TRNN"
 
-    행내 .env 는 URL 을 두 벌 갖는다(`LLM_BASE_URL_TRAIN` · `LLM_BASE_URL_SERVING`).
-    단계 구분이 없는 엔드포인트(Gateway·로컬)는 접미사 없는 이름 하나만 둔다 — 그래서
-    접미사 없는 이름이 폴백이다. 키도 단계마다 다르면 같은 규칙으로 갈라 둘 수 있다.
+
+def staged(name: str, default: str = "") -> str:
+    """단계별 값 조회 — `<name>_TRNN` / `<name>_SERV` 가 있으면 그것, 없으면 `<name>`.
+
+    행내 .env 는 분석계(trnn)와 서빙계(serv)의 APIM 경로가 달라 URL 을 두 벌 갖는다
+    (`LLM_BASE_URL_TRNN` · `LLM_BASE_URL_SERV`), 키도 같다. 단계 구분이 없는 엔드포인트
+    (Gateway·로컬)는 접미사 없는 이름 하나만 둔다 — 그래서 접미사 없는 이름이 폴백이다.
     """
-    return os.getenv(f"{name}_{stage().upper()}") or os.getenv(name) or default
+    return os.getenv(f"{name}_{suffix()}") or os.getenv(name) or default
 
 
 def active() -> dict:
@@ -196,8 +202,7 @@ def main() -> None:
           + ", ".join(f".env.{n}.example" for n in PROFILES))
     # 어느 단계의 URL 을 읽었나 — 행내 .env 에는 …/trnn/… 과 …/serv/… 가 함께 있어서,
     # 값이 찍혀 있는데도 «왜 그쪽을 부르나»가 여기서 갈린다. 키 값은 찍지 않고 호스트만.
-    src = next((f"{'LLM_BASE_URL'}_{stage().upper()}" for _ in [0]
-                if os.getenv(f"LLM_BASE_URL_{stage().upper()}")), "LLM_BASE_URL")
+    src = f"LLM_BASE_URL_{suffix()}" if os.getenv(f"LLM_BASE_URL_{suffix()}") else "LLM_BASE_URL"
     print(f"단계(ENV_PATH)  {stage()}  — {os.getenv(STAGE_ENV) and '실제 환경변수' or '없음 → 기본'} · URL 은 {src}")
     print(f"프로바이더      {llm.PROVIDER}  · 모델 {llm._default_model_label()}")
     print(f"LLM 호출 가능   {'예' if llm.available() else '아니오 — 키·엔드포인트가 비어 있다'}")

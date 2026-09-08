@@ -91,8 +91,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ### 실행 환경 셋 — 파일 하나씩
 
-**행내는 `src/.env` 하나다.** GenAI 플랫폼 URL 두 벌(`LLM_BASE_URL_TRAIN` …/trnn/… ·
-`LLM_BASE_URL_SERVING` …/serv/…)과 키가 그 안에 있고, 실행 단계 `ENV_PATH`(없으면 `train`,
+**행내는 `src/.env` 하나다.** GenAI 플랫폼 URL 두 벌(`LLM_BASE_URL_TRNN` …/trnn/… ·
+`LLM_BASE_URL_SERV` …/serv/…)과 키가 그 안에 있고, 실행 단계 `ENV_PATH`(없으면 `train`,
 배포 때 Jenkins 가 `serving` 을 넣는다)가 어느 것을 읽을지 정한다 — `env.stage()` ·
 `env.staged()`. 워크스페이스와 배포 이미지가 **같은 파일**을 쓴다. `LLM_MODEL` 은 비운다.
 
