@@ -85,6 +85,21 @@ DEFAULT_MAX_TOKENS = 900
 # ── genai (사내 플랫폼) ──
 BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
 API_KEY = os.getenv("LLM_API_KEY", "")
+#: 모델 슬러그. **비우면 payload 에서 `model` 키를 아예 뺀다** — 그것이 기본이다.
+#:
+#: 규격 문서 셋이 여기서 갈린다. SKILL.md 는 LLM_MODEL 을 「필수」로 적고 예시 슬러그
+#: (claude-sonnet-4-6)까지 주는데, genai-platform.md 는 「생략이 기본값 — 게이트웨이가
+#: 라우팅한다」고 적고 코드 예제에서 model 을 주석 처리해 둔다. 어긋난 것이 아니라
+#: **엔드포인트가 모델을 고르는 방식이 둘**이기 때문이다:
+#:
+#:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이
+#:                         라우팅 키다. 채워야 한다(.env.aiden.example 이 그 경우).
+#:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(.../trnn/gemma-4) → body 에 model 을
+#:                         함께 실으면 **404** 다(2026-09-08 행내 실측).
+#:
+#: 그래서 이 값의 정답은 «플랫폼별»이고, 코드는 둘 다 받는다 — 판단은 .env 가 한다.
+#: 콘솔이 모델 이름을 알려주더라도 그것은 «무엇이 서빙되는지»의 표시이지 body 에 실을
+#: 값이라는 뜻은 아니다. 그 혼동이 행내 첫 연결을 404 로 막았다.
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 #: 429·5xx 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
