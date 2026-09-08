@@ -101,9 +101,18 @@ try:
     # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
     # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
     # 배포된 컨테이너에서 그 셋을 로그 없이 가르는 수단이 여기 말고 없다.
-    check(h["briefing_cache"]["enabled"] is False,
-          "/health: 저장소가 꺼져 있으면 꺼졌다고 말한다", str(h.get("briefing_cache")))
+    # 체크아웃에는 briefing_cache/ 가 있으므로(커밋한다) 여기서는 켜져 있는 것이 정상이다.
+    check(h["briefing_cache"]["enabled"] is True and h["briefing_cache"]["dir"].endswith(
+        "briefing_cache"), "/health: 저장소가 어디를 보고 있는지 말한다", str(h.get("briefing_cache")))
     _saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+    try:
+        # 디렉터리가 없으면 통째로 꺼진 것이다 — 그때는 지문 계산까지 가지 않는다.
+        _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir / "__none__"
+        off = client.get("/health").json()["briefing_cache"]
+        check(off["enabled"] is False and "stored" not in off,
+              "/health: 디렉터리가 없으면 꺼졌다고만 말한다(지문 계산도 안 한다)", str(off))
+    finally:
+        _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
     with tempfile.TemporaryDirectory() as _tmp:
         try:
             _cfg.BRIEFING_CACHE_DIR = Path(_tmp)

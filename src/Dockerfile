@@ -42,9 +42,8 @@ COPY ./main.py /custom/main.py
 COPY ./pension_agent /custom/pension_agent
 COPY ./session_data /custom/session_data
 
-# 미리 만들어 둔 브리핑(scripts/prebuild_briefings.py). **없으면 여기서 빌드가 실패한다**
-# — .env 와 같다. 미리 만들지 않고 빌드하려면 `mkdir -p briefing_cache` 로 빈 디렉터리만
-# 만든다(아래 RUN 이 있으니 이미지 쪽은 비어도 선다).
+# 미리 만들어 둔 브리핑(scripts/prebuild_briefings.py). 저장소에 있으므로 따로 만들 것은
+# 없다 — 지우고 빌드하면 그때는 .env 처럼 COPY 단계에서 실패한다.
 #
 # 왜 넣나: 대화형은 브리핑이 **이미 있다고 보고** 답한다. 이 컨테이너가 직접 만들면
 # 고객당 순차 LLM 11 회이고, 외부에서 호출할 때마다 그 시간을 문다. 구워 넣으면 첫
