@@ -33,6 +33,8 @@
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
+  LLM_CLIENT_USER_SPREAD  사번 뒤에 붙일 임의 접미의 길이. 0(기본)이면 안 붙인다.
+                    한 사번의 쿼터 버킷이 바닥날 때 여러 버킷으로 나눈다 — 「쿼터 버킷 분산」
   LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
   LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
@@ -63,6 +65,7 @@ import json
 import logging
 import os
 import random
+import string
 import threading
 import time
 import urllib.error
@@ -227,6 +230,41 @@ def client_user(name: str | None) -> Iterator[None]:
 def current_client_user() -> str:
     """지금 유효한 x-client-user. 명시 인자 > ContextVar > 환경변수 기본값."""
     return _CLIENT_USER.get() or DEFAULT_CLIENT_USER
+
+
+# ── 쿼터 버킷 분산 ────────────────────────────────────────────────────────────
+#
+# x-client-user 가 게이트웨이의 쿼터 버킷이라(위 주석), 한 직원 사번으로 몰아서 부르면
+# 그 버킷 하나가 바닥난다. STG 는 분당 10회인데 브리핑 한 편이 그것만으로 한도를 넘고
+# (.env.example), 12명 선생성이면 사번 하나로 144회다. 사번 뒤에 임의 접미를 붙여 한
+# 사람의 호출을 여러 버킷으로 나눈다.
+#
+# **사번은 그대로 앞에 남긴다.** 이 값은 쿼터 버킷이면서 동시에 감사 기록이라,
+# 익명화하면(예전 "anonymous") 누가 불렀는지가 사라진다. 접미만 갈리므로 «누가»는
+# 그대로 읽히고 «어느 버킷»만 나뉜다.
+#
+# **기본은 꺼짐이다.** 감사 기록의 모양을 바꾸는 설정이라 조용히 켜지면 안 되고,
+# 배포 컨테이너(serving)까지 따라가면 곤란하다 — 켜는 것은 .env 가 정한다.
+# 그리고 **버킷이 x-client-user 로 갈릴 때만 듣는다** — 게이트웨이가 API 키 단위나
+# 전체 단위로 재고 있으면 접미를 붙여도 아무것도 달라지지 않는다.
+
+#: 사번 뒤에 붙일 임의 접미의 길이. 0 이면 안 붙인다(기본).
+CLIENT_USER_SPREAD = max(0, int(os.getenv("LLM_CLIENT_USER_SPREAD", "0") or 0))
+#: 접미에 쓰는 글자. 사번과 섞이지 않게 하이픈으로 잇는다.
+_SPREAD_ALPHABET = string.ascii_letters + string.digits
+
+
+def spread_client_user(base: str) -> str:
+    """쿼터 버킷을 나눈 x-client-user. 꺼져 있으면 base 를 그대로 돌려준다.
+
+    호출 **한 건마다** 새로 뽑는다. 프로세스나 턴 단위로 고정하면 선생성처럼 한
+    프로세스가 순차로 도는 자리에서는 버킷이 하나뿐이라 아무것도 나뉘지 않는다 —
+    그 자리가 바로 이것이 필요한 자리다.
+    """
+    if CLIENT_USER_SPREAD <= 0 or not base:
+        return base
+    suffix = "".join(random.choice(_SPREAD_ALPHABET) for _ in range(CLIENT_USER_SPREAD))
+    return f"{base}-{suffix}"
 
 # ── gemma (외부 사전점검) ──
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
@@ -508,7 +546,9 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
     """
     system = system or None   # "" 은 시스템 메시지 없음으로 본다(프로바이더가 빈 문자열을 싫어한다)
     # 헤더에도 관측 메타데이터에도 같은 값이 실려야 한다 — 여기서 한 번만 정한다.
-    x_client_user = x_client_user or current_client_user()
+    # 쿼터 버킷 분산은 **여기 한 곳**에서 건다 — main.py 는 x_client_user 를 직접 넘기므로
+    # current_client_user() 안에서만 붙이면 실서비스 경로가 통째로 빠진다.
+    x_client_user = spread_client_user(x_client_user or current_client_user())
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "

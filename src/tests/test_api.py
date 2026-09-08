@@ -91,6 +91,10 @@ try:
           "/health 는 키 «설정 여부»만 내보내고 값은 내보내지 않는다", r.text[:120])
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
+    # 「.env 를 고쳤는데 먹었나」가 화면에서 끝나야 한다 — 안 먹은 것과 안 듣는 것은
+    # 처방이 정반대다(버킷을 나누는 설정이 그렇다).
+    check(h["rate_gate"].get("client_user_spread") == llm.CLIENT_USER_SPREAD,
+          "/health 가 쿼터 버킷 분산 설정을 보여준다", str(h.get("rate_gate")))
     # «키를 넣었는데 왜 안 되나»의 첫 질문은 어느 파일이 읽혔나다.
     check("exists" in h["env"], "/health 가 설정 파일 유무를 보여준다", str(h.get("env")))
     # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는
