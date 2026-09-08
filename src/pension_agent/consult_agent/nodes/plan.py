@@ -31,7 +31,8 @@ from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
     MUST_BLOCK,
-    PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK, SHAPE_BLOCK,
+    PLAN_BUDGET_BLOCK, PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK,
+    SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -70,6 +71,44 @@ TOOL_FAILED = (
 )
 
 
+# ─────────────────────────────────────────────────────────────
+# 이번 턴에 해 본 것 — `state["steps"]` 를 읽는 자리는 전부 여기를 거친다
+#
+# 항목 하나가 호출 하나다: {"tool", "query", "outcome": found|miss|failed, "reason"}.
+# 결과 종류를 `outcome` 한 칸에 둔 이유는 state.py 의 `steps` 주석에 적어 뒀다 — 종류마다
+# 리스트를 하나씩 늘리면 «저 호출은 어떻게 됐나»가 서명 문자열을 잘라 맞추는 일이 된다.
+# ─────────────────────────────────────────────────────────────
+
+FOUND, MISS, FAILED = "found", "miss", "failed"
+
+
+def _steps(state: AgentState) -> list[dict]:
+    return list(state.get("steps") or [])
+
+
+def _step(tool: str, query: str, outcome: str, reason: str = "") -> dict:
+    """장부 한 줄. `reason` 은 고장에만 있다 — 빈 값을 넣어 두면 «원인 미상»과 구분이 없어진다."""
+    entry = {"tool": tool, "query": query, "outcome": outcome}
+    if reason:
+        entry["reason"] = reason
+    return entry
+
+
+def _of(steps: list[dict], outcome: str) -> list[dict]:
+    return [s for s in steps if s.get("outcome") == outcome]
+
+
+def _label(step: dict) -> str:
+    """계획·답변에 보이는 호출 표기. 서명(`"도구:질의"`)과 같은 꼴이다 — 예전에는 이 문자열이
+    **기록 그 자체**여서 다시 잘라 써야 했고, 지금은 표시할 때만 만든다."""
+    return f"{step.get('tool')}:{step.get('query')}"
+
+
+def _repeated(steps: list[dict], tool: str, query: str) -> bool:
+    """같은 도구를 같은 말로 이미 불렀나. 문자열을 합쳐 비교하지 않는다 — 두 칸을 그대로 잰다."""
+    return any(s.get("tool") == tool and s.get("query") == query for s in steps)
+
+
 def _failed_label(name: str) -> str:
     """죽은 도구를 직원이 읽는 말로. 문구는 도구 선언에서 온다(progress.py ①)."""
     tool = tools.TOOLS.get(name)
@@ -79,20 +118,20 @@ def _failed_label(name: str) -> str:
 def _tool_failed(state: AgentState) -> str:
     """도구가 죽어 재료를 못 읽은 턴의 답. 무엇이 왜 실패했는지를 함께 남긴다 —
     진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유)."""
-    failed = [f for f in (state.get("plan_failed") or []) if f.get("tool")]
+    failed = [s for s in _of(_steps(state), FAILED) if s.get("tool")]
     return TOOL_FAILED.format(
-        what=" · ".join(dict.fromkeys(_failed_label(f["tool"]) for f in failed)),
-        reasons="; ".join(f.get("reason") or "원인 미상" for f in failed))
+        what=" · ".join(dict.fromkeys(_failed_label(s["tool"]) for s in failed)),
+        reasons="; ".join(s.get("reason") or "원인 미상" for s in failed))
 
 
 def _no_evidence(state: AgentState) -> str:
     """근거 0건 답변. 무엇을 찾아봤는지 함께 말한다.
 
     죽은 호출은 «찾아본 곳»에 세지 않는다 — 그 도구는 지식베이스를 보지도 못했으므로,
-    거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
+    거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다. 장부가 하나가 된 뒤로는
+    그 판정이 `outcome` 한 칸이다(예전에는 서명을 잘라 죽은 도구 목록과 맞춰 봤다).
     """
-    dead = {f.get("tool") for f in (state.get("plan_failed") or [])}
-    calls = [c for c in (state.get("plan_calls") or []) if c and c.split(":", 1)[0] not in dead]
+    calls = [_label(s) for s in _steps(state) if s.get("outcome") != FAILED]
     if not calls:
         return NO_EVIDENCE
     return NO_EVIDENCE + TRIED.format(calls=" · ".join(calls))
@@ -131,13 +170,13 @@ def _json_obj(text: str) -> dict:
 # Node. plan_step — 다음 도구 하나를 고르고 실행해 원장에 쌓는다
 # ─────────────────────────────────────────────────────────────
 
-def _untried(state: AgentState, calls: list[str]) -> list[str]:
+def _untried(state: AgentState, steps: list[dict]) -> list[str]:
     """이 턴에 아직 안 불러본 도구 이름. 재계획 관문(_wrap_up)과 재계획 지시가 함께 쓴다."""
-    used = {c.split(":", 1)[0] for c in calls}
+    used = {s.get("tool") for s in steps}
     return [name for name in tools.usable(state) if name not in used]
 
 
-def _wrap_up(state: AgentState, evidence: list, calls: list[str]) -> dict[str, Any]:
+def _wrap_up(state: AgentState, evidence: list, steps: list[dict]) -> dict[str, Any]:
     """계획을 끝내기 전 마지막 관문 — **근거 0건이면 한 번은 다시 계획한다**(§5).
 
     LLM 이 done 을 말했든, 같은 호출을 반복했든, 없는 도구를 골랐든 끝내려는 사건은
@@ -146,31 +185,42 @@ def _wrap_up(state: AgentState, evidence: list, calls: list[str]) -> dict[str, A
     한 번 만든다(재계획 프롬프트에는 빗나간 호출과 안 써 본 도구가 실린다). 두 번째
     끝내기는 존중한다: 정직한 '없음' 경로를 막지 않는다.
     """
-    if evidence or state.get("plan_retry") or not _untried(state, calls):
+    if evidence or state.get("plan_retry") or not _untried(state, steps):
         return {"plan_done": True}
     return {"plan_retry": True}
 
 
-def _misses_block(state: AgentState, misses: list[str], calls: list[str]) -> str:
+def _misses_block(state: AgentState, steps: list[dict]) -> str:
     """계획 프롬프트에 끼우는 '빗나간 호출' + (재계획 턴이면) '아직 안 써 본 도구' 블록.
 
     원장에는 성공한 재료만 실리므로, 이 블록이 없으면 계획은 자기가 뭘 불러봤는지 모르고
     같은 호출을 반복한다 — 반복은 코드가 끊고, 그러면 턴이 '근거 없음'으로 끝난다.
+
+    **성공한 호출은 여기 세우지 않는다** — 그건 원장(ledger)이 이미 말하고 있고, 두 번
+    세우면 관계있는 지시가 묻힌다(§7 과 같은 이유). 고장 난 호출도 세우지 않는다: 그
+    도구는 이미 카탈로그에서 빠져 있어(`tools.usable`) 계획이 고를 수 없다.
     """
     parts: list[str] = []
+    misses = [_label(s) for s in _of(steps, MISS)]
     if misses:
         parts.append(PLAN_MISSES_BLOCK.format(misses="\n".join(f"- {m}" for m in misses)))
     if state.get("plan_retry"):
-        parts.append(PLAN_RETRY_BLOCK.format(untried=", ".join(_untried(state, calls))))
+        parts.append(PLAN_RETRY_BLOCK.format(untried=", ".join(_untried(state, steps))))
     return "".join(parts)
+
+
+def _budget_block(steps: list[dict]) -> str:
+    """계획 프롬프트에 끼우는 '남은 호출 수'. 상한을 쥔 것은 코드인데 계획은 그 값을 못
+    봤다 — `last: true` 로 한 바퀴를 아끼라고 시키면서 몇 바퀴가 남았는지는 안 알려주던
+    자리다(PLAN_BUDGET_BLOCK 머리말). 계산은 장부 길이 하나다."""
+    return PLAN_BUDGET_BLOCK.format(left=max(MAX_STEPS - len(steps), 0))
 
 
 def plan_step(state: AgentState) -> dict[str, Any]:
     evidence = list(state.get("evidence") or [])
-    calls = list(state.get("plan_calls") or [])
-    misses = list(state.get("plan_misses") or [])
+    steps = _steps(state)
 
-    if len(calls) >= MAX_STEPS:
+    if len(steps) >= MAX_STEPS:
         return {"plan_done": True}
 
     # 진행 표시 — 실제로 계획 LLM 을 부르기 직전에만 찍는다(위의 상한 조기 종료는 계획이
@@ -183,7 +233,8 @@ def plan_step(state: AgentState) -> dict[str, Any]:
             PLAN_PROMPT.format(
                 catalog=tools.catalog(state),
                 ledger=tools.summarize(evidence),
-                misses_block=_misses_block(state, misses, calls),
+                misses_block=_misses_block(state, steps),
+                budget_block=_budget_block(steps),
                 # 후속 질문("그럼 안 된다고 하면요?")은 이전 턴을 이어받아야 무엇을 묻는지
                 # 정해진다. 이 줄이 없으면 계획이 이번 질문 한 줄만 보고 재료를 고른다(§2-1).
                 history_block=format_history(state.get("history")),
@@ -212,7 +263,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
 
     name = action.get("tool")
     if action.get("done") or not isinstance(name, str) or name not in tools.TOOLS:
-        return {**alive, **_wrap_up(state, evidence, calls)}
+        return {**alive, **_wrap_up(state, evidence, steps)}
 
     # 이 도구가 마지막이라고 말했으면 한 바퀴를 아낀다 — 재료 하나로 끝나는 질문
     # ("이 고객 예금 잔액 얼마지")도 계획에만 LLM 을 두 번 쓰던 자리다. 상한은 그대로
@@ -222,11 +273,10 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     query = action.get("query") or state.get("utterance") or question
     if not isinstance(query, str):
         query = question
-    signature = f"{name}:{query}"
-    if signature in calls:
+    if _repeated(steps, name, query):
         # 같은 호출을 반복하면 진전이 없다 — 도구를 다시 돌리지는 않되, 근거 0건이면
         # _wrap_up 이 한 번 되돌려 보낸다(빗나간 호출 목록을 보여주며).
-        return {**alive, **_wrap_up(state, evidence, calls)}
+        return {**alive, **_wrap_up(state, evidence, steps)}
 
     try:
         found = tools.run(name, state, query)
@@ -239,10 +289,12 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         # 나올 수 있고, 죽은 도구는 다음 바퀴의 카탈로그에서 빠진다(tools.usable). 빗나간
         # 호출로 접지 않는 이유는 그쪽의 처방이 «질의의 말을 바꿔라»여서다 — 고장에는
         # 그 말이 틀렸고, 원장이 끝내 비었을 때 답도 갈린다(compose).
-        return {**alive, "plan_calls": calls + [signature],
-                "plan_failed": [*(state.get("plan_failed") or []),
-                                {"tool": exc.tool, "reason": exc.reason}]}
-    update: dict[str, Any] = {**alive, "plan_calls": calls + [signature]}
+        return {**alive, "steps": steps + [_step(name, query, FAILED, exc.reason)]}
+
+    # 무슨 일이 있었는지는 한 번만 적는다 — 예전에는 성공·빗나감·고장이 각자 리스트를
+    # 갖고 있어서, 결과 종류가 늘 때마다 반환값의 키가 늘었다(state.py 의 `steps` 주석).
+    update: dict[str, Any] = {
+        "steps": steps + [_step(name, query, FOUND if found is not None else MISS)], **alive}
     # 게이트가 이번 호출에서 표시한 갈래(tools.record_branches 가 state 에 쌓아 둔 것)를
     # **자기 반환값으로** 넘긴다. 그래프 상태 전파를 in-place 변경에 기대지 않는다 —
     # 노드가 돌려준 것만 다음 노드가 본다는 규약이 여기서도 지켜져야, 계획이 여러 바퀴
@@ -252,11 +304,6 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         update["branches"] = list(branches)
     if found is not None:
         update["evidence"] = evidence + [found]
-    else:
-        # 빗나간 호출로 기록한다 — 다음 계획 프롬프트가 이걸 보고 같은 호출을 반복하는
-        # 대신 질의를 바꾸거나 다른 도구를 고른다(원장에는 성공한 재료만 실리므로,
-        # 이 기록이 없으면 계획은 자기가 뭘 불러봤는지 모른다).
-        update["plan_misses"] = misses + [signature]
 
     # `last` 는 **재료를 얻었을 때만** 존중한다. 근거를 못 찾았는데 루프를 끝내면 다른 도구를 써
     # 볼 기회가 없이 그 턴이 '근거 없음'으로 끝난다 — 계획이 고른 도구·질의가 빗나갔을
@@ -594,7 +641,7 @@ def compose(state: AgentState) -> dict[str, Any]:
         failure = state.get("llm_error")
         if failure:
             answer = LLM_FAILED.format(reason=failure)
-        elif state.get("plan_failed"):
+        elif _of(_steps(state), FAILED):
             answer = _tool_failed(state)
         else:
             answer = _no_evidence(state)

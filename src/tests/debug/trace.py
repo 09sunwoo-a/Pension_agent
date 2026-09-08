@@ -261,14 +261,18 @@ def _summary(delta: dict) -> dict:
 def _plan_note(state: dict, delta: dict) -> str:
     """이 계획 단계가 무엇을 했는지 한 줄. 도구·질의·채택 카드는 상태 차분에서 읽는다 —
     `tools.run` 을 따로 감싸지 않아도 여기 다 나온다."""
-    before = len(state.get("plan_calls") or [])
-    calls = delta.get("plan_calls") or []
-    if len(calls) <= before:
+    before = len(state.get("steps") or [])
+    steps = delta.get("steps") or []
+    if len(steps) <= before:
         if delta.get("llm_error"):
             return f"중단 — {delta['llm_error'][:60]}"
         return "done" if delta.get("plan_done") else "변화 없음"
 
-    signature = calls[-1]
+    step = steps[-1]
+    signature = f"{step.get('tool')}:{step.get('query')}"
+    # 고장은 «자료 없음»과 다른 사건이다(§3) — 장부가 갈라 적으므로 트레이스도 갈라 읽는다.
+    if step.get("outcome") == "failed":
+        return f"{signature} → 도구 고장: {step.get('reason') or '원인 미상'}"
     ev_before = len(state.get("evidence") or [])
     ev_after = delta.get("evidence")
     if ev_after is None or len(ev_after) <= ev_before:

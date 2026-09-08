@@ -171,7 +171,7 @@ def ask(
         # 'answer' 로 세면 대시보드에서는 답이 나간 턴처럼 보이는데 화면에는 실패 안내가
         # 떠 있다 — 고장이 지표에서 사라지는 방향의 실패다. 재료를 얻은 턴의 부분 고장은
         # 여기 안 뜨고 도구 span(`failed`)에만 남는다.
-        failed = out.get("plan_failed") or []
+        failed = [s for s in (out.get("steps") or []) if s.get("outcome") == "failed"]
         observability.score(
             "turn_outcome",
             "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify")

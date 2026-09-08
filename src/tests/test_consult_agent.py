@@ -164,7 +164,7 @@ def stub_plan_pitch(state):
     재려는 것(카드 채점)이 계획의 흔들림에 묻힌다. 계획 자체는 check_tool_loop 가 본다.
     """
     found = tools.run("pitch", state, state.get("utterance") or state["question"])
-    out = {"plan_done": True, "plan_calls": ["pitch"]}
+    out = {"plan_done": True, "steps": [{"tool": "pitch", "query": "q", "outcome": "found"}]}
     if found is not None:
         out["evidence"] = [found]
     return out
@@ -2051,7 +2051,7 @@ def check_turn_cost() -> int:
     ok += hit
 
     # ② 계획이 한 호출로 끝난다("last": true) — 그 도구가 실제로 재료를 내놨을 때만.
-    hit = state.get("plan_done") is True and len(state.get("plan_calls") or []) == 1
+    hit = state.get("plan_done") is True and len(state.get("steps") or []) == 1
     print(f"{'✓' if hit else '✗'} 재료 하나로 끝나는 질문은 계획 호출 1번으로 끝난다")
     ok += hit
 
@@ -2190,7 +2190,8 @@ def check_miss_recovery() -> int:
     ok += hit
 
     # ③ '없다'가 무엇을 찾아봤는지 말한다.
-    answer = P._no_evidence({"plan_calls": ["procedure:운용현황 조회 화면번호"]})
+    answer = P._no_evidence({"steps": [{"tool": "procedure",
+                                    "query": "운용현황 조회 화면번호", "outcome": "miss"}]})
     hit = "찾아본 곳" in answer and "운용현황 조회 화면번호" in answer
     print(f"{'✓' if hit else '✗'} '근거 없음'이 무엇을 어떤 말로 찾아봤는지 밝힌다")
     ok += hit
@@ -2329,7 +2330,8 @@ def check_clarify_golden() -> int:
         try:
             agent = G.build_agent()
             out = agent.invoke({"question": question, "evidence": [found],
-                                "plan_calls": [f"{tool}:{question}"]})
+                                "steps": [{"tool": tool, "query": question,
+                                           "outcome": "found"}]})
         finally:
             CL.generate, G.plan_step, P.generate = orig_cl, orig_plan_node, orig_gen
 
@@ -2546,7 +2548,8 @@ def check_replan_on_empty() -> int:
     # 근거를 모았으면 done 을 바로 존중한다 — 재계획은 0건일 때만이다.
     P.generate = lambda prompt, **kw: '{"done": true}'
     try:
-        st2 = {"question": "질문", "evidence": [ev_customer], "plan_calls": ["customer:q"]}
+        st2 = {"question": "질문", "evidence": [ev_customer],
+               "steps": [{"tool": "customer", "query": "q", "outcome": "found"}]}
         st2.update(P.plan_step(st2))
     finally:
         P.generate = orig_gen
@@ -4660,7 +4663,7 @@ def check_progress() -> int:
     #    알리면 하지 않은 일을 화면이 말하는 것이 된다.
     events.clear()
     with PROG.reporting(events.append):
-        out = P.compose({"question": "질문", "evidence": [], "plan_calls": []})
+        out = P.compose({"question": "질문", "evidence": [], "steps": []})
     hit = events == [] and bool(out["answer"])
     print(f"{'✓' if hit else '✗'} 재료 0건 턴은 작성 진행을 알리지 않는다 — {events}")
     ok += hit
@@ -4670,7 +4673,7 @@ def check_progress() -> int:
         raise RuntimeError("표시 실패")
 
     with PROG.reporting(broken):
-        out = P.compose({"question": "질문", "evidence": [], "plan_calls": []})
+        out = P.compose({"question": "질문", "evidence": [], "steps": []})
     hit = bool(out["answer"])
     print(f"{'✓' if hit else '✗'} 진행 콜백이 죽어도 답변은 나온다")
     ok += hit
@@ -4797,23 +4800,23 @@ def check_tool_loop() -> int:
             st.update(plan.plan_step(st))
             if st.get("plan_done"):
                 break
-        hit = len(st.get("plan_calls") or []) <= plan.MAX_STEPS
-        print(f"{'✓' if hit else '✗'} MAX_STEPS 상한 준수(호출 {len(st.get('plan_calls') or [])}회 ≤ {plan.MAX_STEPS})")
+        hit = len(st.get("steps") or []) <= plan.MAX_STEPS
+        print(f"{'✓' if hit else '✗'} MAX_STEPS 상한 준수(호출 {len(st.get('steps') or [])}회 ≤ {plan.MAX_STEPS})")
         ok += hit
 
         # ⑤ 같은 도구를 같은 질의로 다시 부르면 진전이 없으므로 도구를 다시 돌리지 않는다.
         #    근거가 0건이면 바로 끝내는 대신 한 번 재계획으로 되돌리고(check_replan_on_empty),
         #    그 뒤에도 반복이면 끝낸다.
-        st2 = {"question": "질문", "plan_calls": ["fact:무한"]}
+        st2 = {"question": "질문", "steps": [{"tool": "fact", "query": "무한", "outcome": "miss"}]}
         st2.update(plan.plan_step(st2))
         first = st2.get("plan_retry") is True and not st2.get("plan_done")
         st2.update(plan.plan_step(st2))
-        hit = first and st2.get("plan_done") is True and len(st2["plan_calls"]) == 1
+        hit = first and st2.get("plan_done") is True and len(st2["steps"]) == 1
         print(f"{'✓' if hit else '✗'} 같은 호출 반복 차단(재계획 한 번 뒤 종료)")
         ok += hit
 
         # 근거를 이미 모은 턴이면 반복은 재계획 없이 바로 끝낸다 — 되돌릴 이유가 없다.
-        st2e = {"question": "질문", "plan_calls": ["fact:무한"],
+        st2e = {"question": "질문", "steps": [{"tool": "fact", "query": "무한", "outcome": "miss"}],
                 "evidence": [{"tool": "fact", "query": "q", "text": "블록", "atomic": [],
                               "notices": [], "notice_scopes": [], "marks": [], "related": [],
                               "allow": ["블록"], "sources": [], "meta": {}}]}
@@ -4840,6 +4843,20 @@ def check_tool_loop() -> int:
         hit = ("customer" not in tools.catalog({})
                and "customer" in tools.catalog({"customer_id": "CX"}))
         print(f"{'✓' if hit else '✗'} 쓸 수 없는 도구는 카탈로그에서 제외")
+        ok += hit
+
+        # ⑨ 계획이 **남은 호출 수**를 본다. 상한을 쥔 것은 코드인데, 「한 재료로 답할 수
+        #    있으면 last: true 로 한 바퀴를 아껴라」라고 시키면서 몇 바퀴가 남았는지는
+        #    안 알려주던 자리다(§5 「형태 요구는 재료에 없는 것을 요구하지 않는다」).
+        seen: list[str] = []
+        plan.generate = lambda prompt, **kw: (seen.append(prompt) or '{"done": true}')
+        plan.plan_step({"question": "질문"})
+        plan.plan_step({"question": "질문",
+                        "steps": [{"tool": "fact", "query": "q", "outcome": "miss"}]})
+        hit = (len(seen) == 2
+               and f"남은 호출: {plan.MAX_STEPS}회" in seen[0]
+               and f"남은 호출: {plan.MAX_STEPS - 1}회" in seen[1])
+        print(f"{'✓' if hit else '✗'} 계획 프롬프트가 남은 호출 수를 싣고 바퀴마다 준다")
         ok += hit
     finally:
         plan.generate, tools.fits_question = orig_gen, orig_verify
@@ -5438,7 +5455,7 @@ def check_plan_failure() -> int:
         finally:
             plan.tools.run = orig_run
 
-        hit = (bool(state.get("plan_failed"))
+        hit = (bool([s for s in state.get("steps") or [] if s["outcome"] == "failed"])
                and plan.NO_EVIDENCE not in answer
                and "지식베이스에 자료가 없다는 뜻이 아니" in answer
                and "KeyError" in answer)
@@ -5453,23 +5470,25 @@ def check_plan_failure() -> int:
 
         # 죽은 도구는 이번 턴의 능력 표면에서 빠진다 — 다시 보여주면 계획이 같은 도구를
         # 다시 골라 바퀴를 버린다(빗나간 호출과 처방이 다른 자리).
-        broken = {"plan_failed": [{"tool": "screen", "reason": "KeyError"}]}
+        broken = {"steps": [{"tool": "screen", "query": "운용현황",
+                             "outcome": "failed", "reason": "KeyError"}]}
         hit = "screen" not in tools.usable(broken) and "screen" in tools.usable({})
         print(f"{'✓' if hit else '✗'} 죽은 도구는 이번 턴 카탈로그에서 빠진다")
         ok += hit
 
         # 죽은 호출은 '찾아본 곳'에도 서지 않는다 — 지식베이스를 보지도 못했으므로
         # 거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
-        tried = plan._no_evidence({"plan_calls": ["screen:운용현황", "fact:수수료"],
-                                   "plan_failed": [{"tool": "screen", "reason": "KeyError"}]})
+        tried = plan._no_evidence({"steps": [
+            {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "KeyError"},
+            {"tool": "fact", "query": "수수료", "outcome": "miss"}]})
         hit = "fact:수수료" in tried and "screen:운용현황" not in tried
         print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
         ok += hit
 
         # 답이 갈리는 것은 **원장이 끝내 비었을 때**다. LLM 실패 안내와 같은 꼴로 끝나야
         # 한다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 그 자체가 진단을 어렵게 한다.
-        notice = plan.compose({"question": "q", "evidence": [],
-                               "plan_failed": [{"tool": "screen", "reason": "x"}]})["answer"]
+        notice = plan.compose({"question": "q", "evidence": [], "steps": [
+            {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "x"}]})["answer"]
         hit = (notice.startswith("지금은 답변을 만들 수 없어요")
                and plan.LLM_FAILED.format(reason="x") != notice
                and "단말 화면번호" in notice)     # 도구 선언의 말로 무엇이 실패했는지 밝힌다
