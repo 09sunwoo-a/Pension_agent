@@ -107,6 +107,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | 지식 저작 | `src/AUTHORING.md` |
 | 실행·테스트 | `src/README.md` |
 | 행내 배포 | `src/main.py`(FastAPI 진입점) · `src/Dockerfile`(내부망) · `src/Dockerfile.local`(외부망) · `src/.env.example` |
+| 배포된 것을 밖에서 호출 | `client/` — 통합 웹앱이 짜야 하는 호출 코드. `src/` 밖인 이유는 부르는 쪽이기 때문이다(배포 이미지에 안 들어가고 `pension_agent` 를 임포트하지 않는다) |
 | consult_agent 기준 | `src/pension_agent/consult_agent/CLAUDE.md` — 대화형 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
 | 지식 데이터 기준 | `src/pension_agent/knowledge/CLAUDE.md` — 카드가 선언해야 하는 관계 5종 · 실측 · 이행 순서 |
 

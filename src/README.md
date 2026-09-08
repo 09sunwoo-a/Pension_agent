@@ -45,15 +45,7 @@ cp .env.bank.example .env.bank                        # 행내 프로파일(이 
 CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"   # 고객 화면이 열린 상태
 docker build -f Dockerfile.local -t pension-agent:local .   # 외부망 로컬 빌드
 #   내부망 배포 이미지는 Dockerfile (STG 기준 · PRD 는 주석 줄로 교체)
-
-# ── GenAI 플랫폼에 올린 뒤: 통합 웹앱이 부르는 것과 같은 모양으로 밖에서 호출
-export AGENT_BASE_URL=https://<배포된-에이전트-주소>  AGENT_API_KEY=<키>
-python -m scripts.call_agent --check                  # 호출 규약 검증 (배포 직후 첫 명령)
-python -m scripts.call_agent --check --live           # + 정상 호출 한 턴 (LLM 호출이 나간다)
-python -m scripts.call_agent "IRP 수수료 부담된다는데?" # 한 턴 — 답변이 흘러나온다
-python -m scripts.call_agent --raw "..."              # 서버가 준 줄을 가공 없이
-#   경로 접두·인증 헤더 이름이 다르면 AGENT_CHAT_PATH · AGENT_KEY_HEADER 로 넘긴다.
-#   `call()` 이 웹앱 쪽 참조 구현이다 — 표준 라이브러리만 쓰므로 그대로 떼어 쓴다.
+#   플랫폼에 올린 뒤 «밖에서» 부르는 것은 여기가 아니다 → ../client/README.md
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다 — 모듈만 바꾸고 --debug)
 $CAD --debug "세액공제 한도가 얼마야?"

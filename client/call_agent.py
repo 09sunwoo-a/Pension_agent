@@ -1,9 +1,18 @@
 """배포된 GenAI 플랫폼 에이전트를 **밖에서** 호출해 보는 테스트 클라이언트.
 
-`test_local.sh` 는 로컬 uvicorn 을 두드린다. 이 스크립트는 그 다음 단계 — GenAI 플랫폼에
-에이전트를 만들어 올린 뒤, **통합 웹앱이 부르는 것과 같은 모양으로** 부른다. 웹앱이 짜야
-하는 코드가 바로 이 파일의 `call()` 이므로, 그대로 떼어다 쓸 수 있게 표준 라이브러리만
-쓰고 `pension_agent` 를 임포트하지 않는다.
+`src/test_local.sh` 는 로컬 uvicorn 을 두드린다. 이 스크립트는 그 다음 단계 — GenAI
+플랫폼에 에이전트를 만들어 올린 뒤, **통합 웹앱이 부르는 것과 같은 모양으로** 부른다.
+
+━━ 왜 `src/` 밖에 있나 ━━
+`src/` 는 플랫폼에 **올라가는 것**이고(`pension_agent` 단일 패키지 · 임포트 루트가 `src/`),
+이 파일은 그것을 **부르는 쪽**이다. 경계가 셋으로 갈린다.
+
+  · 배포 이미지에 안 들어간다 — Dockerfile 이 담는 것은 main.py·pension_agent·session_data 다
+  · `src/scripts/` 와 다른 부류다 — 그쪽은 에이전트가 자기 데이터를 만드는 내부 도구고
+    (import_customers·build_kb·demo_status) `src/` 에서 `python -m scripts.X` 로 돈다
+  · **`pension_agent` 을 임포트하지 않는다.** 웹앱이 짜야 하는 코드가 이 파일의 `call()`
+    이라 그대로 떼어다 쓸 수 있어야 하고, 그러려면 저장소 밖에서도 돌아야 한다 —
+    표준 라이브러리만 쓴다. 서버와 상수를 공유하지 못하는 자리는 주석으로 짝을 밝힌다
 
 호출 규약은 플랫폼이 고정한 것이라 여기서 바꾸지 않는다
 (`skills/genai-platform-agent-dev/refs/genai-platform.md` «API I/O 스키마 (고정)»):
@@ -12,7 +21,7 @@
       {"input_value": "<JSON 을 직렬화한 문자열>", "message_hists": null}
       → 200 text/event-stream, 줄마다 {"event": "CHUNK", "content": "..."}
 
-`input_value` 안의 키는 프로젝트가 정한다. 이 에이전트가 읽는 것은 `main.py` 기준으로
+`input_value` 안의 키는 프로젝트가 정한다. 이 에이전트가 읽는 것은 `src/main.py` 기준으로
 message(필수) · x_client_user(필수) · customer_id · session_id · stream_progress 다.
 
 ━━ 확정하지 못한 것 두 가지 ━━
@@ -33,14 +42,14 @@ message(필수) · x_client_user(필수) · customer_id · session_id · stream_
     AGENT_TIMEOUT      초. 기본 120 (한 턴에 LLM 호출이 4~7회 나가므로 넉넉히)
 
 ━━ 쓰는 법 ━━
+어디서 실행해도 된다(임포트 루트에 얽매이지 않는다 — 위 «왜 src 밖에 있나»).
 
-    cd src
     export AGENT_BASE_URL=https://...   AGENT_API_KEY=...
 
-    python -m scripts.call_agent --check            # 규약 검증 (권장 — 먼저 이것)
-    python -m scripts.call_agent "IRP 수수료가 부담된다는데요?"
-    python -m scripts.call_agent -c 198734-1205842 "이 고객 뭐가 문제죠?" --progress
-    python -m scripts.call_agent --raw "..."        # 서버가 준 줄을 그대로 본다
+    python client/call_agent.py --check            # 규약 검증 (권장 — 먼저 이것)
+    python client/call_agent.py "IRP 수수료가 부담된다는데요?"
+    python client/call_agent.py -c 198734-1205842 "이 고객 뭐가 문제죠?" --progress
+    python client/call_agent.py --raw "..."        # 서버가 준 줄을 그대로 본다
 
 종료코드는 0(성공) / 1(실패) 이라 CI 나 배포 후 스모크에 그대로 걸 수 있다.
 """
@@ -302,8 +311,8 @@ def check(*, live: bool, customer_id: str | None, skip_health: bool) -> int:
     answer = "".join(text).strip()
     res.add(bool(answer), "답변이 비어 있지 않다", f"{len(answer)}자")
     # 근거 없는 답은 이 시스템의 산출물이 아니다(루트 CLAUDE.md §2, main.py 주석).
-    # 문자열은 `consult_agent/render.py::GROUND_HEADER` 와 같아야 한다 — 이 스크립트는
-    # 웹앱이 떼어다 쓰라고 pension_agent 를 임포트하지 않으므로 상수를 공유하지 못한다.
+    # 문자열은 `src/pension_agent/consult_agent/render.py::GROUND_HEADER` 와 같아야 한다 —
+    # 이 스크립트는 저장소 밖에서도 돌아야 해서 그 상수를 임포트하지 못한다(맨 위 주석).
     ground = "─ 근거"
     res.add(ground in answer, "답변에 출처 블록이 붙어 있다",
             "" if ground in answer else "출처 블록이 안 보인다")
@@ -323,7 +332,7 @@ def check(*, live: bool, customer_id: str | None, skip_health: bool) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        prog="python -m scripts.call_agent",
+        prog="python client/call_agent.py",
         description="배포된 GenAI 플랫폼 에이전트를 통합 웹앱과 같은 방식으로 호출한다.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="주소·인증은 환경변수로 준다: AGENT_BASE_URL · AGENT_API_KEY ·"
