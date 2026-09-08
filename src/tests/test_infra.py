@@ -552,12 +552,14 @@ _real_sleep = _llm.time.sleep
 _llm.time.sleep = _sleeps.append
 
 
-def _http_error(code: int, headers: dict | None = None) -> urllib.error.HTTPError:
+def _http_error(code: int, headers: dict | None = None,
+                body: bytes = b"") -> urllib.error.HTTPError:
     import email.message
     msg = email.message.Message()
     for k, v in (headers or {}).items():
         msg[k] = v
-    return urllib.error.HTTPError("http://fake", code, "err", msg, io.BytesIO(b""))
+    return urllib.error.HTTPError("http://fake/chat/completions", code, "err", msg,
+                                  io.BytesIO(body))
 
 
 class _FakeResp:
@@ -637,6 +639,33 @@ try:
     except _llm.LLMError:
         pass
     check(calls["n"] == 1, "llm: 4xx(요청이 잘못된 에러)는 재시도하지 않는다", f"calls={calls['n']}")
+
+    # 무엇이 잘못됐는지는 **응답 본문에만** 있다. 404 는 「경로가 없다」와 「그런 모델이
+    # 없다」가 같은 코드로 오는데, 예전에는 본문을 버려서 `HTTP Error 404: Not Found`
+    # 한 줄만 남았다 — 행내 첫 연결에서 이 한 줄로는 어느 쪽인지 갈리지 않았다.
+    _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+        _http_error(404, body=b'{"error": {"code": "model_not_found"}}'))
+    try:
+        _llm.generate("q")
+        _raised = None
+    except _llm.LLMError as exc:
+        _raised = str(exc)
+    check(_raised is not None and "model_not_found" in _raised
+          and "/chat/completions" in _raised,
+          "llm: HTTP 오류는 응답 본문과 부른 URL 을 함께 올린다", str(_raised))
+
+    # 재시도를 다 쓴 경우에도 마지막 본문이 남는다(본문은 한 번만 읽을 수 있다).
+    _sleeps[:] = []
+    _llm._next_free = 0.0
+    _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+        _http_error(429, body=b"quota exceeded for this key"))
+    try:
+        _llm.generate("q")
+        _raised = None
+    except _llm.LLMError as exc:
+        _raised = str(exc)
+    check(_raised is not None and "quota exceeded" in _raised,
+          "llm: 재시도를 다 써도 마지막 응답 본문이 남는다", str(_raised))
 
     # x-client-user — 호출부가 준 주체가 실제 헤더로 나가는가.
     _llm._next_free = 0.0

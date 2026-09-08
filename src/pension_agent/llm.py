@@ -305,14 +305,22 @@ def _post_json(req: urllib.request.Request) -> dict:
     쉬면 나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다(게이트 ③).
     """
     last: urllib.error.HTTPError | None = None
+    last_body = ""
     for attempt in range(RETRY_ATTEMPTS):
         try:
             with _gate(), urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            body = _error_body(exc)
             if not _retryable(exc.code):
-                raise
-            last = exc
+                # 요청이 잘못된 에러는 **무엇이** 잘못됐는지가 전부다. 예전에는 이 예외를
+                # 그대로 올려 `HTTPError: HTTP Error 404: Not Found` 한 줄만 남았는데,
+                # 404 는 «경로가 없다»와 «그런 모델이 없다»가 같은 코드로 온다 — 응답
+                # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
+                raise LLMError(
+                    f"HTTP {exc.code} {exc.reason} — {req.full_url}"
+                    + (f"\n응답: {body}" if body else "")) from exc
+            last, last_body = exc, body
             if attempt == RETRY_ATTEMPTS - 1:
                 break
             wait = _backoff(exc, attempt)
@@ -325,7 +333,26 @@ def _post_json(req: urllib.request.Request) -> dict:
     raise LLMError(
         f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
         f"(동시 {MAX_CONCURRENCY} · 간격 {MIN_INTERVAL}초 — LLM_MAX_CONCURRENCY 를 낮추거나 "
-        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)") from last
+        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)"
+        + (f"\n응답: {last_body}" if last_body else "")) from last
+
+
+#: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
+ERROR_BODY_LIMIT = 400
+
+
+def _error_body(exc: urllib.error.HTTPError) -> str:
+    """오류 응답 본문 한 줄. 못 읽으면 빈 문자열 — 진단을 돕자고 다른 예외를 내지 않는다.
+
+    본문은 **한 번만** 읽을 수 있다(스트림). 재시도 경로와 최종 예외가 같은 것을 봐야 하므로
+    잡는 자리에서 바로 읽어 문자열로 들고 다닌다.
+    """
+    try:
+        raw = exc.read().decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — 본문을 못 읽는 것이 원래 오류를 가리면 안 된다
+        return ""
+    text = " ".join(raw.split())
+    return text[:ERROR_BODY_LIMIT] + ("…" if len(text) > ERROR_BODY_LIMIT else "")
 
 
 def _retryable(code: int) -> bool:
