@@ -266,7 +266,9 @@ def usable(state: AgentState | None = None) -> list[str]:
     '아직 안 써 본 도구'에서도 같은 이유로 빠져야 하므로 판정은 여기 한 곳이다.
     """
     opened = bool((state or {}).get("customer_id"))
-    broken = {f["tool"] for f in ((state or {}).get("plan_failed") or [])}
+    # 이번 턴의 장부에서 «고장»으로 끝난 호출의 도구(`nodes/plan.py` 의 steps 규약).
+    broken = {s.get("tool") for s in ((state or {}).get("steps") or [])
+              if s.get("outcome") == "failed"}
     return [t.name for t in TOOLS.values()
             if (opened or t.name not in _NEEDS_CUSTOMER) and t.name not in broken]
 
