@@ -16,16 +16,20 @@
            LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
-━━ 실행 환경(프로파일) ━━
-환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(OpenAI 호환 게이트웨이의 Sonnet, genai
-경로). 환경마다 `src/.env.<이름>`
-한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
-잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
+━━ 설정 파일 ━━
+`src/.env` 하나다 — 행내 워크스페이스·배포 이미지·사외 개발 PC 모두. 환경에 따라 내용이
+다를 뿐이다(.env.example 의 구역 ①②③). 어느 파일·단계가 잡혔는지는
+`python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
 
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
-  LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
-  LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
+  ENV_PATH          실행 단계. 배포 때 Jenkins 가 serving 을 넣는다 — 손으로 설정하지 않는다.
+                    없으면(워크스페이스) 분석계. 플랫폼 규약
+  LLM_BASE_URL_TRNN / _SERV
+                    행내 GenAI 플랫폼 URL 두 벌(…/trnn/… · …/serv/…). ENV_PATH 로 고른다
+  LLM_BASE_URL      단계 구분이 없을 때의 하나짜리(Gateway·사외). 단계별 값이 없으면 이것
+  LLM_API_KEY       인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용).
+                    단계마다 다르면 LLM_API_KEY_TRNN / _SERV 으로 갈라 둘 수 있다
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
@@ -73,8 +77,16 @@ from pension_agent import env, observability
 # 파싱은 env.py 가 한다(관측 설정도 같은 파일에서 와야 하므로 아래층으로 내렸다).
 env.load()
 
+# ── genai (사내 플랫폼) — 값은 실행 단계(ENV_PATH: train | serving)에 따라 고른다 ──
+# 행내 .env 하나에 URL 이 두 벌 있다(…/trnn/… 과 …/serv/…). 워크스페이스는 train,
+# 배포 컨테이너는 플랫폼이 serving 을 넣어 준다. 어느 것을 읽었는지는 /health 와
+# `python -m pension_agent.env` 가 보여준다(STAGE).
+STAGE = env.stage()
+BASE_URL = env.staged("LLM_BASE_URL").rstrip("/")
+API_KEY = env.staged("LLM_API_KEY")
+
 PROVIDER = os.getenv("LLM_PROVIDER") or (
-    "genai" if os.getenv("LLM_BASE_URL")
+    "genai" if BASE_URL
     else "gemma" if os.getenv("GEMINI_API_KEY")
     else "anthropic"
 )
@@ -82,9 +94,21 @@ PROVIDER = os.getenv("LLM_PROVIDER") or (
 #: max_tokens 를 넘기지 않은 호출의 기본치. 브리핑 문장 한 편 분량.
 DEFAULT_MAX_TOKENS = 900
 
-# ── genai (사내 플랫폼) ──
-BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
-API_KEY = os.getenv("LLM_API_KEY", "")
+#: 모델 슬러그. **비우면 payload 에서 `model` 키를 아예 뺀다** — 그것이 기본이다.
+#:
+#: 규격 문서 셋이 여기서 갈린다. SKILL.md 는 LLM_MODEL 을 「필수」로 적고 예시 슬러그
+#: (claude-sonnet-4-6)까지 주는데, genai-platform.md 는 「생략이 기본값 — 게이트웨이가
+#: 라우팅한다」고 적고 코드 예제에서 model 을 주석 처리해 둔다. 어긋난 것이 아니라
+#: **엔드포인트가 모델을 고르는 방식이 둘**이기 때문이다:
+#:
+#:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이
+#:                         라우팅 키다. 채워야 한다(.env.example 의 구역 ②).
+#:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(…/trnn/gemma-4 · …/serv/gemma-4) → body 에
+#:                         model 을 함께 실으면 **404** 다(2026-09-08 행내 실측).
+#:
+#: 그래서 이 값의 정답은 «플랫폼별»이고, 코드는 둘 다 받는다 — 판단은 .env 가 한다.
+#: 콘솔이 모델 이름을 알려주더라도 그것은 «무엇이 서빙되는지»의 표시이지 body 에 실을
+#: 값이라는 뜻은 아니다. 그 혼동이 행내 첫 연결을 404 로 막았다.
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 #: 429·5xx 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
@@ -305,14 +329,22 @@ def _post_json(req: urllib.request.Request) -> dict:
     쉬면 나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다(게이트 ③).
     """
     last: urllib.error.HTTPError | None = None
+    last_body = ""
     for attempt in range(RETRY_ATTEMPTS):
         try:
             with _gate(), urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            body = _error_body(exc)
             if not _retryable(exc.code):
-                raise
-            last = exc
+                # 요청이 잘못된 에러는 **무엇이** 잘못됐는지가 전부다. 예전에는 이 예외를
+                # 그대로 올려 `HTTPError: HTTP Error 404: Not Found` 한 줄만 남았는데,
+                # 404 는 «경로가 없다»와 «그런 모델이 없다»가 같은 코드로 온다 — 응답
+                # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
+                raise LLMError(
+                    f"HTTP {exc.code} {exc.reason} — {req.full_url}"
+                    + (f"\n응답: {body}" if body else "")) from exc
+            last, last_body = exc, body
             if attempt == RETRY_ATTEMPTS - 1:
                 break
             wait = _backoff(exc, attempt)
@@ -325,7 +357,26 @@ def _post_json(req: urllib.request.Request) -> dict:
     raise LLMError(
         f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
         f"(동시 {MAX_CONCURRENCY} · 간격 {MIN_INTERVAL}초 — LLM_MAX_CONCURRENCY 를 낮추거나 "
-        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)") from last
+        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)"
+        + (f"\n응답: {last_body}" if last_body else "")) from last
+
+
+#: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
+ERROR_BODY_LIMIT = 400
+
+
+def _error_body(exc: urllib.error.HTTPError) -> str:
+    """오류 응답 본문 한 줄. 못 읽으면 빈 문자열 — 진단을 돕자고 다른 예외를 내지 않는다.
+
+    본문은 **한 번만** 읽을 수 있다(스트림). 재시도 경로와 최종 예외가 같은 것을 봐야 하므로
+    잡는 자리에서 바로 읽어 문자열로 들고 다닌다.
+    """
+    try:
+        raw = exc.read().decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — 본문을 못 읽는 것이 원래 오류를 가리면 안 된다
+        return ""
+    text = " ".join(raw.split())
+    return text[:ERROR_BODY_LIMIT] + ("…" if len(text) > ERROR_BODY_LIMIT else "")
 
 
 def _retryable(code: int) -> bool:

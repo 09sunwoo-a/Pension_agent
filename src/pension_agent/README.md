@@ -86,27 +86,16 @@ export LLM_PROVIDER=anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-설정 파일은 `src/.env`(공통) + `src/.env.<프로파일>`(환경별) 이다. 실제 환경변수가 있으면
-그쪽이 이긴다.
+설정 파일은 `src/.env` **하나**다 — 행내 워크스페이스·배포 이미지·사외 개발 PC 모두. 실제
+환경변수가 있으면 파일보다 이긴다(`env.py` 머리말).
 
-### 실행 환경 셋 — 파일 하나씩
-
-LLM 을 쓸 수 있는 환경이 셋이고 환경마다 프로바이더·엔드포인트·키가 다르다. 한 파일에 세
-벌을 넣고 주석을 바꿔 가며 쓰지 않는다 — **환경마다 파일 하나**다(`env.py` 머리말).
-
-| 프로파일 | 환경 | 파일 | 프로바이더 |
-|---|---|---|---|
-| `bank` | 행내(망분리) | `src/.env.bank` | genai — `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL` |
-| `local` | 개발 PC | `src/.env.local` | anthropic — `ANTHROPIC_API_KEY` |
-| `aiden` | 행내·외부 중간, Sonnet | `src/.env.aiden` | genai — OpenAI 호환 게이트웨이. `LLM_BASE_URL`·`LLM_API_KEY`·`LLM_MODEL`(Sonnet 슬러그) |
-
-어느 파일을 읽을지는 이 순서로 정한다: 실제 환경변수 `PENSION_ENV` → `src/.env` 안의
-`PENSION_ENV=` 줄 → `.env.<이름>` 파일이 하나뿐이면 그것. 행내 머신에는 `.env.bank` 만
-두면 아무것도 지정하지 않아도 그쪽이 잡힌다. 여러 개를 두는 개발 PC 는 `.env` 에
-`PENSION_ENV=local` 로 기본을 고정하고, 잠깐 바꿔 돌릴 때만 `PENSION_ENV=aiden python -m …`
-으로 앞에 붙인다. 프로파일 파일이 공통 파일을 덮는다.
+행내 GenAI 플랫폼은 분석계(`…/trnn/…`)와 서빙계(`…/serv/…`)의 APIM 경로가 달라 URL 이 두 벌이고
+(`LLM_BASE_URL_TRNN` · `_SERV`, 키도 같다), 실행 단계 `ENV_PATH`(워크스페이스엔 없다 → 분석계,
+배포 때 Jenkins 가 `serving` → 서빙계)가 어느 것을 읽을지 정한다 — `env.staged()`.
+`LLM_MODEL` 은 비운다. 다른 환경(LLM Gateway · 사외 anthropic)은 같은 파일의 다른 구역을
+채운다 — 견본 `.env.example` 의 ①②③. 다른 설정을 잠깐 쓸 때는 `LLM_DOTENV=<경로>` 로 앞에 붙인다.
 
 ```bash
-cp .env.example .env && cp .env.aiden.example .env.aiden   # 견본을 복사해 채운다
-python -m pension_agent.env                                # 어느 파일·프로바이더가 잡혔나
+cp .env.example .env                 # 하나
+python -m pension_agent.env          # 어느 파일·단계·프로바이더가 잡혔나
 ```

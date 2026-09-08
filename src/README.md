@@ -13,8 +13,8 @@ LLM 이 계획하되, 부를 수 있는 도구·바퀴 수·수치 계산은 코
 cd src
 pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 (Python 3.10)
 pip install -r requirements-dev.txt  # + Streamlit 화면·변환기·사외 프로바이더 (개발용)
-cp .env.example .env                 # 공통 설정 (기본 프로파일 이름 등)
-cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
+
+cp .env.example .env                 # 어디서나 이 파일 하나 — 안의 구역 ①행내 ②Gateway ③사외 중 채운다
 python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
 source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
@@ -30,6 +30,90 @@ CAD="python -m tests.debug"                    # 같은 것 + 트레이스
 CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 · 시연 대본)
 ```
 
+## 행내에서 처음 실행
+
+저장소를 clone 하는 대신 **폴더를 복사해 올리는** 경우(Azure ML 컴퓨트 인스턴스 등)를 기준으로
+적는다. clone 이 되면 0번은 건너뛴다.
+
+```bash
+# 0. 붙여넣기로 올렸다면 줄바꿈부터 — Windows 를 거치면 CRLF 가 붙는다.
+#    셰방이 «/bin/bash^M» 이 되어 bad interpreter 로 죽는데 chmod 로는 안 고쳐진다.
+#    올릴 때마다 필요하다(git 으로 받으면 .gitattributes 가 알아서 한다).
+cd src
+find . -name "*.sh" -exec sed -i 's/\r$//' {} +
+chmod +x *.sh
+
+# 1. 패키지 — 공개 PyPI 가 막혀 있으면 Nexus 를 지정한다.
+pip install -r requirements.txt \
+  --index-url https://stg-nexus-genaihub.kbonecloud.com/repository/pypi/simple \
+  --trusted-host stg-nexus-genaihub.kbonecloud.com
+#    설치되는 것은 셋뿐이다: fastapi · uvicorn · langgraph==0.4.8
+#    (Streamlit 화면까지 쓰려면 requirements-dev.txt 도. API·CLI 만 쓸 거면 불필요)
+
+# 2. LLM 설정 — .env 하나. 워크스페이스에서도 배포 이미지에서도 같은 파일을 쓴다.
+cp .env.example .env
+```
+
+### 2. `.env` 하나 — 단계(ENV_PATH)가 URL 을 고른다
+
+행내 GenAI 플랫폼은 분석계(`…/trnn/…`)와 서빙계(`…/serv/…`)의 APIM 경로가 달라 URL 이 **두 벌**이다. 둘 다
+`.env` 에 두고, 어느 것을 읽을지는 실행 단계 `ENV_PATH` 가 정한다:
+
+| | 워크스페이스·행내 로컬 | 배포된 컨테이너 |
+|---|---|---|
+| `ENV_PATH` | **없음**(→ 분석계) | Jenkins 가 실제 환경변수로 `serving` 을 넣는다. 그 외 값은 전부 분석계 |
+| 읽는 URL | `LLM_BASE_URL_TRNN` | `LLM_BASE_URL_SERV` |
+| 읽는 키 | `LLM_API_KEY_TRNN` (없으면 `LLM_API_KEY`) | `LLM_API_KEY_SERV` (없으면 `LLM_API_KEY`) |
+| `.env` 파일 | 이것 | **같은 파일** — `Dockerfile` 이 그대로 COPY 한다 |
+
+그래서 배포용 `.env` 를 따로 만들지 않는다. `.env` 에 `ENV_PATH` 를 적지도 않는다 —
+실제 환경변수가 파일보다 이기므로, 적어 두면 Jenkins 가 넣는 값과 헷갈릴 뿐이다.
+어느 단계·URL 을 읽었는지는 `python -m pension_agent.env` 와 `/health` 의 `stage` 가 보여준다.
+
+**LLM Gateway(LiteLLM)** 를 쓰는 경우는 같은 `.env` 의 구역 ② 를 채운다.
+단계 구분이 없어 URL 하나(`LLM_BASE_URL`)이고 `LLM_MODEL` 을 **채운다**(`claude-sonnet-4-6`).
+base_url 이 클러스터 내부 이름이라 컴퓨트 인스턴스에서는 이름이 안 풀린다 — 배포된 컨테이너
+안에서만 설 수 있고, 미실측이다.
+
+`LLM_MODEL` 이 서로 반대인 이유는 `llm.py` 의 `MODEL` 상수 주석에 있다. **SKILL.md 는 이
+값을 「필수」로 적는데 그쪽은 Gateway 기준이다** — GenAI 플랫폼에서 콘솔이 알려준 모델
+이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
+
+`Dockerfile` 이 COPY 하는 설정 파일은 `.env` 하나다 — 없으면 COPY 단계에서 빌드가 실패한다
+(refs/dockerfile.md).
+
+```bash
+# 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
+python -m pension_agent.env
+
+# 4. LLM 없이 도는 검사부터. 여기서 깨지면 키를 봐도 소용없다.
+python -m tests.test_api          # HTTP 스키마 계약
+python -m tests.test_infra        # 429 호출 게이트
+python -m tests.test_consult_agent   # 통과하면 langgraph 0.4.8 에서 그래프가 선다는 뜻
+
+# 5. 돌려보기 — CLI 는 서버가 필요 없다
+source ./cli.sh
+$CA "세액공제 한도가 얼마야?"
+$CA -c 198734-1205842 "이 고객 왜 관리 대상이야?"   # 브리핑 경로(LLM 9~11 연쇄)
+
+# 6. HTTP API 로도 볼 거면 — 터미널 둘
+./run_local.sh                                     # 터미널 A
+./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"  # 터미널 B
+```
+
+### 막히면
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| `/bin/bash^M: bad interpreter` | CRLF | 위 0번 |
+| `프로바이더 anthropic` | `.env` 가 안 읽혔거나 구역 ① 이 비어 있음 | `python -m pension_agent.env` 로 읽힌 파일 확인 |
+| `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
+| `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 함께 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
+| `HTTP 429` | 호출이 몰림 | `.env` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작 |
+
+`.env` 는 **프로세스 기동 때 한 번만** 읽는다. 고쳤으면 서버를 다시 띄워야 한다
+(`--reload` 는 `.py` 변경만 본다).
+
 ```bash
 # ── 브리핑 · 대화 · 화면
 python -m pension_agent.strategy_agent.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
@@ -39,7 +123,6 @@ $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을
 streamlit run app.py                                  # 평가 대시보드 (개발용 화면)
 
 # ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
-cp .env.bank.example .env.bank                        # 행내 프로파일(이 파일 하나만 두면 잡힌다)
 ./run_local.sh                                        # uvicorn main:app :8000
 ./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
 CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"   # 고객 화면이 열린 상태
