@@ -144,6 +144,7 @@ RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
 
 #: 동시에 나가는 호출 수 상한. 1 이면 완전 직렬.
 MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
+
 #: 플랫폼이 «분당 N회»로 알려준 한도. 있으면 60/N 이 간격의 바닥이 된다.
 #:
 #: 이 knob 이 따로 있는 이유는 **플랫폼이 알려주는 단위가 「분당 회수」이기 때문**이다.
@@ -154,14 +155,28 @@ MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
 #: 속도를 더듬어 찾는 장치이고, 여기 값이 있으면 처음부터 맞는 속도로 출발한다.
 CALLS_PER_MIN = float(os.getenv("LLM_CALLS_PER_MIN", "0") or 0)
 
+#: 사번 뒤에 붙일 임의 접미의 길이(0=꺼짐). 쓰는 함수는 아래 「쿼터 버킷 분산」이지만
+#: 상수는 여기 둔다 — 이것은 이름 짓기가 아니라 **속도 설정**이고, 바로 아래에서
+#: CALLS_PER_MIN 과 맞물리기 때문이다.
+CLIENT_USER_SPREAD = max(0, int(os.getenv("LLM_CLIENT_USER_SPREAD", "0") or 0))
+
 #: 호출 사이 최소 간격(초) — **바닥값**이다. 실제 간격은 아래 `_interval` 이 들고 있고
 #: 429·5xx 를 맞으면 넓어졌다가 성공하면서 여기까지 돌아온다.
 #: 0 이면 간격 제한 없음(테스트가 이렇게 끈다).
 #: 기본을 0 에서 0.2 로 올린 근거는 행내 실측이다 — 게이트웨이가 이 버스트에 429 를 냈다.
 #: 브리핑 11연쇄에 +2.2초라 감당할 수 있는 값이고, 모자라면 .env 에서 올린다.
 MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
-if CALLS_PER_MIN > 0:
-    # 둘 다 있으면 **느린 쪽**을 쓴다 — 한쪽이 한도를 넘게 잡혀 있으면 그게 곧 429 다.
+
+# ── 두 설정은 서로 반대로 당긴다. 어느 쪽이 이기는지 코드가 정한다 ──────────────
+#
+# CALLS_PER_MIN 은 «한 버킷이 분당 N회»라는 뜻이다. 버킷을 나누고 있으면(SPREAD>0) 그
+# 한도는 **버킷마다** 적용되므로 프로세스 전체는 그보다 빨라도 된다 — 그런데도 60/N 을
+# 바닥으로 깔면 애써 넓힌 것을 코드가 다시 묶는다. 그래서 나눌 때는 이 바닥을 걸지 않는다.
+#
+# 위험은 «나뉜다고 믿었는데 안 나뉘는» 경우다(게이트웨이가 API 키나 전체 단위로 잴 때).
+# 그때는 429 가 다시 나기 시작하고, 적응형 감속이 받아 속도를 도로 6초 근처로 끌어내린다 —
+# 틀렸을 때 조용히 망가지지 않고 느려질 뿐이라, 이 조합을 기본 안전망으로 삼을 수 있다.
+if CALLS_PER_MIN > 0 and CLIENT_USER_SPREAD <= 0:
     MIN_INTERVAL = max(MIN_INTERVAL, 60.0 / CALLS_PER_MIN)
 #: 서버가 Retry-After 를 안 줄 때 쓰는 지수 백오프의 기준값(초).
 COOLDOWN = float(os.getenv("LLM_COOLDOWN", "2"))
@@ -370,8 +385,7 @@ def current_client_user() -> str:
 # 그리고 **버킷이 x-client-user 로 갈릴 때만 듣는다** — 게이트웨이가 API 키 단위나
 # 전체 단위로 재고 있으면 접미를 붙여도 아무것도 달라지지 않는다.
 
-#: 사번 뒤에 붙일 임의 접미의 길이. 0 이면 안 붙인다(기본).
-CLIENT_USER_SPREAD = max(0, int(os.getenv("LLM_CLIENT_USER_SPREAD", "0") or 0))
+#: (상수 `CLIENT_USER_SPREAD` 는 위 「호출 게이트」에 있다 — CALLS_PER_MIN 과 맞물린다.)
 #: 접미에 쓰는 글자. 사번과 섞이지 않게 하이픈으로 잇는다.
 _SPREAD_ALPHABET = string.ascii_letters + string.digits
 

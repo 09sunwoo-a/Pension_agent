@@ -748,6 +748,30 @@ try:
           "llm: 기본은 꺼짐 — 감사 기록의 모양을 조용히 바꾸지 않는다",
           _llm.spread_client_user("3902172"))
 
+    # 분당 한도와 버킷 분산은 서로 반대로 당긴다 — 「분당 10회」는 **한 버킷** 기준이라,
+    # 나누고 있으면 60/N 을 바닥으로 깔면 애써 넓힌 것을 코드가 도로 묶는다.
+    import importlib as _importlib
+    _saved_env = {k: os.environ.get(k) for k in
+                  ("LLM_CALLS_PER_MIN", "LLM_CLIENT_USER_SPREAD", "LLM_MIN_INTERVAL_SEC")}
+    try:
+        for _spread, _want, _label in (("0", 6.0, "나누지 않으면 60/10 = 6초가 바닥이다"),
+                                       ("5", 0.2, "나누면 그 바닥을 걸지 않는다")):
+            os.environ.update(LLM_CALLS_PER_MIN="10", LLM_CLIENT_USER_SPREAD=_spread,
+                              LLM_MIN_INTERVAL_SEC="0.2")
+            _fresh = _importlib.reload(_llm)
+            check(abs(_fresh.MIN_INTERVAL - _want) < 1e-9, f"llm: {_label}",
+                  f"MIN_INTERVAL={_fresh.MIN_INTERVAL}")
+    finally:
+        for _k, _v in _saved_env.items():
+            os.environ.pop(_k, None) if _v is None else os.environ.__setitem__(_k, _v)
+        _importlib.reload(_llm)
+        # reload 로 갈아끼운 스텁이 날아갔다 — 아래 검사들이 쓰는 것을 되돌린다.
+        _llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY = "genai", "http://fake", "k"
+        _llm.MIN_INTERVAL = 0.0
+        _llm.time.sleep = _sleeps.append
+        _llm.urllib.request.urlopen = _urlopen_capture
+        _llm.reset_pace()
+
     # ② 동시성 상한 — 동시에 열려 있는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
     _llm.reset_pace()
     _inflight = {"now": 0, "max": 0}
