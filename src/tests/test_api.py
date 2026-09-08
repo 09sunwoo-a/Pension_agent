@@ -88,7 +88,7 @@ try:
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
     # «키를 넣었는데 왜 안 되나»의 첫 질문은 어느 파일이 읽혔나다.
-    check("files" in h["env"], "/health 가 어느 .env 가 읽혔는지 보여준다", str(h.get("env")))
+    check("exists" in h["env"], "/health 가 설정 파일 유무를 보여준다", str(h.get("env")))
     # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는
     # 사고를 여기서 바로 잡아야 한다.
     check(h["llm"].get("stage") in ("train", "serving"),

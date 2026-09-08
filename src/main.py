@@ -52,7 +52,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from pension_agent import env, llm
+from pension_agent import config, llm
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import render
 
@@ -144,7 +144,7 @@ def health() -> dict[str, Any]:
         "status": "ok",
         # 어느 파일이 읽혔나 — «키를 넣었는데 왜 안 되나»의 첫 질문이다.
         # `python -m pension_agent.env` 가 터미널에 찍는 것과 같은 내용이다.
-        "env": env.active(),
+        "env": {"dotenv": str(config.DOTENV), "exists": config.DOTENV.is_file()},
         "llm": {
             "provider": llm.PROVIDER,
             # 어느 단계의 URL 을 읽었나 — train(…/trnn/…) 인지 serving(…/serv/…) 인지.

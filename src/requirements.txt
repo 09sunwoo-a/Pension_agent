@@ -11,6 +11,7 @@
 # HTTP 진입점 (main.py). 플랫폼 승인 버전.
 fastapi==0.115.12
 uvicorn==0.34.2
+python-dotenv==1.1.0        # .env 파싱 (env.py). 승인 버전.
 
 # consult_agent 대화 그래프.
 #

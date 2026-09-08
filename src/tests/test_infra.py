@@ -155,29 +155,25 @@ def _clear_env():
 try:
     with tempfile.TemporaryDirectory() as _td:
         _root = Path(_td)
-        _clear_env()
-        _env.load(force=True, root=_root)
-        check(_env.active()["files"] == [], "env: 파일이 없으면 읽은 파일 없음", str(_env.active()))
-
         (_root / ".env").write_text("LLM_PROVIDER=genai\nLLM_MODEL=file-model\nPENSION_TEST_MARK=shared\n",
                                     encoding="utf-8")
         _clear_env()
-        _env.load(force=True, root=_root)
+        _env.load(root=_root)
         check(os.environ.get("LLM_PROVIDER") == "genai" and os.environ.get("PENSION_TEST_MARK") == "shared",
-              "env: src/.env 를 읽는다", str(_env.active()))
+              "env: src/.env 를 읽는다")
 
         # LLM_DOTENV 로 지정한 파일이 .env 보다 앞선다 (다른 설정을 잠깐 쓸 때)
         (_root / "other.env").write_text("LLM_MODEL=other-model\n", encoding="utf-8")
         _clear_env()
         os.environ["LLM_DOTENV"] = str(_root / "other.env")
-        _env.load(force=True, root=_root)
+        _env.load(root=_root)
         check(os.environ.get("LLM_MODEL") == "other-model" and os.environ.get("LLM_PROVIDER") == "genai",
-              "env: LLM_DOTENV 파일이 .env 를 덮되, 없는 키는 .env 에서 온다", str(_env.active()))
+              "env: LLM_DOTENV 파일이 .env 를 덮되, 없는 키는 .env 에서 온다")
 
         # 실제 환경변수는 어느 파일도 덮지 못한다
         _clear_env()
         os.environ["LLM_MODEL"] = "from-shell"
-        _env.load(force=True, root=_root)
+        _env.load(root=_root)
         check(os.environ.get("LLM_MODEL") == "from-shell", "env: 실제 환경변수는 파일이 덮지 못한다")
 
         # 실행 단계(ENV_PATH) — 행내 .env 하나에 URL 이 두 벌(…/trnn/… · …/serv/…) 있고
@@ -202,7 +198,7 @@ finally:
     for _k, _v in _saved_profile_env.items():
         if _v is not None:
             os.environ[_k] = _v
-    _env.load(force=True)
+    _env.load()
 
 
 # ─────────────────────────────────────────────────────────────
