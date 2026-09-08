@@ -5730,6 +5730,79 @@ def check_node_label_collision() -> int:
     return hit
 
 
+def check_plan_prompt_order() -> int:
+    """계획 프롬프트에서 «바퀴마다 바뀌는 것»이 맨 뒤에 있는가.
+
+    이 프롬프트는 한 턴에 최대 MAX_STEPS 번 조립되고, 바퀴마다 바뀌는 것은 원장
+    (`ledger`)과 빗나간 호출(`misses_block`) 둘뿐이다. 그 둘이 고정 규칙보다 **앞**에
+    있으면 원장이 한 줄 늘 때마다 뒤의 규칙 1,500자가 바이트가 똑같은데도 새 프리픽스가
+    된다 — 게이트웨이의 prefix 캐시가 prefill 을 건너뛸 구간이 사라진다.
+
+    실측(2026-09-08 · 고객 열린 턴 4바퀴): 재처리해야 하는 분량이 7,893자 → 3,453자.
+    계획 호출은 대화형 입력의 30% 로 1위인데 **건당 크기가 아니라 바퀴 반복** 때문에
+    1위라, 반복분을 프리픽스로 만드는 것이 이 자리의 처방이다.
+
+    되돌아가기 쉬운 변경이라 재는 것은 «순서» 자체다 — 자리표시자를 하나 옮기거나 뒤에
+    덧붙이면 효과가 통째로 사라지는데, 답변 품질에는 아무 티도 안 난다.
+    """
+    import re as _re
+
+    from pension_agent.consult_agent.prompts import PLAN_PROMPT
+    from pension_agent.consult_agent.state import format_history
+
+    ok = 0
+    # 포맷 자리표시자만 뽑는다 — `{{"tool": …}}` 는 JSON 예시라 자리표시자가 아니다.
+    slots = _re.findall(r"(?<!\{)\{([a-z_]+)\}(?!\})", PLAN_PROMPT)
+
+    # ① 바퀴마다 바뀌는 둘이 마지막 두 자리표시자다.
+    hit = slots[-2:] == ["ledger", "misses_block"]
+    print(f"{'✓' if hit else '✗'} 계획 프롬프트의 마지막 자리표시자가 ledger·misses_block 이다"
+          + ("" if hit else f" — {slots}"))
+    ok += hit
+
+    # ② 고정 규칙이 원장보다 앞에 온다.
+    hit = PLAN_PROMPT.index("JSON 외에 아무것도 쓰지 않는다.") < PLAN_PROMPT.index("{ledger}")
+    print(f"{'✓' if hit else '✗'} 고정 규칙이 원장보다 앞에 온다")
+    ok += hit
+
+    # ③ 실제로 조립해 바퀴 사이 공통 프리픽스를 잰다 — ①②를 지켜도 새 자리표시자가
+    #    중간에 끼면 여기서 걸린다.
+    state = {"question": "이 고객 수수료 불만인데 우리 IRP 수수료 얼마고 뭐라고 말하지",
+             "evidence": [], "plan_calls": [], "customer_id": "198734-1205842"}
+    hist = format_history([{"question": "이 고객 왜 관리 대상이야?", "tools": ["customer"]}])
+    rows = ['- customer("이 고객 현황") → 브리핑 재료',
+            '- fact("IRP 수수료율") → 퇴직연금 수수료율표',
+            '- pitch("수수료 비싸다는 고객") → 타사 대비 수수료 반론']
+    built = [PLAN_PROMPT.format(catalog=tools.catalog(state),
+                                ledger="\n".join(rows[:i]) if i else "(아직 없음)",
+                                misses_block="", history_block=hist,
+                                question=state["question"])
+             for i in range(4)]
+
+    def _common(a: str, b: str) -> int:
+        n = 0
+        for x, y in zip(a, b):
+            if x != y:
+                break
+            n += 1
+        return n
+
+    shares = [_common(built[i], built[i + 1]) * 100 // len(built[i + 1]) for i in range(3)]
+    hit = all(s >= 90 for s in shares)
+    print(f"{'✓' if hit else '✗'} 바퀴가 돌아도 앞부분 90% 이상이 그대로다 — {shares}%")
+    ok += hit
+
+    # ④ 첫 줄을 그대로 뒀는가 — trace 가 **첫 `{` 앞의 첫 줄**로 다섯 프롬프트를 갈라
+    #    본다. 겹치면 계측이 계획 호출을 다른 단계로 분류한다(trace.py 가 import 시점에
+    #    스스로 assert 하므로, 여기서는 그 판정이 계획으로 서는지만 확인한다).
+    from tests.debug import trace as _TR
+    hit = _TR._stage(built[0]) == "plan"
+    print(f"{'✓' if hit else '✗'} 계측이 이 프롬프트를 계획 호출로 알아본다")
+    ok += hit
+
+    return ok
+
+
 def main() -> int:
     # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
@@ -5774,6 +5847,7 @@ def main() -> int:
         check_material_marks()
         check_relations()
         check_turn_cost()
+        check_plan_prompt_order()
         check_miss_recovery()
         check_clarify_golden()
         check_clarify_settled()
