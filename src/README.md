@@ -17,6 +17,14 @@ cp .env.example .env                 # 공통 설정 (기본 프로파일 이름
 cp .env.local.example .env.local     # 이 머신의 LLM 환경 — bank(행내) · local · aiden 중 하나
 python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 
+source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
+```
+
+`cli.sh` 가 정의하는 것은 셋뿐이다. 셋 다 **HTTP 를 타지 않고** `graph.ask()` 를 직접
+부르므로 서버(`run_local.sh`)와 무관하고, `.env` 만 잡혀 있으면 행내에서도 사외에서와
+똑같이 돈다.
+
+```bash
 CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
 CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 · 시연 대본)
