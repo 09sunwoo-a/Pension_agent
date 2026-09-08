@@ -661,6 +661,9 @@ try:
         _raised = str(exc)
     check(_raised is not None and "503" in _raised and "서버 오류" in _raised,
           "llm: 계속 5xx 면 상한에서 멈추고 서버 오류로 말한다", str(_raised))
+    # 429 전용 안내(간격·쿼터)를 5xx 에 붙이지 않는다 — 엉뚱한 곳을 만지게 된다.
+    check(_raised is not None and "간격" not in _raised and "쿼터" not in _raised,
+          "llm: 5xx 문장에 429 전용 처방(간격·쿼터)이 섞이지 않는다", str(_raised))
 
     # 요청이 잘못된 에러는 재시도하지 않는다 — 반복해도 결과가 같고 진단만 늦어진다.
     calls["n"] = 0
@@ -839,9 +842,25 @@ try:
         check("tokens per minute" in _catch.lines[0],
               "llm: 첫 429 는 응답 본문을 함께 남긴다(어느 한도인지가 처방을 가른다)",
               _catch.lines[0])
+
         _state = _llm.pace_state()
         check(_state["retries"] == 6 and _state["slept_sec"] == 6.0,
               "llm: 남기지 않은 재시도도 누적으로 센다(pace_state)", str(_state))
+
+        # 같은 첫 줄이 5xx 에도 쓰이는데, 5xx 는 «속도 제한»이 아니다 — 그렇게 적으면
+        # 직원이 간격을 조이러 간다(429 와 5xx 는 할 일이 다르다).
+        _catch.lines.clear()
+        _llm.reset_pace()
+        _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+            _http_error(503, body=b"upstream connect error"))
+        try:
+            _llm.generate("q")
+        except _llm.LLMError:
+            pass
+        check(_catch.lines and "속도를 제한" not in _catch.lines[0]
+              and "서버가 일시적으로 실패" in _catch.lines[0],
+              "llm: 5xx 의 첫 재시도 줄은 «속도 제한»이라고 말하지 않는다",
+              _catch.lines[0] if _catch.lines else "(없음)")
 
         # 오래 기다리는 건은 조용히 넘기지 않는다 — 30초 침묵은 멈춘 것과 구별되지 않는다.
         _catch.lines.clear()

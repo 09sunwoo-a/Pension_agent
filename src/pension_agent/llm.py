@@ -480,11 +480,11 @@ def _post_json(req: urllib.request.Request) -> dict:
                 # 재시도로 성공한 429 는 예외가 안 나므로 여기서 안 남기면 본문을 볼 데가
                 # 없다(끝까지 실패한 429 만 LLMError 에 실린다).
                 _log.warning(
-                    "LLM %s — 게이트웨이가 속도를 제한합니다. %.1f초 감속 후 재시도 "
-                    "(%d/%d · %s). 이후 재시도는 %.0f초 이상 기다릴 때만 남깁니다 — "
-                    "누적은 /health 의 rate_gate 와 prebuild 요약이 셉니다.%s",
-                    exc.code, wait, attempt + 1, RETRY_ATTEMPTS, source, LONG_WAIT_LOG_SEC,
-                    f"\n  응답: {body}" if body else "")
+                    "LLM %s — %s %.1f초 감속 후 재시도 (%d/%d · %s). 이후 재시도는 "
+                    "%.0f초 이상 기다릴 때만 남깁니다 — 누적은 /health 의 rate_gate 와 "
+                    "prebuild 요약이 셉니다.%s",
+                    exc.code, _cause(exc.code), wait, attempt + 1, RETRY_ATTEMPTS, source,
+                    LONG_WAIT_LOG_SEC, f"\n  응답: {body}" if body else "")
             elif wait >= LONG_WAIT_LOG_SEC:
                 # 오래 서 있는 것은 멈춘 것과 구별되지 않는다 — 이건 남긴다.
                 _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
@@ -498,12 +498,18 @@ def _post_json(req: urllib.request.Request) -> dict:
             _speed_up()
             return payload
     code = last.code if last else 0
-    detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
-              else "서버 오류. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다).")
+    # 429 와 5xx 는 직원이 할 일이 다르다 — 문장도 갈라야 한다(이 함수 머리말). 게이트
+    # 상태(간격)는 속도 문제일 때만 붙인다. 5xx 에 「간격을 늘리라」고 적으면 엉뚱한 곳을
+    # 만지게 된다.
+    if code == 429:
+        detail = (
+            "속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오. "
+            f"(동시 {MAX_CONCURRENCY} · 간격 {_interval:.1f}초/바닥 {MIN_INTERVAL}초 — 간격이 "
+            f"상한 {MAX_INTERVAL:.0f}초에 닿았는데도 429 면 속도가 아니라 쿼터 문제입니다.)")
+    else:
+        detail = "서버 오류. 잠시 후 다시 시도하십시오(요청이 잘못된 것이 아닙니다)."
     raise LLMError(
-        f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
-        f"(동시 {MAX_CONCURRENCY} · 간격 {_interval:.1f}초/바닥 {MIN_INTERVAL}초 — 간격이 "
-        f"상한 {MAX_INTERVAL:.0f}초에 닿았는데도 429 면 속도가 아니라 쿼터 문제입니다.)"
+        f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail}"
         + (f"\n응답: {last_body}" if last_body else ""), status=code or None) from last
 
 
@@ -528,6 +534,13 @@ def _error_body(exc: urllib.error.HTTPError) -> str:
 def _retryable(code: int) -> bool:
     """다시 던지면 결과가 달라질 수 있는 에러인가. 429 와 5xx 만 그렇다."""
     return code == 429 or 500 <= code < 600
+
+
+def _cause(code: int) -> str:
+    """왜 기다리는지 한 마디. 429 와 5xx 는 직원이 할 일이 다르므로 같은 말로 적지 않는다 —
+    「속도를 제한합니다」를 보면 간격을 조이러 가는데, 5xx 는 거기가 아니다."""
+    return ("게이트웨이가 속도를 제한합니다." if code == 429
+            else "서버가 일시적으로 실패했습니다.")
 
 
 def _backoff(exc: urllib.error.HTTPError, attempt: int) -> tuple[float, bool]:
