@@ -9,7 +9,7 @@ FROM cmheastggenaiacr01.azurecr.io/python:3.10
 # FROM cmheaprdgenaiacr01.azurecr.io/python:3.10
 
 ARG ENV_FILE_PATH
-# 실행 단계(train | serving). 배포 시 플랫폼이 serving 을 넣어 주면 llm.py 가 같은 .env 안의
+# 실행 단계. 배포 시 Jenkins 가 serving 을 넣어 주면 llm.py 가 같은 .env 안의
 # LLM_BASE_URL_SERV(…/serv/…)을 읽는다. 워크스페이스(train)와 **같은 .env** 를 쓴다.
 ENV ENV_PATH=$ENV_FILE_PATH
 

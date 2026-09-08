@@ -23,7 +23,8 @@
 
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
-  ENV_PATH          실행 단계 train | serving. 비면 train(행내 로컬 기본). 플랫폼 규약
+  ENV_PATH          실행 단계. 배포 때 Jenkins 가 serving 을 넣는다 — 손으로 설정하지 않는다.
+                    없으면(워크스페이스) 분석계. 플랫폼 규약
   LLM_BASE_URL_TRNN / _SERV
                     행내 GenAI 플랫폼 URL 두 벌(…/trnn/… · …/serv/…). ENV_PATH 로 고른다
   LLM_BASE_URL      단계 구분이 없을 때의 하나짜리(Gateway·사외). 단계별 값이 없으면 이것

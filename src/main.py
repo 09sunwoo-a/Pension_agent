@@ -143,7 +143,7 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         # 어느 파일이 읽혔나 — «키를 넣었는데 왜 안 되나»의 첫 질문이다.
-        # `python -m pension_agent.env` 가 터미널에 찍는 것과 같은 내용이다.
+        # 자세한 것은 `python -m pension_agent.env` 가 터미널에 찍는다.
         "env": {"dotenv": str(config.DOTENV), "exists": config.DOTENV.is_file()},
         "llm": {
             "provider": llm.PROVIDER,
