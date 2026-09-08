@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
+from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,8 +30,10 @@ if hasattr(sys.stdout, "reconfigure"):
 from fastapi.testclient import TestClient
 
 import main
+from pension_agent import config as _cfg
 from pension_agent import llm
 from pension_agent.consult_agent import render
+from pension_agent.strategy_agent import briefing_store
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -93,6 +97,30 @@ try:
     # 사고를 여기서 바로 잡아야 한다.
     check(h["llm"].get("stage") in ("train", "serving"),
           "/health 가 어느 단계(ENV_PATH)의 URL 을 읽었는지 보여준다", str(h["llm"].get("stage")))
+
+    # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
+    # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
+    # 배포된 컨테이너에서 그 셋을 로그 없이 가르는 수단이 여기 말고 없다.
+    check(h["briefing_cache"]["enabled"] is False,
+          "/health: 저장소가 꺼져 있으면 꺼졌다고 말한다", str(h.get("briefing_cache")))
+    _saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+    with tempfile.TemporaryDirectory() as _tmp:
+        try:
+            _cfg.BRIEFING_CACHE_DIR = Path(_tmp)
+            # 한 건은 지금 지문, 한 건은 낡은 지문 — «있다»와 «읽힌다»는 다른 수다.
+            (Path(_tmp) / "now.json").write_text(json.dumps(
+                {"fingerprint": briefing_store.fingerprint(), "briefing": {}}), encoding="utf-8")
+            (Path(_tmp) / "old.json").write_text(json.dumps(
+                {"fingerprint": "어제만든것", "briefing": {}}), encoding="utf-8")
+            bc = client.get("/health").json()["briefing_cache"]
+            check(bc["enabled"] is True and bc["stored"] == 2 and bc["usable"] == 1,
+                  "/health: 저장된 건수와 «지금 지문으로 읽히는» 건수를 갈라 보여준다", str(bc))
+            # 파일시스템이 읽기전용이면 런타임 저장이 조용히 실패한다(save 가 예외를 삼킨다).
+            # 그러면 재기동할 때마다 고객당 LLM 11 회를 처음부터 다시 치른다.
+            check(bc["writable"] is True,
+                  "/health: 런타임 저장이 가능한지 보여준다", str(bc))
+        finally:
+            _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
 
     # 행내 첫 연결에서 실제로 걸린 자리 — 인증도 쿼터도 아니고 DNS 였다. LLM Gateway 의
     # base_url 은 *.svc.cluster.local 이라 그 쿠버네티스 클러스터 안에서만 풀리는데,

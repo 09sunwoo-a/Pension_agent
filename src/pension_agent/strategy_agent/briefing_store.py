@@ -69,9 +69,14 @@ def fingerprint() -> str:
     return _FINGERPRINT
 
 
+#: 저장소를 끄는 환경변수. 저장소가 켜진 체크아웃에서 테스트를 돌릴 때 쓴다
+#: (테스트는 LLM 스텁으로 도는데, 그 산출이 파일로 남으면 다음 실운행이 그걸 읽는다).
+CACHE_ENV = "PENSION_BRIEFING_CACHE"
+
+
 def enabled() -> bool:
     """저장소를 쓸 것인가. **디렉터리가 있어야 켜진다** — 만든 사람만 쓰는 셈이다."""
-    if os.environ.get("PENSION_BRIEFING_CACHE", "").strip() in ("0", "off", "false"):
+    if os.environ.get(CACHE_ENV, "").strip() in ("0", "off", "false"):
         return False
     return config.BRIEFING_CACHE_DIR.is_dir()
 
@@ -111,4 +116,51 @@ def save(key: str, briefing: dict[str, Any]) -> None:
         return
 
 
-__all__ = ["enabled", "fingerprint", "load", "save"]
+def stats() -> dict[str, Any]:
+    """저장소 상태 — 배포된 컨테이너에서 «지금 미리 만들어 둔 것을 읽고 있나»를 보는 창.
+
+    이 저장소는 **실패가 전부 조용하다.** 꺼져 있어도(디렉터리 없음), 지문이 어긋나 한 건도
+    못 읽어도, 파일시스템이 읽기전용이라 런타임 저장이 안 돼도, 답변은 그대로 정상으로
+    나간다 — 화면에서는 «느리다»로만 보인다. 그래서 셋을 갈라 볼 수단이 없으면 배포한
+    사람은 원인을 로그로 뒤져야 한다. `/health` 가 LLM 설정을 같은 이유로 노출한다.
+
+      stored    파일 개수 (지문과 무관하게 있는 것 전부)
+      usable    그중 **지금 지문으로 읽히는** 건수. 0 이면 있으나 마나다 —
+                날짜가 넘어갔거나 코드·데이터를 고치고 다시 만들지 않았다는 뜻이다
+      writable  런타임에 만든 브리핑을 저장할 수 있나. 거짓이면 재기동할 때마다
+                처음부터 다시 만든다(저장 실패는 삼켜지므로 여기 말고는 드러나지 않는다)
+
+    파일을 전부 읽어 지문을 대조한다. 로스터가 12명이라 그만큼이고 한 건이 작아서 감당
+    되지만, 지문이 바뀌어도 낡은 파일은 지워지지 않고 쌓인다 — 늘어나면 `--clear` 로
+    지우고 다시 만든다(`scripts/prebuild_briefings.py`).
+    """
+    d = config.BRIEFING_CACHE_DIR
+    # 디렉터리가 없으면 여기서 끝낸다 — 지문 계산(데이터·코드 전체 해시)까지 가지 않는다.
+    # 저장소를 안 쓰는 배포에서 /health 가 비싸지면 안 된다.
+    if not d.is_dir():
+        return {"enabled": False, "dir": str(d), "reason": "디렉터리 없음 — 저장소가 꺼져 있다"}
+
+    files = sorted(d.glob("*.json"))
+    fp = fingerprint()
+    usable = 0
+    for path in files:
+        try:
+            if json.loads(path.read_text(encoding="utf-8")).get("fingerprint") == fp:
+                usable += 1
+        except (OSError, ValueError):
+            continue    # 깨진 파일은 load() 도 건너뛴다 — 여기서도 없는 셈으로 센다
+
+    out: dict[str, Any] = {
+        "enabled": enabled(),
+        "dir": str(d),
+        "stored": len(files),
+        "usable": usable,
+        "writable": os.access(d, os.W_OK),
+        "today": str(today()),      # 지문에 들어가는 축 — 날짜가 넘어가면 usable 이 0 이 된다
+    }
+    if not out["enabled"]:
+        out["reason"] = f"{CACHE_ENV} 로 꺼둠"
+    return out
+
+
+__all__ = ["CACHE_ENV", "enabled", "fingerprint", "load", "save", "stats"]

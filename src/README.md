@@ -80,7 +80,9 @@ base_url 이 클러스터 내부 이름이라 컴퓨트 인스턴스에서는 �
 이름을 채워 넣으면 404 로 막힌다(실제로 그랬다).
 
 `Dockerfile` 이 COPY 하는 설정 파일은 `.env` 하나다 — 없으면 COPY 단계에서 빌드가 실패한다
-(refs/dockerfile.md).
+(refs/dockerfile.md). 디렉터리로는 `briefing_cache/` 가 하나 더 있고 같은 이유로 없으면
+빌드가 실패한다. 미리 만들지 않고 빌드하려면 `mkdir -p briefing_cache` 로 빈 디렉터리만
+만든다(아래 「미리 만들어 두기」).
 
 ```bash
 # 3. 무엇이 잡혔는지 — 여기서 «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
@@ -110,6 +112,12 @@ $CA -c 198734-1205842 "이 고객 왜 관리 대상이야?"   # 브리핑 경로
 | `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
 | `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 함께 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
 | `HTTP 429` | 호출이 몰림 | `.env` 에서 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=1.0` 후 재시작. 서버가 Retry-After 를 주면 그만큼 쉰 뒤 재시도한다(로그에 «서버 Retry-After»). `prebuild_briefings` 는 429 면 그 자리에서 멈춘다 — 잠시 뒤 다시 실행하면 저장된 고객은 건너뛴다 |
+
+**STG 는 분당 10회다.** 브리핑 한 편이 순차 11 회라 **한 편이 한도를 넘는다** — 게이트를
+안 조이면 브리핑을 끝까지 만들 수 없다. `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=6.5`
+로 두면 분당 9 회로 내려가 한 편이 약 70 초에 완주한다. 이 값에서는 **브리핑을 호출 중에
+만들면 안 된다** — 대화 한 턴이 3~14 회를 더 쓰므로 한 번의 `/chat` 이 2 분을 넘긴다.
+미리 만들어 두는 것이 선택이 아니라 전제다(아래 「미리 만들어 두기」).
 
 `.env` 는 **프로세스 기동 때 한 번만** 읽는다. 고쳤으면 서버를 다시 띄워야 한다
 (`--reload` 는 `.py` 변경만 본다).
@@ -151,7 +159,7 @@ $CADR --versions                                      # 중간점검본 판 이�
 $CADR --diff v5 v6                                    # 두 판의 질문 차이
 $CADR review@v3                                       # 옛 판 그대로 돌려보기
 
-# ── 리허설을 빨리 시작하기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
+# ── 미리 만들어 두기 (브리핑 한 편 = 순차 LLM 11회 · 고객 블록마다 화면을 열 때 든다)
 python -m scripts.prebuild_briefings                  # 9케이스 브리핑을 미리 만들어 둔다
 python -m scripts.prebuild_briefings --status         # 무엇이 저장돼 있고 지금 읽히는가
 python -m scripts.prebuild_briefings --clear          # 지우고 저장소를 끈다(예전 동작)
@@ -173,6 +181,39 @@ python -m scripts.kb_build.build_kb [--activate]   # 06_주제별_추출지식 �
 python -m scripts.import_targets                   # 타겟 룰베이스 xlsx → targets.json
 python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 ```
+
+### 미리 만들어 두기 — 배포 이미지에 브리핑을 넣는다
+
+대화형은 브리핑이 **이미 있다고 보고** 답한다(고객 재료 도구가 `strategy_agent.propose()`
+를 부른다). 그런데 브리핑 한 편이 순차 LLM 11 회라, 배포한 컨테이너가 그것을 직접 만들면
+외부 호출마다 그 시간을 문다. STG 는 분당 10 회라 애초에 한 편이 완주하지 못한다.
+`briefing_cache/` 를 이미지에 함께 넣는 이유다.
+
+```bash
+# 1. 게이트를 STG 한도(분당 10회) 아래로. .env 는 기동 때 한 번만 읽는다.
+#    LLM_MAX_CONCURRENCY=1 · LLM_MIN_INTERVAL_SEC=6.5
+# 2. 코드·데이터를 확정한다 — 이 뒤로 한 줄이라도 고치면 지문이 어긋나 저장분이 버려진다
+python -m scripts.prebuild_briefings          # 고객당 11회 · 12명이면 20분 넘게 걸린다
+python -m scripts.prebuild_briefings --status # 전원 «있음(지문 일치)» 인지 확인하고 빌드한다
+docker build -f Dockerfile -t pension-agent .
+```
+
+지문에는 **오늘 날짜**가 들어간다(잔여일수·미접촉 일수가 오늘 기준이다). 그래서 같은
+이미지를 다음 날 부르면 구워 넣은 저장분은 버려지고 고객당 첫 호출이 다시 11 회를 치른다.
+그 11 회는 **컨테이너 안에 저장돼** 두 번째 호출부터는 읽힌다(디렉터리가 이미지에 있으므로
+저장소가 켜져 있다). 다음 날 첫 호출까지 빠르길 원하면 `.env` 에 `PENSION_TODAY` 를 고정해
+빌드한다 — 대신 만기 D-day·연말까지 며칠이 그 날짜로 굳는다.
+
+**지금 무엇이 읽히고 있는지는 `/health` 의 `briefing_cache` 가 답한다.**
+
+```json
+{"enabled": true, "stored": 12, "usable": 12, "writable": true, "today": "2026-09-08"}
+```
+
+`usable` 이 `stored` 보다 작으면 그만큼이 낡은 지문이다(날짜가 넘어갔거나 코드·데이터를
+고치고 다시 만들지 않았다). `usable: 0` 이면 구워 넣은 것이 하나도 안 읽히는 상태다.
+`writable: false` 면 런타임에 만든 브리핑을 저장하지 못해 **재기동할 때마다** 처음부터
+다시 만든다. 셋 다 답변은 정상으로 나가고 화면에는 «느리다»로만 보이므로 여기서 가른다.
 
 **고객 지정(`-c/--customer`)** 은 고객 id(KB-PIN)다. 없으면 브리핑질의·LMS발송·수정이
 "고객 화면을 먼저 열어주세요"로 답한다. id 는 `strategy_agent/customer.py` 의 `PERSONAS`
