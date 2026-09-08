@@ -500,6 +500,25 @@ try:
     check(_raised, "PENSION_TODAY 형식 오류는 즉시 실패한다(조용히 실제 날짜로 넘어가지 않는다)")
     os.environ[CUST.TODAY_ENV] = ""
     check(CUST.today() == date.today(), "고정하지 않으면 실제 오늘이다", str(CUST.today()))
+
+    # ── 시간축 스탬프 — 산출의 출구가 «어느 오늘로 만든 것인가»를 함께 돌려준다.
+    # 없으면 화면이 제 시계를 읽고, 그때 오늘을 읽는 곳이 둘이 된다(clock.stamp 머리말).
+    # `pinned` 가 이 스탬프의 알맹이다 — 날짜만 주면 「이 날짜가 맞나」를 사람이 판단해야
+    # 하는데, pinned 는 «누가 고정해 뒀다»는 사실 자체를 말한다.
+    from pension_agent import clock as CLOCK  # noqa: PLC0415 — 이 절에서만 쓴다
+
+    check(CLOCK.stamp() == {"today": date.today().isoformat(), "pinned": False},
+          "고정하지 않으면 스탬프의 pinned 가 거짓이다", str(CLOCK.stamp()))
+    os.environ[CUST.TODAY_ENV] = "2026-11-30"
+    check(CLOCK.stamp() == {"today": "2026-11-30", "pinned": True},
+          "고정하면 스탬프가 그 날짜와 pinned=True 를 말한다", str(CLOCK.stamp()))
+    # 원장 축은 clock 이 갖지 않는다 — AS_OF 는 시연 데이터에 딸린 값이라 customer 소유다.
+    check(CLOCK.stamp().keys() == {"today", "pinned"}, "clock 스탬프는 원장 축을 모른다")
+    _led = CUST.ledger_stamp()
+    check(_led["today"] == "2026-11-30" and _led["pinned"] is True
+          and _led["as_of"] == CUST.AS_OF.isoformat()
+          and _led["ledger_age_days"] == CUST.ledger_age_days(),
+          "원장 스탬프는 clock 스탬프에 원장 기준일·스냅샷 나이를 더한다", str(_led))
 finally:
     if _saved is None:
         os.environ.pop(CUST.TODAY_ENV, None)

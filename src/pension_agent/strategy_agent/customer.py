@@ -32,6 +32,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import date
 
+from pension_agent import clock
 from pension_agent.clock import TODAY_ENV, today  # noqa: F401 — 오늘은 공용이다
 
 # ─────────────────────────────────────────────────────────────
@@ -66,6 +67,19 @@ AS_OF = date(2026, 8, 24)
 def ledger_age_days() -> int:
     """원장 스냅샷이 오늘 기준 며칠 묵었는가. 0 이면 원장과 오늘이 같은 날이다."""
     return (today() - AS_OF).days
+
+
+def ledger_stamp() -> dict[str, object]:
+    """**이 산출이 어느 «오늘»과 어느 원장 기준일로 만들어졌는가** — 시간축 둘을 함께.
+
+    `clock.stamp()`(오늘·고정 여부)에 원장 축을 더한 것이다. `AS_OF` 는 시연 데이터에
+    딸린 값이라 `clock` 이 갖지 않고 이 모듈이 갖는다(`clock.py` 머리말) — 그래서 «둘을
+    합친 하나»도 여기서 만든다. 합치는 곳이 둘이면 출구마다 다른 모양이 나간다.
+
+    고객 축이 없는 자리(고객 화면이 닫힌 대화 턴)에서는 `clock.stamp()` 만 쓴다 —
+    `date` 도구가 원장 기준일을 «고객이 열려 있을 때만» 싣는 것과 같은 판단이다.
+    """
+    return {**clock.stamp(), "as_of": AS_OF.isoformat(), "ledger_age_days": ledger_age_days()}
 
 # 위험등급. 오름차순으로 정의하며, 인덱스 비교로 상한 초과 여부를 판정한다.
 RISK = ["매우낮은위험", "낮은위험", "보통위험", "다소높은위험", "높은위험", "매우높은위험"]

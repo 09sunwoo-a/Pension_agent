@@ -66,11 +66,19 @@ results = load_all_proposals(use_llm)
 
 # ── 실행 조건을 사이드바에 상시 노출한다. 답변이 이상할 때 «에이전트가 틀렸다»와
 # «기준일이 어긋났다»·«LLM 이 안 붙었다»를 화면에서 바로 갈라야 신고가 재현 가능해진다.
+#
+# 값은 **에이전트 산출의 출구가 주는 것**을 그대로 쓴다(`propose()` 의 clock 키). 화면이
+# 제 시계를 따로 읽으면 오늘을 읽는 곳이 둘이 되고, 그러면 사이드바가 말하는 날짜와 답변
+# 속 D-day 가 갈릴 수 있다 — 지금은 같은 프로세스라 우연히 일치할 뿐이었다(clock.stamp 머리말).
+_stamp = next(iter(results.values()))["clock"] if results else clock.stamp()
 with st.sidebar:
     st.divider()
     st.markdown("**실행 조건**")
+    # `pinned` 는 여기서 쓰지 않는다 — 이 앱은 켤 때 스스로 고정하므로(위 19행) 늘 참이라
+    # 표시해도 «누가 밖에서 얼렸다»를 가리지 못한다. 그 사정은 아래 문구가 설명한다.
+    # 이 칸이 쓸모 있는 곳은 자기가 고정하지 않는 쪽이다(리허설 러너·실서비스 프론트).
     st.caption(
-        f"오늘(상담 시점) · {clock.today():%Y-%m-%d}\n\n"
+        f"오늘(상담 시점) · {_stamp['today']}\n\n"
         f"원장 기준일(AS_OF) · {AS_OF:%Y-%m-%d}\n\n"
         f"LLM · {'연결됨' if llm.available() else '미설정'}"
     )

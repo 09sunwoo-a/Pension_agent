@@ -30,7 +30,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
-from pension_agent import observability
+from pension_agent import clock, observability
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
@@ -220,4 +220,10 @@ def ask(
         # 이 턴이 답변 대신 판별 질문으로 끝났으면 그 질문과 선택지. 화면이 선택지를
         # 버튼으로 띄우고 싶을 때 쓴다.
         "clarify": out.get("clarify"),
+        # **이 턴이 어느 «오늘»로 답했는가**(clock.stamp 머리말). 답변에는 잔여일수·경과일이
+        # 실려 나가는데 그것이 어느 날 기준인지가 여기 없으면 화면이 제 시계를 읽게 되고,
+        # 그 순간 오늘을 읽는 곳이 둘이 된다. 고객이 열려 있으면 원장 기준일도 함께 준다 —
+        # 잔액은 그날 값이고 잔여일수는 오늘 기준이라 둘이 며칠 벌어졌는지가 같이 필요하다
+        # (`date` 도구가 재료에 싣는 것과 같은 판단이고, 이건 화면이 읽는 필드다).
+        "clock": CUST.ledger_stamp() if customer_id else clock.stamp(),
     }

@@ -63,6 +63,16 @@
 
 **오늘은 2026-08-24 로 고정된다**(`tests/__init__.py` — 원장 스냅샷 기준일). 만기
 잔여일수·미접촉 일수가 실행일마다 달라지면 두 번의 실행을 비교할 수 없다.
+
+그리고 **실행 머리에 그 값을 찍는다**(`_print_clock`). 고정 자체는 의도이지만, 그 사실이
+화면에 없으면 답에 실린 「185일간 접촉 없음」이 어느 날 기준인지 읽는 사람이 알 수 없다 —
+2026-09-07 에 그것을 지어낸 수치로 의심한 실측이 있다(값은 원장 그대로였고, 없던 것은
+«어느 오늘로 센 값인가» 하나였다). 러너가 제 시계를 읽지 않고 에이전트 산출의 출구가 주는
+값을 그대로 찍는다(`customer.ledger_stamp` · `clock.stamp`).
+
+**`qa` 만 예외다.** 그 대본의 «기대»는 `scenarios.QA_TODAY`(2026-09-07) 기준으로 적혀
+있어서 기본 고정값으로 돌리면 잔여일수·ISA 상태가 어긋난다. 어긋나면 머리에서 알린다 —
+채점은 여전히 하지 않으므로(아래 「채점하지 않는다」) 막지 않고 알리기만 한다.
 """
 
 from __future__ import annotations
@@ -411,6 +421,29 @@ def _versions_in(argv: list[str]) -> list[str]:
     return [a for a in argv if a in SCEN.version_names()]
 
 
+def _print_clock(script: str, brief: bool) -> None:
+    """이번 실행의 시간축을 한 줄로. 값은 산출의 출구가 주는 것을 그대로 옮긴다.
+
+    `qa` 대본만 한 줄이 더 붙는다 — 그 대본의 «기대»는 `SCEN.QA_TODAY` 기준으로 적혀
+    있어서, 다른 날짜로 돌면 잔여일수·ISA 상태가 어긋난 채 사람이 읽게 된다. 채점은
+    하지 않으므로(머리말) 알리기만 하고 그대로 돈다.
+    """
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+
+    now = CUST.ledger_stamp()
+    how = f"{CUST.TODAY_ENV} 고정" if now["pinned"] else "실제 날짜"
+    print(f"\n오늘: {now['today']} ({how}) · 원장 기준일 {now['as_of']} "
+          f"(오늘 기준 {now['ledger_age_days']}일 전 스냅샷)")
+    if script == "qa" and now["today"] != SCEN.QA_TODAY:
+        print(f"  ⚠ qa 대본의 «기대»는 {SCEN.QA_TODAY} 기준으로 적혀 있습니다 — "
+              "잔여일수·ISA 상태가 어긋납니다.")
+        print(f"    맞추려면: {CUST.TODAY_ENV}={SCEN.QA_TODAY} python -m tests.debug.reps qa …")
+    if brief:
+        return
+    print("  (잔액·수익률·납입액은 원장 기준일 값이고, 만기까지 며칠·마지막 접촉 이후 "
+          "며칠은 «오늘» 기준으로 다시 센 값입니다)")
+
+
 def main(argv: list[str]) -> int:
     """검토(`cases`)와 리허설(나머지 셋)이 **같은 실행 경로**를 쓰고 화면만 갈린다 —
     리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
@@ -506,6 +539,14 @@ def main(argv: list[str]) -> int:
         for b in blocks:
             print(f"    {b[0]}  {b[1]}")
         return 1
+
+    # **어느 «오늘»로 도는지 먼저 찍는다.** 이 러너는 `tests` 패키지 안에 있어서
+    # `tests/__init__.py` 가 `PENSION_TODAY` 를 원장 기준일로 setdefault 한다 — 그게 이
+    # 러너의 의도이기도 하다(머리말 「두 번의 실행을 비교할 수 없다」). 문제는 그 사실이
+    # 화면 어디에도 없었다는 것이다: 읽는 사람은 답에 실린 「185일간 접촉 없음」이 어느 날
+    # 기준인지 알 수 없어 원장 값을 지어낸 수치로 의심했다(2026-09-07 실측 — 값은 맞았다).
+    # 러너가 제 시계를 읽지 않고 **에이전트가 실제로 답한 값**을 찍는다(clock.stamp 머리말).
+    _print_clock(script, brief)
 
     if rehearsal and not brief:
         where = f"review@{version or SCEN.LATEST}" if script == "review" else script

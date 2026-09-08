@@ -4459,6 +4459,28 @@ def check_followups() -> int:
     hit = asking["followups"] == [] and G.FOLLOWUP_HEADER not in asking["answer"]
     print(f"{'✓' if hit else '✗'} 되묻기 턴의 답변에는 추천질문 블록이 붙지 않는다")
     ok += hit
+
+    # ── 시간축 스탬프(clock.stamp 머리말) — 답변에는 잔여일수·경과일이 실려 나가는데
+    #    «어느 오늘로 센 값인가»가 반환값에 없으면 화면이 제 시계를 읽게 되고, 그 순간
+    #    오늘을 읽는 곳이 둘이 된다. 고객이 열려 있을 때만 원장 축을 더한다 — `date`
+    #    도구가 원장 기준일을 그때만 싣는 것과 같은 판단이다.
+    from pension_agent import clock as CLOCK  # noqa: PLC0415
+    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+
+    hit = wired.get("clock") == CLOCK.stamp()
+    print(f"{'✓' if hit else '✗'} ask() 가 이 턴의 «오늘»을 함께 돌려준다 (고객 없음)")
+    ok += hit
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "네.", "sources": [], "evidence": []})})()
+        opened = G.ask("이 고객 만기 언제야?", customer_id=CUST.PERSONAS[0].id)
+    finally:
+        G._AGENT = orig_agent
+    got = opened.get("clock") or {}
+    hit = got.get("as_of") == CUST.AS_OF.isoformat() and "ledger_age_days" in got
+    print(f"{'✓' if hit else '✗'} 고객이 열려 있으면 원장 기준일·스냅샷 나이도 함께 온다")
+    ok += hit
     return ok
 
 

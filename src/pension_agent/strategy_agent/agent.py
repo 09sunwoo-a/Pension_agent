@@ -35,7 +35,7 @@ from pension_agent.strategy_agent import engine
 from pension_agent import llm, observability
 from pension_agent.strategy_agent import sections
 from pension_agent.strategy_agent import support
-from pension_agent.strategy_agent.customer import PERSONAS, Profile
+from pension_agent.strategy_agent.customer import PERSONAS, Profile, ledger_stamp
 # 요건 판정 — 관측 태그에 그대로 옮긴다. 이름이 흔해 별칭을 붙인다
 # (`facts["conditions"]` 는 사람이 읽는 문구이고 이쪽은 코드다).
 from pension_agent.strategy_agent.customer import conditions as target_conditions
@@ -685,6 +685,14 @@ def _propose(p: Profile, *, use_llm: bool, top_n: int) -> dict[str, Any]:
     out: dict[str, Any] = {
         "customer": p.nm, "facts": facts, "sentence": "",
         "insight": "", "source": "미생성", "tier": "행내전략", "reason": "", "rejected": [],
+        # **이 브리핑이 어느 «오늘»과 어느 원장 기준일로 만들어졌는가**(clock.stamp 머리말).
+        # 화면 ①~⑨ 는 만기 D-n · 최근접촉 n일 전 · 연말까지 n일을 그대로 렌더하는데, 그것이
+        # 어느 날 기준인지가 산출에 없으면 화면이 제 시계를 읽게 된다(지금 app.py 가 그렇게
+        # 하고 있다 — 같은 프로세스라 우연히 일치할 뿐이다). **생성 시점**에 찍는다:
+        # 캐시·저장소를 지나 며칠 뒤에 읽혀도 이 값은 «이 산출이 만들어진 날»을 말해야 한다.
+        # facts 가 아니라 최상위인 이유는 대화 쪽과 같다 — 화면이 읽는 필드이지 LLM 재료가
+        # 아니다(재료 쪽은 `date` 도구가 맡는다).
+        "clock": ledger_stamp(),
     }
 
     # Tier2 — 매칭 전략이 없으면 LLM 이 대신 참고 의견을 작성한다. 근거 계층은 tier 로 표시한다.

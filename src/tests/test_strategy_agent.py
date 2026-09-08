@@ -291,8 +291,36 @@ def check_outreach_prompt_has_no_condition_codes() -> None:
           detail=(code.search(seen[0]).group(0) if seen and code.search(seen[0]) else "프롬프트 없음"))
 
 
+# ─────────────────────────────────────────────────────────────
+# ⑥ 시간축 스탬프 — 브리핑도 «어느 오늘로 만든 것인가»를 함께 돌려준다
+# ─────────────────────────────────────────────────────────────
+
+def check_propose_carries_clock() -> None:
+    """화면 ①~⑨ 는 만기 D-n · 최근접촉 n일 전 · 연말까지 n일을 그대로 렌더한다.
+
+    그 값이 어느 날 기준인지가 산출에 없으면 화면이 제 시계를 읽게 되고, 그 순간 오늘을
+    읽는 곳이 둘이 된다(`clock.stamp` 머리말). 대화 쪽 출구(`graph.ask`)와 **같은 모양**
+    이어야 한다 — 출구마다 다른 꼴이면 프론트가 둘을 따로 다루게 된다.
+    """
+    from pension_agent import clock
+    from pension_agent.strategy_agent import customer as CUST
+
+    out = A.propose(_BY_NAME["이준호"], use_llm=False)
+    stamp = out.get("clock") or {}
+    check(stamp.get("today") == clock.stamp()["today"] and "pinned" in stamp,
+          "브리핑 산출이 이 «오늘»을 함께 돌려준다", str(stamp))
+    check(stamp.get("as_of") == CUST.AS_OF.isoformat()
+          and stamp.get("ledger_age_days") == CUST.ledger_age_days(),
+          "원장 기준일과 스냅샷 나이도 함께 온다 — 잔액은 그날 값이고 잔여일수는 오늘 기준이다")
+    # **facts 에는 넣지 않는다.** 거기 넣으면 LLM 재료가 되어 답변이 매번 날짜를 인용하게
+    # 되고, 그 자리는 이미 `date` 도구가 맡는다(계획이 필요할 때만 부른다).
+    check("clock" not in out["facts"],
+          "스탬프는 화면이 읽는 필드다 — 답변 재료(facts)에 실리지 않는다")
+
+
 def main() -> int:
     check_outreach_prompt_has_no_condition_codes()
+    check_propose_carries_clock()
     check_order_mismatch_fallback()
     check_sentence_verify_rejects_fabrication()
     check_why_customer_accepts_grounded()
