@@ -86,6 +86,23 @@ def _steps(state: AgentState) -> list[dict]:
     return list(state.get("steps") or [])
 
 
+#: 상태 로그에 싣는 질의 미리보기 길이 — 질의는 직원의 말이라 전문을 남기지 않는다.
+_QUERY_PREVIEW = 40
+
+
+def _record_tool(name: str, query: str, outcome: str, reason: str = "") -> None:
+    """도구 실행 한 건을 «코드가 아는 사실»로 남긴다(observability.score → Langfuse + 로그).
+
+    장부(`steps`)는 이 턴의 답을 만드는 재료이고, 이것은 나중에 되짚는 기록이다. 고장(failed)만
+    WARNING 으로 찍힌다(observability._state_level).
+    """
+    preview = " ".join(query.split())
+    if len(preview) > _QUERY_PREVIEW:
+        preview = preview[:_QUERY_PREVIEW] + "…"
+    note = f"{name} · 질의 {preview!r}" + (f" · 사유 {reason}" if reason else "")
+    observability.score("tool_outcome", outcome, comment=note)
+
+
 def _step(tool: str, query: str, outcome: str, reason: str = "") -> dict:
     """장부 한 줄. `reason` 은 고장에만 있다 — 빈 값을 넣어 두면 «원인 미상»과 구분이 없어진다."""
     entry = {"tool": tool, "query": query, "outcome": outcome}
@@ -289,12 +306,14 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         # 나올 수 있고, 죽은 도구는 다음 바퀴의 카탈로그에서 빠진다(tools.usable). 빗나간
         # 호출로 접지 않는 이유는 그쪽의 처방이 «질의의 말을 바꿔라»여서다 — 고장에는
         # 그 말이 틀렸고, 원장이 끝내 비었을 때 답도 갈린다(compose).
+        _record_tool(name, query, FAILED, exc.reason)
         return {**alive, "steps": steps + [_step(name, query, FAILED, exc.reason)]}
 
     # 무슨 일이 있었는지는 한 번만 적는다 — 예전에는 성공·빗나감·고장이 각자 리스트를
     # 갖고 있어서, 결과 종류가 늘 때마다 반환값의 키가 늘었다(state.py 의 `steps` 주석).
-    update: dict[str, Any] = {
-        "steps": steps + [_step(name, query, FOUND if found is not None else MISS)], **alive}
+    outcome = FOUND if found is not None else MISS
+    _record_tool(name, query, outcome)
+    update: dict[str, Any] = {"steps": steps + [_step(name, query, outcome)], **alive}
     # 게이트가 이번 호출에서 표시한 갈래(tools.record_branches 가 state 에 쌓아 둔 것)를
     # **자기 반환값으로** 넘긴다. 그래프 상태 전파를 in-place 변경에 기대지 않는다 —
     # 노드가 돌려준 것만 다음 노드가 본다는 규약이 여기서도 지켜져야, 계획이 여러 바퀴

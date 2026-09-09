@@ -25,6 +25,7 @@ import re
 from typing import Any
 
 from pension_agent import workb
+from pension_agent import observability
 from pension_agent.consult_agent import memo, screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.tools import MEMO_DEFAULT_TO, TOOL_REGISTRY
@@ -409,6 +410,9 @@ def _send_memo(pending: dict) -> dict[str, Any]:
     result = TOOL_REGISTRY["send_memo"](
         (pending.get("params") or {}).get("customer_id") or "", markup,
         title=title, recipients=ids, to=to)
+    # 되돌릴 수 없는 행위의 결과는 반드시 기록에 남긴다 — 제목·본문·사번은 싣지 않는다.
+    observability.score("action_outcome", result.get("status") or "unknown",
+                        comment=f"send_memo · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
     if result.get("status") not in ("sent", "stubbed"):
         return {"answer": f"쪽지를 보내지 못했어요. {result.get('detail') or ''}".strip(),
                 "sources": [], "pending_action": None}
@@ -467,15 +471,22 @@ def _link(pending: dict) -> dict[str, Any]:
         gate = TOOL_REGISTRY["open_lms_screen"](
             (pending.get("params") or {}).get("customer_id") or "", message)
         if gate["status"] == "blocked":
+            observability.score("action_outcome", "blocked",
+                                comment=f"open_lms_screen · {gate.get('detail') or ''}")
             return {"answer": f"연계하지 않았어요. {gate['detail']}",
                     "sources": [], "pending_action": None}
 
-    url = screens.link(pending.get("screen") or "")
+    screen = pending.get("screen") or ""
+    url = screens.link(screen)
     if not url:
         # 화면번호가 규격에 맞지 않으면 연계 대신 화면번호만 안내한다(§10).
-        return {"answer": f"화면 연계를 만들지 못했어요. 화면번호 {pending.get('screen') or '미상'} "
+        observability.score("action_outcome", "failed",
+                            comment=f"link · 화면번호 {screen or '미상'} 이 규격에 맞지 않음")
+        return {"answer": f"화면 연계를 만들지 못했어요. 화면번호 {screen or '미상'} "
                           "로 직접 이동해 주세요.",
                 "sources": [], "pending_action": None}
+    observability.score("action_outcome", "ok",
+                        comment=f"link · {pending.get('kind') or 'screen'} · 화면 {screen}")
 
     answer = f"{pending['label']} — {url}"
     if pending.get("kind") == "lms" and message:

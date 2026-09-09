@@ -91,6 +91,10 @@ pension_agent 의 `log.info` 는 **어디에도 나가지 않는다** — 행내
 요청마다 짧은 id 를 붙여 «받음 → 진행 단계 → 완료 / 실패 / 연결 끊김»을 찍는다.
 진행 단계 문구는 progress.emit 이 코드로 정한 것이라(LLM 문장이 아니다) 로그에도 그대로
 싣는다(화면에는 progress 이벤트로 간다 — «출력 형식»).
+에이전트 안에서 일어난 일(도구 실행 결과 · 연계 실행 결과 · 검증 게이트 · 판정)은 `[agent]`
+로거의 «상태» 줄로 찍힌다 — observability.score() 가 Langfuse 활성 여부와 무관하게 남기고,
+여기서 연 request_id 컨텍스트로 같은 요청 id 가 붙는다. 직원이 받는 답이 실패·축소로 바뀐
+사실만 WARNING 이다(observability._state_level).
 """
 
 from __future__ import annotations
@@ -112,7 +116,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from pension_agent import config, llm
+from pension_agent import config, llm, observability
 from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.strategy_agent import briefing_store
@@ -407,11 +411,12 @@ async def chat(req: ChatRequest, request: Request):
         def run_once() -> dict[str, Any]:
             def on_progress(text: str) -> None:
                 log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
-            return consult_graph.ask(
-                question, history,
-                customer_id=args["customer_id"], session_id=session_id,
-                x_client_user=x_client_user, on_progress=on_progress,
-            )
+            with observability.request_id(rid):
+                return consult_graph.ask(
+                    question, history,
+                    customer_id=args["customer_id"], session_id=session_id,
+                    x_client_user=x_client_user, on_progress=on_progress,
+                )
         try:
             result = await asyncio.to_thread(run_once)
         except Exception as exc:  # noqa: BLE001
@@ -438,12 +443,13 @@ async def chat(req: ChatRequest, request: Request):
 
         def run() -> dict[str, Any]:
             try:
-                return consult_graph.ask(
-                    question, history,
-                    customer_id=args["customer_id"], session_id=session_id,
-                    x_client_user=x_client_user,
-                    on_progress=on_progress,
-                )
+                with observability.request_id(rid):
+                    return consult_graph.ask(
+                        question, history,
+                        customer_id=args["customer_id"], session_id=session_id,
+                        x_client_user=x_client_user,
+                        on_progress=on_progress,
+                    )
             finally:
                 # 성공이든 실패든 반드시 닫는다 — 안 닫으면 아래 루프가 영원히 기다린다.
                 loop.call_soon_threadsafe(lines.put_nowait, DONE)

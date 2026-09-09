@@ -34,7 +34,7 @@ from fastapi.testclient import TestClient
 
 import main
 from pension_agent import config as _cfg
-from pension_agent import llm
+from pension_agent import llm, observability
 from pension_agent.strategy_agent import briefing_store
 
 _results: list[tuple[bool, str, str]] = []
@@ -110,6 +110,8 @@ def _fake_ask(question, history=None, **kw):
     if cb:
         for line in PROGRESS:
             cb(line)
+    # 실물처럼 «상태» 한 건 — 진입점이 연 request_id 컨텍스트가 스레드 안까지 따라오는지 본다.
+    observability.score("evidence_count", 2)
     # 실물처럼: 추천질문은 answer 끝에 블록으로도 붙고 followups 로도 온다(graph.ask).
     out = {"answer": ANSWER + "\n\n" + main.consult_graph.FOLLOWUP_HEADER + "\n"
            + "\n".join(f"· {q}" for q in FOLLOWUPS),
@@ -265,6 +267,9 @@ try:
           "진행 단계가 로그에도 찍힌다", str(_mine[1:2]))
     check(any("완료" in m and "출처 2건" in m and "추천질문 2건" in m for m in _mine),
           "완료 로그에 소요시간·답변 길이·출처·추천질문 건수가 실린다", str(_mine[-1:]))
+    _state = [r.getMessage() for r in _captured if r.name == "agent" and _rid and r.getMessage().startswith(f"[{_rid}]")]
+    check(_state == [f"[{_rid}] 상태 evidence_count=2"],
+          "에이전트 안의 «상태» 줄에 같은 요청 id 가 붙는다(워커 스레드까지 컨텍스트가 따라간다)", str(_state))
     check(all(r.levelno == logging.INFO for r in _logs if _rid and r.getMessage().startswith(f"[{_rid}]")),
           "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
     check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",

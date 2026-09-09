@@ -805,6 +805,59 @@ with _obs.trace("noop") as _null:
     _null.update(output="버려진다")
 check(_obs.current_trace_id() is None, "observability: 꺼져 있으면 트레이스 id 도 없다")
 
+# «상태» 로그 — score() 는 Langfuse 가 꺼져 있어도 로그 한 줄을 남긴다. 행내 컨테이너에는
+# 키가 없어 대시보드가 꺼져 있고, 그때 «에이전트가 무엇을 했나»를 보는 자리가 Grafana 다.
+import logging as _logging  # noqa: E402
+_state_records: list = []
+
+
+class _StateCapture(_logging.Handler):
+    def emit(self, record):
+        _state_records.append(record)
+
+
+_agent_log = _logging.getLogger("agent")
+_agent_log.addHandler(_StateCapture())
+_agent_log.setLevel(_logging.INFO)
+try:
+    _obs.score("evidence_count", 7)
+    _obs.score("compose_passed", True)
+    _obs.score("compose_passed", False, comment="수치 '1,485,000' 이 근거에 없음")
+    _obs.score("tool_outcome", "miss", comment="pitch · 질의 '수수료 반론'")
+    _obs.score("tool_outcome", "failed", comment="fact · 사유 FileNotFoundError")
+    _obs.score("action_outcome", "not_connected",
+               comment="send_memo · 받는 사람 1명 · WorkB 클라이언트가 주입되지 않았습니다 — 본문만 생성했습니다")
+    _obs.score("action_outcome", "sent", comment="send_memo · 받는 사람 1명 · 쪽지를 발송했습니다")
+    _obs.score("action_outcome", "blocked", comment="open_lms_screen · 더미")
+    _obs.score("turn_outcome", "answer")
+    _obs.score("turn_outcome", "tool_failed", comment="x")
+    with _obs.request_id("ab12cd34"):
+        _obs.score("judge_verdict", "n/a")
+    _obs.score("compose_passed", False, comment="가" * 300)
+    _msgs = [(r.levelno, r.getMessage()) for r in _state_records]
+    check(len(_msgs) == 12, "observability: score 는 꺼져 있어도 한 건마다 로그 한 줄", str(len(_msgs)))
+    check(_msgs[0] == (_logging.INFO, "[-] 상태 evidence_count=7"),
+          "observability: 상태 줄 형식 — [요청id] 상태 이름=값", str(_msgs[0]))
+    check(_msgs[1][1].endswith("compose_passed=true") and _msgs[1][0] == _logging.INFO,
+          "observability: bool 은 true/false 로 찍힌다", str(_msgs[1]))
+    check(_msgs[2] == (_logging.WARNING, "[-] 상태 compose_passed=false · 수치 '1,485,000' 이 근거에 없음"),
+          "observability: 검증 폐기는 WARNING · comment 가 뒤에 붙는다", str(_msgs[2]))
+    check(_msgs[3][0] == _logging.INFO and _msgs[4][0] == _logging.WARNING,
+          "observability: 도구 miss 는 INFO, failed 는 WARNING", str(_msgs[3:5]))
+    check(_msgs[5][0] == _logging.WARNING and "WorkB 클라이언트가 주입되지 않았습니다" in _msgs[5][1],
+          "observability: 연계 not_connected 는 WARNING 에 detail 이 실린다", str(_msgs[5]))
+    check(_msgs[6][0] == _logging.INFO and _msgs[7][0] == _logging.WARNING,
+          "observability: 연계 sent 는 INFO, blocked 는 WARNING", str(_msgs[6:8]))
+    check(_msgs[8][0] == _logging.INFO and _msgs[9][0] == _logging.WARNING,
+          "observability: turn_outcome answer 는 INFO, tool_failed 는 WARNING", str(_msgs[8:10]))
+    check(_msgs[10][1].startswith("[ab12cd34] 상태 judge_verdict=n/a"),
+          "observability: request_id 컨텍스트 안에서는 요청 id 가 붙는다", str(_msgs[10]))
+    check(_obs.current_request_id() is None, "observability: 컨텍스트를 나오면 요청 id 가 지워진다")
+    check(len(_msgs[11][1]) < 200 and _msgs[11][1].endswith("…"),
+          "observability: comment 는 STATE_COMMENT_MAX 에서 자른다", str(len(_msgs[11][1])))
+finally:
+    _agent_log.handlers.clear()
+
 _saved_env = {k: os.environ.get(k) for k in
               ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",
                "LANGFUSE_CAPTURE_CONTENT")}
