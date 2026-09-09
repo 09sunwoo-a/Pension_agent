@@ -11,6 +11,8 @@
     headers  x-openapi-token: Bearer <토큰> · x-generative-ai-client: <클라이언트 ID>
     body     {"agentId": <assetId>, "contents": [<JSON 문자열>], "llmConfig": {}, "isStream": true}
     응답     SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. 각 JSON 의 content 를 이어 붙인다.
+             "data:" 없이 JSON 줄만 오는 경우(에이전트의 CHUNK 줄 그대로)도 같은 방식으로 읽는다.
+             content 를 하나도 못 찾으면 받은 원문을 stderr 에 찍는다 — 형태가 다를 때 그것을 보고 고친다.
 
 `contents[0]` 은 에이전트의 `input_value` 로 그대로 전달된다고 본다. 그래서 그 안에는
 에이전트(`src/main.py`)가 요구하는 키를 넣는다 — `message`(질문) · `x_client_user`(호출 직원).
@@ -35,9 +37,15 @@ ASSET_ID = ""              # agentId
 X_CLIENT_USER = "test-user"  # 호출 직원 식별자 — 에이전트의 감사 기록·쿼터 버킷
 VERIFY_TLS = False           # 행내 게이트웨이는 사설 인증서라 참고 파이프라인도 끄고 있다
 TIMEOUT = 180                # 초. 한 턴이 LLM 호출 여러 번이라 길게 잡는다
+DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여줄 원문 줄 수
 # ──────────────────────────────────────────────────────────────────────────────
 
 PATH = "/openapi/agent-chat/v1/agent-messages"
+
+if not VERIFY_TLS:
+    # VERIFY_TLS=False 는 의도한 설정이라 매 호출 InsecureRequestWarning 을 찍지 않는다.
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def _headers() -> dict[str, str]:
@@ -78,17 +86,34 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
         # Content-Type 에 charset 이 없으면 requests 는 text/* 를 ISO-8859-1 로 풀어 한글이
         # 깨진다. 플랫폼 응답은 UTF-8 이므로 여기서 고정한다.
         resp.encoding = "utf-8"
+        raw: list[str] = []   # content 를 하나도 못 찾았을 때 «무엇이 왔는지» 보여주려고 모은다
+        found = False
         for line in resp.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data:"):
+            if not line:
                 continue
-            data = line[len("data:"):].strip()
+            raw.append(line)
+            # SSE("data: {...}") 든, 에이전트의 CHUNK 줄("{...}") 이 그대로 오든 같이 읽는다.
+            data = line[len("data:"):].strip() if line.startswith("data:") else line.strip()
             if data == "[DONE]":
                 break
-            if not data:
+            try:
+                obj = json.loads(data)
+            except json.JSONDecodeError:
                 continue
-            content = json.loads(data).get("content")
+            content = obj.get("content") if isinstance(obj, dict) else None
             if isinstance(content, str) and content:
+                found = True
                 yield content
+        if not found:
+            print("[content 를 찾지 못했습니다] 게이트웨이가 보낸 원문:", file=sys.stderr)
+            print(f"  status={resp.status_code} content-type={resp.headers.get('Content-Type')}",
+                  file=sys.stderr)
+            for line in raw[:DEBUG_LINES]:
+                print(f"  {line}", file=sys.stderr)
+            if len(raw) > DEBUG_LINES:
+                print(f"  … 외 {len(raw) - DEBUG_LINES}줄", file=sys.stderr)
+            if not raw:
+                print("  (본문이 비어 있음)", file=sys.stderr)
 
 
 def ask(question: str, x_client_user: str = X_CLIENT_USER) -> str:
