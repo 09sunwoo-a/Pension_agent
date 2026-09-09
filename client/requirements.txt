@@ -1,0 +1,2 @@
+# 호출 클라이언트(call_agent.py) 전용 — 에이전트 배포 이미지(src/requirements.txt)와 섞지 않는다.
+requests==2.32.3
