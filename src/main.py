@@ -55,6 +55,8 @@ answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — foll
 진행(progress)은 항상 흘린다 — 별도 type 이라 답변과 섞일 일이 없다.
 프론트 파서는 content 하나에 JSON 객체가 연달아 있어도 읽어야 한다(게이트웨이가 이벤트를 합쳐
 보내지 않는다는 확인이 아직 없다) — client/call_agent.py 의 `_events_in` 이 참조 구현이다.
+계약 문서는 client/README.md(프론트 독자용) — 이벤트 type 을 바꾸면 함께 고친다. tests/test_api.py
+가 여기서 내보내는 type 전부가 그 문서에 있는지 검사한다.
 
 ━━ 대화 맥락 — 멀티턴 ━━
 후속 질문("그럼 안 된다고 하면요?")·되묻기의 답·연계 확인("네")은 이전 턴의 `history`

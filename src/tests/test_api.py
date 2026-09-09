@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -414,6 +415,18 @@ try:
               "CHAT_SSE_FRAMING=0 이면 문서의 «줄마다 JSON» 형식이다", repr(r.text[:40]))
     finally:
         main.SSE_FRAMING = True
+
+    # ── 계약 문서와 코드가 갈리지 않는다 — client/README.md 는 프론트가 읽는 계약이다 ──
+    _readme = (_cfg.SRC_ROOT.parent / "client" / "README.md").read_text(encoding="utf-8")
+    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done"}
+    _in_code = set(re.findall(r'"type":\s*"(\w+)"', Path(main.__file__).read_text(encoding="utf-8")))
+    check(_in_code == _emitted,
+          "main.py 가 내보내는 이벤트 type 목록이 테스트가 아는 것과 같다(새 type 은 여기와 문서에 등록)",
+          str(sorted(_in_code ^ _emitted)))
+    _missing = [t for t in _emitted if f"`{t}`" not in _readme]
+    check(not _missing, "client/README.md 가 모든 이벤트 type 을 설명한다", str(_missing))
+    _keys = ["message", "x_client_user", "customer_id", "session_id"]
+    check(all(f"`{k}`" in _readme for k in _keys), "client/README.md 가 요청 키 4개를 설명한다")
 
     # ── 실패해도 스트림은 끊지 않는다 ────────────────────────
     def _boom(*a, **k):
