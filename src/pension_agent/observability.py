@@ -52,6 +52,7 @@ import base64
 import contextlib
 import contextvars
 import json
+import logging
 import os
 import queue
 import sys
@@ -157,6 +158,61 @@ _TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 #: 실행 구조(계획 루프 → 도구 호출 → 작성 → 재작성)를 그대로 닮은 트리가 된다.
 _PARENT_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "langfuse_parent_id", default=None)
+
+#: 지금 처리 중인 HTTP 요청의 짧은 id(main.py 가 붙인다). «상태» 로그 줄을 그 요청의 다른
+#: 줄(요청·진행·완료)과 묶는 열쇠다. 트레이스 id 와 달리 Langfuse 가 꺼져 있어도 있다.
+_REQUEST_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "observability_request_id", default=None)
+
+#: «상태» 로그 — 코드가 아는 사실 한 줄. 루트 로거로 흘러 stdout(→ Grafana)에 찍힌다.
+_state_log = logging.getLogger("agent")
+#: 상태 로그에 싣는 부가 설명(comment)의 최대 길이 — 로그는 상담 내용의 저장소가 아니다.
+STATE_COMMENT_MAX = 120
+
+
+@contextlib.contextmanager
+def request_id(rid: str | None) -> Iterator[None]:
+    """이 블록 안의 상태 로그에 요청 id 를 붙인다. main.py 가 ask() 를 부를 때 연다."""
+    token = _REQUEST_ID.set(rid)
+    try:
+        yield
+    finally:
+        _REQUEST_ID.reset(token)
+
+
+def current_request_id() -> str | None:
+    return _REQUEST_ID.get()
+
+
+#: 연계 실행(action_outcome)에서 «실행됐다»로 치는 status. 나머지는 직원이 승낙한 행위가
+#: 실행되지 않은 것이라 WARNING 이다(not_connected · failed · blocked).
+_ACTION_OK = frozenset({"sent", "stubbed", "ok"})
+
+
+def _state_level(name: str, value: Any) -> int:
+    """«직원이 받는 답이 실패·축소로 바뀐 사실»만 WARNING. 나머지는 INFO 로 기록한다."""
+    if name == "tool_outcome":
+        return logging.WARNING if value == "failed" else logging.INFO
+    if name == "action_outcome":
+        return logging.INFO if value in _ACTION_OK else logging.WARNING
+    if name == "compose_passed":
+        return logging.INFO if value else logging.WARNING
+    if name == "turn_outcome":
+        return logging.WARNING if value in ("tool_failed", "llm_down") else logging.INFO
+    return logging.INFO
+
+
+def _log_state(name: str, value: Any, comment: str | None) -> None:
+    """점수 한 건을 로그 한 줄로. Langfuse 가 꺼져 있어도 남는다 — 행내 Grafana 가 보는 자리다."""
+    try:
+        shown = ("true" if value else "false") if isinstance(value, bool) else str(value)
+        note = " ".join(str(comment).split()) if comment else ""
+        if len(note) > STATE_COMMENT_MAX:
+            note = note[:STATE_COMMENT_MAX] + "…"
+        _state_log.log(_state_level(name, value), "[%s] 상태 %s=%s%s",
+                       _REQUEST_ID.get() or "-", name, shown, f" · {note}" if note else "")
+    except Exception:                                     # noqa: BLE001 — 기록은 흐름을 막지 않는다
+        pass
 
 
 class Trace:
@@ -371,7 +427,13 @@ def score(name: str, value: bool | int | float | str, *, comment: str | None = N
     """열려 있는 트레이스에 점수 한 건을 붙인다. 트레이스가 없으면 아무것도 하지 않는다.
 
     bool 은 BOOLEAN(1/0), 숫자는 NUMERIC, 문자열은 CATEGORICAL 로 나간다.
+
+    **로그에는 항상 남는다**(`_log_state`) — 이 함수가 «코드가 아는 사실을 기록하는 단일
+    창구»다. 행내 컨테이너에는 Langfuse 키가 없어 대시보드는 꺼져 있고, 그때 같은 사실을
+    보는 자리가 Grafana 로그다. 같은 이름으로 나가므로 나중에 대시보드를 켜도 집계 이름이
+    갈리지 않는다.
     """
+    _log_state(name, value, comment)
     if not enabled():
         return
     try:
