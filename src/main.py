@@ -32,8 +32,29 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
                            이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
     session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
                            이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
-    stream_progress (선택) 답변을 기다리는 동안 «지금 무엇을 하고 있는지»를 함께 흘린다.
-                           기본 거짓 — 아래 참고
+
+━━ 출력 형식 — CHUNK 의 content 는 JSON 이벤트 하나다 ━━
+프론트가 답변·근거·진행·추천질문을 **다른 자리에** 그려야 하는데 플랫폼 스키마는 CHUNK 텍스트
+하나뿐이다. 그래서 content 에 JSON 객체 문자열을 싣고 `type` 으로 가른다(플랫폼 자체 채팅창은
+JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 순서:
+
+    {"type": "progress",  "text": "질문 내용을 파악하고 있어요"}            0개 이상 · 답변 전에
+    {"type": "answer",    "text": "<본문>", "intent": "situation"}        1개
+    {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용.
+                                                                          본문 끝의 제안 문장은 그대로 둔다
+    {"type": "clarify",   "question": "...", "options": ["..."]}           되묻기 턴에만 — 선택지 버튼용
+    {"type": "sources",   "items": [{"id","doc","title","url","score","page","role"}]}
+                                                                          항상 · 0건이면 [] (근거 없음을 화면이 말해야 한다)
+    {"type": "followups", "items": ["..."]}                                항상 · 없으면 []
+    {"type": "done"}                                                       항상 마지막
+    {"type": "error",     "text": "LLMError: ..."}                         실패 시 answer 대신 · 그 뒤 done
+
+answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — followups 로만 간다. 연계 제안
+문장(«… 연계해드릴까요? (네 / 아니오)»)은 답변의 마지막 문장으로 남긴다 — 직원이 「네」로 답하는
+대화 경로가 그 문장을 전제로 한다. 프론트는 action 이벤트로 버튼만 그린다.
+진행(progress)은 항상 흘린다 — 별도 type 이라 답변과 섞일 일이 없다.
+프론트 파서는 content 하나에 JSON 객체가 연달아 있어도 읽어야 한다(게이트웨이가 이벤트를 합쳐
+보내지 않는다는 확인이 아직 없다) — client/call_agent.py 의 `_events_in` 이 참조 구현이다.
 
 ━━ 대화 맥락 — 멀티턴 ━━
 후속 질문("그럼 안 된다고 하면요?")·되묻기의 답·연계 확인("네")은 이전 턴의 `history`
@@ -49,21 +70,16 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
 부른다 — 두 경로가 갈리면 «화면에서는 되는데 API 에서는 다르게 나오는» 자리가 생긴다.
 
 ━━ 무엇을 흘리는가 ━━
-플랫폼 스키마의 이벤트는 CHUNK 한 종류뿐이고, 소비자는 content 를 이어 붙여 답변으로
-삼는다. 그래서 무엇을 싣느냐가 곧 "답변에 무엇이 남느냐"다.
-
-  답변      항상. 줄 단위로 쪼개 흘린다.
+  답변      항상, 한 이벤트로. 토큰 단위로 흘리지 않는다 — compose 의 생성문은 검증 게이트
+            (verify_texts · relations · 원문 스팬)에서 **통째로 폐기**될 수 있어서, 토큰을
+            흘려보내면 직원이 이미 읽은 문장이 사라진다. "근거 밖 수치를 내보내지 않는다"는
+            보증이 화면에서 뒤집히는 것이다(progress.py 주석).
   출처      **항상.** 이 에이전트의 답은 «근거 안에서만» 나오고, 그 근거를 보여주는 것이
             존재 이유다(루트 CLAUDE.md §2). 출처 없는 답변은 이 시스템의 산출물이 아니다.
-            추천질문이 이미 같은 방식으로 답변 끝에 붙는다(graph.ask) — 같은 규약이다.
-  진행 표시 **요청이 켤 때만**(stream_progress). 이건 답변이 아니라 «기다리는 동안의
-            화면»이라, 이어 붙였을 때 답변의 일부가 되면 안 된다. 사람이 터미널에서 보는
-            테스트(test_local.sh)에서는 켜고, 플랫폼 UI 가 부르는 기본 호출에서는 끈다.
-
-답변 자체를 토큰 단위로 흘리지 않는 이유는 따로 있다 — compose 의 생성문은 검증 게이트
-(verify_texts · relations · 원문 스팬)에서 **통째로 폐기**될 수 있어서, 토큰을 흘려보내면
-직원이 이미 읽은 문장이 사라진다. "근거 밖 수치를 내보내지 않는다"는 보증이 화면에서
-뒤집히는 것이다(progress.py 주석).
+            0건이면 빈 목록을 보낸다 — «근거 없이 답했다»와 «근거를 못 실었다»가 화면에서
+            같아 보이면 안 된다(render.sources_block 주석과 같은 이유).
+  진행 표시 항상. 답변이 만들어지는 동안 «지금 무엇을 하고 있는지». 문구는 전부 코드가
+            정한다(progress.py).
 
 ━━ 로그 ━━
 행내 플랫폼은 컨테이너의 stdout 을 모아 Grafana 에 보여준다. uvicorn 은 제 로거만
@@ -71,8 +87,8 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
 pension_agent 의 `log.info` 는 **어디에도 나가지 않는다** — 행내에서 보인 것이 접속 로그
 (`POST /chat 200 OK`) 한 줄뿐이었던 이유다. 그래서 루트 로거를 stdout·INFO 로 잡고,
 요청마다 짧은 id 를 붙여 «받음 → 진행 단계 → 완료 / 실패 / 연결 끊김»을 찍는다.
-진행 단계 문구는 progress.emit 이 코드로 정한 것이라(LLM 문장이 아니다) 로그에 그대로
-싣는다. 화면에는 종전대로 stream_progress 를 켤 때만 흐른다.
+진행 단계 문구는 progress.emit 이 코드로 정한 것이라(LLM 문장이 아니다) 로그에도 그대로
+싣는다(화면에는 progress 이벤트로 간다 — «출력 형식»).
 """
 
 from __future__ import annotations
@@ -97,7 +113,6 @@ from pydantic import BaseModel, ConfigDict
 from pension_agent import config, llm
 from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
-from pension_agent.consult_agent import render
 from pension_agent.strategy_agent import briefing_store
 
 
@@ -153,6 +168,58 @@ _STREAM_KEYS = ("stream", "isStream", "is_stream")
 def _chunk(text: str) -> str:
     line = json.dumps({"event": "CHUNK", "content": text}, ensure_ascii=False)
     return f"data: {line}\n\n" if SSE_FRAMING else line + "\n"
+
+
+def _event_json(event: dict[str, Any]) -> str:
+    return json.dumps(event, ensure_ascii=False)
+
+
+def _event(event: dict[str, Any]) -> str:
+    """이벤트 하나를 CHUNK 로 — content 가 JSON 객체 문자열이다(머리말 «출력 형식»)."""
+    return _chunk(_event_json(event))
+
+
+def _strip_followups(answer: str) -> str:
+    """graph.ask 가 답변 끝에 붙인 추천질문 블록을 뗀다 — followups 이벤트로만 간다.
+
+    붙이는 쪽(graph.ask)은 건드리지 않는다. 상담이력·`history` 도구가 되읽는 텍스트는 그대로다.
+    """
+    head, sep, _ = answer.rpartition("\n\n" + consult_graph.FOLLOWUP_HEADER + "\n")
+    return head if sep else answer
+
+
+#: action 이벤트에 싣는 pending_action 의 키. html·recipients·params 같은 실행 인자는
+#: 화면이 알 필요가 없고(실행은 대화의 「네」가 한다), 쪽지 초안(title·text·to)은 미리보기용이다.
+_ACTION_KEYS = ("kind", "label", "prompt", "title", "text", "to")
+
+
+def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """ask() 결과를 이벤트 목록으로 — answer → (action | clarify) → sources → followups → done."""
+    events: list[dict[str, Any]] = [{
+        "type": "answer",
+        "text": _strip_followups(result.get("answer", "")),
+        "intent": result.get("intent"),
+    }]
+    action = result.get("pending_action")
+    if action:
+        ev = {k: action[k] for k in _ACTION_KEYS if action.get(k) is not None}
+        # act.py 와 같은 폴백 — 본문에 붙는 문장과 버튼 위 문장이 같아야 한다.
+        ev.setdefault("prompt", f"{action.get('label')}, 연계해드릴까요? (네 / 아니오)")
+        events.append({"type": "action", **ev})
+    clarify = result.get("clarify")
+    if clarify:
+        events.append({"type": "clarify", "question": clarify.get("question"),
+                       "options": list(clarify.get("options") or [])})
+    events.append({"type": "sources", "items": list(result.get("sources") or [])})
+    events.append({"type": "followups", "items": list(result.get("followups") or [])})
+    events.append({"type": "done"})
+    return events
+
+
+def _error_events(exc: BaseException) -> list[dict[str, Any]]:
+    # 실패도 이벤트로 나간다 — 클라이언트가 빈 응답을 받고 «답이 없다»로 오해하는 것보다,
+    # 무엇이 깨졌는지 화면에서 읽는 편이 진단이 빠르다(LLMError 주석과 같은 취지).
+    return [{"type": "error", "text": f"{type(exc).__name__}: {exc}"}, {"type": "done"}]
 
 
 def _wants_stream(request: Request, req: ChatRequest, payload: dict[str, Any]) -> bool:
@@ -222,7 +289,6 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
         "customer_id": payload.get("customer_id") or None,
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
-        "stream_progress": bool(payload.get("stream_progress")),
         "payload": payload,
     }
 
@@ -311,9 +377,9 @@ async def chat(req: ChatRequest, request: Request):
         history = context_store.get(x_client_user, session_id)
         history_from = "store" if history else "none"
     log.info(
-        "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s stream_progress=%s "
+        "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s "
         "맥락=%d턴(%s) · 질문(%d자) %r",
-        rid, x_client_user, args["customer_id"], session_id, args["stream_progress"],
+        rid, x_client_user, args["customer_id"], session_id,
         len(history or []), history_from, len(question),
         question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
     )
@@ -321,12 +387,21 @@ async def chat(req: ChatRequest, request: Request):
     def _remember(result: dict[str, Any]) -> None:
         # 다음 턴이 이어받을 맥락. ask() 가 이미 HISTORY_LIMIT 으로 잘라 돌려준다.
         context_store.put(x_client_user, session_id, result.get("history"))
+
+    def _log_done(result: dict[str, Any]) -> None:
+        log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건 · 추천질문 %d건%s%s",
+                 rid, time.monotonic() - started, result.get("intent"),
+                 len(result.get("answer", "")), len(result.get("sources") or []),
+                 len(result.get("followups") or []),
+                 " · 연계 제안" if result.get("pending_action") else "",
+                 " · 되묻기" if result.get("clarify") else "")
     # 게이트웨이가 무엇을 보내는지는 여기서만 보인다(머리말 «응답 프레이밍») — 모양만 찍는다.
     log.info("[%s] 요청 모양 · 응답=%s · %s", rid, "sse" if streaming else "json",
              _request_shape(request, req, args["payload"]))
 
     if not streaming:
-        # 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다. JSON 하나로 답한다.
+        # 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다. JSON 하나의 content 에 같은
+        # 이벤트들을 줄바꿈으로 이어 싣는다(진행은 뺀다 — 기다리는 동안 보여줄 수 없다).
         def run_once() -> dict[str, Any]:
             def on_progress(text: str) -> None:
                 log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
@@ -339,16 +414,13 @@ async def chat(req: ChatRequest, request: Request):
             result = await asyncio.to_thread(run_once)
         except Exception as exc:  # noqa: BLE001
             log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
-            return JSONResponse({"event": "CHUNK", "content": f"[오류] {type(exc).__name__}: {exc}"})
-        _remember(result)
-        answer = result.get("answer", "")
-        sources = result.get("sources") or []
-        log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건",
-                 rid, time.monotonic() - started, result.get("intent"), len(answer), len(sources))
-        return JSONResponse({
-            "event": "CHUNK",
-            "content": answer + "\n" + render.sources_block(sources) + "\n",
-        })
+            events = _error_events(exc)
+        else:
+            _remember(result)
+            _log_done(result)
+            events = _turn_events(result)
+        return JSONResponse({"event": "CHUNK",
+                             "content": "\n".join(_event_json(e) for e in events)})
 
     async def generate():
         loop = asyncio.get_running_loop()
@@ -356,14 +428,11 @@ async def chat(req: ChatRequest, request: Request):
         # 큐로 건네야 «기다리는 동안» 나간다 — 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
         lines: asyncio.Queue = asyncio.Queue()
         DONE = object()
-        show_progress = args["stream_progress"]
 
         def on_progress(text: str) -> None:
-            # 로그에는 항상 — Grafana 에서 «이 요청이 지금 어디까지 갔나»를 보는 자리다.
-            # 화면에는 요청이 켰을 때만(위 머리말).
+            # 로그에도 — Grafana 에서 «이 요청이 지금 어디까지 갔나»를 보는 자리다.
             log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
-            if show_progress:
-                loop.call_soon_threadsafe(lines.put_nowait, text)
+            loop.call_soon_threadsafe(lines.put_nowait, text)
 
         def run() -> dict[str, Any]:
             try:
@@ -387,30 +456,23 @@ async def chat(req: ChatRequest, request: Request):
                 item = await lines.get()
                 if item is DONE:
                     break
-                yield _chunk(f"⋯ {item}\n")
+                yield _event({"type": "progress", "text": item})
 
             try:
                 result = await task
             except Exception as exc:  # noqa: BLE001
-                # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다. 그래서 실패도 CHUNK 로
-                # 나간다 — 클라이언트가 빈 응답을 받고 «답이 없다»로 오해하는 것보다,
-                # 무엇이 깨졌는지 화면에서 읽는 편이 진단이 빠르다(LLMError 주석과 같은 취지).
+                # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다 — 실패도 이벤트로 나간다.
                 log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
-                yield _chunk(f"[오류] {type(exc).__name__}: {exc}")
+                for ev in _error_events(exc):
+                    yield _event(ev)
                 finished = True
                 return
 
             _remember(result)
-            answer = result.get("answer", "")
-            sources = result.get("sources") or []
-            for line in answer.splitlines(keepends=True):
-                yield _chunk(line)
-            # 출처는 답변의 일부다 — 근거를 못 보여주면 이 에이전트의 답이 아니다(위 주석).
-            yield _chunk("\n" + render.sources_block(sources) + "\n")
+            for ev in _turn_events(result):
+                yield _event(ev)
             finished = True
-            log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건",
-                     rid, time.monotonic() - started, result.get("intent"),
-                     len(answer), len(sources))
+            _log_done(result)
         finally:
             if not finished:
                 # 호출자가 다 받기 전에 끊었다(게이트웨이 타임아웃 등). 접속 로그에는

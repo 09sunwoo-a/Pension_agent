@@ -15,9 +15,12 @@
     POST {ENDPOINT_URL}/openapi/agent-chat/v1/agent-messages
     headers  x-openapi-token: Bearer <토큰> · x-generative-ai-client: <클라이언트 ID>
     body     {"agentId": <assetId>, "contents": [<JSON 문자열>], "llmConfig": {}, "isStream": bool}
-    응답     isStream=true : SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. content 를 이어 붙인다.
-                             "data:" 없이 JSON 줄만 오는 경우도 같은 방식으로 읽는다. **기본.**
-             isStream=false: JSON 하나, content 에 답변 전체.
+    응답     isStream=true : SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. **기본.**
+                             "data:" 없이 JSON 줄만 오는 경우도 같은 방식으로 읽는다.
+             isStream=false: JSON 하나.
+             어느 쪽이든 각 content 는 **에이전트 이벤트(JSON 객체)** 다 — src/main.py 머리말 «출력 형식»:
+               progress(진행 문구) → answer(본문·intent) → [action | clarify] → sources → followups → done
+             `_events_in` 이 content 에서 이벤트를 꺼내고 `_render` 가 type 별로 그린다. 프론트가 할 일과 같다.
              content 를 하나도 못 찾으면 받은 원문을 stderr 에 찍는다 — 형태가 다를 때 그것을 보고 고친다.
 
 `contents[0]` 은 에이전트의 `input_value` 로 그대로 전달된다(행내 실측 — 에이전트가 200 을 내고
@@ -57,7 +60,6 @@ DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여�
 # 를 거기에 맞췄으므로 기본은 스트림이다. 게이트웨이 status 가 SUCCESS 가 아니면 stderr 에
 # 찍는다 — 오류 문구 안에 답변처럼 보이는 글이 있어도 답변이 아니다.
 IS_STREAM = True             # True 면 SSE 로 받는다. False 면 응답 JSON 하나에서 content 를 읽는다
-STREAM_PROGRESS = False      # True 면 에이전트가 답변 전에 진행 줄(⋯ …)을 먼저 흘린다 — 스트림 진단용
 INNER_SHAPE = "agent"        # "agent": {"message", "x_client_user"} — src/main.py 규약
                              # "reference": 참고 파이프라인 형태 {"filtered_body": {...}, "file_objects": []}
                              #   게이트웨이가 contents[0] 를 그대로 넘기지 않고 이 형태를 기대할 때 확인용
@@ -98,8 +100,6 @@ def _inner(question: str, x_client_user: str, customer_id: str = "", session_id:
     inner = {"message": question, "x_client_user": x_client_user, "session_id": session_id}
     if customer_id:
         inner["customer_id"] = customer_id
-    if STREAM_PROGRESS:
-        inner["stream_progress"] = True
     return inner
 
 
@@ -115,18 +115,18 @@ def _payload(question: str, x_client_user: str, customer_id: str = "", session_i
 _DECODER = json.JSONDecoder()
 
 
-def _unwrap(text: str) -> str:
-    """게이트웨이 content 안에 에이전트의 CHUNK JSON 이 문자열로 들어 있으면 안쪽 content 만 이어 붙인다.
+def _events_in(text: str) -> Iterator[dict]:
+    """게이트웨이 content 문자열에서 에이전트 이벤트(JSON 객체, `type` 키)를 차례로 꺼낸다.
 
-    행내에서 실제로 온 형태 — 오류 문구 안에 우리 응답 원문이 통째로 실려 있었다:
-        fail, [Custom CLIENT] … [Errno Extra data] {"event": "CHUNK", "content": "…"}\\n{"event": …} : 92
-    게이트웨이가 정상 경로에서도 에이전트 줄을 그대로 실어 보낼 수 있으므로, `data:` 접두가
-    있든 없든 문자열 어디에 있든 CHUNK 객체를 찾아 그 content 만 남긴다. CHUNK 객체가 하나도
-    없으면 원문 그대로다(게이트웨이가 이미 풀어서 준 답변).
+    프론트가 그대로 따라 하면 되는 참조 구현이다(src/main.py 머리말 «출력 형식»).
+      · content 하나에 이벤트가 하나인 것이 정상이지만, 게이트웨이가 여러 개를 합쳐 보내지
+        않는다는 확인이 없어 객체를 **연달아** 읽는다(`raw_decode` 반복).
+      · 게이트웨이 오류 문구 안에 에이전트의 CHUNK 원문이 통째로 실려 오는 경우가 있었다
+        (행내 실측 — «[Errno Extra data] {"event": "CHUNK", "content": …}»). CHUNK 객체를
+        만나면 그 content 안을 다시 읽는다.
+      · 이벤트를 하나도 못 찾으면 원문을 {"type": "raw"} 로 넘긴다 — 무엇이 왔는지 보이게.
     """
-    if '"content"' not in text:
-        return text
-    pieces: list[str] = []
+    found = False
     i = 0
     while True:
         i = text.find("{", i)
@@ -137,10 +137,19 @@ def _unwrap(text: str) -> str:
         except json.JSONDecodeError:
             i += 1
             continue
-        if isinstance(obj, dict) and obj.get("event") == "CHUNK" and isinstance(obj.get("content"), str):
-            pieces.append(obj["content"])
         i = end
-    return "".join(pieces) if pieces else text
+        if not isinstance(obj, dict):
+            continue
+        if obj.get("event") == "CHUNK" and isinstance(obj.get("content"), str):
+            for inner in _events_in(obj["content"]):
+                if inner.get("type") != "raw":
+                    found = True
+                    yield inner
+        elif "type" in obj:
+            found = True
+            yield obj
+    if not found and text.strip():
+        yield {"type": "raw", "text": text}
 
 
 def _note_status(obj: dict) -> None:
@@ -164,9 +173,10 @@ def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
         print("  (본문이 비어 있음)", file=sys.stderr)
 
 
-def stream(question: str, x_client_user: str = X_CLIENT_USER, *,
-           customer_id: str = "", session_id: str = "default") -> Iterator[str]:
-    """답변 조각을 오는 순서대로 낸다. 200 이 아니면 응답 본문을 찍고 예외를 올린다."""
+def events(question: str, x_client_user: str = X_CLIENT_USER, *,
+           customer_id: str = "", session_id: str = "default") -> Iterator[dict]:
+    """한 턴의 이벤트를 오는 순서대로 낸다(progress… → answer → sources → followups → done).
+    200 이 아니면 응답 본문을 찍고 예외를 올린다."""
     with requests.post(
         ENDPOINT_URL.rstrip("/") + PATH,
         headers=_headers(),
@@ -192,7 +202,7 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER, *,
             except (json.JSONDecodeError, AttributeError):
                 content = None
             if isinstance(content, str) and content:
-                yield _unwrap(content)
+                yield from _events_in(content)
             else:
                 _dump_raw(resp, text.splitlines())
             return
@@ -216,21 +226,82 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER, *,
             content = obj.get("content")
             if isinstance(content, str) and content:
                 found = True
-                yield _unwrap(content)
+                yield from _events_in(content)
         if not found:
             _dump_raw(resp, raw)
 
 
 def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
-        customer_id: str = "", session_id: str = "default") -> str:
-    """한 턴을 돌려 전체 답변 문자열을 돌려준다."""
-    return "".join(stream(question, x_client_user, customer_id=customer_id, session_id=session_id))
+        customer_id: str = "", session_id: str = "default") -> dict:
+    """한 턴을 돌려 이벤트를 종류별로 모은 dict 를 돌려준다.
+
+        {"answer": str, "intent": str|None, "sources": [..], "followups": [..],
+         "action": dict|None, "clarify": dict|None, "error": str|None, "progress": [..]}
+    """
+    out: dict = {"answer": "", "intent": None, "sources": [], "followups": [],
+                 "action": None, "clarify": None, "error": None, "progress": [], "raw": []}
+    for ev in events(question, x_client_user, customer_id=customer_id, session_id=session_id):
+        t = ev.get("type")
+        if t == "progress":
+            out["progress"].append(ev.get("text", ""))
+        elif t == "answer":
+            out["answer"] += ev.get("text", "")
+            out["intent"] = ev.get("intent")
+        elif t == "sources":
+            out["sources"] = list(ev.get("items") or [])
+        elif t == "followups":
+            out["followups"] = list(ev.get("items") or [])
+        elif t == "action":
+            out["action"] = {k: v for k, v in ev.items() if k != "type"}
+        elif t == "clarify":
+            out["clarify"] = {k: v for k, v in ev.items() if k != "type"}
+        elif t == "error":
+            out["error"] = ev.get("text")
+        elif t == "raw":
+            out["raw"].append(ev.get("text", ""))
+    return out
+
+
+def _render(ev: dict) -> None:
+    """이벤트 하나를 터미널에 그린다 — 프론트가 type 별로 자리를 정하는 것과 같은 일이다."""
+    t = ev.get("type")
+    if t == "progress":
+        print(f"  ⋯ {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "answer":
+        print(ev.get("text", ""), flush=True)
+    elif t == "action":
+        # 본문 끝에 제안 문장이 이미 있다. 여기서는 «버튼 자리»만 알린다 — 다음 턴에 네/아니오.
+        print(f"  [연계 제안 · {ev.get('label')}] — 다음 질문에 «네» 또는 «아니오»로 답합니다", flush=True)
+    elif t == "clarify":
+        print("  [되묻기 선택지] " + " / ".join(ev.get("options") or []), flush=True)
+    elif t == "sources":
+        items = ev.get("items") or []
+        ground = [s for s in items if s.get("role", "근거") == "근거"]
+        caution = [s for s in items if s.get("role") == "주의"]
+        print("\n─ 근거" + ("" if ground else ": 없음"))
+        for s in ground:
+            score = f" · 관련도 {s['score']}" if s.get("score") is not None else ""
+            print(f"  · {s.get('doc') or ''} — {s.get('title') or ''} [{s.get('id')}{score}]")
+        if caution:
+            print("\n─ 이 고객 상담에서 지켜야 할 것 (근거 카드)")
+            for s in caution:
+                print(f"  · {s.get('doc') or ''} — {s.get('title') or ''} [{s.get('id')}]")
+    elif t == "followups":
+        if ev.get("items"):
+            print("\n── 이어서 물어보실 수 있어요")
+            for q in ev["items"]:
+                print(f"  · {q}")
+    elif t == "error":
+        print(f"[오류] {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "raw":
+        print(f"[이벤트가 아닌 응답] {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "done":
+        print()
 
 
 def _turn(question: str, session_id: str) -> None:
-    for piece in stream(question, customer_id=CUSTOMER_ID, session_id=session_id):
-        print(piece, end="", flush=True)
-    print()
+    for ev in events(question, customer_id=CUSTOMER_ID, session_id=session_id):
+        _render(ev)
 
 
 def main(argv: list[str]) -> int:

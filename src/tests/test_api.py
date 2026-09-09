@@ -6,9 +6,10 @@ genai-platform.md «API I/O 스키마 (고정)»). 이 스키마가 어긋나면
 
   · input_value 는 JSON «문자열» 이고, 그 안에 message·x_client_user 가 있어야 한다
   · 필수 키가 없으면 422 (500 이 아니다 — 호출자가 무엇이 빠졌는지 알아야 한다)
-  · 응답은 줄마다 {"event": "CHUNK", "content": ...} 이고, 이어 붙이면 답변 본문 +
-    출처가 된다. 출처는 «항상» 실린다 — 근거를 못 보여주면 이 에이전트의 답이 아니다
-  · 진행 표시는 stream_progress 를 켤 때만, 그리고 답변보다 **먼저** 흐른다
+  · 응답은 SSE 프레임의 CHUNK 이고, 각 content 는 JSON 이벤트 하나다(main.py «출력 형식»):
+    progress… → answer → [action | clarify] → sources → followups → done. 출처는 «항상»
+    실린다(0건이면 빈 목록) — 근거를 못 보여주면 이 에이전트의 답이 아니다
+  · 진행 표시는 항상, 답변보다 **먼저** 흐른다
   · x_client_user 가 에이전트(graph.ask)까지 실제로 도달한다 — 거기서 이 턴의 모든
     LLM 호출 주체가 된다(그 배선 자체는 test_consult_agent 가 본다)
 
@@ -33,7 +34,6 @@ from fastapi.testclient import TestClient
 import main
 from pension_agent import config as _cfg
 from pension_agent import llm
-from pension_agent.consult_agent import render
 from pension_agent.strategy_agent import briefing_store
 
 _results: list[tuple[bool, str, str]] = []
@@ -47,7 +47,25 @@ def _body(**payload) -> dict:
     return {"input_value": json.dumps(payload, ensure_ascii=False), "message_hists": None}
 
 
-def _chunks(resp, sse: bool = True) -> list[str]:
+def _events_in(text: str) -> list[dict]:
+    """content 문자열 안의 JSON 이벤트들 — 프론트 파서와 같은 규칙(연달아 있어도 읽는다)."""
+    dec = json.JSONDecoder()
+    out, i = [], 0
+    while True:
+        i = text.find("{", i)
+        if i < 0:
+            return out
+        try:
+            obj, i = dec.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+
+
+def _events(resp, sse: bool = True) -> list[dict]:
+    """스트림 응답 → 이벤트 목록. CHUNK 하나에 이벤트 하나여야 한다."""
     out = []
     for line in resp.text.splitlines():
         if not line.strip():
@@ -58,19 +76,30 @@ def _chunks(resp, sse: bool = True) -> list[str]:
             line = line[len("data:"):]
         d = json.loads(line)
         check(d.get("event") == "CHUNK", "응답 이벤트는 CHUNK 뿐이다", str(d.get("event")))
-        out.append(d["content"])
+        evs = _events_in(d["content"])
+        check(len(evs) == 1 and "type" in evs[0], "CHUNK 하나에 JSON 이벤트 하나다", d["content"][:60])
+        out.extend(evs)
     return out
+
+
+def _types(events: list[dict]) -> list[str]:
+    return [e.get("type") for e in events]
 
 
 _seen: dict = {}
 ANSWER = "첫 줄입니다.\n둘째 줄에는 «인용»과 숫자 12.4% 가 있습니다.\n셋째 줄."
 SOURCES = [
     {"id": "kb_fact_001", "doc": "연금사업부 업무가이드", "title": "IRP 수수료 체계",
-     "score": 0.82},
+     "url": None, "score": 0.82, "page": None, "role": "근거"},
     {"id": "kb_pitch_009", "doc": "스타런 교육자료", "title": "수수료 반론 대응",
-     "score": None, "role": "주의"},
+     "url": None, "score": None, "page": None, "role": "주의"},
 ]
 PROGRESS = ["질문을 이해하고 있어요", "제도·상품 수치를 찾고 있어요", "답변을 쓰고 있어요"]
+FOLLOWUPS = ["이 고객한테 안내할 만한 세미나나 이벤트 있어?", "이 고객 지금 현황은 어때?"]
+ACTION = {"kind": "lms", "label": "75-08-110 발송 화면 열기",
+          "prompt": "«금리 변화기» 안내 문구로 75-08-110 발송 화면 열기, 연계해드릴까요? (네 / 아니오)",
+          "params": {"customer_id": "c"}, "html": "<b>내부</b>"}
+CLARIFY = {"question": "어느 계좌 기준으로 안내할까요?", "options": ["개인형IRP", "연금저축"]}
 
 
 def _fake_ask(question, history=None, **kw):
@@ -80,9 +109,19 @@ def _fake_ask(question, history=None, **kw):
     if cb:
         for line in PROGRESS:
             cb(line)
-    # 실물처럼 이번 턴을 덧붙인 history 를 돌려준다 — 진입점이 그것을 다음 턴에 되찾는지 본다.
-    return {"answer": ANSWER, "sources": SOURCES, "followups": [],
-            "history": [*(history or []), {"question": question, "tools": []}]}
+    # 실물처럼: 추천질문은 answer 끝에 블록으로도 붙고 followups 로도 온다(graph.ask).
+    out = {"answer": ANSWER + "\n\n" + main.consult_graph.FOLLOWUP_HEADER + "\n"
+           + "\n".join(f"· {q}" for q in FOLLOWUPS),
+           "sources": SOURCES, "followups": FOLLOWUPS, "intent": "situation",
+           "pending_action": None, "clarify": None,
+           "history": [*(history or []), {"question": question, "tools": []}]}
+    if question == "연계":
+        out.update(answer=ANSWER + "\n\n— " + ACTION["prompt"], followups=[], pending_action=ACTION)
+    if question == "되묻기":
+        out.update(answer=CLARIFY["question"] + "\n\n· 개인형IRP\n· 연금저축", followups=[], clarify=CLARIFY)
+    if question == "근거없음":
+        out.update(sources=[])
+    return out
 
 
 _saved_ask = main.consult_graph.ask
@@ -194,15 +233,24 @@ try:
           "Content-Type 은 text/event-stream", r.headers.get("content-type", ""))
     check(r.text.startswith("data: {") and "\n\n" in r.text,
           "SSE 프레임 — data: 로 시작하고 이벤트는 빈 줄로 끝난다", repr(r.text[:60]))
-    body = "".join(_chunks(r))
-    check(body.startswith(ANSWER),
-          "CHUNK 를 이어 붙이면 답변 원문으로 시작한다(앞에 아무것도 안 붙는다)",
-          repr(body[:80]))
-    # 진행 콜백은 **항상** 넘긴다 — 로그(Grafana)가 «지금 어디까지 갔나»를 보는 자리다.
-    # 화면에 흐르는 것은 stream_progress 를 켤 때만이다(아래).
-    check(_seen.get("on_progress") is not None,
-          "진행 콜백은 로그용으로 항상 넘긴다", str(_seen.get("on_progress")))
-    check("⋯" not in body, "진행 문구가 답변에 섞이지 않는다", repr(body[:80]))
+    evs = _events(r)
+    check(_types(evs) == ["progress"] * 3 + ["answer", "sources", "followups", "done"],
+          "이벤트 순서 — progress… → answer → sources → followups → done", str(_types(evs)))
+    check([e["text"] for e in evs if e["type"] == "progress"] == PROGRESS,
+          "진행 문구가 그대로, 답변보다 먼저 흐른다", str(evs[:3]))
+    answer = next(e for e in evs if e["type"] == "answer")
+    check(answer["text"] == ANSWER and answer.get("intent") == "situation",
+          "answer.text 는 본문만이다 — 추천질문 블록은 떼어낸다 · intent 가 실린다", repr(answer["text"][-60:]))
+    check(main.consult_graph.FOLLOWUP_HEADER not in answer["text"],
+          "answer.text 에 추천질문 헤더가 남지 않는다")
+    check(next(e for e in evs if e["type"] == "followups")["items"] == FOLLOWUPS,
+          "추천질문은 followups.items 로 따로 간다", str(evs[-2]))
+    src = next(e for e in evs if e["type"] == "sources")
+    check(src["items"] == SOURCES,
+          "근거는 구조 그대로(id·doc·title·url·score·page·role) 간다", str(src)[:120])
+    check([s["role"] for s in src["items"]] == ["근거", "주의"],
+          "role 로 «근거»와 «주의(지켜야 할 것)»를 가를 수 있다")
+    check(_seen.get("on_progress") is not None, "진행 콜백을 넘긴다", str(_seen.get("on_progress")))
     # 행내에서 보인 로그가 접속 로그 한 줄뿐이었다 — 루트 로거에 핸들러가 없어서 log.info
     # 가 어디에도 안 나갔다. 요청 한 건이 «받음 → 진행 → 완료»로 묶여 찍히는지 본다.
     _logs = [r for r in _captured if r.name == "main"]
@@ -213,24 +261,13 @@ try:
     check(any("요청 ·" in m and "x_client_user=emp-0417" in m and "'IRP 수수료 질문'" in m
               for m in _mine), "요청 로그에 호출자·질문 미리보기가 실린다", str(_mine[:1]))
     check([m for m in _mine if "진행" in m and PROGRESS[0] in m],
-          "진행 단계가 화면에 안 흘러도 로그에는 찍힌다", str(_mine[1:2]))
-    check(any("완료" in m and "출처 2건" in m for m in _mine),
-          "완료 로그에 소요시간·답변 길이·출처 건수가 실린다", str(_mine[-1:]))
+          "진행 단계가 로그에도 찍힌다", str(_mine[1:2]))
+    check(any("완료" in m and "출처 2건" in m and "추천질문 2건" in m for m in _mine),
+          "완료 로그에 소요시간·답변 길이·출처·추천질문 건수가 실린다", str(_mine[-1:]))
     check(all(r.levelno == logging.INFO for r in _logs if _rid and r.getMessage().startswith(f"[{_rid}]")),
           "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
     check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",
           str(logging.getLogger().handlers))
-
-    # 출처는 «항상» 실린다 — 근거를 못 보여주면 이 에이전트의 답이 아니다.
-    # 문서명이 먼저 읽히고, 카드 id 는 역추적용으로 뒤에 남고, 관련도는 있을 때만 찍힌다.
-    check(render.GROUND_HEADER in body and "연금사업부 업무가이드" in body
-          and "[kb_fact_001 · 관련도 0.82]" in body,
-          "출처(근거)가 답변 뒤에 실린다", repr(body[-200:]))
-    check(render.CAUTION_HEADER in body and "[kb_pitch_009]" in body,
-          "«지켜야 할 것»은 근거와 갈라서 실리고, 관련도 없는 재료엔 관련도를 안 찍는다",
-          repr(body[-200:]))
-    check(body.endswith(render.sources_block(SOURCES) + "\n"),
-          "출처 블록은 CLI 와 같은 글자다(render 한 곳에서 나온다)", repr(body[-80:]))
     check(_seen.get("x_client_user") == "emp-0417",
           "x_client_user 가 에이전트까지 전달된다", str(_seen.get("x_client_user")))
     check(_seen.get("session_id") == "default" and _seen.get("customer_id") is None,
@@ -239,54 +276,63 @@ try:
     r = client.post("/chat", json=_body(
         message="이 고객 브리핑 요약해줘", x_client_user="emp-0417",
         customer_id="154821-4938201", session_id="S-1"))
-    _chunks(r)
+    _events(r)
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
 
-    # 진행 표시 — 켜면 답변 **앞**에 흘러야 한다. 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
-    r = client.post("/chat", json=_body(
-        message="q", x_client_user="emp-1", stream_progress=True))
-    streamed = _chunks(r)
-    marks = [i for i, c in enumerate(streamed) if c.startswith("⋯")]
-    first_answer = next(i for i, c in enumerate(streamed) if c.startswith("첫 줄"))
-    check([c.strip() for c in streamed if c.startswith("⋯")]
-          == [f"⋯ {p}" for p in PROGRESS],
-          "stream_progress 를 켜면 진행 표시가 그대로 흐른다", str(streamed[:4]))
-    check(marks and max(marks) < first_answer,
-          "진행 표시는 답변보다 먼저 나간다", f"progress={marks} answer={first_answer}")
-    check("".join(streamed[first_answer:]).startswith(ANSWER),
-          "진행 표시를 켜도 답변 본문은 그대로다", repr("".join(streamed[first_answer:])[:60]))
+    # 연계 제안 — 본문 끝 문장은 남고, action 이벤트가 버튼용으로 따로 간다(실행 인자는 안 실린다).
+    evs = _events(client.post("/chat", json=_body(message="연계", x_client_user="emp-1")))
+    check(_types(evs)[3:] == ["answer", "action", "sources", "followups", "done"],
+          "연계 제안 턴은 answer 다음에 action 이 온다", str(_types(evs)))
+    action = next(e for e in evs if e["type"] == "action")
+    check(action.get("label") == ACTION["label"] and action.get("prompt") == ACTION["prompt"]
+          and action.get("kind") == "lms" and "params" not in action and "html" not in action,
+          "action 에는 kind·label·prompt 만(실행 인자·html 은 뺀다)", str(action))
+    check(next(e for e in evs if e["type"] == "answer")["text"].endswith("— " + ACTION["prompt"]),
+          "연계 제안 문장은 answer.text 의 마지막 문장으로 남는다")
+    check(next(e for e in evs if e["type"] == "followups")["items"] == [],
+          "연계 제안 턴에는 추천질문이 없다(빈 목록으로는 온다)")
+
+    # 되묻기 — 선택지가 clarify 이벤트로 간다.
+    evs = _events(client.post("/chat", json=_body(message="되묻기", x_client_user="emp-1")))
+    clar = next((e for e in evs if e["type"] == "clarify"), None)
+    check(clar == {"type": "clarify", **CLARIFY}, "되묻기 턴은 clarify 에 질문·선택지가 실린다", str(clar))
+
+    # 근거 0건 — 이벤트는 그래도 온다(«근거 없음»을 화면이 말해야 한다).
+    evs = _events(client.post("/chat", json=_body(message="근거없음", x_client_user="emp-1")))
+    check(next(e for e in evs if e["type"] == "sources")["items"] == [],
+          "근거가 0건이어도 sources 이벤트가 빈 목록으로 온다", str(_types(evs)))
 
     # ── 대화 맥락 — 게이트웨이 경로는 history 를 돌려줄 자리가 없어 진입점이 세션별로 맡아 둔다 ──
     from pension_agent.consult_agent import context_store
     context_store.clear()
     r = client.post("/chat", json=_body(message="첫 질문", x_client_user="emp-7", session_id="S-7"))
-    _chunks(r)
+    _events(r)
     check(_seen.get("history") is None, "세션의 첫 턴은 맥락 없이 간다", str(_seen.get("history")))
     r = client.post("/chat", json=_body(message="그럼 안 된다고 하면요?", x_client_user="emp-7", session_id="S-7"))
-    _chunks(r)
+    _events(r)
     check(_seen.get("history") == [{"question": "첫 질문", "tools": []}],
           "같은 (직원, 세션)의 다음 턴은 이전 턴의 history 를 이어받는다", str(_seen.get("history")))
     check(any("맥락=1턴(store)" in rec.getMessage() for rec in _captured),
           "요청 로그에 맥락이 몇 턴이고 어디서 왔는지 찍힌다",
           str([m for m in (rec.getMessage() for rec in _captured) if "맥락=" in m][-1:]))
     r = client.post("/chat", json=_body(message="다른 세션", x_client_user="emp-7", session_id="S-8"))
-    _chunks(r)
+    _events(r)
     check(_seen.get("history") is None, "세션이 다르면 맥락이 섞이지 않는다", str(_seen.get("history")))
     r = client.post("/chat", json=_body(message="다른 직원", x_client_user="emp-8", session_id="S-7"))
-    _chunks(r)
+    _events(r)
     check(_seen.get("history") is None, "직원이 다르면 같은 session_id 라도 맥락이 섞이지 않는다",
           str(_seen.get("history")))
     # 호출자가 Turn 형식을 실어 보내면 저장본보다 우선한다 — 프론트가 맥락을 들고 다니게 될 때 자리.
     r = client.post("/chat", json={**_body(message="셋째", x_client_user="emp-7", session_id="S-7"),
                                    "message_hists": [{"question": "프론트가 든 턴"}]})
-    _chunks(r)
+    _events(r)
     check(_seen.get("history") == [{"question": "프론트가 든 턴"}],
           "message_hists 가 Turn 형식이면 저장본보다 우선한다", str(_seen.get("history")))
     # Turn 이 아닌 형식(OpenAI 식)은 버리고 저장본을 쓴다 — 넘기면 format_history 가 500 을 낸다.
     r = client.post("/chat", json={**_body(message="넷째", x_client_user="emp-7", session_id="S-7"),
                                    "message_hists": [{"role": "user", "content": "x"}]})
-    _chunks(r)
+    _events(r)
     check(r.status_code == 200 and _seen.get("history") and
           all("question" in h for h in _seen["history"]),
           "message_hists 가 Turn 형식이 아니면 버리고 저장본을 쓴다(500 이 아니다)", str(_seen.get("history")))
@@ -321,18 +367,22 @@ try:
         context_store.clear()
 
     # ── 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다(행내 실측). JSON 하나로 답한다 ──
-    expected_full = ANSWER + "\n" + render.sources_block(SOURCES) + "\n"
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"),
                     headers={"Accept": "application/json"})
     check(r.status_code == 200 and r.headers["content-type"].startswith("application/json"),
           "Accept: application/json 이면 JSON 하나로 답한다", r.headers.get("content-type", ""))
-    check(r.json() == {"event": "CHUNK", "content": expected_full},
-          "비스트림 JSON 은 답변+출처 전체를 content 에 담은 CHUNK 하나다", r.text[:80])
+    body = r.json()
+    ns_events = _events_in(body.get("content", ""))
+    check(body.get("event") == "CHUNK" and _types(ns_events) == ["answer", "sources", "followups", "done"],
+          "비스트림 JSON 의 content 에 같은 이벤트들이 연달아 실린다(진행은 뺀다)", str(_types(ns_events)))
+    check(ns_events[0]["text"] == ANSWER and ns_events[1]["items"] == SOURCES,
+          "비스트림 이벤트의 내용은 스트림과 같다", str(ns_events[0])[:80])
     check(_seen.get("on_progress") is not None,
           "비스트림에서도 진행 콜백(로그용)은 넘긴다", str(_seen.get("on_progress")))
 
     r = client.post("/chat", json={**_body(message="q", x_client_user="emp-1"), "isStream": False})
-    check(r.headers["content-type"].startswith("application/json") and r.json()["content"] == expected_full,
+    check(r.headers["content-type"].startswith("application/json")
+          and _types(_events_in(r.json()["content"]))[0] == "answer",
           "본문 최상위 isStream=false 도 비스트림 신호다", r.headers.get("content-type", ""))
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1", stream=False))
     check(r.headers["content-type"].startswith("application/json"),
@@ -360,7 +410,7 @@ try:
     main.SSE_FRAMING = False
     try:
         r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
-        check(r.text.startswith("{") and "".join(_chunks(r, sse=False)).startswith(ANSWER),
+        check(r.text.startswith("{") and _types(_events(r, sse=False))[-1] == "done",
               "CHAT_SSE_FRAMING=0 이면 문서의 «줄마다 JSON» 형식이다", repr(r.text[:40]))
     finally:
         main.SSE_FRAMING = True
@@ -371,13 +421,14 @@ try:
 
     main.consult_graph.ask = _boom
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
-    text = "".join(_chunks(r))
-    check(r.status_code == 200 and "LLMError" in text and "LLM 미설정" in text,
-          "에이전트가 죽어도 무엇이 깨졌는지 CHUNK 로 알려준다(빈 응답 금지)", text[:100])
+    evs = _events(r)
+    check(r.status_code == 200 and _types(evs) == ["error", "done"]
+          and "LLMError" in evs[0]["text"] and "LLM 미설정" in evs[0]["text"],
+          "에이전트가 죽어도 error 이벤트로 알려주고 done 으로 닫는다(빈 응답 금지)", str(evs))
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"),
                     headers={"Accept": "application/json"})
-    check(r.status_code == 200 and "LLMError" in r.json().get("content", ""),
-          "비스트림에서도 실패는 200 + content 로 알려준다", r.text[:100])
+    check(r.status_code == 200 and _types(_events_in(r.json().get("content", ""))) == ["error", "done"],
+          "비스트림에서도 실패는 200 + error·done 이벤트다", r.text[:100])
     check(any(rec.levelno == logging.ERROR and "ask() 실패" in rec.getMessage()
               and rec.exc_info for rec in _captured),
           "실패는 스택과 함께 ERROR 로 남고, «연결 끊김»으로 오인되지 않는다",
