@@ -100,6 +100,37 @@ def _payload(question: str, x_client_user: str) -> dict:
     }
 
 
+_DECODER = json.JSONDecoder()
+
+
+def _unwrap(text: str) -> str:
+    """게이트웨이 content 안에 에이전트의 CHUNK JSON 이 문자열로 들어 있으면 안쪽 content 만 이어 붙인다.
+
+    행내에서 실제로 온 형태 — 오류 문구 안에 우리 응답 원문이 통째로 실려 있었다:
+        fail, [Custom CLIENT] … [Errno Extra data] {"event": "CHUNK", "content": "…"}\\n{"event": …} : 92
+    게이트웨이가 정상 경로에서도 에이전트 줄을 그대로 실어 보낼 수 있으므로, `data:` 접두가
+    있든 없든 문자열 어디에 있든 CHUNK 객체를 찾아 그 content 만 남긴다. CHUNK 객체가 하나도
+    없으면 원문 그대로다(게이트웨이가 이미 풀어서 준 답변).
+    """
+    if '"content"' not in text:
+        return text
+    pieces: list[str] = []
+    i = 0
+    while True:
+        i = text.find("{", i)
+        if i < 0:
+            break
+        try:
+            obj, end = _DECODER.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        if isinstance(obj, dict) and obj.get("event") == "CHUNK" and isinstance(obj.get("content"), str):
+            pieces.append(obj["content"])
+        i = end
+    return "".join(pieces) if pieces else text
+
+
 def _note_status(obj: dict) -> None:
     """게이트웨이 이벤트의 status 가 SUCCESS 가 아니면 알린다 — content 는 그때 오류 문구다."""
     status = obj.get("status")
@@ -148,7 +179,7 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
             except (json.JSONDecodeError, AttributeError):
                 content = None
             if isinstance(content, str) and content:
-                yield content
+                yield _unwrap(content)
             else:
                 _dump_raw(resp, text.splitlines())
             return
@@ -172,7 +203,7 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
             content = obj.get("content")
             if isinstance(content, str) and content:
                 found = True
-                yield content
+                yield _unwrap(content)
         if not found:
             _dump_raw(resp, raw)
 
