@@ -9,9 +9,10 @@
 
     POST {ENDPOINT_URL}/openapi/agent-chat/v1/agent-messages
     headers  x-openapi-token: Bearer <토큰> · x-generative-ai-client: <클라이언트 ID>
-    body     {"agentId": <assetId>, "contents": [<JSON 문자열>], "llmConfig": {}, "isStream": true}
-    응답     SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. 각 JSON 의 content 를 이어 붙인다.
-             "data:" 없이 JSON 줄만 오는 경우(에이전트의 CHUNK 줄 그대로)도 같은 방식으로 읽는다.
+    body     {"agentId": <assetId>, "contents": [<JSON 문자열>], "llmConfig": {}, "isStream": bool}
+    응답     isStream=false: JSON 하나, content 에 답변 전체. **지금 기본** — 행내에서 확인된 경로.
+             isStream=true : SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. content 를 이어 붙인다.
+                             "data:" 없이 JSON 줄만 오는 경우도 같은 방식으로 읽는다.
              content 를 하나도 못 찾으면 받은 원문을 stderr 에 찍는다 — 형태가 다를 때 그것을 보고 고친다.
 
 `contents[0]` 은 에이전트의 `input_value` 로 그대로 전달된다고 본다. 그래서 그 안에는
@@ -39,8 +40,14 @@ VERIFY_TLS = False           # 행내 게이트웨이는 사설 인증서라 참
 TIMEOUT = 180                # 초. 한 턴이 LLM 호출 여러 번이라 길게 잡는다
 DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여줄 원문 줄 수
 
-# ── 진단 스위치 — 답변이 비어서 올 때 하나씩 바꿔 본다 ──
-IS_STREAM = True             # False 면 응답 JSON 하나를 받아 content 를 읽고, 없으면 전체를 찍는다
+# ── 호출 방식 ──
+# 행내 확인 결과(2026-09-09): isStream=False 는 답이 오고, isStream=True 는 content 가 빈
+# 이벤트 하나만 온다(에이전트 접속 로그는 둘 다 200). 게이트웨이의 스트림 중계 경로에서
+# 내용이 사라지는 것이라 기본을 비스트림으로 둔다. 스트림을 다시 볼 때는 아래 두 줄을 켜고
+# 에이전트 로그(Grafana)에서 «연결이 끊겼다» 경고가 찍히는지 본다 — 찍히면 게이트웨이가
+# 답변을 기다리지 않고 끊는 것이고, STREAM_PROGRESS 로 진행 줄을 먼저 흘리면 달라지는지 본다.
+IS_STREAM = False            # True 면 SSE 로 받는다. False 면 응답 JSON 하나에서 content 를 읽는다
+STREAM_PROGRESS = False      # True 면 에이전트가 답변 전에 진행 줄(⋯ …)을 먼저 흘린다 — 스트림 진단용
 INNER_SHAPE = "agent"        # "agent": {"message", "x_client_user"} — src/main.py 규약
                              # "reference": 참고 파이프라인 형태 {"filtered_body": {...}, "file_objects": []}
                              #   게이트웨이가 contents[0] 를 그대로 넘기지 않고 이 형태를 기대할 때 확인용
@@ -78,7 +85,10 @@ def _inner(question: str, x_client_user: str) -> dict:
             },
             "file_objects": [],
         }
-    return {"message": question, "x_client_user": x_client_user}
+    inner = {"message": question, "x_client_user": x_client_user}
+    if STREAM_PROGRESS:
+        inner["stream_progress"] = True
+    return inner
 
 
 def _payload(question: str, x_client_user: str) -> dict:

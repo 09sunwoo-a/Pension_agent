@@ -20,6 +20,7 @@ LLM 은 부르지 않는다 — graph.ask 를 갈아끼워 위 계약만 본다.
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import tempfile
 from pathlib import Path
@@ -81,6 +82,17 @@ def _fake_ask(question, history=None, **kw):
 _saved_ask = main.consult_graph.ask
 main.consult_graph.ask = _fake_ask
 client = TestClient(main.app)
+
+# 로그 캡처 — 루트에 핸들러를 하나 더 단다(main 이 잡아 둔 stdout 핸들러는 그대로).
+_captured: list[logging.LogRecord] = []
+
+
+class _Capture(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        _captured.append(record)
+
+
+logging.getLogger().addHandler(_Capture())
 
 try:
     # ── /health ──────────────────────────────────────────────
@@ -154,6 +166,10 @@ try:
     r = client.post("/chat", json=_body(message="안녕"))
     check(r.status_code == 422 and "x_client_user" in r.text,
           "x_client_user 가 없으면 422", f"{r.status_code} {r.text[:80]}")
+    check(any(rec.levelno == logging.WARNING and "422" in rec.getMessage()
+              and "x_client_user" in rec.getMessage() for rec in _captured),
+          "422 는 무엇이 빠졌는지 WARNING 으로 남긴다(접속 로그엔 상태코드뿐이다)",
+          str([rec.getMessage() for rec in _captured][-1:]))
 
     r = client.post("/chat", json=_body(x_client_user="emp-1"))
     check(r.status_code == 422 and "message" in r.text,
@@ -174,10 +190,28 @@ try:
     check(body.startswith(ANSWER),
           "CHUNK 를 이어 붙이면 답변 원문으로 시작한다(앞에 아무것도 안 붙는다)",
           repr(body[:80]))
-    check(_seen.get("on_progress") is None,
-          "stream_progress 를 안 켜면 진행 콜백을 아예 넘기지 않는다",
-          str(_seen.get("on_progress")))
+    # 진행 콜백은 **항상** 넘긴다 — 로그(Grafana)가 «지금 어디까지 갔나»를 보는 자리다.
+    # 화면에 흐르는 것은 stream_progress 를 켤 때만이다(아래).
+    check(_seen.get("on_progress") is not None,
+          "진행 콜백은 로그용으로 항상 넘긴다", str(_seen.get("on_progress")))
     check("⋯" not in body, "진행 문구가 답변에 섞이지 않는다", repr(body[:80]))
+    # 행내에서 보인 로그가 접속 로그 한 줄뿐이었다 — 루트 로거에 핸들러가 없어서 log.info
+    # 가 어디에도 안 나갔다. 요청 한 건이 «받음 → 진행 → 완료»로 묶여 찍히는지 본다.
+    _logs = [r for r in _captured if r.name == "main"]
+    _rid = next((m.split("]")[0][1:] for m in (r.getMessage() for r in _logs)
+                 if m.startswith("[") and "요청 ·" in m), None)
+    check(_rid and len(_rid) == 8, "요청 로그에 8자리 요청 id 가 붙는다", str(_rid))
+    _mine = [r.getMessage() for r in _logs if _rid and r.getMessage().startswith(f"[{_rid}]")]
+    check(any("요청 ·" in m and "x_client_user=emp-0417" in m and "'IRP 수수료 질문'" in m
+              for m in _mine), "요청 로그에 호출자·질문 미리보기가 실린다", str(_mine[:1]))
+    check([m for m in _mine if "진행" in m and PROGRESS[0] in m],
+          "진행 단계가 화면에 안 흘러도 로그에는 찍힌다", str(_mine[1:2]))
+    check(any("완료" in m and "출처 2건" in m for m in _mine),
+          "완료 로그에 소요시간·답변 길이·출처 건수가 실린다", str(_mine[-1:]))
+    check(all(r.levelno == logging.INFO for r in _logs if _rid and r.getMessage().startswith(f"[{_rid}]")),
+          "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
+    check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",
+          str(logging.getLogger().handlers))
 
     # 출처는 «항상» 실린다 — 근거를 못 보여주면 이 에이전트의 답이 아니다.
     # 문서명이 먼저 읽히고, 카드 id 는 역추적용으로 뒤에 남고, 관련도는 있을 때만 찍힌다.
@@ -224,6 +258,12 @@ try:
     text = "".join(_chunks(r))
     check(r.status_code == 200 and "LLMError" in text and "LLM 미설정" in text,
           "에이전트가 죽어도 무엇이 깨졌는지 CHUNK 로 알려준다(빈 응답 금지)", text[:100])
+    check(any(rec.levelno == logging.ERROR and "ask() 실패" in rec.getMessage()
+              and rec.exc_info for rec in _captured),
+          "실패는 스택과 함께 ERROR 로 남고, «연결 끊김»으로 오인되지 않는다",
+          str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
+    check(not any("연결이 끊겼다" in rec.getMessage() for rec in _captured),
+          "정상 완료·실패 응답에는 «연결 끊김» 경고가 찍히지 않는다")
 finally:
     main.consult_graph.ask = _saved_ask
 
