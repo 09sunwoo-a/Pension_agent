@@ -41,12 +41,12 @@ TIMEOUT = 180                # 초. 한 턴이 LLM 호출 여러 번이라 길�
 DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여줄 원문 줄 수
 
 # ── 호출 방식 ──
-# 행내 확인 결과(2026-09-09): isStream=False 는 답이 오고, isStream=True 는 content 가 빈
-# 이벤트 하나만 온다(에이전트 접속 로그는 둘 다 200). 게이트웨이의 스트림 중계 경로에서
-# 내용이 사라지는 것이라 기본을 비스트림으로 둔다. 스트림을 다시 볼 때는 아래 두 줄을 켜고
-# 에이전트 로그(Grafana)에서 «연결이 끊겼다» 경고가 찍히는지 본다 — 찍히면 게이트웨이가
-# 답변을 기다리지 않고 끊는 것이고, STREAM_PROGRESS 로 진행 줄을 먼저 흘리면 달라지는지 본다.
-IS_STREAM = False            # True 면 SSE 로 받는다. False 면 응답 JSON 하나에서 content 를 읽는다
+# 행내 실측(2026-09-09): 에이전트가 «줄마다 JSON» 으로 답하던 동안 isStream=True 는 빈
+# content 하나, isStream=False 는 status ERROR(R40000) 에 «[Errno Extra data] {에이전트 원문}»
+# 이 왔다 — 게이트웨이는 스트림을 SSE 로, 비스트림을 JSON 하나로 읽는다. 에이전트(src/main.py)
+# 를 거기에 맞췄으므로 기본은 스트림이다. 게이트웨이 status 가 SUCCESS 가 아니면 stderr 에
+# 찍는다 — 오류 문구 안에 답변처럼 보이는 글이 있어도 답변이 아니다.
+IS_STREAM = True             # True 면 SSE 로 받는다. False 면 응답 JSON 하나에서 content 를 읽는다
 STREAM_PROGRESS = False      # True 면 에이전트가 답변 전에 진행 줄(⋯ …)을 먼저 흘린다 — 스트림 진단용
 INNER_SHAPE = "agent"        # "agent": {"message", "x_client_user"} — src/main.py 규약
                              # "reference": 참고 파이프라인 형태 {"filtered_body": {...}, "file_objects": []}
@@ -100,6 +100,15 @@ def _payload(question: str, x_client_user: str) -> dict:
     }
 
 
+def _note_status(obj: dict) -> None:
+    """게이트웨이 이벤트의 status 가 SUCCESS 가 아니면 알린다 — content 는 그때 오류 문구다."""
+    status = obj.get("status")
+    if status and status != "SUCCESS":
+        code = obj.get("responseCode") or obj.get("response_code")
+        print(f"[게이트웨이 status={status} responseCode={code}] content 는 답변이 아니라 오류 문구입니다.",
+              file=sys.stderr)
+
+
 def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
     print("[content 를 찾지 못했습니다] 게이트웨이가 보낸 원문:", file=sys.stderr)
     print(f"  status={resp.status_code} content-type={resp.headers.get('Content-Type')}",
@@ -133,7 +142,9 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
             # (response_code · filter_block_reason · truncated 같은 필드가 단서다).
             text = resp.text
             try:
-                content = json.loads(text).get("content")
+                obj = json.loads(text)
+                _note_status(obj)
+                content = obj.get("content")
             except (json.JSONDecodeError, AttributeError):
                 content = None
             if isinstance(content, str) and content:
@@ -155,7 +166,10 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
                 obj = json.loads(data)
             except json.JSONDecodeError:
                 continue
-            content = obj.get("content") if isinstance(obj, dict) else None
+            if not isinstance(obj, dict):
+                continue
+            _note_status(obj)
+            content = obj.get("content")
             if isinstance(content, str) and content:
                 found = True
                 yield content

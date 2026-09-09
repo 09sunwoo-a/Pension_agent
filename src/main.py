@@ -4,7 +4,25 @@
 (skills/genai-platform-agent-dev/refs/genai-platform.md «API I/O 스키마 (고정)»):
 
     POST /chat   {"input_value": "<JSON 문자열>", "message_hists": null}
-      → text/event-stream, 줄마다 {"event": "CHUNK", "content": "..."}
+      → text/event-stream, 이벤트마다 {"event": "CHUNK", "content": "..."}
+
+━━ 응답 프레이밍 — 문서와 게이트웨이가 어긋난다 (2026-09-09 행내 실측) ━━
+위 문서는 «줄마다 JSON» 이라고 적었지만, 게이트웨이(/openapi/agent-chat/v1/agent-messages)
+를 거쳐 부르면 그 형식은 읽히지 않았다:
+
+  isStream=true  → 게이트웨이가 content "" · status SUCCESS 인 이벤트 하나만 돌려준다.
+                   SSE 파서는 `data:` 로 시작하지 않는 줄을 버리므로, 우리 줄이 전부
+                   무시된 것과 정확히 같은 결과다(추정 — 파서 코드는 못 봤다).
+  isStream=false → status ERROR · responseCode R40000 · content 에
+                   "[Errno Extra data] {우리 응답 원문} : 92" — 게이트웨이가 응답 본문
+                   전체를 json.loads 했고 첫 줄(92자) 뒤에서 죽었다(확정 — 오류 문구가
+                   파이썬 JSONDecodeError 그대로다). 비스트림은 **JSON 하나**를 기대한다.
+
+그래서 스트림은 SSE 프레임(`data: {...}\n\n`)으로 내보내고(CHAT_SSE_FRAMING=0 이면 문서
+형식으로 되돌린다), 호출이 비스트림임을 알 수 있으면 JSON 하나로 답한다. 게이트웨이가
+비스트림을 어떻게 알려오는지는 아직 못 봤다 — 그래서 요청마다 헤더·키를 로그에 찍는다
+(아래 «로그»). 지금 보는 신호: Accept 가 application/json 뿐이거나, 본문·input_value 에
+stream/isStream/is_stream 이 false 로 있으면 비스트림.
 
 `input_value` 는 **JSON 을 문자열로 직렬화한 것**이다. 이 프로젝트가 그 안에서 읽는 키:
 
@@ -52,6 +70,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import time
 import uuid
@@ -61,9 +80,9 @@ from typing import Any, List, Optional
 import socket
 import urllib.parse
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict
 
 from pension_agent import config, llm
 from pension_agent.consult_agent import graph as consult_graph
@@ -105,12 +124,55 @@ app = FastAPI(title="퇴직연금 AI 사후관리 에이전트", lifespan=_lifes
 
 
 class ChatRequest(BaseModel):
+    # 게이트웨이가 스키마 밖 키(stream 같은)를 실어 보내는지 봐야 한다 — 버리지 않고 남긴다.
+    model_config = ConfigDict(extra="allow")
+
     input_value: str
     message_hists: Optional[List] = None
 
 
+#: 스트림 프레이밍. 기본 SSE(`data: {...}\n\n`) — 머리말 «응답 프레이밍». 0 이면 문서의
+#: «줄마다 JSON» 으로 되돌린다.
+SSE_FRAMING = os.getenv("CHAT_SSE_FRAMING", "1").strip().lower() not in ("0", "false", "no")
+
+#: 비스트림 신호로 보는 키 이름들(본문 최상위 · input_value 안 어느 쪽이든).
+_STREAM_KEYS = ("stream", "isStream", "is_stream")
+
+
 def _chunk(text: str) -> str:
-    return json.dumps({"event": "CHUNK", "content": text}, ensure_ascii=False) + "\n"
+    line = json.dumps({"event": "CHUNK", "content": text}, ensure_ascii=False)
+    return f"data: {line}\n\n" if SSE_FRAMING else line + "\n"
+
+
+def _wants_stream(request: Request, req: ChatRequest, payload: dict[str, Any]) -> bool:
+    """호출자가 비스트림을 원한다는 신호가 하나라도 있으면 거짓. 없으면 스트림(기본)."""
+    for src in (req.model_extra or {}, payload):
+        for key in _STREAM_KEYS:
+            if key in src and src[key] in (False, 0, "false", "False", "0"):
+                return False
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept and "text/event-stream" not in accept and "*/*" not in accept:
+        return False
+    return True
+
+
+_SECRET_HINTS = ("token", "key", "auth", "cookie", "secret")
+
+
+def _request_shape(request: Request, req: ChatRequest, payload: dict[str, Any]) -> str:
+    """게이트웨이가 실제로 무엇을 보내는지 — 값이 아니라 **모양**만. 비밀 헤더는 값을 가린다."""
+    headers = {
+        k: ("***" if any(h in k.lower() for h in _SECRET_HINTS) else v)
+        for k, v in request.headers.items()
+        if k.lower() not in ("host", "content-length", "user-agent")
+    }
+    hists = req.message_hists
+    return json.dumps({
+        "headers": headers,
+        "body_extra": sorted((req.model_extra or {}).keys()),
+        "input_value_keys": sorted(payload.keys()),
+        "message_hists": None if hists is None else f"{type(hists).__name__}[{len(hists)}]",
+    }, ensure_ascii=False)
 
 
 def _reject(rid: str, detail: str) -> HTTPException:
@@ -149,6 +211,7 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
         "stream_progress": bool(payload.get("stream_progress")),
+        "payload": payload,
     }
 
 
@@ -220,11 +283,12 @@ def health() -> dict[str, Any]:
 
 
 @app.post("/chat")
-async def chat(req: ChatRequest) -> StreamingResponse:
+async def chat(req: ChatRequest, request: Request):
     rid = uuid.uuid4().hex[:8]   # 이 요청의 로그 줄을 한데 묶는 id
     args = _parse(req, rid)
     started = time.monotonic()
     question = args["question"]
+    streaming = _wants_stream(request, req, args["payload"])
     log.info(
         "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s stream_progress=%s "
         "history=%s · 질문(%d자) %r",
@@ -232,6 +296,33 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         args["stream_progress"], len(args["history"] or []), len(question),
         question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
     )
+    # 게이트웨이가 무엇을 보내는지는 여기서만 보인다(머리말 «응답 프레이밍») — 모양만 찍는다.
+    log.info("[%s] 요청 모양 · 응답=%s · %s", rid, "sse" if streaming else "json",
+             _request_shape(request, req, args["payload"]))
+
+    if not streaming:
+        # 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다. JSON 하나로 답한다.
+        def run_once() -> dict[str, Any]:
+            def on_progress(text: str) -> None:
+                log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
+            return consult_graph.ask(
+                question, args["history"],
+                customer_id=args["customer_id"], session_id=args["session_id"],
+                x_client_user=args["x_client_user"], on_progress=on_progress,
+            )
+        try:
+            result = await asyncio.to_thread(run_once)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
+            return JSONResponse({"event": "CHUNK", "content": f"[오류] {type(exc).__name__}: {exc}"})
+        answer = result.get("answer", "")
+        sources = result.get("sources") or []
+        log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건",
+                 rid, time.monotonic() - started, result.get("intent"), len(answer), len(sources))
+        return JSONResponse({
+            "event": "CHUNK",
+            "content": answer + "\n" + render.sources_block(sources) + "\n",
+        })
 
     async def generate():
         loop = asyncio.get_running_loop()

@@ -47,11 +47,15 @@ def _body(**payload) -> dict:
     return {"input_value": json.dumps(payload, ensure_ascii=False), "message_hists": None}
 
 
-def _chunks(resp) -> list[str]:
+def _chunks(resp, sse: bool = True) -> list[str]:
     out = []
     for line in resp.text.splitlines():
         if not line.strip():
             continue
+        if sse:
+            # 게이트웨이는 SSE 파서다 — `data:` 없는 줄은 버린다(main.py 머리말 «응답 프레이밍»).
+            check(line.startswith("data: "), "스트림 이벤트는 SSE 프레임(data: …)이다", line[:40])
+            line = line[len("data:"):]
         d = json.loads(line)
         check(d.get("event") == "CHUNK", "응답 이벤트는 CHUNK 뿐이다", str(d.get("event")))
         out.append(d["content"])
@@ -186,6 +190,8 @@ try:
     check(r.status_code == 200, "정상 요청은 200", str(r.status_code))
     check(r.headers["content-type"].startswith("text/event-stream"),
           "Content-Type 은 text/event-stream", r.headers.get("content-type", ""))
+    check(r.text.startswith("data: {") and "\n\n" in r.text,
+          "SSE 프레임 — data: 로 시작하고 이벤트는 빈 줄로 끝난다", repr(r.text[:60]))
     body = "".join(_chunks(r))
     check(body.startswith(ANSWER),
           "CHUNK 를 이어 붙이면 답변 원문으로 시작한다(앞에 아무것도 안 붙는다)",
@@ -238,7 +244,7 @@ try:
     # 진행 표시 — 켜면 답변 **앞**에 흘러야 한다. 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
     r = client.post("/chat", json=_body(
         message="q", x_client_user="emp-1", stream_progress=True))
-    streamed = [json.loads(l)["content"] for l in r.text.splitlines() if l.strip()]
+    streamed = _chunks(r)
     marks = [i for i, c in enumerate(streamed) if c.startswith("⋯")]
     first_answer = next(i for i, c in enumerate(streamed) if c.startswith("첫 줄"))
     check([c.strip() for c in streamed if c.startswith("⋯")]
@@ -249,6 +255,51 @@ try:
     check("".join(streamed[first_answer:]).startswith(ANSWER),
           "진행 표시를 켜도 답변 본문은 그대로다", repr("".join(streamed[first_answer:])[:60]))
 
+    # ── 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다(행내 실측). JSON 하나로 답한다 ──
+    expected_full = ANSWER + "\n" + render.sources_block(SOURCES) + "\n"
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"),
+                    headers={"Accept": "application/json"})
+    check(r.status_code == 200 and r.headers["content-type"].startswith("application/json"),
+          "Accept: application/json 이면 JSON 하나로 답한다", r.headers.get("content-type", ""))
+    check(r.json() == {"event": "CHUNK", "content": expected_full},
+          "비스트림 JSON 은 답변+출처 전체를 content 에 담은 CHUNK 하나다", r.text[:80])
+    check(_seen.get("on_progress") is not None,
+          "비스트림에서도 진행 콜백(로그용)은 넘긴다", str(_seen.get("on_progress")))
+
+    r = client.post("/chat", json={**_body(message="q", x_client_user="emp-1"), "isStream": False})
+    check(r.headers["content-type"].startswith("application/json") and r.json()["content"] == expected_full,
+          "본문 최상위 isStream=false 도 비스트림 신호다", r.headers.get("content-type", ""))
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1", stream=False))
+    check(r.headers["content-type"].startswith("application/json"),
+          "input_value 안의 stream=false 도 비스트림 신호다", r.headers.get("content-type", ""))
+
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"),
+                    headers={"Accept": "*/*"})
+    check(r.headers["content-type"].startswith("text/event-stream"),
+          "Accept: */* 는 스트림(기본)이다", r.headers.get("content-type", ""))
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1", stream=True))
+    check(r.headers["content-type"].startswith("text/event-stream"),
+          "stream=true 는 스트림이다", r.headers.get("content-type", ""))
+
+    # 요청 모양 로그 — 게이트웨이가 무엇을 보내는지 보는 유일한 자리. 비밀 헤더 값은 가린다.
+    r = client.post("/chat", json={**_body(message="q", x_client_user="emp-1"), "isStream": False},
+                    headers={"x-openapi-token": "Bearer SECRET-1", "x-generative-ai-client": "cli"})
+    shape = next(rec.getMessage() for rec in reversed(_captured) if "요청 모양" in rec.getMessage())
+    check("SECRET-1" not in shape and '"x-openapi-token": "***"' in shape,
+          "요청 모양 로그는 토큰 값을 가린다", shape[:200])
+    check('"x-generative-ai-client": "cli"' in shape and '"body_extra": ["isStream"]' in shape
+          and '"input_value_keys": ["message", "x_client_user"]' in shape and "응답=json" in shape,
+          "요청 모양 로그에 헤더·본문 추가 키·input_value 키·응답 방식이 실린다", shape[:300])
+
+    # 문서 형식(줄마다 JSON)으로 되돌리는 스위치.
+    main.SSE_FRAMING = False
+    try:
+        r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
+        check(r.text.startswith("{") and "".join(_chunks(r, sse=False)).startswith(ANSWER),
+              "CHAT_SSE_FRAMING=0 이면 문서의 «줄마다 JSON» 형식이다", repr(r.text[:40]))
+    finally:
+        main.SSE_FRAMING = True
+
     # ── 실패해도 스트림은 끊지 않는다 ────────────────────────
     def _boom(*a, **k):
         raise llm.LLMError("LLM 미설정 — 테스트")
@@ -258,6 +309,10 @@ try:
     text = "".join(_chunks(r))
     check(r.status_code == 200 and "LLMError" in text and "LLM 미설정" in text,
           "에이전트가 죽어도 무엇이 깨졌는지 CHUNK 로 알려준다(빈 응답 금지)", text[:100])
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"),
+                    headers={"Accept": "application/json"})
+    check(r.status_code == 200 and "LLMError" in r.json().get("content", ""),
+          "비스트림에서도 실패는 200 + content 로 알려준다", r.text[:100])
     check(any(rec.levelno == logging.ERROR and "ask() 실패" in rec.getMessage()
               and rec.exc_info for rec in _captured),
           "실패는 스택과 함께 ERROR 로 남고, «연결 끊김»으로 오인되지 않는다",

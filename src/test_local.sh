@@ -40,6 +40,9 @@ for line in sys.stdin:
     line = line.strip()
     if not line:
         continue
+    # SSE 프레임(data: {...})이 기본이고, CHAT_SSE_FRAMING=0 이면 JSON 줄이다 — 둘 다 읽는다.
+    if line.startswith('data:'):
+        line = line[len('data:'):].strip()
     try:
         d = json.loads(line)
         if d.get('event') == 'CHUNK':
