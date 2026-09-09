@@ -14,6 +14,8 @@ consult_agent 는 매 턴 `append_turn()`으로 기록만 하고, strategy_agent
 from __future__ import annotations
 
 import json
+import logging
+import re
 # datetime.UTC 는 Python 3.11에서 생긴 별칭이다 — 3.10 로컬에서 임포트가 죽어
 # 상담 세션 저장이 통째로 못 올라왔다. timezone.utc 는 같은 객체다.
 from datetime import datetime, timezone
@@ -33,6 +35,19 @@ class Turn(TypedDict, total=False):
     text: str
     intent: str | None
     tool_calls: list[dict[str, Any]]
+
+
+_log = logging.getLogger(__name__)
+
+#: 파일 이름이 되는 고객 id 의 꼴. 비어 있거나 경로 문자가 섞이면 기록하지 않는다 —
+#: 빈 값은 `session_data/.json` 이라는 주인 없는 파일을 만들었고(2026-09-09 실측),
+#: `..`·`/` 는 저장 디렉터리 밖을 가리킨다.
+_CUSTOMER_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def recordable(customer_id: str | None) -> bool:
+    """이 고객 id 로 기록을 남길 수 있는가. 아니면 부르는 쪽이 건너뛴다."""
+    return bool(customer_id) and bool(_CUSTOMER_ID.match(str(customer_id)))
 
 
 def _path(customer_id: str) -> Path:
@@ -71,7 +86,15 @@ def _save(customer_id: str, doc: dict[str, Any]) -> None:
 def append_turn(
     customer_id: str, session_id: str, turn: Turn, *, employee_id: str | None = None
 ) -> None:
-    """세션에 턴 하나를 추가한다. session_id 가 처음 보는 값이면 세션을 새로 연다."""
+    """세션에 턴 하나를 추가한다. session_id 가 처음 보는 값이면 세션을 새로 연다.
+
+    고객 id 가 없거나 꼴이 아니면 **기록하지 않는다** — 주인 없는 파일을 만드는 것보다
+    기록이 빠지는 편이 낫고, 그 사실은 경고로 남긴다(고객 화면 없이 연계가 실행된 경로다).
+    """
+    if not recordable(customer_id):
+        _log.warning("세션 기록 건너뜀 — 고객 id 가 비었거나 꼴이 아님(%r) · %s",
+                     customer_id, (turn.get("text") or "")[:40])
+        return
     doc = _load(customer_id)
     turn = dict(turn)
     turn.setdefault("ts", datetime.now(timezone.utc).isoformat())

@@ -40,6 +40,33 @@ def _clean_session_data() -> None:
 
 
 # ─────────────────────────────────────────────────────────────
+# session_store — 주인 없는 기록은 남기지 않는다
+import logging as _lg0  # noqa: E402
+_skip_records: list = []
+
+
+class _SkipCapture(_lg0.Handler):
+    def emit(self, record):
+        _skip_records.append(record)
+
+
+_ss_log = _lg0.getLogger("pension_agent.session_store")
+_ss_log.addHandler(_SkipCapture())
+_ss_log.setLevel(_lg0.INFO)
+try:
+    for bad in ("", "../x", "a/b", None):
+        session_store.append_turn(bad, "sess-x", {"role": "tool", "text": "연계"})
+    check(not (session_store.SESSION_DATA_DIR / ".json").exists()
+          and not (session_store.SESSION_DATA_DIR / "..").with_suffix(".json").exists(),
+          "session_store: 고객 id 가 비면 session_data/.json 을 만들지 않는다")
+    check(len(_skip_records) == 4 and all(r.levelno == _lg0.WARNING for r in _skip_records)
+          and "건너뜀" in _skip_records[0].getMessage(),
+          "session_store: 건너뛴 기록은 WARNING 으로 남는다", str([r.getMessage() for r in _skip_records][:1]))
+    check(session_store.recordable("198734-1205842") and not session_store.recordable("a b"),
+          "session_store: recordable 이 고객 id 꼴을 가른다")
+finally:
+    _ss_log.handlers.clear()
+
 # session_store — 왕복 테스트
 # ─────────────────────────────────────────────────────────────
 
