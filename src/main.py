@@ -4,7 +4,25 @@
 (skills/genai-platform-agent-dev/refs/genai-platform.md «API I/O 스키마 (고정)»):
 
     POST /chat   {"input_value": "<JSON 문자열>", "message_hists": null}
-      → text/event-stream, 줄마다 {"event": "CHUNK", "content": "..."}
+      → text/event-stream, 이벤트마다 {"event": "CHUNK", "content": "..."}
+
+━━ 응답 프레이밍 — 문서와 게이트웨이가 어긋난다 (2026-09-09 행내 실측) ━━
+위 문서는 «줄마다 JSON» 이라고 적었지만, 게이트웨이(/openapi/agent-chat/v1/agent-messages)
+를 거쳐 부르면 그 형식은 읽히지 않았다:
+
+  isStream=true  → 게이트웨이가 content "" · status SUCCESS 인 이벤트 하나만 돌려준다.
+                   SSE 파서는 `data:` 로 시작하지 않는 줄을 버리므로, 우리 줄이 전부
+                   무시된 것과 정확히 같은 결과다(추정 — 파서 코드는 못 봤다).
+  isStream=false → status ERROR · responseCode R40000 · content 에
+                   "[Errno Extra data] {우리 응답 원문} : 92" — 게이트웨이가 응답 본문
+                   전체를 json.loads 했고 첫 줄(92자) 뒤에서 죽었다(확정 — 오류 문구가
+                   파이썬 JSONDecodeError 그대로다). 비스트림은 **JSON 하나**를 기대한다.
+
+그래서 스트림은 SSE 프레임(`data: {...}\n\n`)으로 내보내고(CHAT_SSE_FRAMING=0 이면 문서
+형식으로 되돌린다), 호출이 비스트림임을 알 수 있으면 JSON 하나로 답한다. 게이트웨이가
+비스트림을 어떻게 알려오는지는 아직 못 봤다 — 그래서 요청마다 헤더·키를 로그에 찍는다
+(아래 «로그»). 지금 보는 신호: Accept 가 application/json 뿐이거나, 본문·input_value 에
+stream/isStream/is_stream 이 false 로 있으면 비스트림.
 
 `input_value` 는 **JSON 을 문자열로 직렬화한 것**이다. 이 프로젝트가 그 안에서 읽는 키:
 
@@ -12,9 +30,19 @@
     x_client_user   (필수) 호출한 직원 식별자. 플랫폼의 감사 기록이자 쿼터 버킷이다
     customer_id     (선택) 지금 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능은
                            이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
-    session_id      (선택) 상담 세션 구분자. 없으면 "default"
+    session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
+                           이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
     stream_progress (선택) 답변을 기다리는 동안 «지금 무엇을 하고 있는지»를 함께 흘린다.
                            기본 거짓 — 아래 참고
+
+━━ 대화 맥락 — 멀티턴 ━━
+후속 질문("그럼 안 된다고 하면요?")·되묻기의 답·연계 확인("네")은 이전 턴의 `history`
+(Turn 목록, state.Turn)가 있어야 해석된다. 게이트웨이 경로는 그것을 돌려줄 자리가 없으므로
+진입점이 `(x_client_user, session_id)` 키로 메모리에 맡겨 두고 다음 턴에 되찾는다
+(consult_agent/context_store.py — 최근 4턴 · 2시간 · 500세션 · 디스크에 안 쓴다).
+호출자가 `message_hists` 에 Turn 형식(`question` 키가 있는 dict 목록)을 실어 보내면 그것이
+저장본보다 우선한다. 다른 형식(OpenAI 식 messages 등)은 버린다 — Turn 이 아닌 것을 넘기면
+`format_history` 가 `turn['question']` 에서 죽어 500 이 난다.
 
 이 파일은 **얇다.** 판단·검증·문장 생성은 전부 consult_agent 안에서 끝나고, 여기서는
 파싱·스트리밍·오류 형태만 맡는다. 화면(Streamlit app.py)과 이 API 는 같은 `ask()` 하나를
@@ -36,6 +64,15 @@
 (verify_texts · relations · 원문 스팬)에서 **통째로 폐기**될 수 있어서, 토큰을 흘려보내면
 직원이 이미 읽은 문장이 사라진다. "근거 밖 수치를 내보내지 않는다"는 보증이 화면에서
 뒤집히는 것이다(progress.py 주석).
+
+━━ 로그 ━━
+행내 플랫폼은 컨테이너의 stdout 을 모아 Grafana 에 보여준다. uvicorn 은 제 로거만
+설정하고 루트 로거에는 핸들러를 달지 않으므로, 여기서 설정하지 않으면 이 파일과
+pension_agent 의 `log.info` 는 **어디에도 나가지 않는다** — 행내에서 보인 것이 접속 로그
+(`POST /chat 200 OK`) 한 줄뿐이었던 이유다. 그래서 루트 로거를 stdout·INFO 로 잡고,
+요청마다 짧은 id 를 붙여 «받음 → 진행 단계 → 완료 / 실패 / 연결 끊김»을 찍는다.
+진행 단계 문구는 progress.emit 이 코드로 정한 것이라(LLM 문장이 아니다) 로그에 그대로
+싣는다. 화면에는 종전대로 stream_progress 를 켤 때만 흐른다.
 """
 
 from __future__ import annotations
@@ -43,62 +80,141 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import sys
+import time
+import uuid
+from contextlib import asynccontextmanager
 from typing import Any, List, Optional
 
 import socket
 import urllib.parse
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, ConfigDict
 
 from pension_agent import config, llm
+from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import render
 from pension_agent.strategy_agent import briefing_store
 
+
+def _setup_logging() -> None:
+    """루트 로거 → stdout · INFO. 바깥(테스트 러너 등)이 이미 잡아 두었으면 손대지 않는다.
+
+    타임스탬프는 넣지 않는다 — 플랫폼 수집기가 줄마다 붙인다(행내 화면에서 확인).
+    형식은 uvicorn 의 접속 로그(`INFO:     …`)와 나란히 읽히게 맞춘다.
+    """
+    if logging.getLogger().handlers:
+        return
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s:     [%(name)s] %(message)s",
+        stream=sys.stdout,
+    )
+
+
+_setup_logging()
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="퇴직연금 AI 사후관리 에이전트")
+#: 요청 로그에 싣는 질문 미리보기 길이. 전문은 싣지 않는다 — 로그는 상담 내용의 저장소가 아니다.
+QUESTION_PREVIEW = 60
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    # 이 컨테이너가 어떤 설정으로 떴는지 한 줄 — /health 와 같은 내용이다. «키를 넣었는데
+    # 왜 안 되나 / train URL 을 보고 있나»를 Grafana 에서 로그 첫 줄로 끝내려고 둔다.
+    log.info("기동 · %s", json.dumps(health(), ensure_ascii=False))
+    yield
+
+
+app = FastAPI(title="퇴직연금 AI 사후관리 에이전트", lifespan=_lifespan)
 
 
 class ChatRequest(BaseModel):
+    # 게이트웨이가 스키마 밖 키(stream 같은)를 실어 보내는지 봐야 한다 — 버리지 않고 남긴다.
+    model_config = ConfigDict(extra="allow")
+
     input_value: str
     message_hists: Optional[List] = None
 
 
+#: 스트림 프레이밍. 기본 SSE(`data: {...}\n\n`) — 머리말 «응답 프레이밍». 0 이면 문서의
+#: «줄마다 JSON» 으로 되돌린다.
+SSE_FRAMING = os.getenv("CHAT_SSE_FRAMING", "1").strip().lower() not in ("0", "false", "no")
+
+#: 비스트림 신호로 보는 키 이름들(본문 최상위 · input_value 안 어느 쪽이든).
+_STREAM_KEYS = ("stream", "isStream", "is_stream")
+
+
 def _chunk(text: str) -> str:
-    return json.dumps({"event": "CHUNK", "content": text}, ensure_ascii=False) + "\n"
+    line = json.dumps({"event": "CHUNK", "content": text}, ensure_ascii=False)
+    return f"data: {line}\n\n" if SSE_FRAMING else line + "\n"
 
 
-def _parse(req: ChatRequest) -> dict[str, Any]:
+def _wants_stream(request: Request, req: ChatRequest, payload: dict[str, Any]) -> bool:
+    """호출자가 비스트림을 원한다는 신호가 하나라도 있으면 거짓. 없으면 스트림(기본)."""
+    for src in (req.model_extra or {}, payload):
+        for key in _STREAM_KEYS:
+            if key in src and src[key] in (False, 0, "false", "False", "0"):
+                return False
+    accept = request.headers.get("accept", "")
+    if "application/json" in accept and "text/event-stream" not in accept and "*/*" not in accept:
+        return False
+    return True
+
+
+_SECRET_HINTS = ("token", "key", "auth", "cookie", "secret")
+
+
+def _request_shape(request: Request, req: ChatRequest, payload: dict[str, Any]) -> str:
+    """게이트웨이가 실제로 무엇을 보내는지 — 값이 아니라 **모양**만. 비밀 헤더는 값을 가린다."""
+    headers = {
+        k: ("***" if any(h in k.lower() for h in _SECRET_HINTS) else v)
+        for k, v in request.headers.items()
+        if k.lower() not in ("host", "content-length", "user-agent")
+    }
+    hists = req.message_hists
+    return json.dumps({
+        "headers": headers,
+        "body_extra": sorted((req.model_extra or {}).keys()),
+        "input_value_keys": sorted(payload.keys()),
+        "message_hists": None if hists is None else f"{type(hists).__name__}[{len(hists)}]",
+    }, ensure_ascii=False)
+
+
+def _reject(rid: str, detail: str) -> HTTPException:
+    """422 — 접속 로그에는 상태코드만 남으므로 무엇이 빠졌는지는 여기서 찍는다."""
+    log.warning("[%s] 요청 거부 422 · %s", rid, detail)
+    return HTTPException(status_code=422, detail=detail)
+
+
+def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
     """input_value(JSON 문자열)를 풀고 필수 키를 확인한다. 어긋나면 422."""
     try:
         payload = json.loads(req.input_value)
     except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"input_value 가 JSON 문자열이 아닙니다: {exc}",
-        ) from exc
+        raise _reject(rid, f"input_value 가 JSON 문자열이 아닙니다: {exc}") from exc
     if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=422, detail="input_value 는 JSON 객체를 직렬화한 문자열이어야 합니다.")
+        raise _reject(rid, "input_value 는 JSON 객체를 직렬화한 문자열이어야 합니다.")
 
     x_client_user = payload.get("x_client_user")
     if not x_client_user:
-        raise HTTPException(
-            status_code=422, detail="input_value 에 'x_client_user' 키가 필요합니다.")
+        raise _reject(rid, "input_value 에 'x_client_user' 키가 필요합니다.")
     message = payload.get("message")
     if not message:
-        raise HTTPException(
-            status_code=422, detail="input_value 에 'message' 키가 필요합니다.")
+        raise _reject(rid, "input_value 에 'message' 키가 필요합니다.")
 
     # message_hists 는 플랫폼 스키마의 자리이고, 이 에이전트의 대화 맥락은 ask() 가
-    # 돌려준 history(Turn 목록)다. 형태가 맞을 때만 넘긴다 — 플랫폼이 다른 것을 실어
-    # 보내도 턴이 깨지지 않아야 한다(맥락이 없어지는 것과 500 이 나는 것은 다르다).
+    # 돌려준 history(Turn 목록)다. Turn 형식(question 키)일 때만 넘긴다 — 플랫폼이 다른
+    # 것을 실어 보내도 턴이 깨지지 않아야 한다(맥락이 없어지는 것과 500 이 나는 것은
+    # 다르다). None 이면 진입점이 저장해 둔 맥락을 쓴다(머리말 «대화 맥락»).
     hists = req.message_hists
-    history = hists if isinstance(hists, list) and all(
-        isinstance(h, dict) for h in hists) else None
+    history = hists if isinstance(hists, list) and hists and all(
+        isinstance(h, dict) and "question" in h for h in hists) else None
 
     return {
         "question": str(message),
@@ -107,6 +223,7 @@ def _parse(req: ChatRequest) -> dict[str, Any]:
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
         "stream_progress": bool(payload.get("stream_progress")),
+        "payload": payload,
     }
 
 
@@ -164,6 +281,8 @@ def health() -> dict[str, Any]:
         # 지문으로 읽히는지, 런타임에 만든 것을 저장할 수 있는지 — 셋 다 어긋나도 답변은
         # 정상으로 나가고 «느리다»로만 보인다(briefing_store.stats 머리말).
         "briefing_cache": briefing_store.stats(),
+        # 진행 중인 대화 맥락이 몇 세션 살아 있나(메모리 · 머리말 «대화 맥락»).
+        "context_store": context_store.stats(),
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
             "max_concurrency": llm.MAX_CONCURRENCY,
@@ -178,8 +297,58 @@ def health() -> dict[str, Any]:
 
 
 @app.post("/chat")
-async def chat(req: ChatRequest) -> StreamingResponse:
-    args = _parse(req)
+async def chat(req: ChatRequest, request: Request):
+    rid = uuid.uuid4().hex[:8]   # 이 요청의 로그 줄을 한데 묶는 id
+    args = _parse(req, rid)
+    started = time.monotonic()
+    question = args["question"]
+    x_client_user, session_id = args["x_client_user"], args["session_id"]
+    streaming = _wants_stream(request, req, args["payload"])
+    # 대화 맥락 — 호출자가 Turn 형식으로 실어 보낸 것이 우선, 없으면 저장해 둔 것.
+    if args["history"] is not None:
+        history, history_from = args["history"], "caller"
+    else:
+        history = context_store.get(x_client_user, session_id)
+        history_from = "store" if history else "none"
+    log.info(
+        "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s stream_progress=%s "
+        "맥락=%d턴(%s) · 질문(%d자) %r",
+        rid, x_client_user, args["customer_id"], session_id, args["stream_progress"],
+        len(history or []), history_from, len(question),
+        question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
+    )
+
+    def _remember(result: dict[str, Any]) -> None:
+        # 다음 턴이 이어받을 맥락. ask() 가 이미 HISTORY_LIMIT 으로 잘라 돌려준다.
+        context_store.put(x_client_user, session_id, result.get("history"))
+    # 게이트웨이가 무엇을 보내는지는 여기서만 보인다(머리말 «응답 프레이밍») — 모양만 찍는다.
+    log.info("[%s] 요청 모양 · 응답=%s · %s", rid, "sse" if streaming else "json",
+             _request_shape(request, req, args["payload"]))
+
+    if not streaming:
+        # 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다. JSON 하나로 답한다.
+        def run_once() -> dict[str, Any]:
+            def on_progress(text: str) -> None:
+                log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
+            return consult_graph.ask(
+                question, history,
+                customer_id=args["customer_id"], session_id=session_id,
+                x_client_user=x_client_user, on_progress=on_progress,
+            )
+        try:
+            result = await asyncio.to_thread(run_once)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
+            return JSONResponse({"event": "CHUNK", "content": f"[오류] {type(exc).__name__}: {exc}"})
+        _remember(result)
+        answer = result.get("answer", "")
+        sources = result.get("sources") or []
+        log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건",
+                 rid, time.monotonic() - started, result.get("intent"), len(answer), len(sources))
+        return JSONResponse({
+            "event": "CHUNK",
+            "content": answer + "\n" + render.sources_block(sources) + "\n",
+        })
 
     async def generate():
         loop = asyncio.get_running_loop()
@@ -187,17 +356,22 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         # 큐로 건네야 «기다리는 동안» 나간다 — 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
         lines: asyncio.Queue = asyncio.Queue()
         DONE = object()
+        show_progress = args["stream_progress"]
 
         def on_progress(text: str) -> None:
-            loop.call_soon_threadsafe(lines.put_nowait, text)
+            # 로그에는 항상 — Grafana 에서 «이 요청이 지금 어디까지 갔나»를 보는 자리다.
+            # 화면에는 요청이 켰을 때만(위 머리말).
+            log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
+            if show_progress:
+                loop.call_soon_threadsafe(lines.put_nowait, text)
 
         def run() -> dict[str, Any]:
             try:
                 return consult_graph.ask(
-                    args["question"], args["history"],
-                    customer_id=args["customer_id"], session_id=args["session_id"],
-                    x_client_user=args["x_client_user"],
-                    on_progress=on_progress if args["stream_progress"] else None,
+                    question, history,
+                    customer_id=args["customer_id"], session_id=session_id,
+                    x_client_user=x_client_user,
+                    on_progress=on_progress,
                 )
             finally:
                 # 성공이든 실패든 반드시 닫는다 — 안 닫으면 아래 루프가 영원히 기다린다.
@@ -207,25 +381,41 @@ async def chat(req: ChatRequest) -> StreamingResponse:
         # 부르면 이 워커가 다른 요청을 하나도 못 받는다. to_thread 는 컨텍스트를 복사해
         # 넘기므로 x-client-user 도 스레드 안까지 따라간다.
         task = asyncio.create_task(asyncio.to_thread(run))
-        while True:
-            item = await lines.get()
-            if item is DONE:
-                break
-            yield _chunk(f"⋯ {item}\n")
-
+        finished = False
         try:
-            result = await task
-        except Exception as exc:  # noqa: BLE001
-            # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다. 그래서 실패도 CHUNK 로
-            # 나간다 — 클라이언트가 빈 응답을 받고 «답이 없다»로 오해하는 것보다,
-            # 무엇이 깨졌는지 화면에서 읽는 편이 진단이 빠르다(LLMError 주석과 같은 취지).
-            log.exception("ask() 실패")
-            yield _chunk(f"[오류] {type(exc).__name__}: {exc}")
-            return
+            while True:
+                item = await lines.get()
+                if item is DONE:
+                    break
+                yield _chunk(f"⋯ {item}\n")
 
-        for line in result.get("answer", "").splitlines(keepends=True):
-            yield _chunk(line)
-        # 출처는 답변의 일부다 — 근거를 못 보여주면 이 에이전트의 답이 아니다(위 주석).
-        yield _chunk("\n" + render.sources_block(result.get("sources")) + "\n")
+            try:
+                result = await task
+            except Exception as exc:  # noqa: BLE001
+                # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다. 그래서 실패도 CHUNK 로
+                # 나간다 — 클라이언트가 빈 응답을 받고 «답이 없다»로 오해하는 것보다,
+                # 무엇이 깨졌는지 화면에서 읽는 편이 진단이 빠르다(LLMError 주석과 같은 취지).
+                log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
+                yield _chunk(f"[오류] {type(exc).__name__}: {exc}")
+                finished = True
+                return
+
+            _remember(result)
+            answer = result.get("answer", "")
+            sources = result.get("sources") or []
+            for line in answer.splitlines(keepends=True):
+                yield _chunk(line)
+            # 출처는 답변의 일부다 — 근거를 못 보여주면 이 에이전트의 답이 아니다(위 주석).
+            yield _chunk("\n" + render.sources_block(sources) + "\n")
+            finished = True
+            log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건",
+                     rid, time.monotonic() - started, result.get("intent"),
+                     len(answer), len(sources))
+        finally:
+            if not finished:
+                # 호출자가 다 받기 전에 끊었다(게이트웨이 타임아웃 등). 접속 로그에는
+                # 200 으로만 남아 «답이 비었다»와 구분이 안 되므로 여기서 갈라 찍는다.
+                log.warning("[%s] 응답을 다 보내기 전에 연결이 끊겼다 %.1f초",
+                            rid, time.monotonic() - started)
 
     return StreamingResponse(generate(), media_type="text/event-stream")
