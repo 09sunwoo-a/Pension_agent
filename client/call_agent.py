@@ -38,6 +38,12 @@ X_CLIENT_USER = "test-user"  # 호출 직원 식별자 — 에이전트의 감�
 VERIFY_TLS = False           # 행내 게이트웨이는 사설 인증서라 참고 파이프라인도 끄고 있다
 TIMEOUT = 180                # 초. 한 턴이 LLM 호출 여러 번이라 길게 잡는다
 DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여줄 원문 줄 수
+
+# ── 진단 스위치 — 답변이 비어서 올 때 하나씩 바꿔 본다 ──
+IS_STREAM = True             # False 면 응답 JSON 하나를 받아 content 를 읽고, 없으면 전체를 찍는다
+INNER_SHAPE = "agent"        # "agent": {"message", "x_client_user"} — src/main.py 규약
+                             # "reference": 참고 파이프라인 형태 {"filtered_body": {...}, "file_objects": []}
+                             #   게이트웨이가 contents[0] 를 그대로 넘기지 않고 이 형태를 기대할 때 확인용
 # ──────────────────────────────────────────────────────────────────────────────
 
 PATH = "/openapi/agent-chat/v1/agent-messages"
@@ -57,7 +63,21 @@ def _headers() -> dict[str, str]:
 
 
 def _inner(question: str, x_client_user: str) -> dict:
-    """에이전트의 input_value 가 되는 객체 — src/main.py 가 읽는 키."""
+    """contents[0] 에 실을 객체.
+
+    "agent"     — 에이전트의 input_value 가 되는 객체. src/main.py 가 읽는 키.
+    "reference" — 참고 파이프라인이 보내던 형태. 게이트웨이가 이 형태에서 message 를 뽑아
+                  input_value 를 만드는지 확인할 때만 쓴다.
+    """
+    if INNER_SHAPE == "reference":
+        return {
+            "filtered_body": {
+                "messages": [{"role": "user", "content": question}],
+                "stream": IS_STREAM,
+                "user_id": x_client_user,
+            },
+            "file_objects": [],
+        }
     return {"message": question, "x_client_user": x_client_user}
 
 
@@ -66,8 +86,20 @@ def _payload(question: str, x_client_user: str) -> dict:
         "agentId": ASSET_ID,
         "contents": [json.dumps(_inner(question, x_client_user), ensure_ascii=False)],
         "llmConfig": {},
-        "isStream": True,
+        "isStream": IS_STREAM,
     }
+
+
+def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
+    print("[content 를 찾지 못했습니다] 게이트웨이가 보낸 원문:", file=sys.stderr)
+    print(f"  status={resp.status_code} content-type={resp.headers.get('Content-Type')}",
+          file=sys.stderr)
+    for line in raw[:DEBUG_LINES]:
+        print(f"  {line}", file=sys.stderr)
+    if len(raw) > DEBUG_LINES:
+        print(f"  … 외 {len(raw) - DEBUG_LINES}줄", file=sys.stderr)
+    if not raw:
+        print("  (본문이 비어 있음)", file=sys.stderr)
 
 
 def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
@@ -76,7 +108,7 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
         ENDPOINT_URL.rstrip("/") + PATH,
         headers=_headers(),
         json=_payload(question, x_client_user),
-        stream=True,
+        stream=IS_STREAM,
         verify=VERIFY_TLS,
         timeout=TIMEOUT,
     ) as resp:
@@ -86,6 +118,19 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
         # Content-Type 에 charset 이 없으면 requests 는 text/* 를 ISO-8859-1 로 풀어 한글이
         # 깨진다. 플랫폼 응답은 UTF-8 이므로 여기서 고정한다.
         resp.encoding = "utf-8"
+        if not IS_STREAM:
+            # 응답 JSON 하나. content 가 있으면 그것, 없으면 전체를 찍어 무엇이 채워졌는지 본다
+            # (response_code · filter_block_reason · truncated 같은 필드가 단서다).
+            text = resp.text
+            try:
+                content = json.loads(text).get("content")
+            except (json.JSONDecodeError, AttributeError):
+                content = None
+            if isinstance(content, str) and content:
+                yield content
+            else:
+                _dump_raw(resp, text.splitlines())
+            return
         raw: list[str] = []   # content 를 하나도 못 찾았을 때 «무엇이 왔는지» 보여주려고 모은다
         found = False
         for line in resp.iter_lines(decode_unicode=True):
@@ -105,15 +150,7 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
                 found = True
                 yield content
         if not found:
-            print("[content 를 찾지 못했습니다] 게이트웨이가 보낸 원문:", file=sys.stderr)
-            print(f"  status={resp.status_code} content-type={resp.headers.get('Content-Type')}",
-                  file=sys.stderr)
-            for line in raw[:DEBUG_LINES]:
-                print(f"  {line}", file=sys.stderr)
-            if len(raw) > DEBUG_LINES:
-                print(f"  … 외 {len(raw) - DEBUG_LINES}줄", file=sys.stderr)
-            if not raw:
-                print("  (본문이 비어 있음)", file=sys.stderr)
+            _dump_raw(resp, raw)
 
 
 def ask(question: str, x_client_user: str = X_CLIENT_USER) -> str:
