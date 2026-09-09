@@ -1,18 +1,30 @@
-# 대화형 에이전트 호출 계약 — 프론트·게이트웨이용
+# client — 대화형 에이전트 호출 클라이언트와 API 계약
 
-이 폴더는 **바깥 독자용**이다. 저장소의 다른 문서(`docs/`)가 «우리가 무엇을 왜 이렇게 만들었나»를
-적은 백엔드 기록이라면, 여기는 «남이 이 에이전트를 어떻게 부르고 무엇을 받나»를 적는다.
-계약의 원천은 코드(`src/main.py` 머리말)이고 이 문서는 그것을 옮긴 것이다 — 이벤트를 바꾸면
-둘을 함께 고친다(`tests/test_api.py` 가 이 문서에 모든 이벤트 type 이 있는지 검사한다).
+이 디렉토리는 배포된 대화형 에이전트를 행내 GenAI 플랫폼 게이트웨이를 통해 호출하는 코드와,
+그 호출의 요청·응답 형식을 정리한 문서다. 에이전트 본체(`src/`)와는 별개이고 `pension_agent`
+를 임포트하지 않는다.
 
-참조 구현: `call_agent.py` — 요청을 만들고(`_payload`), 응답에서 이벤트를 꺼내고(`_events_in`),
-type 별로 그린다(`_render`). 프론트는 이 셋을 그대로 옮기면 된다.
+| 파일 | 역할 |
+|---|---|
+| `README.md` | 요청 형식 · 응답 이벤트 · 파싱 규칙 · 멀티턴 규칙. 프론트를 만들 때 이 문서를 기준으로 한다 |
+| `call_agent.py` | 참조 구현. 요청을 만들고(`_payload`), 응답에서 이벤트를 꺼내고(`_events_in`), 종류별로 출력한다(`_render`). 프론트는 이 세 함수가 하는 일을 그대로 옮기면 된다 |
+| `requirements.txt` | `requests` 하나 |
+
+응답 형식의 원천은 `src/main.py` 머리말 «출력 형식»이다. 이벤트를 바꾸면 이 문서를 함께 고친다.
+`src/tests/test_api.py` 가 코드가 내보내는 이벤트 type 이 전부 이 문서에 있는지 검사한다.
+
+## 0. 실행
 
 ```bash
 pip install -r client/requirements.txt
-python client/call_agent.py                 # 대화형 — 여러 턴, 한 세션
-python client/call_agent.py "IRP 세액공제"   # 한 턴
+# call_agent.py 상단의 ENDPOINT_URL · OPENAPI_TOKEN · GENERATIVE_AI_CLIENT · ASSET_ID 를 채운다.
+# CUSTOMER_ID 에 열려 있는 고객 id, SESSION_ID 는 비워 두면 실행마다 새로 만든다.
+python client/call_agent.py                 # 대화형 — 질문을 여러 번, 한 세션으로
+python client/call_agent.py "IRP 세액공제"   # 한 턴만
 ```
+
+토큰과 URL 은 콘솔에서 받는다. 에이전트를 재배포하면 URL 의 API 식별자가 바뀌고 토큰은 만료되므로
+그때마다 다시 확인한다. 값을 채운 파일은 커밋하지 않는다.
 
 ## 1. 요청
 
@@ -91,7 +103,7 @@ Content-Type: application/json
    (무엇이 왔는지 보이게).
 
 `_events_in` 은 게이트웨이 오류 문구 안에 에이전트 CHUNK 원문이 통째로 실려 오는 경우
-(행내 실측 — `[Errno Extra data] {"event": "CHUNK", "content": …}`)도 풀어 읽는다.
+(2026-09-09 실측 — `[Errno Extra data] {"event": "CHUNK", "content": …}`)도 풀어 읽는다.
 
 ## 4. 멀티턴 — 프론트가 지킬 것
 
@@ -103,7 +115,7 @@ Content-Type: application/json
 ## 5. 확인·진단
 
 - 에이전트를 직접 띄운 상태(`src/run_local.sh`)에서 `RAW=1 src/test_local.sh "질문"` 을 실행하면
-  위 이벤트 JSON 이 한 줄씩 그대로 찍힌다. `RAW=2` 면 SSE 줄 자체가 나온다.
+  게이트웨이 없이 위 이벤트 JSON 이 한 줄씩 그대로 찍힌다. `RAW=2` 면 SSE 줄 자체가 나온다.
 - 게이트웨이를 거친 결과는 `call_agent.py` 의 `ask()` 가 종류별로 모은 dict 로 돌려준다.
   `raw` 에 무엇인가 들어 있으면 게이트웨이가 이벤트가 아닌 텍스트를 보낸 것이다.
 - 에이전트 쪽 로그(Grafana)는 요청마다 8자리 id 로 «요청 → 진행 → 완료» 가 묶여 찍힌다.

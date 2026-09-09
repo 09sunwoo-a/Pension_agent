@@ -107,7 +107,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | 지식 저작 | `src/AUTHORING.md` |
 | 실행·테스트 | `src/README.md` |
 | 행내 배포 | `src/main.py`(FastAPI 진입점) · `src/Dockerfile`(내부망) · `src/.env.example`. 외부망용 `Dockerfile.local` · `requirements-dev.txt` 는 저장소에 넣지 않는다 |
-| 호출 계약(프론트·게이트웨이) | `client/README.md` — **바깥 독자용.** 요청 키 · 응답 이벤트(`type`) · 파싱 규칙 · 멀티턴. 참조 구현은 `client/call_agent.py`. 원천은 `src/main.py` 머리말이고 이벤트를 바꾸면 함께 고친다(`tests/test_api.py` 가 검사) |
+| 호출 계약(프론트·게이트웨이) | `client/README.md` — 요청 키 · 응답 이벤트(`type`) · 파싱 규칙 · 멀티턴. 참조 구현은 `client/call_agent.py`. 원천은 `src/main.py` 머리말이고 이벤트를 바꾸면 함께 고친다(`tests/test_api.py` 가 검사) |
 | consult_agent 기준 | `src/pension_agent/consult_agent/CLAUDE.md` — 대화형 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
 | 지식 데이터 기준 | `src/pension_agent/knowledge/CLAUDE.md` — 카드가 선언해야 하는 관계 5종 · 실측 · 이행 순서 |
 
