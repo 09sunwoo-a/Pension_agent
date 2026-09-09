@@ -30,9 +30,19 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
     x_client_user   (필수) 호출한 직원 식별자. 플랫폼의 감사 기록이자 쿼터 버킷이다
     customer_id     (선택) 지금 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능은
                            이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
-    session_id      (선택) 상담 세션 구분자. 없으면 "default"
+    session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
+                           이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
     stream_progress (선택) 답변을 기다리는 동안 «지금 무엇을 하고 있는지»를 함께 흘린다.
                            기본 거짓 — 아래 참고
+
+━━ 대화 맥락 — 멀티턴 ━━
+후속 질문("그럼 안 된다고 하면요?")·되묻기의 답·연계 확인("네")은 이전 턴의 `history`
+(Turn 목록, state.Turn)가 있어야 해석된다. 게이트웨이 경로는 그것을 돌려줄 자리가 없으므로
+진입점이 `(x_client_user, session_id)` 키로 메모리에 맡겨 두고 다음 턴에 되찾는다
+(consult_agent/context_store.py — 최근 4턴 · 2시간 · 500세션 · 디스크에 안 쓴다).
+호출자가 `message_hists` 에 Turn 형식(`question` 키가 있는 dict 목록)을 실어 보내면 그것이
+저장본보다 우선한다. 다른 형식(OpenAI 식 messages 등)은 버린다 — Turn 이 아닌 것을 넘기면
+`format_history` 가 `turn['question']` 에서 죽어 500 이 난다.
 
 이 파일은 **얇다.** 판단·검증·문장 생성은 전부 consult_agent 안에서 끝나고, 여기서는
 파싱·스트리밍·오류 형태만 맡는다. 화면(Streamlit app.py)과 이 API 는 같은 `ask()` 하나를
@@ -85,6 +95,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
 from pension_agent import config, llm
+from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import render
 from pension_agent.strategy_agent import briefing_store
@@ -198,11 +209,12 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
         raise _reject(rid, "input_value 에 'message' 키가 필요합니다.")
 
     # message_hists 는 플랫폼 스키마의 자리이고, 이 에이전트의 대화 맥락은 ask() 가
-    # 돌려준 history(Turn 목록)다. 형태가 맞을 때만 넘긴다 — 플랫폼이 다른 것을 실어
-    # 보내도 턴이 깨지지 않아야 한다(맥락이 없어지는 것과 500 이 나는 것은 다르다).
+    # 돌려준 history(Turn 목록)다. Turn 형식(question 키)일 때만 넘긴다 — 플랫폼이 다른
+    # 것을 실어 보내도 턴이 깨지지 않아야 한다(맥락이 없어지는 것과 500 이 나는 것은
+    # 다르다). None 이면 진입점이 저장해 둔 맥락을 쓴다(머리말 «대화 맥락»).
     hists = req.message_hists
-    history = hists if isinstance(hists, list) and all(
-        isinstance(h, dict) for h in hists) else None
+    history = hists if isinstance(hists, list) and hists and all(
+        isinstance(h, dict) and "question" in h for h in hists) else None
 
     return {
         "question": str(message),
@@ -269,6 +281,8 @@ def health() -> dict[str, Any]:
         # 지문으로 읽히는지, 런타임에 만든 것을 저장할 수 있는지 — 셋 다 어긋나도 답변은
         # 정상으로 나가고 «느리다»로만 보인다(briefing_store.stats 머리말).
         "briefing_cache": briefing_store.stats(),
+        # 진행 중인 대화 맥락이 몇 세션 살아 있나(메모리 · 머리말 «대화 맥락»).
+        "context_store": context_store.stats(),
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
             "max_concurrency": llm.MAX_CONCURRENCY,
@@ -288,14 +302,25 @@ async def chat(req: ChatRequest, request: Request):
     args = _parse(req, rid)
     started = time.monotonic()
     question = args["question"]
+    x_client_user, session_id = args["x_client_user"], args["session_id"]
     streaming = _wants_stream(request, req, args["payload"])
+    # 대화 맥락 — 호출자가 Turn 형식으로 실어 보낸 것이 우선, 없으면 저장해 둔 것.
+    if args["history"] is not None:
+        history, history_from = args["history"], "caller"
+    else:
+        history = context_store.get(x_client_user, session_id)
+        history_from = "store" if history else "none"
     log.info(
         "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s stream_progress=%s "
-        "history=%s · 질문(%d자) %r",
-        rid, args["x_client_user"], args["customer_id"], args["session_id"],
-        args["stream_progress"], len(args["history"] or []), len(question),
+        "맥락=%d턴(%s) · 질문(%d자) %r",
+        rid, x_client_user, args["customer_id"], session_id, args["stream_progress"],
+        len(history or []), history_from, len(question),
         question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
     )
+
+    def _remember(result: dict[str, Any]) -> None:
+        # 다음 턴이 이어받을 맥락. ask() 가 이미 HISTORY_LIMIT 으로 잘라 돌려준다.
+        context_store.put(x_client_user, session_id, result.get("history"))
     # 게이트웨이가 무엇을 보내는지는 여기서만 보인다(머리말 «응답 프레이밍») — 모양만 찍는다.
     log.info("[%s] 요청 모양 · 응답=%s · %s", rid, "sse" if streaming else "json",
              _request_shape(request, req, args["payload"]))
@@ -306,15 +331,16 @@ async def chat(req: ChatRequest, request: Request):
             def on_progress(text: str) -> None:
                 log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
             return consult_graph.ask(
-                question, args["history"],
-                customer_id=args["customer_id"], session_id=args["session_id"],
-                x_client_user=args["x_client_user"], on_progress=on_progress,
+                question, history,
+                customer_id=args["customer_id"], session_id=session_id,
+                x_client_user=x_client_user, on_progress=on_progress,
             )
         try:
             result = await asyncio.to_thread(run_once)
         except Exception as exc:  # noqa: BLE001
             log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
             return JSONResponse({"event": "CHUNK", "content": f"[오류] {type(exc).__name__}: {exc}"})
+        _remember(result)
         answer = result.get("answer", "")
         sources = result.get("sources") or []
         log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건",
@@ -342,9 +368,9 @@ async def chat(req: ChatRequest, request: Request):
         def run() -> dict[str, Any]:
             try:
                 return consult_graph.ask(
-                    question, args["history"],
-                    customer_id=args["customer_id"], session_id=args["session_id"],
-                    x_client_user=args["x_client_user"],
+                    question, history,
+                    customer_id=args["customer_id"], session_id=session_id,
+                    x_client_user=x_client_user,
                     on_progress=on_progress,
                 )
             finally:
@@ -374,6 +400,7 @@ async def chat(req: ChatRequest, request: Request):
                 finished = True
                 return
 
+            _remember(result)
             answer = result.get("answer", "")
             sources = result.get("sources") or []
             for line in answer.splitlines(keepends=True):

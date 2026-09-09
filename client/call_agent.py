@@ -3,28 +3,33 @@
 에이전트(`src/`)와는 별개다 — `pension_agent` 를 임포트하지 않고, 설정도 공유하지 않는다.
 
     pip install -r client/requirements.txt
-    python client/call_agent.py "IRP 수수료가 부담된다는데 뭐라고 답하죠?"
+    python client/call_agent.py "IRP 수수료가 부담된다는데 뭐라고 답하죠?"   # 한 턴
+    python client/call_agent.py                                             # 대화형 — 여러 턴, 한 세션
 
-게이트웨이 규격(호출 측 파이프라인 예시에서 확인한 것):
+이 클라이언트는 **«열려 있는 고객 화면을 아는 프론트»의 자리**를 흉내 낸다 — 실서비스 프론트가
+할 일과 같다: 열린 화면의 고객 id(CUSTOMER_ID)와 상담 세션 id 를 질문과 함께 싣는다. 고객을
+문장에서 알아내는 장치는 없다(에이전트 설계 — state.Turn 주석 «호출자가 넘김»).
+
+게이트웨이 규격(호출 측 파이프라인 예시 + 행내 실측):
 
     POST {ENDPOINT_URL}/openapi/agent-chat/v1/agent-messages
     headers  x-openapi-token: Bearer <토큰> · x-generative-ai-client: <클라이언트 ID>
     body     {"agentId": <assetId>, "contents": [<JSON 문자열>], "llmConfig": {}, "isStream": bool}
-    응답     isStream=false: JSON 하나, content 에 답변 전체. **지금 기본** — 행내에서 확인된 경로.
-             isStream=true : SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. content 를 이어 붙인다.
-                             "data:" 없이 JSON 줄만 오는 경우도 같은 방식으로 읽는다.
+    응답     isStream=true : SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. content 를 이어 붙인다.
+                             "data:" 없이 JSON 줄만 오는 경우도 같은 방식으로 읽는다. **기본.**
+             isStream=false: JSON 하나, content 에 답변 전체.
              content 를 하나도 못 찾으면 받은 원문을 stderr 에 찍는다 — 형태가 다를 때 그것을 보고 고친다.
 
-`contents[0]` 은 에이전트의 `input_value` 로 그대로 전달된다고 본다. 그래서 그 안에는
-에이전트(`src/main.py`)가 요구하는 키를 넣는다 — `message`(질문) · `x_client_user`(호출 직원).
-이 가정이 틀리면 첫 호출이 422 로 돌아오고 본문에 «'x_client_user' 키가 필요합니다» 가
-찍힌다 — 그 경우 아래 `_inner()` 의 형태를 게이트웨이가 실제로 넘기는 형태에 맞춘다.
+`contents[0]` 은 에이전트의 `input_value` 로 그대로 전달된다(행내 실측 — 에이전트가 200 을 내고
+답변을 만들었다). 그 안에는 에이전트(`src/main.py`)가 읽는 키를 넣는다 — `message`(질문) ·
+`x_client_user`(호출 직원) · `customer_id`(열린 고객, 선택) · `session_id`(상담 세션).
 """
 
 from __future__ import annotations
 
 import json
 import sys
+import uuid
 from typing import Iterator
 
 import requests
@@ -36,6 +41,11 @@ GENERATIVE_AI_CLIENT = ""  # x-generative-ai-client
 ASSET_ID = ""              # agentId
 
 X_CLIENT_USER = "test-user"  # 호출 직원 식별자 — 에이전트의 감사 기록·쿼터 버킷
+CUSTOMER_ID = ""             # 지금 열려 있는 브리핑 화면의 고객 id(예: 198734-1205842). 비우면
+                             # 고객 없이 호출 — 지식 질의응답·화법은 답하고 고객 질문에는
+                             # 「고객 화면을 먼저 열어달라」고 답한다. 실서비스 프론트가 이 자리다
+SESSION_ID = ""              # 비우면 실행마다 새로 만든다(실행 한 번 = 상담 한 번). 채우면 그
+                             # 세션을 이어간다 — 에이전트가 이 값으로 이전 턴의 맥락을 되찾는다
 VERIFY_TLS = False           # 행내 게이트웨이는 사설 인증서라 참고 파이프라인도 끄고 있다
 TIMEOUT = 180                # 초. 한 턴이 LLM 호출 여러 번이라 길게 잡는다
 DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여줄 원문 줄 수
@@ -69,7 +79,7 @@ def _headers() -> dict[str, str]:
     }
 
 
-def _inner(question: str, x_client_user: str) -> dict:
+def _inner(question: str, x_client_user: str, customer_id: str = "", session_id: str = "default") -> dict:
     """contents[0] 에 실을 객체.
 
     "agent"     — 에이전트의 input_value 가 되는 객체. src/main.py 가 읽는 키.
@@ -85,16 +95,18 @@ def _inner(question: str, x_client_user: str) -> dict:
             },
             "file_objects": [],
         }
-    inner = {"message": question, "x_client_user": x_client_user}
+    inner = {"message": question, "x_client_user": x_client_user, "session_id": session_id}
+    if customer_id:
+        inner["customer_id"] = customer_id
     if STREAM_PROGRESS:
         inner["stream_progress"] = True
     return inner
 
 
-def _payload(question: str, x_client_user: str) -> dict:
+def _payload(question: str, x_client_user: str, customer_id: str = "", session_id: str = "default") -> dict:
     return {
         "agentId": ASSET_ID,
-        "contents": [json.dumps(_inner(question, x_client_user), ensure_ascii=False)],
+        "contents": [json.dumps(_inner(question, x_client_user, customer_id, session_id), ensure_ascii=False)],
         "llmConfig": {},
         "isStream": IS_STREAM,
     }
@@ -152,12 +164,13 @@ def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
         print("  (본문이 비어 있음)", file=sys.stderr)
 
 
-def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
+def stream(question: str, x_client_user: str = X_CLIENT_USER, *,
+           customer_id: str = "", session_id: str = "default") -> Iterator[str]:
     """답변 조각을 오는 순서대로 낸다. 200 이 아니면 응답 본문을 찍고 예외를 올린다."""
     with requests.post(
         ENDPOINT_URL.rstrip("/") + PATH,
         headers=_headers(),
-        json=_payload(question, x_client_user),
+        json=_payload(question, x_client_user, customer_id, session_id),
         stream=IS_STREAM,
         verify=VERIFY_TLS,
         timeout=TIMEOUT,
@@ -208,23 +221,47 @@ def stream(question: str, x_client_user: str = X_CLIENT_USER) -> Iterator[str]:
             _dump_raw(resp, raw)
 
 
-def ask(question: str, x_client_user: str = X_CLIENT_USER) -> str:
+def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
+        customer_id: str = "", session_id: str = "default") -> str:
     """한 턴을 돌려 전체 답변 문자열을 돌려준다."""
-    return "".join(stream(question, x_client_user))
+    return "".join(stream(question, x_client_user, customer_id=customer_id, session_id=session_id))
+
+
+def _turn(question: str, session_id: str) -> None:
+    for piece in stream(question, customer_id=CUSTOMER_ID, session_id=session_id):
+        print(piece, end="", flush=True)
+    print()
 
 
 def main(argv: list[str]) -> int:
+    """인자로 질문을 주면 한 턴, 없으면 대화형 루프.
+
+    실행 한 번이 상담 한 번이다 — 세션 id 를 실행마다 새로 만들고(SESSION_ID 가 비어 있을
+    때) 그 실행 안의 턴들은 같은 세션으로 보낸다. 에이전트가 그 값으로 이전 턴의 맥락을
+    되찾으므로 후속 질문·되묻기의 답·「네」가 이어진다. 이전 실행의 대화는 고객 화면이 열려
+    있었다면 «지난 상담»으로 기록돼 있고, 에이전트가 필요할 때 찾아 읽는다.
+    """
     missing = [n for n in ("ENDPOINT_URL", "OPENAPI_TOKEN", "GENERATIVE_AI_CLIENT", "ASSET_ID")
                if not globals()[n]]
     if missing:
         print(f"파일 상단 설정이 비어 있습니다: {', '.join(missing)}", file=sys.stderr)
         return 2
-    if len(argv) < 2:
-        print(f"사용법: python {argv[0]} \"질문\"", file=sys.stderr)
-        return 2
-    for piece in stream(" ".join(argv[1:])):
-        print(piece, end="", flush=True)
-    print()
+    session_id = SESSION_ID or uuid.uuid4().hex[:8]
+    print(f"[세션 {session_id} · 직원 {X_CLIENT_USER} · 고객 {CUSTOMER_ID or '(없음)'}]",
+          file=sys.stderr)
+    if len(argv) >= 2:
+        _turn(" ".join(argv[1:]), session_id)
+        return 0
+    print("질문을 입력하세요. 빈 줄이나 Ctrl-D 로 끝냅니다.", file=sys.stderr)
+    while True:
+        try:
+            question = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print(file=sys.stderr)
+            break
+        if not question:
+            break
+        _turn(question, session_id)
     return 0
 
 

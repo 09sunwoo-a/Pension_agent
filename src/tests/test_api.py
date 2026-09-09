@@ -80,7 +80,9 @@ def _fake_ask(question, history=None, **kw):
     if cb:
         for line in PROGRESS:
             cb(line)
-    return {"answer": ANSWER, "sources": SOURCES, "history": [], "followups": []}
+    # 실물처럼 이번 턴을 덧붙인 history 를 돌려준다 — 진입점이 그것을 다음 턴에 되찾는지 본다.
+    return {"answer": ANSWER, "sources": SOURCES, "followups": [],
+            "history": [*(history or []), {"question": question, "tools": []}]}
 
 
 _saved_ask = main.consult_graph.ask
@@ -254,6 +256,69 @@ try:
           "진행 표시는 답변보다 먼저 나간다", f"progress={marks} answer={first_answer}")
     check("".join(streamed[first_answer:]).startswith(ANSWER),
           "진행 표시를 켜도 답변 본문은 그대로다", repr("".join(streamed[first_answer:])[:60]))
+
+    # ── 대화 맥락 — 게이트웨이 경로는 history 를 돌려줄 자리가 없어 진입점이 세션별로 맡아 둔다 ──
+    from pension_agent.consult_agent import context_store
+    context_store.clear()
+    r = client.post("/chat", json=_body(message="첫 질문", x_client_user="emp-7", session_id="S-7"))
+    _chunks(r)
+    check(_seen.get("history") is None, "세션의 첫 턴은 맥락 없이 간다", str(_seen.get("history")))
+    r = client.post("/chat", json=_body(message="그럼 안 된다고 하면요?", x_client_user="emp-7", session_id="S-7"))
+    _chunks(r)
+    check(_seen.get("history") == [{"question": "첫 질문", "tools": []}],
+          "같은 (직원, 세션)의 다음 턴은 이전 턴의 history 를 이어받는다", str(_seen.get("history")))
+    check(any("맥락=1턴(store)" in rec.getMessage() for rec in _captured),
+          "요청 로그에 맥락이 몇 턴이고 어디서 왔는지 찍힌다",
+          str([m for m in (rec.getMessage() for rec in _captured) if "맥락=" in m][-1:]))
+    r = client.post("/chat", json=_body(message="다른 세션", x_client_user="emp-7", session_id="S-8"))
+    _chunks(r)
+    check(_seen.get("history") is None, "세션이 다르면 맥락이 섞이지 않는다", str(_seen.get("history")))
+    r = client.post("/chat", json=_body(message="다른 직원", x_client_user="emp-8", session_id="S-7"))
+    _chunks(r)
+    check(_seen.get("history") is None, "직원이 다르면 같은 session_id 라도 맥락이 섞이지 않는다",
+          str(_seen.get("history")))
+    # 호출자가 Turn 형식을 실어 보내면 저장본보다 우선한다 — 프론트가 맥락을 들고 다니게 될 때 자리.
+    r = client.post("/chat", json={**_body(message="셋째", x_client_user="emp-7", session_id="S-7"),
+                                   "message_hists": [{"question": "프론트가 든 턴"}]})
+    _chunks(r)
+    check(_seen.get("history") == [{"question": "프론트가 든 턴"}],
+          "message_hists 가 Turn 형식이면 저장본보다 우선한다", str(_seen.get("history")))
+    # Turn 이 아닌 형식(OpenAI 식)은 버리고 저장본을 쓴다 — 넘기면 format_history 가 500 을 낸다.
+    r = client.post("/chat", json={**_body(message="넷째", x_client_user="emp-7", session_id="S-7"),
+                                   "message_hists": [{"role": "user", "content": "x"}]})
+    _chunks(r)
+    check(r.status_code == 200 and _seen.get("history") and
+          all("question" in h for h in _seen["history"]),
+          "message_hists 가 Turn 형식이 아니면 버리고 저장본을 쓴다(500 이 아니다)", str(_seen.get("history")))
+    check(client.get("/health").json()["context_store"]["sessions"] >= 3,
+          "/health 가 살아 있는 맥락 세션 수를 보여준다", str(client.get("/health").json().get("context_store")))
+
+    # 저장소 자체 — 만료·상한·비우기.
+    import time as _time
+    context_store.clear()
+    context_store.put("e", "s1", [{"question": "a"}])
+    check(context_store.get("e", "s1") == [{"question": "a"}], "put 한 것을 get 으로 되찾는다")
+    context_store.put("e", "s1", [])
+    check(context_store.get("e", "s1") is None, "빈 history 를 put 하면 세션이 지워진다")
+    _saved_mono = context_store.time.monotonic
+    try:
+        _now = [1000.0]
+        context_store.time.monotonic = lambda: _now[0]
+        context_store.put("e", "old", [{"question": "o"}])
+        _now[0] += context_store.TTL_SEC + 1
+        check(context_store.get("e", "old") is None, "TTL 이 지난 세션은 버린다")
+        _saved_max = context_store.MAX_SESSIONS
+        context_store.MAX_SESSIONS = 3
+        for i in range(5):
+            _now[0] += 1
+            context_store.put("e", f"s{i}", [{"question": str(i)}])
+        check(context_store.stats()["sessions"] == 3 and context_store.get("e", "s0") is None
+              and context_store.get("e", "s4") is not None,
+              "상한을 넘으면 가장 오래 안 쓴 세션부터 버린다", str(context_store.stats()))
+        context_store.MAX_SESSIONS = _saved_max
+    finally:
+        context_store.time.monotonic = _saved_mono
+        context_store.clear()
 
     # ── 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다(행내 실측). JSON 하나로 답한다 ──
     expected_full = ANSWER + "\n" + render.sources_block(SOURCES) + "\n"
