@@ -1,6 +1,8 @@
 #!/bin/bash
 # 수동 확인 — /health 로 설정을 보고, /chat 으로 한 턴 돌린다.
 #     ./test_local.sh "IRP 수수료 부담된다고 하시는데 뭐라고 답하죠?"
+#     RAW=1 ./test_local.sh "…"     # 그리지 않고 이벤트 JSON 을 한 줄씩 그대로 — 프론트가 받는 원문
+#     RAW=2 ./test_local.sh "…"     # 게이트웨이 없이 에이전트가 내보내는 SSE 줄 그대로(data: …)
 set -uo pipefail
 cd "$(dirname "$0")"
 
@@ -29,14 +31,22 @@ print(json.dumps(payload, ensure_ascii=False))
 
 # 응답은 CHUNK 마다 content 에 JSON 이벤트 하나다(main.py 머리말 «출력 형식»). type 별로 그린다 —
 # 프론트가 할 일과 같다. SSE 프레임(data: {...})이 기본이고 CHAT_SSE_FRAMING=0 이면 JSON 줄이다.
-curl -s -X POST "$BASE_URL/chat" \
-  -H "Content-Type: application/json" \
-  -d "$("$PYTHON" -c '
+BODY=$("$PYTHON" -c '
 import json, sys
 print(json.dumps({"input_value": sys.argv[1], "message_hists": None}, ensure_ascii=False))
-' "$INPUT_VALUE")" \
-  --no-buffer | "$PYTHON" -c "
-import sys, json
+' "$INPUT_VALUE")
+
+if [ "${RAW:-}" = "2" ]; then
+  curl -s -X POST "$BASE_URL/chat" -H "Content-Type: application/json" -d "$BODY" --no-buffer
+  exit 0
+fi
+
+curl -s -X POST "$BASE_URL/chat" \
+  -H "Content-Type: application/json" \
+  -d "$BODY" \
+  --no-buffer | RAW="${RAW:-}" "$PYTHON" -c "
+import sys, json, os
+raw = os.environ.get('RAW') == '1'
 dec = json.JSONDecoder()
 def events_in(text):
     i = 0
@@ -64,6 +74,9 @@ for line in sys.stdin:
     if d.get('event') != 'CHUNK':
         continue
     for ev in events_in(d.get('content') or ''):
+        if raw:
+            print(json.dumps(ev, ensure_ascii=False), flush=True)
+            continue
         t = ev.get('type')
         if t == 'progress':
             print(f'  ⋯ {ev.get(\"text\")}', file=sys.stderr, flush=True)
