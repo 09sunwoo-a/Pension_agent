@@ -87,6 +87,7 @@ streamlit run app.py                                  # 개발·테스트 화면
 ./run_local.sh                                        # uvicorn main:app :8000
 ./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
 CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"
+#   플랫폼에 올린 뒤 «밖에서» 부르는 것은 여기가 아니다 → ../client/README.md
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다)
 $CAD --debug "세액공제 한도가 얼마야?"
