@@ -964,7 +964,7 @@ def check_guard() -> int:
 
 
 def check_briefing_shared() -> int:
-    """브리핑을 **화면과 대화형이 같은 것으로** 본다 (§3 · 지워진 gap 25).
+    """브리핑을 **화면과 대화형이 같은 것으로** 본다 (§3 · 지워진 gap 38).
 
     `propose()` 는 LLM 으로 산문을 쓰므로 부를 때마다 다른 문장이 나온다. 그런데 그 산출을
     화면(브리핑)과 대화형(`customer` 도구가 sentence·insight 를 재료에 그대로 싣는다)이
@@ -5787,7 +5787,7 @@ def check_node_label_collision() -> int:
 
 
 def check_graded_judge() -> int:
-    """등급형 판정 — 답한다 · 전제를 밝히고 답한다 · 되묻는다 · 없다 (§5 · gap 30).
+    """등급형 판정 — 답한다 · 전제를 밝히고 답한다 · 되묻는다 · 없다 (§5 · 지워진 gap 39).
 
     판정의 출력이 「되물을까/말까」 둘이던 동안 §5 의 나머지 두 결론은 **출력을 갖지
     못했다**: 판정자가 갈래를 알아내고도 그 사실이 작성자에게 건너가지 않았고(전제),
@@ -5967,7 +5967,7 @@ def check_graded_judge() -> int:
 
     # ⑪ 게이트가 갈래를 **남긴 후보 위에서** 찾는지. 이 지시가 「빼려는 후보들이 서로
     #    갈래면」이던 동안 갈래 절은 «뺄 후보가 있는 턴»에만 읽혔고, 실측 11턴 내내
-    #    `branches` 가 한 번도 안 찍혔다(gap 34). 갈래가 걸리는 질문일수록 갈래마다 답이
+    #    `branches` 가 한 번도 안 찍혔다(gap 40). 갈래가 걸리는 질문일수록 갈래마다 답이
     #    되는 카드가 전부 맞는 카드라 하나도 안 빠지기 때문이다 — 장치가 붙어 있는데
     #    입력이 영원히 비는 형태라, 되묻기가 잘 되는 동안 아무도 눈치채지 못한다.
     #    문구를 재는 테스트인 이유는 **여기서 갈래가 생기지 않으면 아래 배선이 전부 죽은
@@ -5982,7 +5982,7 @@ def check_graded_judge() -> int:
 
 
 def check_tool_axes() -> int:
-    """`pitch` 와 `playbook` 의 설명이 «무엇으로 찾나»로 갈리는가 (gap 35).
+    """`pitch` 와 `playbook` 의 설명이 «무엇으로 찾나»로 갈리는가 (gap 41).
 
     도구 설명은 계획 LLM 이 읽는 **유일한** 판단 재료다(`tools.catalog`). 둘 다 「반론」을
     말하고 축을 말하지 않던 동안, 고객 화면이 열린 턴의 반론 질문이 통째로 `playbook` 으로
@@ -5995,7 +5995,7 @@ def check_tool_axes() -> int:
     """
     from pension_agent.consult_agent.state import KB
     ok = 0
-    print("\n[도구 설명 — pitch 와 playbook 이 «무엇으로 찾나»로 갈린다 (gap 35)]")
+    print("\n[도구 설명 — pitch 와 playbook 이 «무엇으로 찾나»로 갈린다 (gap 41)]")
 
     pitch, playbook = tools.TOOLS["pitch"].desc, tools.TOOLS["playbook"].desc
 

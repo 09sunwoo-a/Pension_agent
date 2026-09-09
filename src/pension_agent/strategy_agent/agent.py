@@ -594,7 +594,7 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
 # 브리핑 화면과, 그 화면을 보며 묻는 직원에게 답하는 대화형(consult_agent 의 `customer`
 # 도구가 sentence·insight 를 재료에 그대로 싣는다). 각자 따로 생성하면 화면에 뜬 문장과
 # 대화가 인용하는 문장이 갈리고, 그건 "화면에 저렇게 써 있는데 왜 다르게 말하느냐"가 된다
-# (consult_agent/CLAUDE.md §3 «화면에 뜬 것과 다른 값을 말하지 않는다» · 지워진 gap 25).
+# (consult_agent/CLAUDE.md §3 «화면에 뜬 것과 다른 값을 말하지 않는다» · 지워진 gap 38).
 #
 # 부수 효과가 지연이다. 브리핑 한 편은 순차 LLM 호출 11 회인데 대화형은 고객 질문마다 그걸
 # 새로 돌리고 있었다 — "이 고객 평가금액 얼마야" 한 마디가 순차 14 회였다(route·plan·
