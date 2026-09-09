@@ -16,8 +16,11 @@
 cd src
 pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 (Python 3.10)
                                      #   fastapi · uvicorn · python-dotenv · langgraph==0.4.8
-pip install -r requirements-dev.txt  # + Streamlit 화면 · xlsx 변환기 · 사외 프로바이더 (개발용)
+pip install streamlit pandas anthropic openpyxl   # 개발용 — Streamlit 화면 · 사외 프로바이더 · xlsx 변환기
 ```
+
+개발용 패키지 목록과 외부망 Dockerfile 은 저장소에 넣지 않는다(`requirements-dev.txt` ·
+`Dockerfile.local` — `.gitignore`). 각자 로컬에 둔다.
 
 행내에서 공개 PyPI 가 막혀 있으면 Nexus 를 지정한다.
 
@@ -172,8 +175,7 @@ git add briefing_cache && git commit          # 커밋 전에 읽는다 — 그 
 ## 6. 배포
 
 ```bash
-docker build -f Dockerfile -t pension-agent .               # 내부망 (STG 기준 · PRD 는 주석 줄로 교체)
-docker build -f Dockerfile.local -t pension-agent:local .   # 외부망 로컬 빌드
+docker build -f Dockerfile -t pension-agent .   # 내부망 (STG 기준 · PRD 는 주석 줄로 교체)
 ```
 
 이미지가 COPY 하는 설정 파일은 `.env` 하나다 — 없으면 빌드가 실패한다. 배포용 `.env` 를
