@@ -23,12 +23,12 @@ CA · CAD · CADR 준비됐습니다. 인자 규약은 셋 다 같습니다.
   $CA -c 198734-1205842                                REPL (고객 화면이 열린 상태)
   $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  멀티턴을 한 줄로 (맥락 이어서)
 
-  $CAD --debug "세액공제 한도가 얼마야?"                + 「무엇을 찾아봤나 → LLM 이 썼다」
+  $CAD --debug "세액공제 한도가 얼마야?"                + 전체 트레이스 (어디서 갈렸나)
   $CAD --debug --show-llm ...                          + 폐기된 생성문까지 (왜 잘렸나)
-  $CAD --list                                          시나리오 목록 (LLM 키 없이)
+  $CAD --list                                          캔드 시나리오 목록 (LLM 키 없이)
 
-  $CADR                                                검토 10케이스 + 요약표
-  $CADR --demo --debug                                 시연 대본 13턴 리허설
+  $CADR                                                검토 11케이스 + 요약표
+  $CADR demo --why                                     시연 대본 16턴 리허설 ($CADR --help)
 
 어느 .env 가 읽혔는지:  python -m pension_agent.env
 USAGE

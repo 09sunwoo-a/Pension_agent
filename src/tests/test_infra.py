@@ -61,6 +61,22 @@ check(len(summary) == 2, "session_store: summarize_for_briefing 최신순 2건",
 empty_summary = session_store.summarize_for_briefing("NO_SUCH_CUSTOMER")
 check(empty_summary == [], "session_store: 없는 고객은 빈 목록(에러 아님)")
 
+# UTF-8 로 쓸 수 없는 문자가 섞여도 기록은 남는다 — 행내 터미널(로케일 비 UTF-8)에서
+# 백스페이스가 한글 한 글자 중 1바이트만 지우면 남은 2바이트가 surrogateescape 로 들어와
+# `input()` 은 성공하고 파일 쓰기에서 죽었다(2026-09-08 실측 — 답변까지 만든 턴이 통째로).
+_broken = "이 고객 왜 타겟".encode("utf-8")[:-1].decode("utf-8", "surrogateescape") + " 이야?"
+check(session_store.scrub_text(_broken) == "이 고객 왜 타 이야?",
+      "session_store.scrub_text: 반쪽 바이트(서로게이트)를 지운다", repr(session_store.scrub_text(_broken)))
+try:
+    session_store.append_turn("TEST01", "sess-c", {"role": "user", "text": _broken})
+    _saved_ok = True
+except UnicodeEncodeError:
+    _saved_ok = False
+check(_saved_ok, "session_store: 서로게이트가 섞인 텍스트로도 저장이 죽지 않는다")
+_sess_c = next(s for s in session_store.list_sessions("TEST01") if s["session_id"] == "sess-c")
+check(_sess_c["turns"][0]["text"] == "이 고객 왜 타 이야?",
+      "session_store: 저장 뒤 다시 읽힌다(깨진 바이트만 빠진다)", repr(_sess_c["turns"][0]["text"]))
+
 _clean_session_data()
 
 
@@ -129,12 +145,12 @@ check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임�
 
 
 # ─────────────────────────────────────────────────────────────
-# env — 실행 환경(프로파일) 선택 · 값의 우선순위 (env.py 머리말 ①~④)
+# env — 값의 우선순위 · 실행 단계 (env.py 머리말)
 #
-# 환경이 셋(행내·로컬·aiden)이라 파일을 환경마다 하나씩 두고 env.py 가 고른다. 고정하는 것:
-#   · 실제 환경변수 PENSION_ENV > .env 의 PENSION_ENV= 줄 > 프로파일 파일이 하나뿐이면 그것
-#   · 여럿 있고 지정이 없으면 고르지 않는다(짐작하지 않는다)
-#   · 값은 실제 환경변수 > .env.<프로파일> > .env — 프로파일이 공통을 덮는다
+# 파일은 src/.env 하나다. 고정하는 것:
+#   · 실제 환경변수 > LLM_DOTENV 로 지정한 파일 > .env — 운영이 주입한 값을 파일이 뒤엎지 않는다
+#   · ENV_PATH 가 serving 이면 …_SERV, 그 외 전부 …_TRNN — 플랫폼 가이드의 분기 그대로
+#   · 단계별 값이 없으면 접미사 없는 이름이 폴백(Gateway·사외)
 # ─────────────────────────────────────────────────────────────
 
 import os  # noqa: E402
@@ -142,7 +158,8 @@ import tempfile  # noqa: E402
 
 from pension_agent import env as _env  # noqa: E402
 
-_ENV_KEYS = ("PENSION_ENV", "LLM_PROVIDER", "LLM_MODEL", "LLM_DOTENV", "PENSION_TEST_MARK")
+_ENV_KEYS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_DOTENV", "PENSION_TEST_MARK", "ENV_PATH",
+             "LLM_BASE_URL", "LLM_BASE_URL_TRNN", "LLM_BASE_URL_SERV", "LLM_API_KEY", "LLM_API_KEY_SERV")
 _saved_profile_env = {k: os.environ.get(k) for k in _ENV_KEYS}
 
 
@@ -154,64 +171,50 @@ def _clear_env():
 try:
     with tempfile.TemporaryDirectory() as _td:
         _root = Path(_td)
-        _clear_env()
-        _env.load(force=True, root=_root)
-        check(_env.active()["profile"] is None and _env.active()["files"] == [],
-              "env: 파일이 하나도 없으면 프로파일 없음·읽은 파일 없음", str(_env.active()))
-
-        # ③ 프로파일 파일이 하나뿐이면 지정 없이 그것이 잡힌다 (행내 머신에 .env.bank 만 두는 경우)
-        (_root / ".env.bank").write_text("LLM_PROVIDER=genai\nLLM_MODEL=bank-model\n", encoding="utf-8")
-        (_root / ".env.bank.example").write_text("LLM_PROVIDER=xxx\n", encoding="utf-8")   # 견본은 세지 않는다
-        _clear_env()
-        _env.load(force=True, root=_root)
-        check(_env.active()["profile"] == "bank" and os.environ.get("LLM_PROVIDER") == "genai",
-              "env: 프로파일 파일이 하나뿐이면 그것이 잡힌다(견본 .example 은 세지 않는다)", str(_env.active()))
-        check(os.environ.get("PENSION_ENV") == "bank", "env: 잡힌 프로파일 이름을 PENSION_ENV 로 남긴다")
-
-        # 여럿 있고 지정이 없으면 고르지 않는다
-        (_root / ".env.local").write_text("LLM_PROVIDER=anthropic\n", encoding="utf-8")
-        _clear_env()
-        _env.load(force=True, root=_root)
-        check(_env.active()["profile"] is None and "LLM_PROVIDER" not in os.environ,
-              "env: 프로파일 파일이 여럿인데 지정이 없으면 고르지 않는다", _env.active()["how"])
-
-        # ② .env 의 PENSION_ENV= 줄이 기본을 정한다. 프로파일 값이 공통 값을 덮는다.
-        (_root / ".env").write_text("PENSION_ENV=local\nLLM_MODEL=common-model\nPENSION_TEST_MARK=shared\n",
+        (_root / ".env").write_text("LLM_PROVIDER=genai\nLLM_MODEL=file-model\nPENSION_TEST_MARK=shared\n",
                                     encoding="utf-8")
-        (_root / ".env.local").write_text("LLM_PROVIDER=anthropic\nLLM_MODEL=local-model\n", encoding="utf-8")
         _clear_env()
-        _env.load(force=True, root=_root)
-        check(_env.active()["profile"] == "local" and os.environ.get("LLM_PROVIDER") == "anthropic",
-              "env: .env 의 PENSION_ENV= 줄로 기본 프로파일을 고정한다", str(_env.active()))
-        check(os.environ.get("LLM_MODEL") == "local-model", "env: 같은 키는 프로파일 파일이 공통 파일을 덮는다",
-              os.environ.get("LLM_MODEL"))
-        check(os.environ.get("PENSION_TEST_MARK") == "shared", "env: 공통 파일의 나머지 값은 그대로 들어온다")
+        _env.load(root=_root)
+        check(os.environ.get("LLM_PROVIDER") == "genai" and os.environ.get("PENSION_TEST_MARK") == "shared",
+              "env: src/.env 를 읽는다")
 
-        # ① 실제 환경변수 PENSION_ENV 가 .env 의 줄보다 앞선다 (잠깐 바꿔 돌릴 때)
+        # LLM_DOTENV 로 지정한 파일이 .env 보다 앞선다 (다른 설정을 잠깐 쓸 때)
+        (_root / "other.env").write_text("LLM_MODEL=other-model\n", encoding="utf-8")
         _clear_env()
-        os.environ["PENSION_ENV"] = "bank"
-        _env.load(force=True, root=_root)
-        check(_env.active()["profile"] == "bank" and os.environ.get("LLM_MODEL") == "bank-model",
-              "env: 실제 환경변수 PENSION_ENV 가 .env 의 줄보다 앞선다", str(_env.active()))
+        os.environ["LLM_DOTENV"] = str(_root / "other.env")
+        _env.load(root=_root)
+        check(os.environ.get("LLM_MODEL") == "other-model" and os.environ.get("LLM_PROVIDER") == "genai",
+              "env: LLM_DOTENV 파일이 .env 를 덮되, 없는 키는 .env 에서 온다")
 
         # 실제 환경변수는 어느 파일도 덮지 못한다
         _clear_env()
         os.environ["LLM_MODEL"] = "from-shell"
-        _env.load(force=True, root=_root)
+        _env.load(root=_root)
         check(os.environ.get("LLM_MODEL") == "from-shell", "env: 실제 환경변수는 파일이 덮지 못한다")
 
-        # 지정한 프로파일 파일이 없으면 그 사실을 남긴다(조용히 넘어가지 않는다)
+        # 실행 단계(ENV_PATH) — 행내 .env 하나에 URL 이 두 벌(…/trnn/… · …/serv/…) 있고
+        # 어느 것을 읽을지는 이 변수가 정한다. 워크스페이스에는 없으니 분석계, 배포 때는
+        # Jenkins 가 실제 환경변수로 serving 을 넣는다. 파일 경로로 잘못 읽던 때가 있었다.
         _clear_env()
-        os.environ["PENSION_ENV"] = "aiden"
-        _env.load(force=True, root=_root)
-        check("파일이 없다" in _env.active()["how"], "env: 지정한 프로파일 파일이 없으면 그 사실을 남긴다",
-              _env.active()["how"])
+        os.environ.update({"LLM_BASE_URL_TRNN": "https://h/trnn/m", "LLM_BASE_URL_SERV": "https://h/serv/m",
+                           "LLM_API_KEY": "k-common", "LLM_API_KEY_SERV": "k-serv"})
+        check(_env.suffix() == "TRNN", "env: ENV_PATH 가 없으면 분석계(TRNN)", _env.suffix())
+        check(_env.staged("LLM_BASE_URL") == "https://h/trnn/m", "env: 분석계면 …/trnn/… URL 을 읽는다")
+        check(_env.staged("LLM_API_KEY") == "k-common", "env: 단계별 키가 없으면 접미사 없는 키로 폴백")
+        os.environ["ENV_PATH"] = "serving"
+        check(_env.staged("LLM_BASE_URL") == "https://h/serv/m", "env: serving 이면 …/serv/… URL 을 읽는다")
+        check(_env.staged("LLM_API_KEY") == "k-serv", "env: serving 이면 serving 키를 읽는다")
+        os.environ["ENV_PATH"] = "dev"
+        check(_env.suffix() == "TRNN", "env: serving 이 아닌 값(dev 등)은 전부 분석계 — 가이드의 else 분기")
+        _clear_env()
+        os.environ["LLM_BASE_URL"] = "https://one"
+        check(_env.staged("LLM_BASE_URL") == "https://one", "env: 단계별 URL 이 없으면 하나짜리 LLM_BASE_URL(Gateway·사외)")
 finally:
     _clear_env()
     for _k, _v in _saved_profile_env.items():
         if _v is not None:
             os.environ[_k] = _v
-    _env.load(force=True)
+    _env.load()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -552,12 +555,14 @@ _real_sleep = _llm.time.sleep
 _llm.time.sleep = _sleeps.append
 
 
-def _http_error(code: int, headers: dict | None = None) -> urllib.error.HTTPError:
+def _http_error(code: int, headers: dict | None = None,
+                body: bytes = b"") -> urllib.error.HTTPError:
     import email.message
     msg = email.message.Message()
     for k, v in (headers or {}).items():
         msg[k] = v
-    return urllib.error.HTTPError("http://fake", code, "err", msg, io.BytesIO(b""))
+    return urllib.error.HTTPError("http://fake/chat/completions", code, "err", msg,
+                                  io.BytesIO(body))
 
 
 class _FakeResp:
@@ -586,16 +591,46 @@ try:
     check(len(_sleeps) == 2 and all(0.9 < w <= 1.0 for w in _sleeps),
           "llm: Retry-After 초만큼 기다린다", str(_sleeps))
 
+    # 서버가 준 Retry-After 는 **추측 백오프의 상한(30초)에 걸리지 않는다.** 행내 실측
+    # (2026-09-08): 50초를 30초에서 끊자 다음 시도가 같은 429 를 맞고 20초를 더 쉬었다 —
+    # 쉬는 시간은 같은데 재시도 횟수 하나가 헛되이 나갔다.
     calls["n"], _sleeps[:] = 0, []
+    _llm._next_free = 0.0
+
+    def _urlopen_429_long(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(429, {"Retry-After": "50"})
+        return _FakeResp()
+
+    _llm.urllib.request.urlopen = _urlopen_429_long
+    _llm.generate("q")
+    check(len(_sleeps) == 1 and 49.0 < _sleeps[0] <= 50.0,
+          "llm: 서버 Retry-After 는 추측 상한(30초)에 걸리지 않고 그대로 쉰다", str(_sleeps))
+    # 그래도 터무니없는 값은 끊는다 — 상한은 서버 값 전용(MAX_RETRY_AFTER)이다.
+    _wait, _told = _llm._backoff(_http_error(429, {"Retry-After": "9999"}), 0)
+    check(_told and _wait == _llm.MAX_RETRY_AFTER,
+          "llm: Retry-After 가 터무니없이 크면 MAX_RETRY_AFTER 에서 끊는다", f"{_wait}")
+    _wait, _told = _llm._backoff(_http_error(429), 10)
+    check(not _told and _wait <= _llm.MAX_BACKOFF,
+          "llm: Retry-After 가 없으면 추측 백오프이고 MAX_BACKOFF 를 넘지 않는다", f"{_wait}")
+
+    calls["n"], _sleeps[:] = 0, []
+    _llm._next_free = 0.0
     _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
         _http_error(429))
     try:
         _llm.generate("q")
         _raised = None
+        _raised_exc = None
     except _llm.LLMError as exc:
         _raised = str(exc)
+        _raised_exc = exc
     check(_raised is not None and "429" in _raised,
           "llm: 계속 429 면 상한에서 멈추고 LLMError 로 올린다", str(_raised))
+    # 호출부가 «속도 제한»을 문자열 검색 없이 가르는 자리 — prebuild_briefings 가 429 면 멈춘다.
+    check(getattr(_raised_exc, "status", None) == 429,
+          "llm: LLMError 가 HTTP 상태 코드를 싣는다(status)", str(getattr(_raised_exc, "status", None)))
 
     # 5xx 는 재시도한다 — 두 번 죽고 세 번째에 살아나는 서버를 흉내 낸다.
     calls["n"], _sleeps[:] = 0, []
@@ -638,6 +673,33 @@ try:
         pass
     check(calls["n"] == 1, "llm: 4xx(요청이 잘못된 에러)는 재시도하지 않는다", f"calls={calls['n']}")
 
+    # 무엇이 잘못됐는지는 **응답 본문에만** 있다. 404 는 「경로가 없다」와 「그런 모델이
+    # 없다」가 같은 코드로 오는데, 예전에는 본문을 버려서 `HTTP Error 404: Not Found`
+    # 한 줄만 남았다 — 행내 첫 연결에서 이 한 줄로는 어느 쪽인지 갈리지 않았다.
+    _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+        _http_error(404, body=b'{"error": {"code": "model_not_found"}}'))
+    try:
+        _llm.generate("q")
+        _raised = None
+    except _llm.LLMError as exc:
+        _raised = str(exc)
+    check(_raised is not None and "model_not_found" in _raised
+          and "/chat/completions" in _raised,
+          "llm: HTTP 오류는 응답 본문과 부른 URL 을 함께 올린다", str(_raised))
+
+    # 재시도를 다 쓴 경우에도 마지막 본문이 남는다(본문은 한 번만 읽을 수 있다).
+    _sleeps[:] = []
+    _llm._next_free = 0.0
+    _llm.urllib.request.urlopen = lambda req, timeout=None: (_ for _ in ()).throw(
+        _http_error(429, body=b"quota exceeded for this key"))
+    try:
+        _llm.generate("q")
+        _raised = None
+    except _llm.LLMError as exc:
+        _raised = str(exc)
+    check(_raised is not None and "quota exceeded" in _raised,
+          "llm: 재시도를 다 써도 마지막 응답 본문이 남는다", str(_raised))
+
     # x-client-user — 호출부가 준 주체가 실제 헤더로 나가는가.
     _llm._next_free = 0.0
     _seen: dict = {}
@@ -656,6 +718,37 @@ try:
     check(_seen.get("X-client-user") == _llm.DEFAULT_CLIENT_USER,
           "llm: 주체를 주지 않으면 기본값으로 나간다(빈 값 금지)",
           str(_seen.get("X-client-user")))
+
+    # 쿼터 버킷 분산 — x-client-user 가 게이트웨이의 쿼터 버킷이라, 사번 하나로 몰아서
+    # 부르면 그 버킷이 바닥난다(STG 분당 10회). 사번 뒤에 임의 접미를 붙여 나누되
+    # **사번은 앞에 그대로 남는다** — 이 값은 버킷이면서 감사 기록이라 누가 불렀는지가
+    # 사라지면 안 된다.
+    _saved_spread, _llm.CLIENT_USER_SPREAD = _llm.CLIENT_USER_SPREAD, 5
+    try:
+        check(_llm.spread_client_user("3902172") != _llm.spread_client_user("3902172"),
+              "llm: 접미는 호출마다 새로 뽑는다(한 프로세스가 순차로 돌아도 나뉜다)")
+        _bucket = _llm.spread_client_user("3902172")
+        check(_bucket.startswith("3902172-") and len(_bucket) == len("3902172-") + 5,
+              "llm: 사번은 앞에 그대로 남고 접미만 붙는다(감사 기록이 사라지지 않는다)",
+              _bucket)
+        # main.py 는 x_client_user 를 직접 넘긴다 — 그 경로가 빠지면 실서비스만 안 나뉜다.
+        _seen.clear()
+        _llm.generate("q", x_client_user="3902172")
+        check(str(_seen.get("X-client-user", "")).startswith("3902172-"),
+              "llm: 호출부가 직접 준 주체에도 분산이 걸린다(API 경로가 빠지지 않는다)",
+              str(_seen.get("X-client-user")))
+        # 관측에도 헤더와 **같은** 값이 실려야 한다 — 갈리면 대시보드에서 되짚을 수 없다.
+        _seen.clear()
+        with _llm.client_user("emp-0417"):
+            _llm.generate("q")
+        check(str(_seen.get("X-client-user", "")).startswith("emp-0417-"),
+              "llm: client_user() 로 감싼 주체에도 분산이 걸린다",
+              str(_seen.get("X-client-user")))
+    finally:
+        _llm.CLIENT_USER_SPREAD = _saved_spread
+    check(_llm.spread_client_user("3902172") == "3902172",
+          "llm: 기본은 꺼짐 — 감사 기록의 모양을 조용히 바꾸지 않는다",
+          _llm.spread_client_user("3902172"))
 
     # ② 동시성 상한 — 동시에 열려 있는 호출이 MAX_CONCURRENCY 를 넘지 않는가.
     _llm._next_free = 0.0

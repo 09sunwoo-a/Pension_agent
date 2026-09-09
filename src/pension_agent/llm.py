@@ -16,23 +16,30 @@
            LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
            없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
 
-━━ 실행 환경(프로파일) ━━
-환경이 셋이다 — 행내(genai) · 로컬(anthropic) · aiden(OpenAI 호환 게이트웨이의 Sonnet, genai
-경로). 환경마다 `src/.env.<이름>`
-한 파일이고 `env.py` 가 고른다(PENSION_ENV, 또는 파일이 하나뿐이면 그것). 어느 환경이
-잡혔는지는 `python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
+━━ 설정 파일 ━━
+`src/.env` 하나다 — 행내 워크스페이스·배포 이미지·사외 개발 PC 모두. 환경에 따라 내용이
+다를 뿐이다(.env.example 의 구역 ①②③). 어느 파일·단계가 잡혔는지는
+`python -m pension_agent.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
 
 ━━ 환경변수 ━━
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
-  LLM_BASE_URL      genai 엔드포인트 (/v1 등 경로 접미사 없이 호스트까지)
-  LLM_API_KEY       genai 인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용)
+  ENV_PATH          실행 단계. 배포 때 Jenkins 가 serving 을 넣는다 — 손으로 설정하지 않는다.
+                    없으면(워크스페이스) 분석계. 플랫폼 규약
+  LLM_BASE_URL_TRNN / _SERV
+                    행내 GenAI 플랫폼 URL 두 벌(…/trnn/… · …/serv/…). ENV_PATH 로 고른다
+  LLM_BASE_URL      단계 구분이 없을 때의 하나짜리(Gateway·사외). 단계별 값이 없으면 이것
+  LLM_API_KEY       인증 키 (Authorization Bearer + kb-key 헤더에 동일 사용).
+                    단계마다 다르면 LLM_API_KEY_TRNN / _SERV 으로 갈라 둘 수 있다
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
+  LLM_CLIENT_USER_SPREAD  사번 뒤에 붙일 임의 접미의 길이. 0(기본)이면 안 붙인다.
+                    한 사번의 쿼터 버킷이 바닥날 때 여러 버킷으로 나눈다 — 「쿼터 버킷 분산」
   LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
   LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
   LLM_COOLDOWN      429·5xx 를 맞은 뒤 프로세스 전체가 쉬는 시간의 기준값(초). 기본 2
+                    (서버가 Retry-After 를 주면 그 값이 이긴다 — MAX_RETRY_AFTER 주석)
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
   GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
@@ -58,6 +65,7 @@ import json
 import logging
 import os
 import random
+import string
 import threading
 import time
 import urllib.error
@@ -73,8 +81,16 @@ from pension_agent import env, observability
 # 파싱은 env.py 가 한다(관측 설정도 같은 파일에서 와야 하므로 아래층으로 내렸다).
 env.load()
 
+# ── genai (사내 플랫폼) — 값은 실행 단계(ENV_PATH: train | serving)에 따라 고른다 ──
+# 행내 .env 하나에 URL 이 두 벌 있다(…/trnn/… 과 …/serv/…). 워크스페이스는 train,
+# 배포 컨테이너는 플랫폼이 serving 을 넣어 준다. 어느 것을 읽었는지는 /health 와
+# `python -m pension_agent.env` 가 보여준다(STAGE).
+STAGE = env.stage()
+BASE_URL = env.staged("LLM_BASE_URL").rstrip("/")
+API_KEY = env.staged("LLM_API_KEY")
+
 PROVIDER = os.getenv("LLM_PROVIDER") or (
-    "genai" if os.getenv("LLM_BASE_URL")
+    "genai" if BASE_URL
     else "gemma" if os.getenv("GEMINI_API_KEY")
     else "anthropic"
 )
@@ -82,9 +98,22 @@ PROVIDER = os.getenv("LLM_PROVIDER") or (
 #: max_tokens 를 넘기지 않은 호출의 기본치. 브리핑 문장 한 편 분량.
 DEFAULT_MAX_TOKENS = 900
 
-# ── genai (사내 플랫폼) ──
-BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
-API_KEY = os.getenv("LLM_API_KEY", "")
+#: 모델 슬러그. **비우면 payload 에서 `model` 키를 아예 뺀다** — 그것이 기본이다.
+#:
+#: 규격 문서 셋이 여기서 갈린다(저장소 루트 skills/genai-platform-agent-dev/). SKILL.md 는
+#: LLM_MODEL 을 「필수」로 적고 예시 슬러그(claude-sonnet-4-6)까지 주는데,
+#: refs/genai-platform.md 는 「생략이 기본값 — 게이트웨이가 라우팅한다」고 적고 코드
+#: 예제에서 model 을 주석 처리해 둔다. 어긋난 것이 아니라
+#: **엔드포인트가 모델을 고르는 방식이 둘**이기 때문이다:
+#:
+#:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이
+#:                         라우팅 키다. 채워야 한다(.env.example 의 구역 ②).
+#:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(…/trnn/gemma-4 · …/serv/gemma-4) → body 에
+#:                         model 을 함께 실으면 **404** 다(2026-09-08 행내 실측).
+#:
+#: 그래서 이 값의 정답은 «플랫폼별»이고, 코드는 둘 다 받는다 — 판단은 .env 가 한다.
+#: 콘솔이 모델 이름을 알려주더라도 그것은 «무엇이 서빙되는지»의 표시이지 body 에 실을
+#: 값이라는 뜻은 아니다. 그 혼동이 행내 첫 연결을 404 로 막았다.
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 #: 429·5xx 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
@@ -116,8 +145,14 @@ MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
 MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
 #: 서버가 Retry-After 를 안 줄 때 쓰는 지수 백오프의 기준값(초).
 COOLDOWN = float(os.getenv("LLM_COOLDOWN", "2"))
-#: 한 번에 쉬는 최대 시간(초). Retry-After 가 터무니없이 커도 여기서 끊는다.
+#: **우리가 추측한** 백오프의 상한(초). 서버가 회복 시각을 안 알려줄 때만 쓰는 값이다.
 MAX_BACKOFF = 30.0
+#: **서버가 알려준** Retry-After 의 상한(초). 추측 상한과 갈라 둔 이유는 행내 실측이다
+#: (2026-09-08 · prebuild_briefings): 게이트웨이의 Retry-After 를 30초에서 끊었더니
+#: «30.0초 감속 → 다시 429 → 20.0초 감속» 으로 한 번 쉴 것을 두 번에 나눠 쉬고, 그 사이
+#: 재시도 횟수(RETRY_ATTEMPTS) 하나를 헛되이 썼다. 서버가 50초라고 하면 50초를 쉬는 것이
+#: 맞다 — 그보다 일찍 가면 같은 답(429)만 돌아온다. 이 값은 «터무니없는 값»만 거른다.
+MAX_RETRY_AFTER = 120.0
 
 _SLOTS = threading.BoundedSemaphore(MAX_CONCURRENCY)
 _PACE_LOCK = threading.Lock()
@@ -197,6 +232,41 @@ def current_client_user() -> str:
     """지금 유효한 x-client-user. 명시 인자 > ContextVar > 환경변수 기본값."""
     return _CLIENT_USER.get() or DEFAULT_CLIENT_USER
 
+
+# ── 쿼터 버킷 분산 ────────────────────────────────────────────────────────────
+#
+# x-client-user 가 게이트웨이의 쿼터 버킷이라(위 주석), 한 직원 사번으로 몰아서 부르면
+# 그 버킷 하나가 바닥난다. STG 는 분당 10회인데 브리핑 한 편이 그것만으로 한도를 넘고
+# (.env.example), 12명 선생성이면 사번 하나로 144회다. 사번 뒤에 임의 접미를 붙여 한
+# 사람의 호출을 여러 버킷으로 나눈다.
+#
+# **사번은 그대로 앞에 남긴다.** 이 값은 쿼터 버킷이면서 동시에 감사 기록이라,
+# 익명화하면(예전 "anonymous") 누가 불렀는지가 사라진다. 접미만 갈리므로 «누가»는
+# 그대로 읽히고 «어느 버킷»만 나뉜다.
+#
+# **기본은 꺼짐이다.** 감사 기록의 모양을 바꾸는 설정이라 조용히 켜지면 안 되고,
+# 배포 컨테이너(serving)까지 따라가면 곤란하다 — 켜는 것은 .env 가 정한다.
+# 그리고 **버킷이 x-client-user 로 갈릴 때만 듣는다** — 게이트웨이가 API 키 단위나
+# 전체 단위로 재고 있으면 접미를 붙여도 아무것도 달라지지 않는다.
+
+#: 사번 뒤에 붙일 임의 접미의 길이. 0 이면 안 붙인다(기본).
+CLIENT_USER_SPREAD = max(0, int(os.getenv("LLM_CLIENT_USER_SPREAD", "0") or 0))
+#: 접미에 쓰는 글자. 사번과 섞이지 않게 하이픈으로 잇는다.
+_SPREAD_ALPHABET = string.ascii_letters + string.digits
+
+
+def spread_client_user(base: str) -> str:
+    """쿼터 버킷을 나눈 x-client-user. 꺼져 있으면 base 를 그대로 돌려준다.
+
+    호출 **한 건마다** 새로 뽑는다. 프로세스나 턴 단위로 고정하면 선생성처럼 한
+    프로세스가 순차로 도는 자리에서는 버킷이 하나뿐이라 아무것도 나뉘지 않는다 —
+    그 자리가 바로 이것이 필요한 자리다.
+    """
+    if CLIENT_USER_SPREAD <= 0 or not base:
+        return base
+    suffix = "".join(random.choice(_SPREAD_ALPHABET) for _ in range(CLIENT_USER_SPREAD))
+    return f"{base}-{suffix}"
+
 # ── gemma (외부 사전점검) ──
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
 GEMMA_ENDPOINT = (
@@ -222,7 +292,16 @@ class LLMError(RuntimeError):
     LLM 장애가 같이 걸리면 "찾아봤는데 재료가 없다"는 답으로 나간다 — 있는 자료를
     없다고 말하는 셈이다(CLAUDE.md §11). 호출부는 이 예외를 재던지고, 턴은 'LLM 연결이
     안 되어 있다'는 한 가지 안내로 끝난다.
+
+    status: 원인이 HTTP 응답이면 그 상태 코드(429·500 …), 아니면 None. 호출부가 «속도
+    제한이라 조금 뒤에 다시 하면 되는 실패»와 나머지를 문자열 검색 없이 가르는 자리다 —
+    `scripts.prebuild_briefings` 가 429 를 만나면 다음 고객으로 넘어가지 않고 멈추는 데 쓴다
+    (넘어가 봐야 같은 429 를 재시도 횟수만큼 더 맞을 뿐이다).
     """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def available() -> bool:
@@ -305,19 +384,30 @@ def _post_json(req: urllib.request.Request) -> dict:
     쉬면 나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다(게이트 ③).
     """
     last: urllib.error.HTTPError | None = None
+    last_body = ""
     for attempt in range(RETRY_ATTEMPTS):
         try:
             with _gate(), urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
+            body = _error_body(exc)
             if not _retryable(exc.code):
-                raise
-            last = exc
+                # 요청이 잘못된 에러는 **무엇이** 잘못됐는지가 전부다. 예전에는 이 예외를
+                # 그대로 올려 `HTTPError: HTTP Error 404: Not Found` 한 줄만 남았는데,
+                # 404 는 «경로가 없다»와 «그런 모델이 없다»가 같은 코드로 온다 — 응답
+                # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
+                raise LLMError(
+                    f"HTTP {exc.code} {exc.reason} — {req.full_url}"
+                    + (f"\n응답: {body}" if body else ""), status=exc.code) from exc
+            last, last_body = exc, body
             if attempt == RETRY_ATTEMPTS - 1:
                 break
-            wait = _backoff(exc, attempt)
-            _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d)",
-                         exc.code, wait, attempt + 1, RETRY_ATTEMPTS)
+            wait, told = _backoff(exc, attempt)
+            # 서버가 준 값인지 우리 추측인지를 남긴다 — 「30.0초」가 서버 말인지 상한에 걸린
+            # 것인지 로그만 보고 갈려야 상한을 조정할 근거가 생긴다(MAX_RETRY_AFTER 주석).
+            _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
+                         exc.code, wait, attempt + 1, RETRY_ATTEMPTS,
+                         "서버 Retry-After" if told else "추정 백오프")
             _slow_down(wait)
     code = last.code if last else 0
     detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
@@ -325,7 +415,26 @@ def _post_json(req: urllib.request.Request) -> dict:
     raise LLMError(
         f"HTTP {code} — {RETRY_ATTEMPTS}회 시도 후에도 실패. {detail} "
         f"(동시 {MAX_CONCURRENCY} · 간격 {MIN_INTERVAL}초 — LLM_MAX_CONCURRENCY 를 낮추거나 "
-        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)") from last
+        f"LLM_MIN_INTERVAL_SEC 를 늘립니다.)"
+        + (f"\n응답: {last_body}" if last_body else ""), status=code or None) from last
+
+
+#: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
+ERROR_BODY_LIMIT = 400
+
+
+def _error_body(exc: urllib.error.HTTPError) -> str:
+    """오류 응답 본문 한 줄. 못 읽으면 빈 문자열 — 진단을 돕자고 다른 예외를 내지 않는다.
+
+    본문은 **한 번만** 읽을 수 있다(스트림). 재시도 경로와 최종 예외가 같은 것을 봐야 하므로
+    잡는 자리에서 바로 읽어 문자열로 들고 다닌다.
+    """
+    try:
+        raw = exc.read().decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — 본문을 못 읽는 것이 원래 오류를 가리면 안 된다
+        return ""
+    text = " ".join(raw.split())
+    return text[:ERROR_BODY_LIMIT] + ("…" if len(text) > ERROR_BODY_LIMIT else "")
 
 
 def _retryable(code: int) -> bool:
@@ -333,20 +442,21 @@ def _retryable(code: int) -> bool:
     return code == 429 or 500 <= code < 600
 
 
-def _backoff(exc: urllib.error.HTTPError, attempt: int) -> float:
-    """다음 시도까지 프로세스 전체가 쉴 초.
+def _backoff(exc: urllib.error.HTTPError, attempt: int) -> tuple[float, bool]:
+    """다음 시도까지 프로세스 전체가 쉴 초와, 그 값이 서버가 알려준 것인지(True).
 
-    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_BACKOFF) — 서버가 아는
-    회복 시각을 우리가 추측으로 덮을 이유가 없다. 없으면 지수 백오프에 지터를 섞는다.
-    지터가 필요한 이유: 동시에 맞은 스레드들이 같은 시간을 기다리면 같은 순간에 한꺼번에
-    다시 몰려가 또 같이 맞는다.
+    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_RETRY_AFTER) — 서버가 아는
+    회복 시각을 우리가 추측으로 덮을 이유가 없고, 더 짧게 끊으면 다음 시도가 같은 429 를
+    맞아 재시도 횟수만 축난다(상한 상수 주석의 실측). 없으면 지수 백오프에 지터를 섞는다
+    (상한 MAX_BACKOFF). 지터가 필요한 이유: 동시에 맞은 스레드들이 같은 시간을 기다리면
+    같은 순간에 한꺼번에 다시 몰려가 또 같이 맞는다.
     """
     retry_after = (exc.headers.get("Retry-After") or "").strip() if exc.headers else ""
     try:
-        return min(float(retry_after), MAX_BACKOFF)
+        return min(float(retry_after), MAX_RETRY_AFTER), True
     except ValueError:
         pass
-    return min(COOLDOWN * (2 ** attempt) * (0.5 + random.random()), MAX_BACKOFF)
+    return min(COOLDOWN * (2 ** attempt) * (0.5 + random.random()), MAX_BACKOFF), False
 
 
 def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
@@ -437,7 +547,9 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
     """
     system = system or None   # "" 은 시스템 메시지 없음으로 본다(프로바이더가 빈 문자열을 싫어한다)
     # 헤더에도 관측 메타데이터에도 같은 값이 실려야 한다 — 여기서 한 번만 정한다.
-    x_client_user = x_client_user or current_client_user()
+    # 쿼터 버킷 분산은 **여기 한 곳**에서 건다 — main.py 는 x_client_user 를 직접 넘기므로
+    # current_client_user() 안에서만 붙이면 실서비스 경로가 통째로 빠진다.
+    x_client_user = spread_client_user(x_client_user or current_client_user())
     if not available():
         raise LLMError(
             "LLM 미설정 — PROVIDER=%s. genai 는 LLM_BASE_URL/LLM_API_KEY, "

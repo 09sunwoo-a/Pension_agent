@@ -1,7 +1,7 @@
 """HTTP 진입점(main.py) 회귀 테스트 — 플랫폼 I/O 스키마를 지키는가.
 
-행내 GenAI 플랫폼은 요청·응답 형태를 고정해 두었다(refs/genai-platform.md «API I/O
-스키마 (고정)»). 이 스키마가 어긋나면 에이전트가 아무리 잘 답해도 플랫폼이 못 읽는다 —
+행내 GenAI 플랫폼은 요청·응답 형태를 고정해 두었다(skills/genai-platform-agent-dev/refs/
+genai-platform.md «API I/O 스키마 (고정)»). 이 스키마가 어긋나면 에이전트가 아무리 잘 답해도 플랫폼이 못 읽는다 —
 그런데 그 사실은 **행내에 들고 가서야** 드러난다. 여기서 미리 잡는다.
 
   · input_value 는 JSON «문자열» 이고, 그 안에 message·x_client_user 가 있어야 한다
@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
+from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -28,8 +30,10 @@ if hasattr(sys.stdout, "reconfigure"):
 from fastapi.testclient import TestClient
 
 import main
+from pension_agent import config as _cfg
 from pension_agent import llm
 from pension_agent.consult_agent import render
+from pension_agent.strategy_agent import briefing_store
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -87,9 +91,49 @@ try:
           "/health 는 키 «설정 여부»만 내보내고 값은 내보내지 않는다", r.text[:120])
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
-    # 프로파일이 셋이라(bank·local·aiden) «어느 .env 가 읽혔나»가 진단의 첫 질문이다.
-    check("profile" in h["env"] and "files" in h["env"],
-          "/health 가 어느 .env 프로파일이 읽혔는지 보여준다", str(h.get("env")))
+    # 「.env 를 고쳤는데 먹었나」가 화면에서 끝나야 한다 — 안 먹은 것과 안 듣는 것은
+    # 처방이 정반대다(버킷을 나누는 설정이 그렇다).
+    check(h["rate_gate"].get("client_user_spread") == llm.CLIENT_USER_SPREAD,
+          "/health 가 쿼터 버킷 분산 설정을 보여준다", str(h.get("rate_gate")))
+    # «키를 넣었는데 왜 안 되나»의 첫 질문은 어느 파일이 읽혔나다.
+    check("exists" in h["env"], "/health 가 설정 파일 유무를 보여준다", str(h.get("env")))
+    # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는
+    # 사고를 여기서 바로 잡아야 한다.
+    check(h["llm"].get("stage") in ("train", "serving"),
+          "/health 가 어느 단계(ENV_PATH)의 URL 을 읽었는지 보여준다", str(h["llm"].get("stage")))
+
+    # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
+    # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
+    # 배포된 컨테이너에서 그 셋을 로그 없이 가르는 수단이 여기 말고 없다.
+    # 체크아웃에는 briefing_cache/ 가 있으므로(커밋한다) 여기서는 켜져 있는 것이 정상이다.
+    check(h["briefing_cache"]["enabled"] is True and h["briefing_cache"]["dir"].endswith(
+        "briefing_cache"), "/health: 저장소가 어디를 보고 있는지 말한다", str(h.get("briefing_cache")))
+    _saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
+    try:
+        # 디렉터리가 없으면 통째로 꺼진 것이다 — 그때는 지문 계산까지 가지 않는다.
+        _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir / "__none__"
+        off = client.get("/health").json()["briefing_cache"]
+        check(off["enabled"] is False and "stored" not in off,
+              "/health: 디렉터리가 없으면 꺼졌다고만 말한다(지문 계산도 안 한다)", str(off))
+    finally:
+        _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
+    with tempfile.TemporaryDirectory() as _tmp:
+        try:
+            _cfg.BRIEFING_CACHE_DIR = Path(_tmp)
+            # 한 건은 지금 지문, 한 건은 낡은 지문 — «있다»와 «읽힌다»는 다른 수다.
+            (Path(_tmp) / "now.json").write_text(json.dumps(
+                {"fingerprint": briefing_store.fingerprint(), "briefing": {}}), encoding="utf-8")
+            (Path(_tmp) / "old.json").write_text(json.dumps(
+                {"fingerprint": "어제만든것", "briefing": {}}), encoding="utf-8")
+            bc = client.get("/health").json()["briefing_cache"]
+            check(bc["enabled"] is True and bc["stored"] == 2 and bc["usable"] == 1,
+                  "/health: 저장된 건수와 «지금 지문으로 읽히는» 건수를 갈라 보여준다", str(bc))
+            # 파일시스템이 읽기전용이면 런타임 저장이 조용히 실패한다(save 가 예외를 삼킨다).
+            # 그러면 재기동할 때마다 고객당 LLM 11 회를 처음부터 다시 치른다.
+            check(bc["writable"] is True,
+                  "/health: 런타임 저장이 가능한지 보여준다", str(bc))
+        finally:
+            _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
 
     # 행내 첫 연결에서 실제로 걸린 자리 — 인증도 쿼터도 아니고 DNS 였다. LLM Gateway 의
     # base_url 은 *.svc.cluster.local 이라 그 쿠버네티스 클러스터 안에서만 풀리는데,

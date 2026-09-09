@@ -6,7 +6,7 @@ KB 통합 웹앱 파이프라인이 짜야 하는 호출 코드가 여기 있다
 경계가 셋으로 갈린다.
 
 - **배포 이미지에 안 들어간다.** `src/Dockerfile` 이 담는 것은 `main.py`·`pension_agent`·
-  `session_data` 뿐이다.
+  `session_data`·`briefing_cache` 뿐이다.
 - **`src/scripts/` 와 다른 부류다.** 그쪽은 에이전트가 자기 데이터를 만드는 내부
   도구고(`import_customers`·`build_kb`·`demo_status`), `src/` 에서 `python -m scripts.X`
   로 돈다. 여기는 임포트 루트에 얽매이지 않는다.
@@ -108,6 +108,10 @@ data: [DONE]
 - `/health` — 200 인가. 그리고 **LLM 엔드포인트 호스트가 이름이 풀리는가 · 키가 잡혔는가.**
   행내 첫 연결에서 실제로 걸린 자리가 인증도 쿼터도 아니고 DNS 였는데, 그 실패는 첫 대화
   턴에 가서야 「LLM 호출이 실패했습니다」로 나타나 원인이 안 보인다(`src/main.py` 주석).
+- **미리 만들어 둔 브리핑이 읽히는가**(`briefing_cache`). 여기는 실패가 전부 조용하다 —
+  한 건도 안 읽히면 고객 질문마다 순차 LLM 11회를 새로 치르는데, STG 는 분당 10회라 그
+  한 편이 한도를 넘는다(`src/README.md` §4·§5). **호출이 성공해도 배포는 성립하지 않는
+  자리**라, 화면의 «느리다»가 되기 전에 여기서 짚는다.
 - 잘못된 요청 넷이 **422** 인가 — `input_value` 가 JSON 문자열이 아닐 때 · 객체가 아닐 때 ·
   `message` 누락 · `x_client_user` 누락.
 - `--live` 면 SSE 규격까지 — 200 · `Content-Type` 이 `text/event-stream` ·

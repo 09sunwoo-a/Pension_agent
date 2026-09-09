@@ -372,7 +372,170 @@ def check_owned_products_are_quotable() -> None:
         check(not ok, f"다른 고객이 가진 상품 이름은 막힌다 ({alien})")
 
 
+# ─────────────────────────────────────────────────────────────
+# LLM 호출 실패 — 빈 브리핑을 파일 저장소에 남기지 않는다
+# ─────────────────────────────────────────────────────────────
+
+def _with_store(fn) -> None:
+    """임시 디렉터리로 파일 저장소를 켠 채 fn(tmp) 을 돌리고 전부 되돌린다."""
+    import pathlib
+    import shutil
+    import tempfile
+
+    from pension_agent import config
+
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="briefing-store-"))
+    saved_dir = config.BRIEFING_CACHE_DIR
+    saved_env = os.environ.get("PENSION_BRIEFING_CACHE")
+    config.BRIEFING_CACHE_DIR = tmp
+    os.environ["PENSION_BRIEFING_CACHE"] = "1"
+    try:
+        fn(tmp)
+    finally:
+        config.BRIEFING_CACHE_DIR = saved_dir
+        if saved_env is None:
+            os.environ.pop("PENSION_BRIEFING_CACHE", None)
+        else:
+            os.environ["PENSION_BRIEFING_CACHE"] = saved_env
+        A.clear_briefing_cache()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def check_call_failure_is_not_persisted() -> None:
+    """호출이 죽어서(429) 빈 섹션이 있는 브리핑은 파일로 남지 않는다.
+
+    회귀 대상(2026-09-08 행내 실측): prebuild_briefings 가 429 를 맞으며 만든 브리핑이
+    저장됐고, 다음 실행은 「이미 있음(지문 일치)」으로 건너뛰었다 — 빈 섹션은 시연 화면에서야
+    보인다. 대조군으로 «LLM 은 답했는데 코드가 거른» 브리핑은 저장한다 — 다시 불러도
+    같은 자리로 온다.
+    """
+    p = _BY_NAME["이준호"]
+
+    def run(tmp) -> None:
+        llm.available = lambda: True
+
+        def boom(*a, **k):
+            raise llm.LLMError("HTTP 429 — 5회 시도 후에도 실패. 속도 제한.", status=429)
+
+        llm.generate = boom
+        A.llm = llm
+        A.clear_briefing_cache()
+        out = A.propose(p)
+        failed = A.llm_failed(out)
+        check(bool(failed) and all(f["status"] == 429 for f in failed.values()),
+              "propose(): 호출이 죽은 섹션이 facts.llm_failed 에 HTTP 코드와 함께 남는다",
+              str(failed)[:120])
+        check(A.rate_limited(out), "rate_limited(): 429 를 알아본다")
+        check("sentence" in failed and out["sentence"] == "",
+              "propose(): 브리핑 문장 호출의 실패도 같은 자리에 남는다", str(sorted(failed)))
+        check(not list(tmp.glob("*.json")),
+              "propose(): 호출이 죽은 브리핑은 파일 저장소에 쓰지 않는다",
+              str(list(tmp.glob("*.json"))))
+
+        # 대조군 — LLM 이 답은 했고 코드가 거른 경우(파싱 실패)는 저장한다.
+        llm.generate = lambda *a, **k: "JSON 이 아닌 답"
+        A.clear_briefing_cache()
+        out2 = A.propose(p)
+        check(not A.llm_failed(out2) and bool(out2["facts"]["llm_skipped"]),
+              "propose(): 파싱 실패는 호출 실패가 아니다(llm_failed 비어 있음)",
+              str(A.llm_failed(out2))[:120])
+        check(len(list(tmp.glob("*.json"))) == 1,
+              "propose(): 파싱 실패 브리핑은 저장한다 — 다시 불러도 같은 자리로 온다")
+
+    _with_store(run)
+    _restore_llm()
+
+
+def check_llmless_briefing_is_not_persisted() -> None:
+    """LLM 을 안 부른 브리핑은 파일로 남지 않는다 — LLM 섹션이 통째로 빈 산출이다.
+
+    429 방어(`not llm_failed`)가 여기까지 덮지 못한다. 그 방어는 **호출이 죽은** 것을
+    보는데, 여기는 부르지 않은 것이다. 두 갈래가 있고 갈래마다 남는 흔적이 다르다.
+
+      · 키가 없다 — 섹션 대부분은 `llm.generate` 까지 가서 LLMError 를 받으므로
+        llm_failed 에 남는다. 즉 기존 방어가 이미 막는다. 다만 그건 «그 섹션까지 갔을
+        때»의 이야기고, 브리핑 문장처럼 `available()` 을 먼저 보고 부르지 않는 자리는
+        아무 흔적도 남기지 않는다 — 재료가 없어 지원 섹션이 전부 건너뛰어진 고객이면
+        llm_failed 가 빈 채로 저장될 수 있다.
+      · `use_llm=False` — 부르지 않기로 **정한** 것이라 llm_failed 가 확실히 비어 있다.
+        예전 방어를 그대로 통과해 저장됐다.
+
+    저장소를 커밋하기로 하면서(briefing_cache/) 이 자리가 위험해졌다. 키 없이 돌린
+    체크아웃에서 빈 브리핑이 파일로 생기고, 그것이 커밋되면 배포 이미지가 «출처는 진짜인데
+    내용이 빈» 브리핑을 미리 만들어 둔 것으로 읽는다.
+    """
+    p = _BY_NAME["이준호"]
+
+    def run(tmp) -> None:
+        llm.available = lambda: False       # 키 없는 체크아웃
+        A.llm = llm
+        A.clear_briefing_cache()
+        out = A.propose(p)
+        check(out["source"] != "LLM" and "LLM 미설정" in out["reason"],
+              "propose(): 키가 없으면 브리핑 문장을 비우고 사유를 남긴다",
+              f"source={out['source']} · reason={out['reason']}")
+        check(not list(tmp.glob("*.json")),
+              "propose(): LLM 없이 만든 브리핑은 파일 저장소에 쓰지 않는다",
+              str(list(tmp.glob("*.json"))))
+
+        # use_llm=False — llm_failed 가 확실히 비는 갈래다. 여기가 예전 방어의 구멍이었다.
+        llm.available = lambda: True
+        llm.generate = lambda *a, **k: '{"sentence": "x", "insight": "y", "order": []}'
+        A.clear_briefing_cache()
+        out2 = A.propose(p, use_llm=False)
+        check(not A.llm_failed(out2),
+              "propose(use_llm=False): 부르지 않기로 한 것은 «호출 실패»가 아니다",
+              str(A.llm_failed(out2))[:120])
+        check(not list(tmp.glob("*.json")),
+              "propose(use_llm=False): 그래도 저장하지 않는다 — 빈 산출이다",
+              str(list(tmp.glob("*.json"))))
+
+    _with_store(run)
+    _restore_llm()
+
+
+def check_prebuild_stops_on_rate_limit() -> None:
+    """prebuild_briefings 는 429 를 만나면 다음 고객으로 넘어가지 않고 멈춘다.
+
+    넘어가 봐야 섹션마다 재시도 횟수를 다 쓰며 같은 429 를 맞는다 — 고객 한 명에 수십 분이
+    사라지고 남는 것은 없다. ✓ 가 아니라 ✗ 로 적고, 종료 코드로도 «다 못 했다»를 알린다.
+    """
+    import contextlib
+    import io
+
+    from scripts import prebuild_briefings as PB
+
+    calls: list[str] = []
+
+    def fake_propose(profile, **kw):
+        calls.append(profile.nm)
+        return {"customer": profile.nm, "sentence": "", "facts": {"llm_skipped": {},
+                "llm_failed": {"coaching": {"error": "LLMError", "status": 429,
+                                            "detail": "HTTP 429 — 5회 시도 후에도 실패"}}}}
+
+    def run(tmp) -> None:
+        saved = (A.propose, llm.available)
+        A.propose, llm.available = fake_propose, (lambda: True)
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                rc = PB.main([])
+        finally:
+            A.propose, llm.available = saved
+        text = buf.getvalue()
+        check(len(calls) == 1, "prebuild: 429 뒤 다음 고객을 부르지 않는다", str(calls))
+        check("✗" in text and "속도 제한" in text and "✓" not in text,
+              "prebuild: 호출이 죽은 고객은 ✗ 로 적고 멈춘 이유를 말한다", text[-300:])
+        check(rc != 0, "prebuild: 다 못 만들었으면 종료 코드가 0 이 아니다", str(rc))
+        check(not list(tmp.glob("*.json")), "prebuild: 그 고객은 파일로 남지 않는다")
+
+    _with_store(run)
+
+
 def main() -> int:
+    check_call_failure_is_not_persisted()
+    check_llmless_briefing_is_not_persisted()
+    check_prebuild_stops_on_rate_limit()
     check_outreach_prompt_has_no_condition_codes()
     check_shown_state_is_quotable()
     check_owned_products_are_quotable()

@@ -170,8 +170,7 @@ def _write_talking_scripts(facts: dict) -> None:
             system=TALK_SYSTEM, max_tokens=500, name="briefing.talking_scripts",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
-        facts["llm_skipped"]["talking_scripts"] = (
-            f"LLM 호출 실패 ({type(e).__name__}) — 화법 카드 원문만 표시됨")
+        _call_failed(facts, "talking_scripts", e, "화법 카드 원문만 표시됨")
         return
     data = _parse(raw)
     if not isinstance(data, dict):
@@ -203,8 +202,7 @@ def _write_why_this_customer(facts: dict) -> None:
             system=WHY_CUSTOMER_SYSTEM, max_tokens=300, name="briefing.why_customer",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
-        facts["llm_skipped"]["why_this_customer"] = (
-            f"LLM 호출 실패 ({type(e).__name__}) — 규칙 문장 그대로 표시됨")
+        _call_failed(facts, "why_this_customer", e, "규칙 문장 그대로 표시됨")
         return
     data = _parse(raw)
     lines = [str(x).strip() for x in (data or {}).get("lines", []) if str(x).strip()]
@@ -242,7 +240,7 @@ def _write_coaching(facts: dict) -> None:
             system=COACH_SYSTEM, max_tokens=400, name="briefing.coaching",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
-        facts["llm_skipped"]["coaching"] = f"LLM 호출 실패 ({type(e).__name__})"
+        _call_failed(facts, "coaching", e)
         return
     data = _parse(raw)
     if not isinstance(data, dict):
@@ -328,7 +326,7 @@ def _select(p: Profile, facts: dict, key: str, label: str,
             system=SELECT_SYSTEM, max_tokens=200, name="briefing.select",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
-        skipped[key] = f"LLM 호출 실패 ({type(e).__name__}) — 규칙 순서로 표시됨"
+        _call_failed(facts, key, e, "규칙 순서로 표시됨")
         return None
     data = _parse(raw)
     picks = (data or {}).get("pick")
@@ -382,7 +380,7 @@ def _select_outreach(p: Profile, facts: dict, key: str, label: str,
             system=OUTREACH_SELECT_SYSTEM, max_tokens=300, name="briefing.select_outreach",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
-        skipped[key] = f"LLM 호출 실패 ({type(e).__name__}) — 규칙 순서로 표시됨"
+        _call_failed(facts, key, e, "규칙 순서로 표시됨")
         return None
     data = _parse(raw) or {}
     pick = data.get("pick")
@@ -435,7 +433,7 @@ def _write_top_holdings_insight(p: Profile, facts: dict) -> None:
             system=TOP_HOLDINGS_SYSTEM, max_tokens=250, name="briefing.top_holdings",
         )
     except Exception as e:
-        facts["llm_skipped"]["top_holdings_insight"] = f"LLM 호출 실패 ({type(e).__name__})"
+        _call_failed(facts, "top_holdings_insight", e)
         return
     insight = str((_parse(raw) or {}).get("insight") or "").strip()
     if not insight:
@@ -471,8 +469,7 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
                 system=LMS_SYSTEM, max_tokens=250, name="briefing.lms_message",
             )
         except Exception as e:
-            facts["llm_skipped"]["lms_message"] = (
-                f"LLM 호출 실패 ({type(e).__name__}) — 규칙 본문이 표시됨")
+            _call_failed(facts, "lms_message", e, "규칙 본문이 표시됨")
             return
         body = str((_parse(raw) or {}).get("body") or "").strip()
         # 예전에는 여기서 '[더미] ' 접두를 코드가 다시 붙였다. 지금은 붙이지 않는다 —
@@ -555,7 +552,7 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
             system=RECOMMEND_SYSTEM, max_tokens=700, name="briefing.recommend",
         )
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
-        skipped["recommendation"] = f"LLM 호출 실패 ({type(e).__name__})"
+        _call_failed(facts, "recommendation", e)
         return None
 
     data = _parse(raw)
@@ -632,6 +629,48 @@ def clear_briefing_cache() -> None:
         _BRIEFING_CACHE.clear()
 
 
+# ─────────────────────────────────────────────────────────────
+# LLM 호출 실패의 기록 — «다시 하면 되는 실패»를 «산출이 검증에서 떨어진 것»과 가른다
+#
+# 각 섹션은 LLM 이 죽어도 브리핑을 끝까지 만든다(사유는 llm_skipped 에 남는다). 그건 화면의
+# 규약이지 **저장**의 규약이 아니다. 429·5xx·타임아웃으로 빈 섹션은 입력이 같아도 다음
+# 호출에서 채워질 수 있는데, 그 브리핑을 파일 저장소(briefing_store)에 쓰면 지문이 같은 한
+# 계속 읽힌다 — 행내 실측(2026-09-08): prebuild_briefings 가 429 를 맞으며 만든 브리핑이
+# «✓ 저장됨»으로 남고, 다음 실행은 「이미 있음(지문 일치)」으로 건너뛰었다. 빈 섹션은
+# 시연 화면에서야 보인다.
+#
+# 그래서 호출 실패는 llm_skipped(사람이 읽는 사유)와 별도로 facts["llm_failed"] 에 코드가
+# 읽는 꼴로 남기고, propose() 는 이것이 있으면 저장하지 않는다. 파싱 실패·재료 이탈은 여기
+# 들지 않는다 — 그건 LLM 이 답을 했고 코드가 거른 것이라 다시 불러도 같은 자리로 온다.
+# ─────────────────────────────────────────────────────────────
+
+def _record_call_failure(facts: dict, key: str, exc: Exception) -> None:
+    """facts["llm_failed"][key] 에 실패를 코드가 읽는 꼴로 남긴다(사유 문장과는 별도)."""
+    facts.setdefault("llm_failed", {})[key] = {
+        "error": type(exc).__name__,
+        "status": getattr(exc, "status", None),        # llm.LLMError 가 실은 HTTP 코드
+        "detail": str(exc).splitlines()[0][:200] if str(exc) else "",
+    }
+
+
+def _call_failed(facts: dict, key: str, exc: Exception, note: str = "") -> None:
+    """섹션 하나의 LLM 호출이 죽었다 — 사유(llm_skipped)와 기록(llm_failed)을 함께 남긴다."""
+    facts["llm_skipped"][key] = (
+        f"LLM 호출 실패 ({type(exc).__name__})" + (f" — {note}" if note else ""))
+    _record_call_failure(facts, key, exc)
+
+
+def llm_failed(out: dict[str, Any]) -> dict[str, dict]:
+    """propose() 산출에서 «호출이 죽어서» 빈 섹션들. 비어 있으면 호출은 전부 닿았다
+    (산출이 검증에서 떨어져 비었을 수는 있다 — 그건 llm_skipped 가 말한다)."""
+    return dict((out.get("facts") or {}).get("llm_failed") or {})
+
+
+def rate_limited(out: dict[str, Any]) -> bool:
+    """호출 실패 중 429 가 있는가 — 지금 더 불러 봐야 같은 답이 오는 상태."""
+    return any(f.get("status") == 429 for f in llm_failed(out).values())
+
+
 def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> dict[str, Any]:
     """고객 프로파일에 대한 전략 제안 문장을 생성한다. 같은 입력이면 한 번만 만든다(위 주석).
 
@@ -684,7 +723,18 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
                 observability.score("briefing_source", out["source"])
                 observability.score("sections_skipped", len(skipped),
                                     comment=", ".join(skipped) or None)
-            briefing_store.save(key, out)
+            # 호출이 죽어서 빈 섹션이 있으면 파일로 남기지 않는다 — 남기면 지문이 같은 한
+            # 다음 프로세스가 그 빈 브리핑을 «미리 만들어 둔 것»으로 읽는다(위 주석).
+            # 프로세스 캐시에는 넣는다: 같은 프로세스 안에서는 화면과 대화가 같은 것을
+            # 봐야 하고, 게이트웨이가 죽은 동안 턴마다 11 회를 다시 치르지 않기 위해서다.
+            #
+            # **LLM 을 아예 안 쓴 산출도 남기지 않는다.** 키 없이 돈 실행(테스트·CI·키를
+            # 안 넣은 체크아웃)의 브리핑은 LLM 섹션이 통째로 비는데, 그건 «호출 실패»가
+            # 아니라 «부르지 않음»이라 llm_failed 에 잡히지 않는다. 저장하면 지문이 같은
+            # 한 다음 실행이 그 빈 브리핑을 미리 만들어 둔 것으로 읽는다 — 저장소가
+            # 저장소에 커밋되면서(briefing_cache/) 그 빈 파일이 커밋될 수도 있다.
+            if use_llm and llm.available() and not llm_failed(out):
+                briefing_store.save(key, out)
         # 생성은 락 밖에서 한다 — 11 회의 LLM 호출 동안 다른 호출자를 세우지 않는다.
         # 동시에 처음 부른 둘이 각자 만들 수는 있고, 그때는 먼저 넣은 쪽으로 통일된다
         # (둘 다 같은 입력의 산출이므로 어느 쪽이 이겨도 «하나로 통일»이라는 목적은 선다).
@@ -738,6 +788,7 @@ def _propose(p: Profile, *, use_llm: bool, top_n: int) -> dict[str, Any]:
         raw = llm.generate(_prompt(facts), system=SYSTEM, name="briefing.sentence")
     except Exception as e:  # 게이트웨이 장애·타임아웃 등
         out["reason"] = f"LLM 호출 실패 ({type(e).__name__})"
+        _record_call_failure(facts, "sentence", e)
         return out
 
     data = _parse(raw)
@@ -787,6 +838,7 @@ def _fallback(facts: dict, out: dict[str, Any], use_llm: bool) -> dict[str, Any]
                            name="briefing.fallback_sentence")
     except Exception as e:  # 게이트웨이 장애·타임아웃 등
         out["reason"] = f"행내 매칭 전략 없음 · LLM 호출 실패({type(e).__name__})"
+        _record_call_failure(facts, "sentence", e)
         return out
 
     data = _parse(raw)

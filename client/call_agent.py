@@ -8,7 +8,8 @@
 `src/` 는 플랫폼에 **올라가는 것**이고(`pension_agent` 단일 패키지 · 임포트 루트가 `src/`),
 이 파일은 그것을 **부르는 쪽**이다. 경계가 셋으로 갈린다.
 
-  · 배포 이미지에 안 들어간다 — Dockerfile 이 담는 것은 main.py·pension_agent·session_data 다
+  · 배포 이미지에 안 들어간다 — Dockerfile 이 담는 것은 main.py·pension_agent·
+    session_data·briefing_cache 다
   · `src/scripts/` 와 다른 부류다 — 그쪽은 에이전트가 자기 데이터를 만드는 내부 도구고
     (import_customers·build_kb·demo_status) `src/` 에서 `python -m scripts.X` 로 돈다
   · **`pension_agent` 을 임포트하지 않는다.** 웹앱 쪽 코드가 이 파일의 `call()` 이라
@@ -336,6 +337,21 @@ def _check_health(res: _Result) -> None:
                 f"{llm.get('host')} 를 못 찾는다 — 클러스터 밖에서 부르고 있다")
     if llm.get("api_key_set") is False:
         res.add(False, "LLM_API_KEY", "서버에 키가 안 잡혔다")
+
+    # 미리 만들어 둔 브리핑 — **실패가 전부 조용한** 자리라 여기서 짚는다
+    # (briefing_store.stats() 머리말). 한 건도 안 읽히면 고객 질문마다 순차 LLM 11회를
+    # 새로 치르고, STG 는 분당 10회라 그 한 편이 한도를 넘는다(src/README.md §4·§5).
+    # 화면에는 «느리다»로만 보이므로 호출이 성공해도 배포는 성립하지 않는다.
+    cache = body.get("briefing_cache") or {}
+    if cache.get("enabled") is False:
+        res.note(f"briefing_cache 꺼져 있다 — {cache.get('reason', '')}")
+    elif cache:
+        stored, usable = cache.get("stored", 0), cache.get("usable", 0)
+        res.add(not (stored and not usable), "미리 만들어 둔 브리핑이 읽힌다",
+                f"{usable}/{stored} 건 — 지문이 어긋났다(날짜가 넘어갔거나 재생성 안 함)"
+                if stored and not usable else f"{usable}/{stored} 건")
+        if cache.get("writable") is False:
+            res.note("briefing_cache 가 읽기전용이다 — 재기동할 때마다 처음부터 다시 만든다")
 
 
 def _check_sse(res: _Result, customer_id: str | None) -> None:
