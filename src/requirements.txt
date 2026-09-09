@@ -6,7 +6,8 @@
 # 승인 목록을 벗어나는 패키지는 내부망 Nexus 에 미등록일 수 있어 pip install 이
 # 실패한다 — 아래 langgraph 주석 참고.
 #
-# 개발·시연 화면(Streamlit)과 변환기는 배포 이미지에 넣지 않는다 → requirements-dev.txt
+# 개발·시연 화면(Streamlit)과 변환기는 배포 이미지에 넣지 않는다 — 개발용 패키지
+# (streamlit · pandas · anthropic · openpyxl)는 따로 설치한다(README §1).
 # ─────────────────────────────────────────────────────────────
 
 # HTTP 진입점 (main.py). 플랫폼 승인 버전.

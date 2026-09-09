@@ -1,7 +1,7 @@
 # 내부망 배포용 (STG / PRD). 빌드 컨텍스트는 이 파일이 있는 src/ 다.
 #     docker build -f Dockerfile -t pension-agent .
 # 외부망에서는 빌드되지 않는다 — base image 도 pip index 도 내부망 전용이다.
-# 외부망 로컬 테스트는 Dockerfile.local 을 쓴다.
+# 외부망 로컬 테스트용 Dockerfile.local 은 저장소에 넣지 않는다(.gitignore) — 각자 둔다.
 
 # STG
 FROM cmheastggenaiacr01.azurecr.io/python:3.10
