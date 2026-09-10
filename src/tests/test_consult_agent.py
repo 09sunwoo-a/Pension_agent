@@ -3992,8 +3992,8 @@ def check_memo() -> int:
                              if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
 
             # 진입점 → 상태 — 위 두 축(받는 사람·보내는 사람)이 성립하려면 사번이 여기까지
-            # 와야 한다. 게이트웨이의 x_client_user 는 「사번 7자리 + LLM 중복 호출을 가르는
-            # uuid」꼴이라 앞 7자리를 읽고, 사번이 아닌 값(쿼터 버킷 이름)은 읽지 않는다.
+            # 와야 한다. x_client_user 는 사번 뒤에 접미가 붙어 올 수 있어 구분자 앞의
+            # 사번을 읽고, 사번이 아닌 값(쿼터 버킷 이름)은 읽지 않는다.
             class _FakeAgent:
                 seen: dict = {}
 

@@ -1286,19 +1286,22 @@ check(_err["status"] == "failed" and "전송 끊김" in _err["detail"],
 # 받는 사람과 다른 축이다. MCP 인증에 들어가고 행내 감사 기록이 그 사번으로 남는다.
 # 값은 진입점의 x_client_user·employee_id 에서 대화 상태를 거쳐 내려온다.
 #
-# 게이트웨이의 x_client_user 는 「사번 7자리 + LLM 중복 호출을 가르는 uuid」꼴이다.
-# 전체 일치로 재면 uuid 가 붙은 값이 전부 «사번 아님»으로 떨어지고, 그러면 쪽지가
-# 환경변수에 적힌 한 사람 앞으로 몰린다 — 이 함수가 막으려는 바로 그 상태다.
+# x_client_user 는 사번 뒤에 접미가 붙어 올 수 있다(LLM 호출을 가르는 uuid 등).
+# 전체 일치로 재면 그런 값이 전부 «사번 아님»으로 떨어지고, 그러면 쪽지가 환경변수에
+# 적힌 한 사람 앞으로 몰린다 — 이 함수가 막으려는 바로 그 상태다.
 for _raw in ("3902172", " 3902172 ", "3902172-550e8400-e29b-41d4-a716-446655440000",
-             "3902172_550e8400e29b", "39021725f3a9c"):
+             "3902172_550e8400e29b", "3902172:a1b2"):
     check(workb.as_emp_no(_raw) == "3902172",
-          f"workb.as_emp_no: 「사번+uuid」에서 앞 7자리를 읽는다 ({_raw!r})",
+          f"workb.as_emp_no: 사번 뒤에 구분자와 접미가 붙어도 읽는다 ({_raw!r})",
           str(workb.as_emp_no(_raw)))
-# 그 값은 쿼터 버킷 이름이기도 해서 사번이 아닌 값도 들어온다 — 그대로 쓰면 없는 사번
-# 앞으로 쪽지가 나가고 MCP 인증의 사번 자리에 그 문자열이 실린다.
-for _bad in ("pension-agent", "streamlit-dev", "390217", "emp-3902172", "", None):
+# 뒤에 **숫자가 더 붙어 있으면 읽지 않는다.** 「7자리 + 무엇이든」으로 자르면 사번이 아닌
+# 숫자 id 에서 실재하는 남의 사번을 만들어내고, 그 사람 받은편지함에 고객 정보가 남는다.
+# 못 읽으면 환경변수 폴백으로 떨어지므로 틀리는 방향이 되돌릴 수 있는 쪽이다.
+# 그 값은 쿼터 버킷 이름이기도 해서 사번이 아닌 값도 들어온다(pension-agent 는 기본값이다).
+for _bad in ("pension-agent", "streamlit-dev", "390217", "emp-3902172",
+             "20250910123456", "39021725f3a9c", "", None):
     check(workb.as_emp_no(_bad) is None,
-          f"workb.as_emp_no: 앞이 숫자 7자리가 아니면 사번으로 읽지 않는다 ({_bad!r})",
+          f"workb.as_emp_no: 사번으로 확정되지 않으면 읽지 않는다 ({_bad!r})",
           str(workb.as_emp_no(_bad)))
 
 _saved_emp_env = os.environ.get(workb.EMP_NO_ENV)

@@ -315,7 +315,8 @@ try:
     _events(r)
     check(_seen.get("employee_id") == "3902172",
           "input_value 의 employee_id 가 에이전트까지 전달된다", str(_seen.get("employee_id")))
-    # 게이트웨이의 x_client_user 는 「사번 7자리 + uuid」다 — 앞 7자리가 그 직원이다.
+    # x_client_user 는 사번 뒤에 접미(LLM 호출을 가르는 uuid 등)가 붙어 올 수 있다 —
+    # 구분자로 이었으면 앞의 사번을 읽는다(workb.as_emp_no).
     check(main.consult_graph.employee_no("3902172", "emp-0417") == "3902172"
           and main.consult_graph.employee_no(
               None, "3902172-550e8400-e29b-41d4-a716-446655440000") == "3902172"
