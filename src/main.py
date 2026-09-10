@@ -243,20 +243,40 @@ def _wants_stream(request: Request, req: ChatRequest, payload: dict[str, Any]) -
 _SECRET_HINTS = ("token", "key", "auth", "cookie", "secret")
 
 
-def _request_shape(request: Request, req: ChatRequest, payload: dict[str, Any]) -> str:
-    """게이트웨이가 실제로 무엇을 보내는지 — 값이 아니라 **모양**만. 비밀 헤더는 값을 가린다."""
+#: 거부된 요청의 input_value 를 로그에 얼마나 보여주나(글자 수). JSON 으로 풀리지 않은
+#: 문자열이라 키를 뽑을 수 없으므로 앞부분을 그대로 남긴다 — 질문 미리보기(QUESTION_PREVIEW)와
+#: 같은 수준의 노출이다.
+INPUT_VALUE_PREVIEW = 120
+
+
+def _request_shape(request: Request, req: ChatRequest, payload: Optional[dict[str, Any]]) -> str:
+    """게이트웨이가 실제로 무엇을 보내는지 — 값이 아니라 **모양**만. 비밀 헤더는 값을 가린다.
+
+    payload 가 None 이면 input_value 가 JSON 으로 풀리지 않은 요청이다 — 키 대신 원문의
+    길이와 앞부분을 남긴다. 행내 실측(2026-09-10): 같은 세션 4턴째에 게이트웨이가
+    «Expecting value: line 1 column 1» 인 input_value 를 보내 422 가 났는데, 그때 이 로그가
+    거부 뒤에만 찍혀 무엇이 왔는지(빈 문자열인지 · 질문 원문인지) 알 수 없었다.
+    """
     headers = {
         k: ("***" if any(h in k.lower() for h in _SECRET_HINTS) else v)
         for k, v in request.headers.items()
         if k.lower() not in ("host", "content-length", "user-agent")
     }
     hists = req.message_hists
-    return json.dumps({
+    shape: dict[str, Any] = {
         "headers": headers,
         "body_extra": sorted((req.model_extra or {}).keys()),
-        "input_value_keys": sorted(payload.keys()),
         "message_hists": None if hists is None else f"{type(hists).__name__}[{len(hists)}]",
-    }, ensure_ascii=False)
+    }
+    if payload is None:
+        raw = req.input_value
+        shape["input_value_raw"] = {
+            "len": len(raw),
+            "head": raw[:INPUT_VALUE_PREVIEW] + ("…" if len(raw) > INPUT_VALUE_PREVIEW else ""),
+        }
+    else:
+        shape["input_value_keys"] = sorted(payload.keys())
+    return json.dumps(shape, ensure_ascii=False)
 
 
 def _reject(rid: str, detail: str) -> HTTPException:
@@ -371,7 +391,13 @@ def health() -> dict[str, Any]:
 @app.post("/chat")
 async def chat(req: ChatRequest, request: Request):
     rid = uuid.uuid4().hex[:8]   # 이 요청의 로그 줄을 한데 묶는 id
-    args = _parse(req, rid)
+    try:
+        args = _parse(req, rid)
+    except HTTPException:
+        # 거부된 요청도 모양을 남긴다 — 게이트웨이가 무엇을 보냈는지는 여기서만 보이고,
+        # 422 사유 한 줄로는 «왜 JSON 이 아니었나»를 되짚을 수 없다(_request_shape 머리말).
+        log.warning("[%s] 거부된 요청 모양 · %s", rid, _request_shape(request, req, None))
+        raise
     started = time.monotonic()
     question = args["question"]
     x_client_user, session_id = args["x_client_user"], args["session_id"]

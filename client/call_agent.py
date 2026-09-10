@@ -37,6 +37,14 @@ from typing import Iterator
 
 import requests
 
+try:
+    # 대화형 input() 이 readline 을 쓰게 한다. 없으면 터미널의 줄 편집에 맡겨지는데, 한글
+    # 한 글자(UTF-8 3바이트)를 지울 때 1바이트만 지우거나 IME 가 조합 중 자모를 보냈다
+    # 지우는 터미널에서는 남은 바이트가 대리 문자(U+DCxx)로 들어온다 — 아래 _check_utf8.
+    import readline  # noqa: F401
+except ImportError:
+    pass
+
 # ── 설정 — 여기만 채운다. 채운 채로 커밋하지 않는다. ──────────────────────────
 ENDPOINT_URL = ""          # 콘솔이 준 호스트. /openapi/... 경로는 코드가 붙인다
 OPENAPI_TOKEN = ""         # x-openapi-token. "Bearer " 접두는 코드가 붙인다
@@ -173,10 +181,30 @@ def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
         print("  (본문이 비어 있음)", file=sys.stderr)
 
 
+def _check_utf8(question: str) -> None:
+    """질문이 UTF-8 로 인코딩되는지 — 아니면 보내지 않는다.
+
+    행내 실측(2026-09-10): 같은 «IRP 세액공제 얼마지» 가 인자로는 정상, 대화형 타이핑으로는
+    게이트웨이 500(에이전트 422 «input_value 가 JSON 이 아님»)이었다. 터미널이 한글 지우기를
+    바이트 단위로 처리해 남은 바이트가 대리 문자(U+DCxx)로 들어왔고, JSON 으로는 ASCII
+    이스케이프라 전송은 되지만 게이트웨이가 UTF-8 로 다시 인코딩하지 못해 깨진 input_value 를
+    에이전트에 넘긴 것이다. 여기서 막아야 원인이 클라이언트 쪽에서 바로 보인다.
+    """
+    try:
+        question.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            f"질문 {exc.start}번째 글자가 UTF-8 이 아닙니다({question!r}). 터미널이 한글을 지울 때 "
+            f"바이트 단위로 지운 흔적입니다 — 다시 입력하거나 인자로 넘기세요: "
+            f'python call_agent.py "질문"'
+        ) from exc
+
+
 def events(question: str, x_client_user: str = X_CLIENT_USER, *,
            customer_id: str = "", session_id: str = "default") -> Iterator[dict]:
     """한 턴의 이벤트를 오는 순서대로 낸다(progress… → answer → sources → followups → done).
-    200 이 아니면 응답 본문을 찍고 예외를 올린다."""
+    200 이 아니면 응답 본문·헤더를 찍고 예외를 올린다."""
+    _check_utf8(question)
     with requests.post(
         ENDPOINT_URL.rstrip("/") + PATH,
         headers=_headers(),
@@ -187,6 +215,10 @@ def events(question: str, x_client_user: str = X_CLIENT_USER, *,
     ) as resp:
         if resp.status_code != 200:
             print(f"[HTTP {resp.status_code}] {resp.text}", file=sys.stderr)
+            # 게이트웨이가 붙인 추적 id(x-request-id 류)가 헤더에 있으면 플랫폼팀이 그 요청을
+            # 찾을 수 있다. 쿠키는 찍지 않는다.
+            headers = {k: v for k, v in resp.headers.items() if k.lower() != "set-cookie"}
+            print(f"[응답 헤더] {json.dumps(headers, ensure_ascii=False)}", file=sys.stderr)
             resp.raise_for_status()
         # Content-Type 에 charset 이 없으면 requests 는 text/* 를 ISO-8859-1 로 풀어 한글이
         # 깨진다. 플랫폼 응답은 UTF-8 이므로 여기서 고정한다.
@@ -332,7 +364,10 @@ def main(argv: list[str]) -> int:
             break
         if not question:
             break
-        _turn(question, session_id)
+        try:
+            _turn(question, session_id)
+        except ValueError as exc:   # _check_utf8 — 깨진 입력은 보내지 않고 다시 받는다
+            print(f"[입력 오류] {exc}", file=sys.stderr, flush=True)
     return 0
 
 

@@ -12,6 +12,10 @@
 
 # HTTP 진입점 (main.py). 플랫폼 승인 버전.
 fastapi==0.115.12
+starlette==0.46.2           # fastapi 0.115.12 의 의존(<0.47). 같은 환경에 다른 패키지가 starlette 를
+                            # 1.x 로 올리면 기동 시 `Router.__init__() got an unexpected keyword
+                            # argument 'on_startup'` 으로 죽는다(2026-09-10 azureml_py38 에서 실측).
+                            # 그 오류가 나면: pip install "starlette==0.46.2"
 uvicorn==0.34.2
 python-dotenv==1.1.0        # .env 파싱 (env.py). 승인 버전.
 
