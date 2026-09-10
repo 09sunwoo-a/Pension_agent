@@ -25,7 +25,10 @@ BASE_URL="${BASE_URL:-http://localhost:8000}"
 PYTHON="${PYTHON:-$(command -v python3 || command -v python)}"
 
 MESSAGE="${1:-IRP 수수료가 부담된다고 하시는데 뭐라고 답하면 좋을까요?}"
-CLIENT_USER="${CLIENT_USER:-test-user}"
+# 호출 직원 식별자. **개발자 사번**이다 — 에이전트가 여기서 사번을 읽어 쪽지의 받는
+# 사람·보내는 사람을 정하므로(workb.as_emp_no), 다른 사람이 시험하면
+# CLIENT_USER=<자기 사번> 으로 넘긴다. 운영에서는 로그인 사번이 실려 온다.
+CLIENT_USER="${CLIENT_USER:-3902172}"
 
 echo "[health]"
 curl -s "$BASE_URL/health" | "$PYTHON" -m json.tool
