@@ -225,6 +225,19 @@ try:
 
     r = client.post("/chat", json={"input_value": "이건 JSON 이 아니다", "message_hists": None})
     check(r.status_code == 422, "input_value 가 JSON 문자열이 아니면 422", str(r.status_code))
+    # 거부된 요청도 모양을 남긴다 — 행내에서 4턴째에 이 422 가 났을 때 게이트웨이가 무엇을
+    # 보냈는지(빈 문자열인지 · 질문 원문인지) 로그로 알 수 없었다.
+    rejected = next((rec.getMessage() for rec in reversed(_captured)
+                     if "거부된 요청 모양" in rec.getMessage()), "")
+    check('"input_value_raw"' in rejected and '"len": 13' in rejected
+          and "이건 JSON 이 아니다" in rejected and '"headers"' in rejected,
+          "422 로 거부된 요청은 헤더와 input_value 원문 앞부분을 WARNING 으로 남긴다", rejected[:300])
+
+    r = client.post("/chat", json={"input_value": "", "message_hists": None})
+    check(r.status_code == 422, "input_value 가 빈 문자열이면 422", str(r.status_code))
+    rejected = next((rec.getMessage() for rec in reversed(_captured)
+                     if "거부된 요청 모양" in rec.getMessage()), "")
+    check('"len": 0' in rejected, "빈 input_value 는 길이 0 으로 남는다", rejected[:300])
 
     r = client.post("/chat", json={"input_value": json.dumps(["배열"]), "message_hists": None})
     check(r.status_code == 422, "input_value 가 JSON «객체»가 아니면 422", str(r.status_code))
