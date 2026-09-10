@@ -1282,6 +1282,49 @@ _err = asyncio.run(workb.send_note(["3902172"], _note, send=_boom))
 check(_err["status"] == "failed" and "전송 끊김" in _err["detail"],
       "workb.send_note: 호출이 죽으면 실패로 보고한다(삼키지 않는다)", str(_err))
 
+# ── 「누구 이름으로 보내나」 ────────────────────────────────
+# 받는 사람과 다른 축이다. MCP 인증에 들어가고 행내 감사 기록이 그 사번으로 남는다.
+# 값은 진입점의 x_client_user·employee_id 에서 대화 상태를 거쳐 내려온다.
+#
+# x_client_user 는 **사번이라는 보장이 없다** — 플랫폼의 쿼터 버킷 이름이라 실제로
+# 'pension-agent' 같은 값이 들어온다. 그대로 쓰면 없는 사번 앞으로 쪽지가 나간다.
+for _bad in ("pension-agent", "streamlit-dev", "39021720", "390217", "39021a2", "", None):
+    check(workb.as_emp_no(_bad) is None, f"workb.as_emp_no: 사번 꼴이 아니면 안 쓴다 ({_bad!r})",
+          str(workb.as_emp_no(_bad)))
+check(workb.as_emp_no(" 3902172 ") == "3902172",
+      "workb.as_emp_no: 사번 꼴이면 그 값(앞뒤 공백은 턴다)")
+
+_saved_emp_env = os.environ.get(workb.EMP_NO_ENV)
+os.environ[workb.EMP_NO_ENV] = "3900000"
+try:
+    check(workb.employee_id() == "3900000",
+          "workb.employee_id: 아무것도 없으면 환경변수로 떨어진다", str(workb.employee_id()))
+    with workb.acting("3902174"):
+        check(workb.employee_id() == "3902174" and workb.acting_employee() == "3902174",
+              "workb.acting: 블록 안에서는 그 사번이 «보내는 사람»이다", str(workb.employee_id()))
+        check(workb.employee_id("3902175") == "3902175",
+              "workb.employee_id: 로그인 사번(명시)이 가장 먼저다")
+    check(workb.employee_id() == "3900000" and workb.acting_employee() is None,
+          "workb.acting: 블록을 벗어나면 원래대로 돌아온다", str(workb.employee_id()))
+
+    # 발송 함수는 주입받은 것이라 시그니처를 늘릴 수 없다 — 주체는 ContextVar 로 건넨다.
+    _seen_actor: list = []
+
+    async def _who(recipients, title, body):
+        _seen_actor.append(workb.acting_employee())
+        return '{"success": true}'
+
+    asyncio.run(workb.send_note(["3902172"], _note, send=_who, as_employee="3902174"))
+    asyncio.run(workb.send_note(["3902172"], _note, send=_who))
+    check(_seen_actor == ["3902174", None],
+          "workb.send_note: as_employee 가 발송 함수에게 «보내는 사람»으로 건네진다",
+          str(_seen_actor))
+finally:
+    if _saved_emp_env is None:
+        os.environ.pop(workb.EMP_NO_ENV, None)
+    else:
+        os.environ[workb.EMP_NO_ENV] = _saved_emp_env
+
 
 # ─────────────────────────────────────────────────────────────
 # 행내 MCP 연동 (pension_agent/mcp) — 쪽지가 실제로 나가는 층
@@ -1408,6 +1451,17 @@ try:
           "mcp.user_key: 사번과 클라이언트 id 가 그대로 실린다", str(_key.get("emp_no")))
     check(_key["signature"] == _sig,
           "mcp.user_key: 서명은 (시각+요청id+사번)의 HMAC-SHA256 이다")
+
+    # 로그인 사번이 넘어온 발송은 **그 사번으로** 인증한다 — 감사 기록이 그 사번으로
+    # 남는다. 받는 사람(3902172)과 다른 축이라는 것도 여기서 갈린다.
+    workb.send_note_sync(["3902172"], _note, as_employee="3902174")
+    _key2 = _js.loads(_b64.b64decode(
+        _adapter.made[-1]["workb-mcp-server"]["headers"]["MCP-User-Key"]).decode())
+    check(_key2["emp_no"] == "3902174" and _memo_tool.calls[-1]["RECIPIENT"] == ["3902172"],
+          "mcp: 로그인 사번이 «보내는 사람»으로 인증에 실린다(받는 사람과 다른 축)",
+          f"{_key2['emp_no']} → {_memo_tool.calls[-1]['RECIPIENT']}")
+    check(sorted(_mcp.stats()["connected"]) == ["3902172", "3902174"],
+          "mcp: 사번마다 접속이 따로 열린다", str(_mcp.stats()["connected"]))
     check(_mcpc.user_key("tea000", "s3cret", "3902172")
           != _mcpc.user_key("tea000", "s3cret", "3902172"),
           "mcp.user_key: 같은 사번이어도 요청마다 다른 값이다(요청 id·시각)")

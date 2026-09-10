@@ -50,10 +50,12 @@ async def send_memo(recipients: list[str], title: str, body: str,
     것은 **누가 보내는가**이지 누가 받는가가 아니다 — 받는 사람은 위층이 이미 정했다
     (기본은 본인, 타인은 직원이 사번을 적었을 때만).
 
-    지금 그 값은 로그인 사번(`emp_no` 인자) → `WORKB_EMP_NO` 환경변수 순으로 정해진다.
-    진입점이 아직 로그인 사번을 상태에 싣지 않으므로(`consult_agent/state.py` 의
-    `employee_id`) 실제로는 환경변수 하나가 답이고, **그래서 지금은 프로세스 하나가 한
-    사번으로 보낸다.** 진입점이 사번을 싣게 되면 이 인자에 연결하면 된다.
+    그 값은 로그인 사번 → 발송을 감싼 블록이 세운 주체(`workb.acting`) → `WORKB_EMP_NO`
+    환경변수 순으로 정해진다. 앞의 둘은 진입점이 받은 사번이 대화 상태(`employee_id`)를
+    거쳐 여기까지 내려온 것이다(`graph.ask` → `nodes/act.py` → `tools.send_memo` →
+    `workb.send_note`). **환경변수까지 떨어졌으면 경고를 남긴다** — 여러 직원이 쓰는
+    배포에서 그 상태는 «전부 한 사람 이름으로 나간다»는 뜻이고, 화면에는 아무 표시도
+    나지 않아 로그가 유일한 신호다.
 
     ━━ 재시도하지 않는다 ━━
     `idempotent=False` 다. 발송 호출이 타임아웃으로 실패했다는 것은 «안 나갔다»가 아니라
@@ -66,6 +68,10 @@ async def send_memo(recipients: list[str], title: str, body: str,
         raise mcp_client.MCPUnavailable(
             "쪽지를 보낼 직원 사번이 없습니다 — 로그인 사번이 넘어오지 않았고 "
             f"{notes.EMP_NO_ENV} 환경변수도 비어 있습니다")
+    if not ((emp_no or "").strip() or notes.acting_employee()):
+        log.warning("쪽지를 %s 사번으로 보냅니다 — 로그인 사번이 넘어오지 않아 %s 환경변수로 "
+                    "떨어졌습니다(여러 직원이 쓰는 배포면 전부 이 사번으로 나갑니다)",
+                    sender, notes.EMP_NO_ENV)
     return await mcp_client.client_for(sender).call(
         TOOL, {ARG_RECIPIENT: ids, ARG_TITLE: title, ARG_BODY: body}, idempotent=False)
 

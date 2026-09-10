@@ -127,12 +127,16 @@ def _plain(markup: str) -> str:
 
 def send_memo(customer_id: str, text: str, *, title: str,
               recipients: list[str] | None = None, to: str = MEMO_DEFAULT_TO,
+              as_employee: str | None = None,
               session_id: str = "tool-log") -> dict[str, Any]:
     """행내 WorkB 쪽지 발송. 본문·제목은 여기서 만들지도 고치지도 않는다.
 
     **되돌릴 수 없는 행위다**(루트 CLAUDE.md 규칙 5). 부르는 쪽은 직원이 초안을 읽고
     승낙한 뒤에만 부른다(`consult_agent/nodes/act.py::confirm_action`) — 본문은 LLM 이 쓴
     글이라 직원이 보기 전에 나가면 무엇이 나갔는지 아무도 모른다.
+
+    `as_employee` 는 **누구 이름으로 보내는가**(받는 사람이 아니다 — 그쪽은 `recipients`).
+    로그인 사번이고, 행내 감사 기록이 그 사번으로 남는다. 비우면 환경변수로 떨어진다.
 
     ━━ 더미 게이트 ━━
     본문이 아직 실제 콘텐츠로 확정되지 않은 안내 문구(`dummy: true`)에서 왔으면 거부한다.
@@ -161,7 +165,8 @@ def send_memo(customer_id: str, text: str, *, title: str,
         result = {"status": "failed", "detail": "받는 사람 사번이 없습니다",
                   "to": to, "recipients": ids, "title": title}
     else:
-        result = {**workb.send_note_sync(ids, workb.Note(title=title, body=text)), "to": to}
+        result = {**workb.send_note_sync(ids, workb.Note(title=title, body=text),
+                                         as_employee=as_employee), "to": to}
     append_turn(customer_id, session_id, {
         "role": "tool",
         "text": f"[쪽지 발송 · {to}] {title}",

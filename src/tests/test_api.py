@@ -305,6 +305,35 @@ try:
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
 
+    # ── 사번(employee_id) ────────────────────────────────────
+    # 쪽지의 수신자이자 발송 주체이고 상담이력에 «누가 상담했나»로 남는다. x_client_user
+    # 는 쿼터 버킷 이름이라 사번이라는 보장이 없어서, 진입점은 **판정하지 않고 그대로**
+    # 넘기고 사번 꼴 판정은 graph.employee_no 한 곳이 한다(두 곳이 판정하면 로그에 찍힌
+    # 사번과 실제로 쪽지가 나가는 사번이 갈린다).
+    r = client.post("/chat", json=_body(message="쪽지 보내줘", x_client_user="emp-0417",
+                                        employee_id="3902172"))
+    _events(r)
+    check(_seen.get("employee_id") == "3902172",
+          "input_value 의 employee_id 가 에이전트까지 전달된다", str(_seen.get("employee_id")))
+    check(main.consult_graph.employee_no("3902172", "emp-0417") == "3902172"
+          and main.consult_graph.employee_no(None, "3902172") == "3902172"
+          and main.consult_graph.employee_no(None, "emp-0417") is None
+          and main.consult_graph.employee_no(None, "pension-agent") is None,
+          "사번은 명시한 값이 먼저이고, x_client_user 는 사번 꼴일 때만 읽는다")
+    def _last_request_log() -> str:
+        return next((m for m in reversed([r.getMessage() for r in _captured if r.name == "main"])
+                     if "요청 ·" in m), "")
+
+    check("emp_no=3902172" in _last_request_log(),
+          "요청 로그가 이 턴의 사번을 남긴다 — 쪽지가 누구 앞으로 나갈지가 그 값이다",
+          _last_request_log())
+
+    r = client.post("/chat", json=_body(message="쪽지 보내줘", x_client_user="emp-0417"))
+    _events(r)
+    check(_seen.get("employee_id") is None and "emp_no=-" in _last_request_log(),
+          "사번을 못 찾으면 «-» 로 남긴다 — 환경변수 폴백으로 떨어졌다는 뜻이다(위험 10)",
+          _last_request_log())
+
     # 연계 제안 — 본문 끝 문장은 남고, action 이벤트가 버튼용으로 따로 간다(실행 인자는 안 실린다).
     evs = _events(client.post("/chat", json=_body(message="연계", x_client_user="emp-1")))
     check(_types(evs)[3:] == ["answer", "action", "sources", "followups", "done"],

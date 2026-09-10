@@ -30,7 +30,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
-from pension_agent import llm, observability
+from pension_agent import llm, observability, workb
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
@@ -112,11 +112,25 @@ def _customer_name(customer_id: str | None) -> str | None:
     return getattr(profile, "nm", None)
 
 
+def employee_no(explicit: str | None, x_client_user: str | None) -> str | None:
+    """이 턴을 부른 직원의 **WorkB 사번**. 없으면 None(환경변수 폴백으로 떨어진다).
+
+    명시한 값은 그대로 믿고(프론트가 «이것이 사번이다»라고 말한 값이다), `x_client_user`
+    는 **사번 꼴일 때만** 읽는다 — 그 값은 플랫폼의 쿼터 버킷 이름이라 사번이라는 보장이
+    없다(`ask` 머리말 · `workb.as_emp_no`).
+
+    `ask()` 안에 두지 않고 함수로 꺼내 둔 것은 **진입점이 같은 판정을 로그에 찍기**
+    때문이다(`main.py`). 두 곳이 각자 판정하면 로그에 찍힌 사번과 실제로 쪽지가 나가는
+    사번이 갈릴 수 있고, 그때 로그는 진단을 돕는 대신 틀린 값을 확인시켜 준다.
+    """
+    return (explicit or "").strip() or workb.as_emp_no(x_client_user)
+
+
 def ask(
     question: str, history: list[dict] | None = None,
     *, customer_id: str | None = None, session_id: str = "default",
     on_progress: Callable[[str], None] | None = None,
-    x_client_user: str | None = None,
+    x_client_user: str | None = None, employee_id: str | None = None,
 ) -> dict[str, Any]:
     """단발 호출용 헬퍼. FastAPI 핸들러에서 이것만 부르면 된다.
 
@@ -137,6 +151,17 @@ def ask(
     `x-client-user` 헤더가 된다 — 플랫폼의 감사 기록이자 쿼터 버킷이라, 비워 두면 전사
     호출이 한 버킷에 몰려 429 를 자초한다(llm.client_user 주석). 한 턴이 여러 노드·
     도구로 갈라지므로 인자 대신 ContextVar 로 흘린다.
+    employee_id: 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송 주체이고,
+    상담이력에 «누가 상담했나»로 남는다. 넘기지 않으면 `x_client_user` 에서 가져오되
+    **사번 꼴일 때만** 쓴다(`workb.as_emp_no`) — 아래.
+
+    ━━ 사번과 x_client_user 는 같은 값이 아닐 수 있다 ━━
+    둘은 뜻이 다르다: `x_client_user` 는 플랫폼의 쿼터 버킷 이름이고 사번이라는 보장이
+    없다(`pension-agent`·`streamlit-dev` 같은 값이 실제로 들어온다). 사번은 행내 WorkB
+    계정이다. 그래서 순서가 둘이다 — **명시한 `employee_id` 는 그대로 믿고**(프론트가
+    «이것이 사번이다»라고 말한 값이다), `x_client_user` 는 꼴이 맞을 때만 사번으로 읽는다.
+    못 알아보면 환경변수 폴백으로 떨어지므로(`workb.employee_id`) 틀리는 방향이 되돌릴 수
+    있는 쪽이다 — 없는 사번 앞으로 쪽지를 보내지 않는다.
     """
     global _AGENT
     if _AGENT is None:
@@ -156,6 +181,9 @@ def ask(
     who = observability.customer_ref(
         customer_id, _customer_name(customer_id), guard.conditions_of(customer_id))
     tags = ["consult", *who["tags"]]
+    # 이 턴을 부른 직원의 사번. 여기서 한 번 정해 **상태·상담이력·발송이 같은 값**을
+    # 본다 — 세 곳이 각자 정하면 쪽지는 A 에게 가고 기록은 B 로 남는 상태가 된다.
+    emp_no = employee_no(employee_id, x_client_user)
     # client_user 는 트레이스 바깥에 둔다 — 이 턴에서 나가는 **모든** LLM 호출의
     # x-client-user 헤더가 되고(감사 기록이자 게이트웨이 쿼터 버킷), 관측 메타데이터에도
     # 같은 값이 실린다. 한 턴이 노드·도구 수십 갈래로 흩어지므로 인자 대신 ContextVar 로
@@ -169,7 +197,9 @@ def ask(
             out = _AGENT.invoke(
                 {"question": question, "history": history or [], "customer_id": customer_id,
                  # history 도구가 «지난번»에서 이번 세션을 제외할 수 있게 세션 구분자를 싣는다.
-                 "session_id": session_id})
+                 "session_id": session_id,
+                 # 쪽지의 수신자·발송 주체가 되는 값(state.employee_id · nodes/act.py).
+                 "employee_id": emp_no})
         evidence = out.get("evidence") or []
         # intent 는 턴이 끝나야 정해지므로 닫을 때 태그를 다시 채운다 — 여는 이벤트의
         # 태그를 덮어쓰므로 그때 준 것을 함께 실어야 한다. intent 는 «직원이 무엇을
@@ -222,9 +252,12 @@ def ask(
     new_history = [*(history or []), turn][-HISTORY_LIMIT:]
 
     if customer_id:
+        # 세션에 «누가 상담했나»를 함께 남긴다(세션을 여는 첫 턴에만 기록된다 —
+        # session_store.append_turn). 지금까지 이 칸은 늘 비어 있었다: 진입점이 직원
+        # 식별자를 받고도 상태에 싣지 않아 여기까지 오지 않았다.
         append_turn(customer_id, session_id, {
             "role": "user", "text": question, "intent": out.get("intent"),
-        })
+        }, employee_id=emp_no)
         append_turn(customer_id, session_id, {
             # 기록에는 **추천질문을 붙이기 전의 답변**을 남긴다. 추천질문은 화면 장치이지
             # 고객에게 한 안내가 아니고, 이 기록은 `history` 도구가 다음 상담에서 재료로

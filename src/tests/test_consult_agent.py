@@ -3926,7 +3926,9 @@ def check_memo() -> int:
     outbox: list[tuple] = []
 
     async def _send(ids, title, body):
-        outbox.append((ids, title, body))
+        # 「누구 이름으로」는 발송 함수의 인자가 아니라 블록에 세워진 값이다 — 주입받은
+        # 함수라 시그니처를 늘릴 수 없어서다(workb 의 «누구 이름으로 나가나»).
+        outbox.append((ids, title, body, workb.acting_employee()))
         return '{"success": true}'
 
     workb.use_sender(_send)
@@ -3967,6 +3969,8 @@ def check_memo() -> int:
             shut = act.offer({**turn, "customer_id": None})
             noev = act.offer({**turn, "evidence": []})
             other = act.offer({**turn, "question": "이 내용 사번 3902173한테 쪽지로 보내줘"})
+            # 로그인 사번이 넘어온 턴 — 받는 사람이 환경변수가 아니라 그 사번이다.
+            login = act.offer({**turn, "employee_id": "3902174"})
 
             # 검증에 걸리는 초안 — 원장에 없는 수치를 쓴다. 보내지 않고 사유를 말한다.
             memo.generate = _writer("한도 정리", "세액공제 한도는 1,234만원이에요.")
@@ -3977,12 +3981,39 @@ def check_memo() -> int:
             memo.generate = _writer("과세이연 등록 상담 정리", "확인한 내용을 남겨둡니다.")
 
             history = [{"question": state["question"], "pending_action": pending}]
-            yes = act.confirm_action({"question": "응, 보내줘", "history": history, "customer_id": "CM"})
+            # 승낙 턴에도 로그인 사번이 실려 온다 — 받는 사람은 제안한 턴이 정했고(3902172),
+            # 보내는 사람은 이번 턴을 부른 직원(3902174)이다. 두 축이 갈리는 자리다.
+            yes = act.confirm_action({"question": "응, 보내줘", "history": history,
+                                      "customer_id": "CM", "employee_id": "3902174"})
             sent = [t for s2 in session_store.list_sessions("CM") for t in s2["turns"]
                     if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
             no = act.confirm_action({"question": "아니 괜찮아", "history": history, "customer_id": "CM"})
             sent_after_no = [t for s2 in session_store.list_sessions("CM") for t in s2["turns"]
                              if any(c.get("name") == "send_memo" for c in (t.get("tool_calls") or []))]
+
+            # 진입점 → 상태 — 위 두 축(받는 사람·보내는 사람)이 성립하려면 사번이 여기까지
+            # 와야 한다. x_client_user 는 사번이라는 보장이 없어 꼴이 맞을 때만 읽는다.
+            class _FakeAgent:
+                seen: dict = {}
+
+                def invoke(self, st):
+                    _FakeAgent.seen = dict(st)
+                    return {"answer": "답", "evidence": [], "sources": [], "intent": "situation"}
+
+            orig_agent = G._AGENT
+            G._AGENT = _FakeAgent()
+            try:
+                G.ask("질문", customer_id="CM", session_id="s-emp", x_client_user="3902176")
+                by_client = _FakeAgent.seen.get("employee_id")
+                G.ask("질문", customer_id="CM", session_id="s-x", x_client_user="pension-agent")
+                by_bucket = _FakeAgent.seen.get("employee_id")
+                G.ask("질문", customer_id="CM", session_id="s-y",
+                      x_client_user="pension-agent", employee_id="3902177")
+                by_explicit = _FakeAgent.seen.get("employee_id")
+            finally:
+                G._AGENT = orig_agent
+            logged_emp = next((s2.get("employee_id") for s2 in session_store.list_sessions("CM")
+                               if s2["session_id"] == "s-emp"), None)
         finally:
             session_store.SESSION_DATA_DIR = orig_dir
             memo.generate, workb.SENDER = orig_gen, orig_sender
@@ -4042,6 +4073,13 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 기본은 본인이고, 사번을 적으면 그 사번으로 간다")
     ok += hit
 
+    # 「본인」이 누구인가 — 로그인 사번이 넘어오면 그 사람이고, 없을 때만 환경변수다.
+    # 이 값은 진입점의 x_client_user·employee_id 에서 온다(graph.employee_no → 상태).
+    hit = ((login.get("pending_action") or {}).get("recipients") == ["3902174"]
+           and pending["recipients"] == ["3902172"])
+    print(f"{'✓' if hit else '✗'} 「본인」은 로그인 사번이고, 없을 때만 환경변수로 떨어진다")
+    ok += hit
+
     # ⑤ LLM 이 쓰고 코드가 검사한다 — 걸리면 «보내지 않고 사유». 꼴은 코드가 만든다.
     hit = (pending["title"] == "과세이연 등록 상담 정리"
            and "쪽지" not in pending["title"] and not any(c.isdigit() for c in pending["title"])
@@ -4076,9 +4114,25 @@ def check_memo() -> int:
     hit = (yes["pending_action"] is None and "쪽지를 보냈어요" in yes["answer"]
            and "\n" not in yes["answer"].strip()
            and len(sent) == 1 and len(outbox) == 1
-           and outbox[0] == (["3902172"], pending["title"], pending["html"])
+           and outbox[0][:3] == (["3902172"], pending["title"], pending["html"])
            and sent[0]["tool_calls"][0]["args"]["title"] == pending["title"])
     print(f"{'✓' if hit else '✗'} '응, 보내줘' 면 초안 그대로 WorkB 로 보내고 상담이력에 남긴다")
+    ok += hit
+
+    # 받는 사람과 보내는 사람은 다른 축이다 — 받는 사람은 제안한 턴이 정해 초안에 적힌
+    # 값이고(직원이 읽고 승낙한 값이라 다시 정하지 않는다), 보내는 사람은 이번 턴을 부른
+    # 직원이다(MCP 인증에 들어가고 행내 감사 기록이 그 사번으로 남는다).
+    hit = outbox[0][3] == "3902174" and outbox[0][0] == ["3902172"]
+    print(f"{'✓' if hit else '✗'} 보내는 사람은 이번 턴의 로그인 사번이다(받는 사람과 다른 축)")
+    ok += hit
+
+    hit = by_client == "3902176" and by_bucket is None and by_explicit == "3902177"
+    print(f"{'✓' if hit else '✗'} 진입점의 사번이 상태로 실린다 — x_client_user 는 사번 꼴일 때만"
+          f" ({by_client} · {by_bucket} · {by_explicit})")
+    ok += hit
+
+    hit = logged_emp == "3902176"
+    print(f"{'✓' if hit else '✗'} 상담이력 세션에 «누가 상담했나»가 남는다 ({logged_emp})")
     ok += hit
 
     hit = "취소" in no["answer"] and no["pending_action"] is None and len(sent_after_no) == 1

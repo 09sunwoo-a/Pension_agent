@@ -190,28 +190,31 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 **진짜 조치** 무엇을 마스킹할지의 규칙을 정한다. 지금 스위치는 «전부 보내거나 전부
 가리거나» 둘뿐이라, "고객명·계좌번호만 가리고 나머지는 본다"가 안 된다.
 
-## 10. 쪽지를 «누가 보내는가»가 프로세스 설정 하나다 — 🔴 남의 이름으로 나간다
+## 10. 호출자가 사번을 주지 않으면 쪽지가 한 사람 이름으로 나간다 — 🟡 배포 설정에 달렸다
 
-**어디** `pension_agent/mcp/workb.py::send_memo` · `pension_agent/workb.py::employee_id` ·
-`pension_agent/consult_agent/state.py` 의 `employee_id`
+**어디** `pension_agent/consult_agent/graph.py::employee_no` ·
+`pension_agent/workb.py::employee_id` · `pension_agent/mcp/workb.py::send_memo`
 
-행내 MCP 인증에는 **사번이 들어간다**(MCP-User-Key). 그 사번이 곧 «누가 이 쪽지를
-보냈나»의 행내 기록이고, 받는 사람의 기본값이기도 하다. 그런데 진입점(`/chat`)이 받는
-직원 식별자(`x_client_user`)는 아직 대화 상태의 `employee_id` 로 실리지 않는다 — 그래서
-`workb.employee_id()` 는 늘 환경변수 `WORKB_EMP_NO` 하나로 떨어진다.
+행내 MCP 인증에는 **사번이 들어간다**(MCP-User-Key). 그 사번이 «누가 이 쪽지를 보냈나»의
+행내 기록이고 받는 사람의 기본값이기도 하다.
 
-한 사람이 시연하는 동안은 맞다. 여러 직원이 같은 컨테이너를 쓰는 순간 깨진다:
+**배선은 끝났다**(2026-09-10): 진입점이 받은 사번이 `AgentState["employee_id"]` 를 거쳐
+발송(`send_memo(as_employee=…)`)과 상담이력까지 같은 값으로 내려간다. 회귀는
+`tests/test_api.py`(진입점 → 에이전트) · `tests/test_consult_agent.py`(받는 사람 ·
+보내는 사람) · `tests/test_infra.py`(인증에 실리는 사번)가 잡는다.
 
-- 직원 B 가 «쪽지로 보내줘»라고 하면 쪽지는 **`WORKB_EMP_NO` 의 사번(A)에게** 간다.
-  B 는 자기 받은편지함을 열어 보고 «안 왔다»고 한다.
-- 행내 기록에는 전부 A 가 보낸 것으로 남는다. 되돌릴 수 없는 행위의 추적 수단이 그
-  기록 하나인데(루트 `CLAUDE.md` 규칙 5), 그것이 통째로 한 사람을 가리킨다.
+**남은 것은 값의 출처다.** 사번은 `input_value` 의 `employee_id` 로 오거나, 없으면
+`x_client_user` 에서 **사번 꼴일 때만** 읽는다. 그 값은 플랫폼의 쿼터 버킷 이름이라
+사번이라는 보장이 없다(`pension-agent` 같은 값이 실제로 들어온다). 둘 다 사번이 아닌
+배포에서는 여전히 `WORKB_EMP_NO` 하나로 떨어지고, 그러면 여러 직원이 같은 컨테이너를
+쓸 때 쪽지가 전부 그 사번 앞으로 가고 행내 기록도 한 사람을 가리킨다.
 
-**최소 조치** 진입점이 `x_client_user` 를 `AgentState["employee_id"]` 로 싣고,
-`nodes/act.py` 가 그 값을 `send_memo(..., emp_no=…)` 까지 넘긴다. 자리는 이미 전부
-뚫려 있다 — `employee_id` 상태 키, `workb.employee_id(explicit)`, 어댑터의 `emp_no`
-인자. **연결하기 전에 정할 것 하나**: `x_client_user` 가 WorkB 사번과 같은 값인가.
-다르면 사번을 주는 것은 게이트웨이가 아니라 프론트다.
+조용하지는 않다 — 그 폴백으로 나가는 발송마다 WARNING 이 남고(`mcp/workb.py`), 요청
+로그의 `emp_no=` 가 `-` 로 찍힌다.
+
+**최소 조치** 배포 전에 `x_client_user` 가 WorkB 사번 그대로인지 확인한다. 다르면
+프론트가 `input_value` 에 `employee_id` 를 실어 보낸다(`client/README.md` §1). 확인
+방법은 요청 로그 한 줄이다 — `emp_no=-` 가 찍히면 그 배포는 폴백 상태다.
 
 ## 10-b. MCP 요청 컨텍스트가 SDK 전역이다 — 🟡 다른 직원의 컨텍스트로 나갈 수 있다
 

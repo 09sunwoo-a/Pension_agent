@@ -32,6 +32,13 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
                            이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
     session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
                            이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
+    employee_id     (선택) 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송
+                           주체이고 상담이력에 «누가 상담했나»로 남는다. 없으면
+                           `x_client_user` 를 쓰되 **사번 꼴일 때만** 읽는다 — 그 값은
+                           쿼터 버킷 이름이라 사번이라는 보장이 없기 때문이다
+                           (`pension_agent/workb.py::as_emp_no`). 둘 다 사번이 아니면
+                           `WORKB_EMP_NO` 환경변수로 떨어지고, 그것도 없으면 쪽지 발송을
+                           제안하지 않는다
 
 ━━ 출력 형식 — CHUNK 의 content 는 JSON 이벤트 하나다 ━━
 프론트가 답변·근거·진행·추천질문을 **다른 자리에** 그려야 하는데 플랫폼 스키마는 CHUNK 텍스트
@@ -320,6 +327,9 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
         "customer_id": payload.get("customer_id") or None,
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
+        # 사번을 따로 실어 보내는 게이트웨이·프론트를 위한 자리(머리말). 없으면 ask() 가
+        # x_client_user 에서 «사번 꼴일 때만» 가져온다 — 여기서 판정하지 않는다.
+        "employee_id": str(payload.get("employee_id") or "").strip() or None,
         "payload": payload,
     }
 
@@ -417,9 +427,14 @@ async def chat(req: ChatRequest, request: Request):
         history = context_store.get(x_client_user, session_id)
         history_from = "store" if history else "none"
     log.info(
-        "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s "
+        "[%s] 요청 · x_client_user=%s emp_no=%s customer_id=%s session_id=%s "
         "맥락=%d턴(%s) · 질문(%d자) %r",
-        rid, x_client_user, args["customer_id"], session_id,
+        rid, x_client_user,
+        # 이 턴의 쪽지가 누구 앞으로 · 누구 이름으로 나갈지가 여기서 정해진다. 값이 «-»
+        # 이면 환경변수 폴백으로 떨어졌다는 뜻이고, 그건 여러 직원이 쓰는 배포에서
+        # 남의 이름으로 나가는 상태다(docs/PRODUCTION_RISKS.md 10).
+        consult_graph.employee_no(args["employee_id"], x_client_user) or "-",
+        args["customer_id"], session_id,
         len(history or []), history_from, len(question),
         question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
     )
@@ -449,7 +464,8 @@ async def chat(req: ChatRequest, request: Request):
                 return consult_graph.ask(
                     question, history,
                     customer_id=args["customer_id"], session_id=session_id,
-                    x_client_user=x_client_user, on_progress=on_progress,
+                    x_client_user=x_client_user, employee_id=args["employee_id"],
+                    on_progress=on_progress,
                 )
         try:
             result = await asyncio.to_thread(run_once)
@@ -481,7 +497,7 @@ async def chat(req: ChatRequest, request: Request):
                     return consult_graph.ask(
                         question, history,
                         customer_id=args["customer_id"], session_id=session_id,
-                        x_client_user=x_client_user,
+                        x_client_user=x_client_user, employee_id=args["employee_id"],
                         on_progress=on_progress,
                     )
             finally:
