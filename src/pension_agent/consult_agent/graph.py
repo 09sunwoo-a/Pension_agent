@@ -34,7 +34,7 @@ from pension_agent import llm, observability
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
-from pension_agent.consult_agent import guard, progress, suggest
+from pension_agent.consult_agent import guard, progress, suggest, tools
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -44,9 +44,9 @@ from pension_agent.consult_agent.nodes.meta import agent_help
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
 from pension_agent.consult_agent.routing import (
-    LLM_DOWN, route_answer, route_confirm, route_intent, route_plan,
+    LLM_DOWN, route_answer, route_confirm, route_correction, route_intent, route_plan,
 )
-from pension_agent.consult_agent.state import HISTORY_LIMIT, AgentState
+from pension_agent.consult_agent.state import ANSWER_KEEP, HISTORY_LIMIT, AgentState
 
 #: 답변 끝 추천질문 블록의 머리말. `plan.MISSING_NOTICES`·`MATERIAL_MARKS` 와 같은 꼴로,
 #: **프론트가 이 블록만 떼어낼 수 있게** 고정 문자열로 둔다(반환값의 "followups" 를 쓰면
@@ -89,7 +89,12 @@ def build_agent():
     g.add_conditional_edges("confirm_action", route_confirm,
                             {"compose": "compose", "__end__": END})
     g.add_edge("offer", END)
-    for node in ("agent_help", "lms_link", "correction", LLM_DOWN):
+    # 브리핑 수정 노드가 «이건 화면 문장이 아니라 방금 한 답변을 고쳐 달라는 것»이라고
+    # 판정하면 답을 내지 않고 계획 루프로 넘긴다(routing.route_correction). 분류가 어긋나도
+    # 능력이 잘리지 않는다는 기본값(플랜 루프)이 이 노드에도 적용되는 것이다 — 직전 답변은
+    # `last_answer` 도구의 재료이고, 답을 만드는 경로는 계획 루프 하나다.
+    g.add_conditional_edges("correction", route_correction, {"plan": "plan", "__end__": END})
+    for node in ("agent_help", "lms_link", LLM_DOWN):
         g.add_edge(node, END)
     return g.compile()
 
@@ -218,6 +223,14 @@ def ask(
         # 무슨 재료로 답했는지(이름만). 다음 턴이 «이미 나열한 것»을 알아야 좁히는 후속
         # 질문에 앞 답을 통째로 반복하지 않는다(state.Turn 의 tools 주석).
         "tools": sorted({e["tool"] for e in (out.get("evidence") or [])}),
+        # 답변 원문 — 다음 턴의 「좀 더 짧게 줄여줘」가 다시 쓸 재료다(`last_answer` 도구).
+        # 프롬프트의 대화 맥락에는 안 실린다(state.Turn). 되묻기·LLM 장애 턴은 «답변»이
+        # 아니라 비운다 — 되물은 문장을 줄여 달라는 요청은 성립하지 않고, 실패 안내를
+        # 재료로 다시 쓰면 실패 안내가 답변처럼 나간다.
+        "answer": (None if out.get("clarify") or out.get("llm_error")
+                   else (out.get("answer") or "")[:ANSWER_KEEP] or None),
+        "sources": list(out.get("sources") or []),
+        "marks": tools.ledger_marks(evidence),
     }
     new_history = [*(history or []), turn][-HISTORY_LIMIT:]
 

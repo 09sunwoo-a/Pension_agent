@@ -32,7 +32,7 @@ from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
     MUST_BLOCK,
     PLAN_BUDGET_BLOCK, PLAN_MISSES_BLOCK, PLAN_PROMPT, PLAN_RETRY_BLOCK, REPEAT_BLOCK,
-    SHAPE_BLOCK,
+    REWRITE_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
 from pension_agent.llm import LLMError, generate
@@ -536,9 +536,14 @@ def _repeated_materials(state: AgentState, evidence: list[tools.Evidence]) -> li
 
     직전 한 턴만 본다. 두세 턴 전이면 직원이 다시 보고 싶어 물었을 수 있고, 그때는
     반복이 아니라 답이다.
+
+    **다시 쓰는 턴에는 붙지 않는다.** 원장에 `last_answer` 가 있으면 직원이 직전 답변을
+    다시 정리해 달라고 한 것이라, 「같은 목록을 다시 세우지 마라」가 요구와 정반대다
+    (REPEAT_BLOCK 자체가 「직원이 다시 정리해 달라고 한 것이 아니면」이라고 단서를 단다 —
+    그 단서를 코드가 확인할 수 있는 자리가 여기다).
     """
     history = state.get("history") or []
-    if not history:
+    if not history or any(e["tool"] == "last_answer" for e in evidence):
         return []
     prev = set(history[-1].get("tools") or [])
     return sorted(prev & {e["tool"] for e in evidence})
@@ -686,6 +691,12 @@ def compose(state: AgentState) -> dict[str, Any]:
     # 답변 원문이 없어서(state.Turn) LLM 은 자기가 방금 무엇을 나열했는지 볼 수 없다.
     if _repeated_materials(state, evidence):
         prompt = f"{prompt}\n{REPEAT_BLOCK}"
+    # 다시 쓰는 턴 — 원장에 이 에이전트가 방금 한 답변이 실려 있다(`last_answer` 도구).
+    # 이번 턴의 질문("좀 더 짧게 줄여줘")에는 주제가 없어서, 알려주지 않으면 작성 LLM 은
+    # <자료>를 그 말에 대고 재고 「그 자료는 없어요」로 답한다(승낙 턴과 같은 모양). 판정은
+    # 코드가 아는 값(원장의 도구 이름)으로 한다.
+    if any(e["tool"] == "last_answer" for e in evidence):
+        prompt = f"{prompt}\n{REWRITE_BLOCK}"
     # 승낙 턴 — 이번 턴의 질문은 "네" 한 마디다. 그 말에는 무엇을 쓰라는 것인지가 없어서,
     # 알려주지 않으면 LLM 은 <자료> 를 직전 턴의 질문에 대고 재고 「그 자료는 없어요」로
     # 답한다(ACCEPTED_BLOCK 주석의 실측). 무엇을 보여주기로 했는지는 제안한 턴이 정했고,

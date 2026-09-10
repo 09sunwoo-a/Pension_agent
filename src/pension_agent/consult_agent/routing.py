@@ -10,7 +10,9 @@ predicate 를 여기 모았다(노드 구현은 nodes/, 조립은 graph.py).
 의도는 **계획 루프로 답할 수 없는 것들뿐**이다:
 
   agent_help      에이전트 자신에 대한 질문이라 지식 재료가 없다
-  correction      답을 만드는 게 아니라 화면의 산문을 고치는 요청이다
+  correction      답을 만드는 게 아니라 화면의 산문을 고치는 요청이다. **방금 한 답변**을
+                  고쳐 달라는 것은 여기가 아니다 — 그 노드가 판정해 계획 루프로 되돌린다
+                  (route_correction · `last_answer` 도구)
   lms_link        재료 검색이 아니라 화면 연계 요청이다(§10)
   confirm_action  직전 턴의 제안에 대한 확인이라 근거를 모으지 않는다
   llm_down        LLM 이 죽어 분류조차 못 한 턴 (§11)
@@ -103,6 +105,23 @@ def route_answer(state: AgentState) -> str:
     이 분기가 고르는 것은 «답을 썼나»가 아니라 «되물었나»다.
     """
     return "__end__" if state.get("clarify") else "offer"
+
+
+def route_correction(state: AgentState) -> str:
+    """브리핑 수정 노드가 답을 냈으면 끝내고, 내지 않았으면 계획 루프로 보낸다.
+
+    수정 노드가 답을 내지 않는 경우는 하나다 — 직원이 가리킨 것이 화면의 AI 문장이 아니라
+    **방금 이 에이전트가 한 답변**이라고 판정했을 때(nodes/correction.py). 「고객에게 할 말
+    좀 더 짧게 줄여줘」가 그렇다. 분류(understand)가 그것을 correction 으로 읽는 일이
+    실제로 있었고(2026-09-10), 그때 수정 노드가 화법과 무관한 브리핑 문장을 고쳐 «이렇게
+    반영할게요»로 끝냈다. 분류가 어긋나면 기본값(계획 루프)으로 떨어진다는 규약이 이
+    노드에서도 지켜져야 한다 — 직전 답변은 `last_answer` 도구의 재료이고, 답을 만드는
+    경로는 계획 루프 하나다(graph.py).
+
+    판정은 route_confirm 과 같이 **코드가 아는 값**으로 한다: 답변이 비어 있으면 아직 답이
+    없는 턴이다.
+    """
+    return "__end__" if state.get("answer") else "plan"
 
 
 def route_confirm(state: AgentState) -> str:

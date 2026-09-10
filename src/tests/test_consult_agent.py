@@ -2966,8 +2966,206 @@ def check_no_repeat() -> int:
     print(f"{'✓' if hit else '✗'} 턴 기록이 무슨 재료로 답했는지 남긴다({turn.get('tools')})")
     ok += hit
 
-    hit = not any("5.1" in str(v) for v in turn.values())
-    print(f"{'✓' if hit else '✗'} 턴 기록에 답변 수치는 남지 않는다")
+    # 답변 원문은 턴 기록에는 남지만(`Turn.answer` — last_answer 도구의 재료, 2026-09-10)
+    # **프롬프트의 대화 맥락에는 실리지 않는다.** 실리면 LLM 이 그 수치를 되받고 §6 이 답을
+    # 통째로 버린다 — 이 검사가 지키는 것은 그 경계다.
+    from pension_agent.consult_agent.state import format_history
+    hit = "5.1" not in format_history(out["history"]) and "5.1" in (turn.get("answer") or "")
+    print(f"{'✓' if hit else '✗'} 답변 수치는 턴 기록에만 남고 프롬프트 맥락에는 실리지 않는다")
+    ok += hit
+    return ok
+
+
+def check_last_answer() -> int:
+    """직전 답변을 다시 쓰는 턴 — 「고객에게 할 말 좀 더 짧게 줄여줘」(2026-09-10 실측).
+
+    실측: 「증권사는 ETF 종류가 많던데요」 화법을 답한 다음 턴의 그 요청이 **브리핑 수정**
+    (correction)으로 분류돼, 화법과 무관한 AI브리핑 문장(「만기 예정 예금이 있어…」)을 고쳐
+    «이렇게 반영할게요»로 끝났다. 원인이 둘이었다 — ① 직전 답변 원문이 어디에도 재료로
+    없었다(대화 맥락은 질문만 싣는다) ② 분류가 어긋나면 기본값(계획 루프)으로 떨어진다는
+    규약이 correction 노드에는 없었다.
+
+    고정하는 것: 답변 원문이 턴 기록에 남고 `last_answer` 도구가 그것을 원장에 싣는다 ·
+    프롬프트 맥락에는 여전히 안 실린다 · 다시 쓴 답변이 직전 답변의 수치를 옮겨도 §6 을
+    통과한다 · 되묻기 판정이 돌지 않는다 · correction 노드가 «화면 문장이 아니다»면 답을
+    내지 않고 계획 루프로 넘어간다(그래프 배선까지).
+    """
+    from pension_agent.consult_agent import prompts, routing as R
+    from pension_agent.consult_agent.nodes import clarify as CL, correction as CORR
+    from pension_agent.consult_agent.state import HISTORY_LIMIT, format_history
+
+    ok = 0
+    print("\n[직전 답변 다시 쓰기 — last_answer 도구 · correction 되돌림]")
+
+    prev = ("증권사의 많은 상품 수보다 '선별된 선택'이 더 중요하다는 논리로 대응하는 게 핵심이에요.\n\n"
+            "\"현재 당행에서 판매 중인 ETF는 총 193종(국내 90종, 해외 103종)이고, 라인업을 "
+            "최대 400개까지 확대할 예정입니다.\"\n\n"
+            f"{plan.MATERIAL_MARKS}\n· 본부 공식 자료\n· 직원 교육자료\n\n"
+            "— 이 고객 «만기예금 보유» 상태에 걸린 화법 2건, 연계해드릴까요? (네 / 아니오)")
+    history = [
+        {"question": "고객이 증권사가 더 좋지 않냐고 하시네", "tools": ["pitch"], "answer": None,
+         "pending_clarify": {"question": "어떤 점을 이유로?", "options": ["수수료 혜택", "ETF 상품 종류"]}},
+        {"question": "ETF 상품 종류", "tools": ["pitch"], "answer": prev,
+         "sources": [{"id": "pitch.k03.005", "title": "ETF 종류 반론", "doc": "마스터북",
+                      "score": 2.0, "page": None, "role": tools.GROUND},
+                     {"id": "m.004", "title": "가드", "doc": "d", "score": None, "page": None,
+                      "role": tools.CAUTION}],
+         "marks": ["본부 공식 자료", "직원 교육자료"]},
+    ]
+    state = {"question": "고객에게 해야 할 말 좀 더 짧게 줄여줘", "history": history}
+
+    # ① 도구가 카탈로그에 서는 조건은 코드가 아는 값이다 — 다시 쓸 답변이 있을 때만.
+    hit = ("last_answer" not in tools.usable({})
+           and "last_answer" not in tools.usable({"history": [history[0]]})   # 되묻기 턴뿐
+           and "last_answer" in tools.usable(state))
+    print(f"{'✓' if hit else '✗'} last_answer 는 다시 쓸 답변이 있을 때만 카탈로그에 선다")
+    ok += hit
+
+    # ② 원장에 실리는 것은 직전 답변 본문이고 화면 장치(제안 문구·표시 블록)는 뗀다.
+    found = tools.run("last_answer", state, "직전 답변")
+    hit = (bool(found) and "193종" in found["text"] and "ETF 상품 종류" in found["text"]
+           and "(네 / 아니오)" not in found["text"] and plan.MATERIAL_MARKS not in found["text"])
+    print(f"{'✓' if hit else '✗'} 직전 답변 본문이 원장에 실리고 화면 장치는 떼어진다")
+    ok += hit
+
+    # ③ 출처는 직전 답변의 «근거»만 잇고 «주의»(고객 상태 가드)는 잇지 않는다. 표시는 잇는다.
+    hit = (bool(found) and [s["id"] for s in found["sources"]] == ["pitch.k03.005"]
+           and all("role" not in s for s in found["sources"])
+           and found["marks"] == ["본부 공식 자료", "직원 교육자료"])
+    print(f"{'✓' if hit else '✗'} 출처는 원래 답변의 근거를 잇고 가드는 잇지 않는다 · 표시도 잇는다")
+    ok += hit
+
+    hit = tools.run("last_answer", {"question": "q", "history": []}, "직전 답변") is None \
+        and tools.run("last_answer", {"question": "q", "history": [history[0]]}, "x") is None
+    print(f"{'✓' if hit else '✗'} 다시 쓸 답변이 없으면 지어내지 않는다(None)")
+    ok += hit
+
+    # 출처가 하나도 없던 답변(메타 안내 등)은 «직전 답변» 하나를 출처로 세운다 — 지어내지 않는다.
+    bare = tools.run("last_answer", {"question": "q", "history": [{"question": "뭘 도와줘?",
+                                                                  "answer": "제가 도울 수 있는 것…"}]}, "x")
+    hit = bool(bare) and [s["id"] for s in bare["sources"]] == [tools.SELF_SOURCE["id"]]
+    print(f"{'✓' if hit else '✗'} 출처 없는 답변은 «직전 답변» 자체를 출처로 세운다")
+    ok += hit
+
+    # ④ 다시 쓴 답변이 직전 답변의 수치를 옮겨도 §6 을 통과한다 — 원장이 곧 직전 답변이다.
+    #    그리고 작성 프롬프트에 «다시 쓰는 턴» 블록이 실리고, 반복 금지 블록은 실리지 않는다
+    #    (직원이 다시 정리해 달라고 한 턴이다).
+    seen: dict[str, str] = {}
+    orig = plan.generate
+
+    def _rewriter(p, **kw):
+        seen.setdefault("p", p)
+        return '"당행 ETF는 193종이고 400개까지 늘릴 예정입니다."'
+
+    plan.generate = _rewriter
+    try:
+        out = plan.compose({**state, "evidence": [found]})
+    finally:
+        plan.generate = orig
+    hit = out["answer"].startswith('"당행 ETF는 193종이고 400개까지') \
+        and "직전 답변을 다시 쓰는 턴" in seen["p"] and "직전 답변과 겹치는 자료" not in seen["p"] \
+        and "본부 공식 자료" in out["answer"] and [s["id"] for s in out["sources"]] == ["pitch.k03.005"]
+    print(f"{'✓' if hit else '✗'} 다시 쓴 답변이 직전 답변의 수치로 §6 을 통과하고 표시·출처가 따라온다")
+    ok += hit
+
+    seen.clear()
+    plan.generate = lambda p, **kw: seen.setdefault("p", p) or "답"
+    try:
+        plan.compose({"question": "q", "evidence": [tools._ev("fact", "q", "■ 재료", [])]})
+    finally:
+        plan.generate = orig
+    hit = "직전 답변을 다시 쓰는 턴" not in seen["p"] and "last_answer" in prompts.ANSWER_SHAPES
+    print(f"{'✓' if hit else '✗'} 다시 쓰는 턴이 아니면 그 블록이 붙지 않는다 · 형태 요구는 등록돼 있다")
+    ok += hit
+
+    # ⑤ 되묻기 판정이 돌지 않는다 — 갈래가 있었다면 그 답을 쓴 턴에서 이미 끝났다.
+    hit = "last_answer" in CL._NO_BRANCH and not CL.applicable({**state, "evidence": [found]}) \
+        and found["text"] not in CL.settled_block({**state, "evidence": [found]})
+    print(f"{'✓' if hit else '✗'} 다시 쓰는 턴에는 되묻기 판정이 없고 «이미 정해진 것»에도 안 실린다")
+    ok += hit
+
+    # ⑥ 프롬프트의 대화 맥락에는 답변 원문이 여전히 안 실린다(§6) — 원장으로만 들어간다.
+    hit = "193종" not in format_history(history) and HISTORY_LIMIT >= 12
+    print(f"{'✓' if hit else '✗'} 대화 맥락에는 답변 원문이 안 실리고, 맥락 창은 12턴 이상이다")
+    ok += hit
+
+    # ⑦ 진입점이 답변 원문을 턴에 남긴다 — 되묻기·LLM 장애 턴은 비운다.
+    orig_agent = G._AGENT
+    try:
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "답변 본문", "sources": [{"id": "x", "role": tools.GROUND}],
+            "evidence": [tools._ev("fact", "q", "■ 재료", [{"id": "x", "title": "t"}])]})})
+        answered = G.ask("q")["history"][-1]
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": "어느 쪽인가요?", "sources": [], "clarify": {"question": "어느 쪽인가요?"}})})
+        asked = G.ask("q")["history"][-1]
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": plan.LLM_FAILED.format(reason="x"), "sources": [], "llm_error": "x"})})
+        dead = G.ask("q")["history"][-1]
+    finally:
+        G._AGENT = orig_agent
+    hit = (answered.get("answer") == "답변 본문" and answered.get("sources") == [{"id": "x", "role": tools.GROUND}]
+           and asked.get("answer") is None and dead.get("answer") is None)
+    print(f"{'✓' if hit else '✗'} 진입점이 답변 원문을 턴에 남기고 되묻기·장애 턴은 비운다")
+    ok += hit
+
+    # ⑧ 라우팅·계획 프롬프트가 이 요청을 correction 이 아니라 situation·last_answer 로 이끈다.
+    hit = ("짧게 줄여줘" in prompts.ROUTE_PROMPT and "correction 이 아니라 situation" in prompts.ROUTE_PROMPT
+           and "last_answer" in prompts.PLAN_PROMPT)
+    print(f"{'✓' if hit else '✗'} 라우팅·계획 프롬프트가 «방금 한 답변 고쳐줘»를 situation·last_answer 로 이끈다")
+    ok += hit
+
+    # ⑨ correction 노드 — 분류가 «화면 문장이 아니다»면 답을 내지 않고 계획 루프로 넘긴다.
+    #    고객 화면이 닫혀 있는데 다시 쓸 답변은 있는 턴도 같다. 기록(감사로그)도 남기지 않는다.
+    hit = R.route_correction({}) == "plan" and R.route_correction({"answer": "반영"}) == "__end__"
+    print(f"{'✓' if hit else '✗'} 분기표 — 답이 없으면 계획 루프, 있으면 끝")
+    ok += hit
+
+    out = CORR.correction({**state, "customer_id": None})
+    hit = not out.get("answer") and out.get("intent") == routing.DEFAULT_INTENT
+    print(f"{'✓' if hit else '✗'} 고객 화면이 닫혀 있어도 다시 쓸 답변이 있으면 계획 루프로 넘긴다")
+    ok += hit
+
+    hit = "고객 화면을 먼저" in CORR.correction({"question": "고쳐줘", "history": []})["answer"]
+    print(f"{'✓' if hit else '✗'} 다시 쓸 답변도 없으면 예전대로 고객 화면을 먼저 열라고 답한다")
+    ok += hit
+
+    from pension_agent.strategy_agent import agent as SA, customer as SC
+    orig_profile, orig_propose, orig_gen, logged = SC.get_profile, SA.propose, CORR.generate, []
+    SC.get_profile = lambda cid: object()
+    SA.propose = lambda p: {"facts": {"items": []}, "sentence": "만기 예정 예금이 있어 빠른 운용 결정이 필요합니다.",
+                            "insight": "i"}
+    CORR.generate = lambda prompt, **kw: (logged.append(prompt) or
+                                          '{"target": "not_briefing", "item_id": null, "revised_text": "", "reject_reason": ""}')
+    orig_log = CORR._log_correction
+    CORR._log_correction = lambda *a, **kw: logged.append("LOGGED")
+    try:
+        out = CORR.correction({**state, "customer_id": "CX"})
+    finally:
+        SC.get_profile, SA.propose, CORR.generate, CORR._log_correction = orig_profile, orig_propose, orig_gen, orig_log
+    hit = (not out.get("answer") and out.get("intent") == routing.DEFAULT_INTENT
+           and "LOGGED" not in logged and "ETF 상품 종류" in logged[0]
+           and "not_briefing" in prompts.CORRECTION_SYSTEM)
+    print(f"{'✓' if hit else '✗'} 분류가 not_briefing 이면 반영도 기록도 없이 넘긴다 · 프롬프트가 이전 대화를 본다")
+    ok += hit
+
+    # ⑩ 그래프 배선 — understand 가 correction 으로 오분류해도 턴이 다시 쓴 답변으로 끝난다.
+    def stub_plan_last(st):
+        found = tools.run("last_answer", st, "직전 답변")
+        return {"plan_done": True, "evidence": [found] if found else [],
+                "steps": [{"tool": "last_answer", "query": "직전 답변", "outcome": "found"}]}
+
+    orig_u, orig_p, orig_g = G.understand, G.plan_step, plan.generate
+    G.understand = lambda st: {"intent": "correction", "utterance": st["question"]}
+    G.plan_step = stub_plan_last
+    plan.generate = lambda p, **kw: '"당행 ETF는 193종이고 400개까지 늘릴 예정입니다."'
+    try:
+        out = G.build_agent().invoke({"question": state["question"], "history": history, "customer_id": None})
+    finally:
+        G.understand, G.plan_step, plan.generate = orig_u, orig_p, orig_g
+    hit = out["answer"].startswith('"당행 ETF는 193종') and [e["tool"] for e in out["evidence"]] == ["last_answer"] \
+        and "반영할게요" not in out["answer"]
+    print(f"{'✓' if hit else '✗'} 그래프 — correction 오분류가 다시 쓴 답변으로 끝난다(브리핑을 건드리지 않는다)")
     ok += hit
     return ok
 
@@ -6193,6 +6391,7 @@ def main() -> int:
         check_question_echo()
         check_table_row_names()
         check_no_repeat()
+        check_last_answer()
         check_suitable_shape()
         check_history_material()
         check_memo()
