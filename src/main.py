@@ -116,7 +116,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from pension_agent import config, llm, observability
+from pension_agent import config, llm, mcp, observability
 from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.strategy_agent import briefing_store
@@ -146,6 +146,11 @@ QUESTION_PREVIEW = 60
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
+    # 행내 MCP(쪽지 발송)를 이 프로세스에 붙인다 — 설정이 없으면 아무것도 하지 않고,
+    # 그때 쪽지는 «미연결»로 답한다(보내지 않고 본문만 만든다 — pension_agent/mcp).
+    # 여기서 붙이는 이유는 **붙는 시점이 한 곳이어야 하기 때문**이다: 첫 발송 때 붙이면
+    # 그 요청 하나만 토큰 발급 왕복을 물고, 설정이 틀린 것도 그때서야 드러난다.
+    mcp.install()
     # 이 컨테이너가 어떤 설정으로 떴는지 한 줄 — /health 와 같은 내용이다. «키를 넣었는데
     # 왜 안 되나 / train URL 을 보고 있나»를 Grafana 에서 로그 첫 줄로 끝내려고 둔다.
     log.info("기동 · %s", json.dumps(health(), ensure_ascii=False))
@@ -375,6 +380,9 @@ def health() -> dict[str, Any]:
         "briefing_cache": briefing_store.stats(),
         # 진행 중인 대화 맥락이 몇 세션 살아 있나(메모리 · 머리말 «대화 맥락»).
         "context_store": context_store.stats(),
+        # 행내 MCP(쪽지 발송)가 붙었나. 안 붙었으면 무엇이 비어 있는지까지 말한다 —
+        # 「보낸다고 했는데 왜 미연결이지」가 여기서 끝나야 한다. 키·토큰은 내보내지 않는다.
+        "mcp": mcp.stats(),
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
             "max_concurrency": llm.MAX_CONCURRENCY,

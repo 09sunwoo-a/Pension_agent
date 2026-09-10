@@ -2,7 +2,8 @@
 
 직원이 "오늘 타겟 고객 쪽지로 보내줘" 라고 하면 보내는 그 글이다. 여기가 만드는 것은
 **본문 텍스트 하나**이고, 실제 발송은 앱이 `use_sender` 로 등록한 행내 MCP 클라이언트가
-한다(`send_note` 가 부른다). 등록 전에는 보내지 않고 «미연결»로 답한다.
+한다(`send_note` 가 부른다 — 등록하는 쪽은 `pension_agent/mcp/workb.py`). 등록 전에는
+보내지 않고 «미연결»로 답한다.
 
 ━━ 여기는 «꼴과 발송»이다 ━━
 **무엇을 쓸지는 `consult_agent/memo.py` 가 정한다**(대화 중 직원이 부탁하는 쪽지 — LLM 이
@@ -365,7 +366,8 @@ def daily_targets_note(*, fmt: str = "", max_chars: int = MAX_CHARS) -> Note:
 # ─────────────────────────────────────────────────────────────
 
 #: 주입받는 발송 함수의 모양 — `send(recipients, title, body)` 를 await 하면 원시 결과가
-#: 온다. 행내 클라이언트의 `MCPClient.send_message` 가 그대로 이 모양이다.
+#: 온다(판정은 아래 `parse_result` 가 한다). 행내 어댑터
+#: `pension_agent/mcp/workb.py::send_memo` 가 그대로 이 모양이다.
 Sender = Callable[[list[str], str, str], Awaitable[Any]]
 
 #: 앱이 등록한 발송 함수. 등록 전에는 None 이고, 그동안 발송 시도는 «미연결»로 답한다 —
@@ -380,10 +382,13 @@ EMP_NO_ENV = "WORKB_EMP_NO"
 
 
 def use_sender(fn: Sender | None) -> None:
-    """행내 WorkB 클라이언트를 등록한다(앱 시작 시 1회).
+    """발송 함수를 등록한다(앱 시작 시 1회).
 
-        from pension_agent import workb
-        workb.use_sender(MCPClient(emp_no).send_message)
+        from pension_agent import mcp
+        mcp.install()                    # 행내 MCP 를 이 자리에 등록한다(설정이 있을 때만)
+
+    보통은 `mcp.install()` 이 부른다(`pension_agent/mcp/workb.py::send_memo`). 이 함수를
+    직접 부르는 것은 다른 전송 수단을 끼울 때다 — 스텁·시연용 가짜·미래의 다른 경로.
 
     여기서 임포트하지 않고 등록받는 이유는 `mcp_sdk` 가 저장소 밖 패키지이기 때문이다 —
     임포트하면 그 패키지 없이는 테스트도 임포트도 안 된다(망분리 밖에서는 설치도 못 한다).

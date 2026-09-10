@@ -161,6 +161,12 @@ try:
     # 사고를 여기서 바로 잡아야 한다.
     check(h["llm"].get("stage") in ("train", "serving"),
           "/health 가 어느 단계(ENV_PATH)의 URL 을 읽었는지 보여준다", str(h["llm"].get("stage")))
+    # 행내 MCP(쪽지 발송)가 붙었나. 안 붙어 있으면 쪽지는 보내지 않고 «미연결»로 답하는데,
+    # 화면에는 초안까지 똑같이 뜨므로 승낙 뒤에야 드러난다 — 여기서 먼저 갈려야 한다.
+    # 여기서도 키 값은 나가지 않는다(설정 «여부»와 무엇이 비었는지의 이름까지).
+    check(set(h["mcp"]) >= {"configured", "missing", "servers"}
+          and isinstance(h["mcp"]["configured"], bool),
+          "/health 가 행내 MCP 연결 상태를 보여준다", str(h.get("mcp")))
 
     # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
     # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
