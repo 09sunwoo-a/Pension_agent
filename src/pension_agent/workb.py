@@ -387,23 +387,30 @@ EMP_NO_ENV = "WORKB_EMP_NO"
 #: 대화에서 수신자 사번을 읽는 정규식(`consult_agent/nodes/act.py`)도 이 문자열로 만든다.
 #: 자릿수가 다른 사번이 있다는 것이 확인되면 고칠 자리도 여기 하나다.
 EMP_NO_PATTERN = r"\d{7}"
-_EMP_NO_ONLY = re.compile(rf"^{EMP_NO_PATTERN}$")
+_EMP_NO_HEAD = re.compile(rf"^({EMP_NO_PATTERN})")
 
 
 def as_emp_no(value: str | None) -> str | None:
-    """**사번 꼴일 때만** 그 값, 아니면 None — 사번이라는 보장이 없는 값을 거르는 자리.
+    """진입점이 받은 직원 식별자에서 사번을 읽는다 — **앞 7자리 숫자**. 아니면 None.
 
-    진입점이 받는 직원 식별자(`x_client_user`)는 플랫폼의 감사 기록이자 LLM 쿼터 버킷
-    이름이고, 그것이 WorkB 사번과 같은 값이라는 **보장이 없다**(`pension-agent`·
-    `streamlit-dev` 같은 값이 실제로 들어온다). 그대로 쓰면 두 가지가 조용히 어긋난다 —
-    없는 사번 앞으로 쪽지가 나가고, MCP 인증의 사번 자리에 그 문자열이 실린다.
+    ━━ 왜 앞자리만 보나 ━━
+    게이트웨이가 넘기는 `x_client_user` 는 「사번 7자리 + LLM 중복 호출을 가르는 uuid」
+    꼴이다(`3902172-550e8400-e29b-…`). 사번은 늘 맨 앞이고 길이가 고정이므로, 뒤에
+    무엇이 붙든 앞 7자리가 그 사람이다. **전체 일치로 재면 안 된다** — uuid 가 붙은
+    값이 전부 «사번 아님»으로 떨어지고, 그러면 쪽지가 환경변수에 적힌 한 사람 앞으로
+    몰린다(그것이 이 함수가 막으려는 바로 그 상태다).
 
-    그래서 «꼴이 아니면 안 쓴다». 못 알아보면 환경변수 폴백으로 떨어지므로, 틀리는
-    방향이 **되돌릴 수 있는 쪽**이다(`consult_agent/nodes/act.py::employee_no` 와 같은 규칙).
-    프론트가 «이것이 사번이다»라고 명시해 넘긴 값은 이 문을 거치지 않는다(`graph.ask`).
+    ━━ 왜 그냥 쓰지는 않나 ━━
+    그 값은 플랫폼의 감사 기록이자 LLM 쿼터 버킷 이름이라 **사번이 아닌 값도 들어온다**
+    (`pension-agent` 는 이 저장소의 기본값이고 `streamlit-dev` 는 개발 화면이 쓴다).
+    그대로 쓰면 없는 사번 앞으로 쪽지가 나가고, MCP 인증의 사번 자리에 그 문자열이
+    실린다. 앞이 숫자 7자리가 아니면 사번으로 읽지 않는다.
+
+    못 알아보면 환경변수 폴백으로 떨어진다(`employee_id`). 프론트가 «이것이 사번이다»
+    라고 명시해 넘긴 값은 이 문을 거치지 않는다(`graph.ask`).
     """
-    text = (value or "").strip()
-    return text if _EMP_NO_ONLY.fullmatch(text) else None
+    found = _EMP_NO_HEAD.match((value or "").strip())
+    return found.group(1) if found else None
 
 
 # ─────────────────────────────────────────────────────────────

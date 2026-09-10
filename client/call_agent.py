@@ -51,7 +51,10 @@ OPENAPI_TOKEN = ""         # x-openapi-token. "Bearer " 접두는 코드가 붙�
 GENERATIVE_AI_CLIENT = ""  # x-generative-ai-client
 ASSET_ID = ""              # agentId
 
-X_CLIENT_USER = "test-user"  # 호출 직원 식별자 — 에이전트의 감사 기록·쿼터 버킷
+# 호출 직원 식별자 — 에이전트의 감사 기록·쿼터 버킷. 실서비스는 「사번 7자리 + uuid」로
+# 온다(uuid 는 LLM 중복 호출을 가른다). 에이전트가 앞 7자리를 사번으로 읽어 쪽지의 받는
+# 사람·보내는 사람을 정하므로, 쪽지까지 시험하려면 여기를 자기 사번으로 둔다.
+X_CLIENT_USER = "test-user"
 CUSTOMER_ID = ""             # 지금 열려 있는 브리핑 화면의 고객 id(예: 198734-1205842). 비우면
                              # 고객 없이 호출 — 지식 질의응답·화법은 답하고 고객 질문에는
                              # 「고객 화면을 먼저 열어달라」고 답한다. 실서비스 프론트가 이 자리다

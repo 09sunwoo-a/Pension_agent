@@ -315,11 +315,14 @@ try:
     _events(r)
     check(_seen.get("employee_id") == "3902172",
           "input_value 의 employee_id 가 에이전트까지 전달된다", str(_seen.get("employee_id")))
+    # 게이트웨이의 x_client_user 는 「사번 7자리 + uuid」다 — 앞 7자리가 그 직원이다.
     check(main.consult_graph.employee_no("3902172", "emp-0417") == "3902172"
+          and main.consult_graph.employee_no(
+              None, "3902172-550e8400-e29b-41d4-a716-446655440000") == "3902172"
           and main.consult_graph.employee_no(None, "3902172") == "3902172"
           and main.consult_graph.employee_no(None, "emp-0417") is None
           and main.consult_graph.employee_no(None, "pension-agent") is None,
-          "사번은 명시한 값이 먼저이고, x_client_user 는 사번 꼴일 때만 읽는다")
+          "사번은 명시한 값이 먼저이고, x_client_user 에서는 앞 7자리를 읽는다")
     def _last_request_log() -> str:
         return next((m for m in reversed([r.getMessage() for r in _captured if r.name == "main"])
                      if "요청 ·" in m), "")
