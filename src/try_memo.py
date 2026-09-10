@@ -4,14 +4,22 @@
 그래서 LLM 키가 없어도 돌고, 실패하면 어디서 갈렸는지 그 자리에서 찍는다.
 
     cd src
-    python try_memo.py                 # 붙는지만 본다 — **보내지 않는다**
-    python try_memo.py --send          # 본인에게 시험 쪽지를 실제로 보낸다
-    python try_memo.py --send --targets        # 오늘의 타겟 목록 쪽지(진짜 본문)
-    python try_memo.py --send --targets --html # 그 목록을 HTML 표로 — 뷰어가 표를 그리나
-    python try_memo.py --send --to 3902173     # 다른 직원에게(사번을 직접 적을 때만)
+    python try_memo.py 3902172                 # 붙는지만 본다 — **보내지 않는다**
+    python try_memo.py 3902172 --send          # 본인에게 시험 쪽지를 실제로 보낸다
+    python try_memo.py 3902172 --send --targets        # 오늘의 타겟 목록 쪽지(진짜 본문)
+    python try_memo.py 3902172 --send --targets --html # 그 목록을 HTML 표로
+    python try_memo.py 3902172 --send --to 3902173     # 다른 직원에게
 
-받는 사람은 기본이 **본인**이다 — `WORKB_EMP_NO` 환경변수(`src/.env`)나 `--emp` 로 준
-사번. `--to` 를 적으면 그 사번으로 간다.
+━━ 사번은 인자로 준다 ━━
+첫 인자가 **로그인한 직원의 사번**이다 — 실서비스에서 `x_client_user` 로 들어오는 그
+자리다(`graph.employee_no`). 이 파일에는 HTTP 요청이 없으니 그 값을 손으로 준다.
+
+받는 사람은 기본이 **본인**(그 사번)이고, `--to` 를 적으면 그 사번으로 간다. 제품에서
+받는 사람이 갈리는 규칙과 같다 — 기본은 본인, 타인은 직원이 사번을 적었을 때만.
+
+사번을 안 주면 `WORKB_EMP_NO` 환경변수로 떨어진다. **그건 폴백이다** — 실서비스에서
+그 자리까지 떨어지면 여러 직원의 쪽지가 전부 한 사람 앞으로 가는 상태이고
+(`docs/PRODUCTION_RISKS.md` 10), 시험할 때 그 값에 기대면 무엇을 재는지가 흐려진다.
 
 ━━ 무엇을 보게 되나 ━━
 발송은 되돌릴 수 없어서(루트 CLAUDE.md 규칙 5) `--send` 없이는 본문만 찍고 끝난다.
@@ -46,37 +54,61 @@ BODY = ("<b>퇴직연금 AI 사후관리 에이전트</b><br>"
         "이 쪽지가 보이면 발송 경로가 살아 있습니다.")
 
 
+def _parse(argv: list[str]) -> tuple[set[str], str, str]:
+    """(플래그, 첫 인자=로그인 사번, --to 값). `--to` 만 값을 하나 먹는다."""
+    flags: set[str] = set()
+    to, emp_no = "", ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--to":
+            to, i = (argv[i + 1] if i + 1 < len(argv) else ""), i + 2
+        elif arg.startswith("--"):
+            flags.add(arg)
+            i += 1
+        else:
+            emp_no = emp_no or arg
+            i += 1
+    return flags, emp_no, to
+
+
 def main(argv: list[str]) -> int:
-    send = "--send" in argv
-    use_targets = "--targets" in argv
-    fmt = "html" if "--html" in argv else "text"
+    flags, emp_no, to_arg = _parse(argv)
+    send = "--send" in flags
+    use_targets = "--targets" in flags
+    fmt = "html" if "--html" in flags else "text"
 
-    def _opt(name: str) -> str:
-        """`--to 3902173` 처럼 값이 따라오는 인자."""
-        return argv[argv.index(name) + 1] if name in argv and argv.index(name) + 1 < len(argv) else ""
-
-    # 보내는 주체(사번). 운영에서는 로그인 사번이 여기 온다 — 이 파일은 그 자리를
-    # `--emp` 나 WORKB_EMP_NO 로 대신한다.
-    sender = workb.employee_id(_opt("--emp"))
-    to = _opt("--to") or sender
+    # 로그인한 직원의 사번 — 실서비스에서 x_client_user 로 들어오는 그 자리다.
+    # 안 주면 환경변수로 떨어지지만 그건 폴백이다(머리말).
+    sender = workb.employee_id(emp_no)
+    from_env = bool(sender) and not emp_no
+    # 받는 사람은 기본이 본인, --to 를 적으면 그 사번(제품의 갈림과 같다).
+    to = to_arg or sender
 
     # ── ① 설정 · 패키지 ────────────────────────────────────────────────
     cfg = mcp.settings()
     print("[설정]")
     print(f"  게이트웨이   {cfg.base_url or '(비어 있음)'}")
     print(f"  설정         {'갖춰짐' if cfg.configured else '모자람 — ' + ', '.join(cfg.missing())}")
-    print(f"  보내는 사번   {sender or f'(비어 있음 — {workb.EMP_NO_ENV})'}")
-    print(f"  받는 사번     {to or '(없음)'}")
+    print(f"  보내는 사번   {sender or '(없음)'}"
+          f"{f' — 인자를 안 줘서 {workb.EMP_NO_ENV} 로 떨어졌다(폴백)' if from_env else ''}")
+    print(f"  받는 사번     {to or '(없음)'}{' — 본인' if to == sender else ''}")
     try:
         mcp.client.backend()
         print("  행내 패키지   있음")
     except mcp.MCPUnavailable as exc:
         print(f"  행내 패키지   없음 · {exc}")
 
-    if not to:
-        print(f"\n받는 사람이 없습니다 — src/.env 의 {workb.EMP_NO_ENV} 를 채우거나 "
-              "--emp 3902172 로 주세요.")
+    if not sender:
+        print("\n사번이 없습니다 — 첫 인자로 로그인 사번을 주세요:"
+              "\n    python try_memo.py 3902172 --send")
         return 1
+    # 꼴이 아니어도 막지 않는다 — 손으로 적어 준 값은 그대로 믿는다(제품의 employee_id 와
+    # 같은 규약). 다만 오타는 서버가 «64;ETC_ERR» 로만 답하므로 여기서 먼저 알려준다.
+    for label, value in (("보내는", sender), ("받는", to)):
+        if not workb.as_emp_no(value):
+            print(f"  ⚠ {label} 사번 {value!r} 이 사번 꼴(숫자 7자리)이 아닙니다 — "
+                  "그대로 보내지만 서버가 거부할 수 있습니다.")
 
     # ── ② 나가는 본문 ─────────────────────────────────────────────────
     if use_targets:
