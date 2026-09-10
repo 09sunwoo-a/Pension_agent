@@ -6,12 +6,11 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 from __future__ import annotations
 
 from pension_agent.consult_agent import kb as KBMOD
-from pension_agent.consult_agent.nodes import pitch as PITCHMOD, procedure_qa
+from pension_agent.consult_agent.nodes import pitch as PITCHMOD
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.llm import LLMError
 from pension_agent.consult_agent.tools.adequacy import _adopt
-from pension_agent.consult_agent.tools.base import Evidence, _ev
-from pension_agent.consult_agent.tools.cards import _method_decls, _procedure_decls, _render_method
+from pension_agent.consult_agent.tools.base import Evidence
 
 
 # 문제상황에 걸린 화법 — 화면 ⑥⑦⑧ 과 같은 후보군
@@ -139,33 +138,13 @@ def playbook_evidence(query: str, hits: list[tuple[float, dict]]) -> Evidence | 
     구분 없이 뿌려 저작 메모(authoring)가 직원에게 노출되고(§12 지워진 gap 17 이 고친
     실패의 재발), ② 화면번호가 `atomic` 강제를 받지 않아 LLM 이 옮겨 적다 틀려도 아무도
     못 잡는다.
-    """
-    if not hits:
-        return None
-    pitch_hits = [(sc, c) for sc, c in hits if c["_kind"] == "pitch"]
-    proc_hits = [(sc, c) for sc, c in hits if c["_kind"] == "procedure"]
-    method_hits = [(sc, c) for sc, c in hits if c["_kind"] == "method"]
 
-    blocks: list[str] = []
-    atomic: list[str] = []
-    notices: list[str] = []
-    scopes: list[dict] = []
-    if pitch_hits:
-        blocks.append(KBMOD.build_context(KB, pitch_hits))
-    if proc_hits:
-        blocks.append(procedure_qa.render(proc_hits))
-        p_atomic, p_notices, p_scopes = _procedure_decls([c for _sc, c in proc_hits])
-        atomic += p_atomic
-        notices += p_notices
-        scopes += p_scopes
-    if method_hits:
-        blocks.append("\n\n".join(_render_method(c) for _sc, c in method_hits))
-        m_notices, m_scopes = _method_decls([c for _sc, c in method_hits])
-        notices += m_notices
-        scopes += m_scopes
-    return _ev("playbook", query, "\n\n".join(blocks), KBMOD.sources_of(KB, hits),
-               atomic=atomic, notices=notices, scopes=scopes or None,
-               cards=[c for _sc, c in hits])
+    종류별 조립은 `combine.evidence_from_cards` 가 한다 — 직전 답변의 근거 카드를 되싣는
+    `last_answer` 와 같은 함수다. 한때 여기 인라인으로 있었는데, 같은 조립이 두 곳이면
+    한쪽만 선언이 빠지는 날이 온다.
+    """
+    from pension_agent.consult_agent.tools.combine import evidence_from_cards  # noqa: PLC0415
+    return evidence_from_cards("playbook", query, hits)
 
 
 def cited_cards(state: AgentState) -> set[str]:

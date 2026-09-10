@@ -95,7 +95,7 @@ $CAD --script tax_credit_asserts_wrong --debug --show-llm   # 캔드 시나리�
 $CAD --list                                           # 시나리오 7종
 
 # ── 묶음 실행: 첫 인자가 «어떤 대본», --옵션이 «얼마나 보여주나» ($CADR --help)
-$CADR                                                 # cases — 검토 11케이스 + 요약표
+$CADR                                                 # cases — 검토 12케이스 + 요약표
 $CADR demo --why                                      # 시연 대본 16턴 (docs/DEMO_SCENARIO.md)
 $CADR library 김서연 정민석 --why                      # 고객별 시나리오 5종 (docs/DEMO_CUSTOMER_SCENARIOS.md)
 $CADR review 이수민 --why                              # 중간점검 시연본 (docs/DEMO_REVIEW.md)

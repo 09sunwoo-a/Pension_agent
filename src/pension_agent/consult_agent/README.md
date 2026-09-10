@@ -99,6 +99,8 @@ flowchart TD
     compose -.-> offer
     confirm_action -.-> __end__
     confirm_action -.-> compose
+    correction -.-> __end__
+    correction -.-> plan
     plan -.-> compose
     plan -.-> plan
     understand -.-> agent_help
@@ -108,11 +110,10 @@ flowchart TD
     understand -.-> lms_link
     understand -.-> plan
     agent_help --> __end__
-    correction --> __end__
     llm_down --> __end__
     lms_link --> __end__
     offer --> __end__
-    tools[["자료 도구 19종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이번 상담 대화 기록<br/>&nbsp;&nbsp;&nbsp;&nbsp;이 고객 상태에 걸린 참고자료 · 안내할 이벤트·세미나<br/>오늘의 목록: 오늘의 타겟 고객 목록<br/>계산: 세액공제 환급액 · 오늘 날짜·기한"]]
+    tools[["자료 도구 20종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록 · 이번 상담 대화 기록<br/>&nbsp;&nbsp;&nbsp;&nbsp;이 고객 상태에 걸린 참고자료 · 안내할 이벤트·세미나<br/>오늘의 목록: 오늘의 타겟 고객 목록<br/>계산: 세액공제 환급액 · 오늘 날짜·기한<br/>이번 대화: 이전 답변"]]
     plan -. "필요한 자료를 골라 조회" .-> tools
     gates[["답변 점검 — 근거를 벗어난 답변은 화면에 내보내지 않는다<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]
     compose -. "내보내기 전 검사" .-> gates
@@ -136,7 +137,7 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 | └ `compose` | 원장만으로 답변 하나를 씀 → 원장 밖 수치·원문 스팬을 코드가 집행. 원장 0건이면 정직하게 없다고 답변 | ○ |
 | `llm_down` | LLM 이 죽어 분류조차 못 한 턴 — "LLM 연결이 안 되어 있다"고 원인과 함께 답변 | ✕ |
 | `lms_link` | 인용부호로 명시된 문구로 **발송 화면 연계를 제안**(보내지 않는다) | ✕ |
-| `correction` | 수정 요청을 편집 가능 필드로 분류 → 편집 가능하면 재작성+검증, 아니면 거절 | ○ |
+| `correction` | 수정 요청을 편집 가능 필드로 분류 → 편집 가능하면 재작성+검증, 아니면 거절. 「화면 문장이 아니라 방금 한 답변을 고쳐 달라는 것」이면 답을 내지 않고 `plan` 으로 넘긴다(`last_answer` 도구가 그 답변을 재료로 싣는다) | ○ |
 | `offer` | 답변이 가리키는 화면이 있으면 "연계해드릴까요?" 를 덧붙이고 `pending_action` 설정 | ✕ |
 | `confirm_action` | 직전 **한 턴**의 제안에 대한 "네"/"아니오" → 화면 URL 연계 또는 철회 | ✕ |
 
@@ -151,6 +152,8 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 |---|---|---|
 | `tools/pitch.py` `PITCH_TOP_K` | 3 | 프롬프트에 넣을 화법 카드 수. 늘리면 맥락↑ 토큰↑ |
 | `knowledge/kb.py` `MIN_TOPICAL` | 0.5 | 낮추면 n-gram 폴백이 줄고 오답이 늘어남 (실측: 유관 0.55~2.1 / 무관 0.00~0.42) |
+| `state.py` `HISTORY_LIMIT` | 12 | 프롬프트에 싣고 다음 턴에 넘기는 최근 턴 수. `last_answer` 가 되짚을 수 있는 범위이기도 하다. 12턴 블록이 455자다 |
+| `state.py` `HISTORY_VERBATIM` / `HISTORY_OLD_CHARS` | 4 / 40 | 최근 4턴은 질문 원문, 그 앞은 40자에서 접는다(프롬프트 한 줄만 — 기록은 안 자른다) |
 
 ## 주의
 

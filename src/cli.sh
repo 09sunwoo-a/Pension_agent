@@ -27,7 +27,7 @@ CA · CAD · CADR 준비됐습니다. 인자 규약은 셋 다 같습니다.
   $CAD --debug --show-llm ...                          + 폐기된 생성문까지 (왜 잘렸나)
   $CAD --list                                          캔드 시나리오 목록 (LLM 키 없이)
 
-  $CADR                                                검토 11케이스 + 요약표
+  $CADR                                                검토 12케이스 + 요약표
   $CADR demo --why                                     시연 대본 16턴 리허설 ($CADR --help)
 
 어느 .env 가 읽혔는지:  python -m pension_agent.env

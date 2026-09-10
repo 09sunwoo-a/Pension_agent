@@ -90,18 +90,25 @@ def _market_like(kind: str, label: str) -> Callable[[AgentState, str], Evidence 
             _T.pick((kind,), query, top_k=MARKET_TOP_K * 3))[:MARKET_TOP_K], label)
         if not hits:
             return None
-        notices: list[str] = []
-        scopes: list[dict] = []
-        for _s, c in hits:
-            # 시효 표시(※)와 인용 고지(⚖)는 다른 것을 말한다 — 앞은 «이 수치가 낡을 수
-            # 있다», 뒤는 «이건 정보 제공이지 권유가 아니다». 둘 다 카드의 선언에서 온다.
-            marks = [m for m in (stale_mark(c), advisory_mark(c)) if m]
-            if not marks:
-                continue
-            notices += [m for m in marks if m not in notices]
-            scopes.append(_scope(c["title"], [], marks))
-        return _ev(kind, query, "\n\n".join(_render_market(c) for _, c in hits),
-                   KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
-                   cards=[c for _s, c in hits])
+        return market_evidence(kind, query, hits)
 
     return run
+
+
+def market_evidence(kind: str, query: str, hits: list[tuple[float, dict]],
+                    tool: str | None = None) -> Evidence | None:
+    """시황·상품 카드 → 원장 항목. 검색 도구와 «카드 id 로 되싣기»가 함께 쓴다 —
+    표시 선언(※·⚖)이 두 곳에 있으면 한쪽만 빠지는 날이 온다(cards.fact_evidence 와 같다)."""
+    notices: list[str] = []
+    scopes: list[dict] = []
+    for _s, c in hits:
+        # 시효 표시(※)와 인용 고지(⚖)는 다른 것을 말한다 — 앞은 «이 수치가 낡을 수
+        # 있다», 뒤는 «이건 정보 제공이지 권유가 아니다». 둘 다 카드의 선언에서 온다.
+        marks = [m for m in (stale_mark(c), advisory_mark(c)) if m]
+        if not marks:
+            continue
+        notices += [m for m in marks if m not in notices]
+        scopes.append(_scope(c["title"], [], marks))
+    return _ev(tool or kind, query, "\n\n".join(_render_market(c) for _, c in hits),
+               KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
+               cards=[c for _s, c in hits])

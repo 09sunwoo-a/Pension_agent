@@ -78,7 +78,14 @@ MIN_OPTIONS = 2
 #: 100% 운용 고객에게」 화법 2장이 왔고, 판정이 그 둘을 갈래로 읽어 **직원에게 고객 상태를
 #: 되물었다.** 카드 안에 다른 축의 갈래(절차 방향 등)가 있어도 여기서는 세지 않는다 —
 #: 그 경우 작성이 전제를 밝히고 답한다(§5 ①).
-_NO_BRANCH = frozenset({"customer", "history", "transcript", "date", "playbook"})
+#: `last_answer`(이 에이전트가 방금 한 답변)도 같다 — 갈래가 있었다면 그 답을 쓴 턴에서
+#: 이미 판정이 끝났다. 줄여 달라는 턴에 다시 되물으면 답한 것을 다시 묻는 꼴이 된다.
+_NO_BRANCH = frozenset({"customer", "history", "transcript", "date", "playbook", "last_answer"})
+
+#: `_NO_BRANCH` 중 «이미 정해진 것» 블록에도 싣지 않는 재료. playbook 은 어느 상태의 카드를
+#: 쓸지를 코드가 이미 정한 것이고, last_answer 는 고객 원장이 아니라 에이전트가 쓴 문장이다 —
+#: 둘 다 «코드가 원장에서 계산한 값»이 아니다.
+_NOT_SETTLING = frozenset({"playbook", "last_answer"})
 
 #: «이미 정해진 것» 블록에 싣는 계좌 상태 항목. `render._account_state` 의 키 중 되묻기가
 #: 갈래로 오독할 수 있는 축만 고른다 — 전부 원장 값이거나 코드가 이미 계산한 것이다.
@@ -138,7 +145,7 @@ def settled_block(state: AgentState) -> str:
             lines.append("· 계좌 상태: " + " · ".join(
                 f"{k.replace('_', ' ')} {account[k]}" for k in _SETTLED_STATE_KEYS if k in account))
     for e in state.get("evidence") or []:
-        if e["tool"] in _NO_BRANCH and e["tool"] != "playbook" and e.get("text"):
+        if e["tool"] in _NO_BRANCH and e["tool"] not in _NOT_SETTLING and e.get("text"):
             lines.append(e["text"])
     if not lines:
         return ""

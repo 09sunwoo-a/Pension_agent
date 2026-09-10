@@ -8,7 +8,7 @@
 셋은 함께 쓸 수 없는 배타 선택이었고, 표시 옵션과 한 줄에 섞여 어느 것이 무엇인지 갈리지
 않았다. 지금은 대본이 이름이다.
 
-    python -m tests.debug.reps                     # cases — 검토 11케이스 (기본)
+    python -m tests.debug.reps                     # cases — 검토 12케이스 (기본)
     python -m tests.debug.reps cases 4 7           # 케이스 골라서
     python -m tests.debug.reps demo                # 전체 시연 대본  (docs/DEMO_SCENARIO.md)
     python -m tests.debug.reps library 김서연       # 시나리오 라이브러리 (docs/DEMO_CUSTOMER_SCENARIOS.md)
@@ -412,7 +412,7 @@ def _usage() -> None:
     print("""사용법: python -m tests.debug.reps [대본[@판]] [고객명·번호 …] [표시옵션 …]
 
   대본 — 하나만 고른다 (없으면 cases)
-    cases              검토 11케이스. 케이스마다 새 세션 · 전체 트레이스를 붙인다
+    cases              검토 12케이스. 케이스마다 새 세션 · 전체 트레이스를 붙인다
     demo               전체 시연 대본            docs/DEMO_SCENARIO.md
     library            고객별 시나리오 5종        docs/DEMO_CUSTOMER_SCENARIOS.md
     review             중간점검 시연본 지금 판     docs/DEMO_REVIEW.md
@@ -587,7 +587,7 @@ def main(argv: list[str]) -> int:
                     and not any(n in sees for n in names):
                 continue
             labelled = (turns if rehearsal else
-                        tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
+                        tuple((str(no) if i == 0 else f"{no}{chr(ord('a') + i)}", q) for i, q in enumerate(turns)))
             if rehearsal and not brief:
                 print(f"\n{'━' * 70}\n{sees}"
                       + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))

@@ -62,7 +62,7 @@ answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — foll
 후속 질문("그럼 안 된다고 하면요?")·되묻기의 답·연계 확인("네")은 이전 턴의 `history`
 (Turn 목록, state.Turn)가 있어야 해석된다. 게이트웨이 경로는 그것을 돌려줄 자리가 없으므로
 진입점이 `(x_client_user, session_id)` 키로 메모리에 맡겨 두고 다음 턴에 되찾는다
-(consult_agent/context_store.py — 최근 4턴 · 2시간 · 500세션 · 디스크에 안 쓴다).
+(consult_agent/context_store.py — 최근 HISTORY_LIMIT(12)턴 · 2시간 · 500세션 · 디스크에 안 쓴다).
 호출자가 `message_hists` 에 Turn 형식(`question` 키가 있는 dict 목록)을 실어 보내면 그것이
 저장본보다 우선한다. 다른 형식(OpenAI 식 messages 등)은 버린다 — Turn 이 아닌 것을 넘기면
 `format_history` 가 `turn['question']` 에서 죽어 500 이 난다.

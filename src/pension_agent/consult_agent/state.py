@@ -13,7 +13,27 @@ from typing import TypedDict
 
 from pension_agent.knowledge.kb import load_kb
 
-HISTORY_LIMIT = 4  # 프롬프트에 넣는 최근 대화 턴 수 (understand·situation_slots 공통)
+#: 프롬프트에 넣고 다음 턴에 넘기는 최근 대화 턴 수(understand·plan·compose·clarify 공통).
+#:
+#: 오래 4 였다. 한 턴이 질문 한 줄이라 넷이면 «직전 맥락»은 덮였지만, 실제 상담은 고객
+#: 하나를 열어 두고 열 턴 넘게 이어진다 — 다섯 턴 전에 되물었던 갈래·여섯 턴 전에 나열한
+#: 상품 목록이 창 밖으로 밀려 「그때 그거」가 새 질문으로 읽혔다. 프롬프트에 실리는 것은
+#: 턴마다 한두 줄뿐이라(format_history — 답변 원문은 싣지 않는다) 12 로 늘려도 토큰
+#: 비용은 몇백 자다. 답변 원문(`Turn.answer`)은 프롬프트가 아니라 `last_answer` 도구가
+#: 읽으므로 이 수와 무관하게 프롬프트 비용에 안 잡힌다.
+HISTORY_LIMIT = 12
+
+#: 대화 맥락에서 **질문을 원문 그대로** 싣는 최근 턴 수. 그 앞의 턴은 질문을
+#: HISTORY_OLD_CHARS 자에서 접는다 — 되묻기 답·연계 확인·「그 중에」 같은 직전 턴 해석은 전부
+#: 최근 턴에서 일어나고, 오래된 턴은 «무슨 얘기를 했었나»의 색인이면 된다(번호와 앞부분).
+#: 12턴 블록이 4턴 때와 비슷한 크기로 돌아온다(455자 → 약 250자). 기록 자체는 안 자른다.
+HISTORY_VERBATIM = 4
+HISTORY_OLD_CHARS = 40
+
+#: 턴 기록에 남기는 답변 원문의 길이 상한. 프롬프트 비용이 아니라 **메모리** 상한이다 —
+#: 기록은 프로세스 메모리(context_store)에 세션 수 × 턴 수만큼 쌓이고, 게이트웨이 경로에서는
+#: 호출자가 들고 다닐 수도 있다. 화면 답변은 길어야 2천 자 안팎이라 넉넉하다.
+ANSWER_KEEP = 6000
 
 #: 공용 지식베이스. 프로세스당 한 번만 적재된다.
 KB = load_kb()
@@ -24,10 +44,10 @@ KB = load_kb()
 # ─────────────────────────────────────────────────────────────
 
 class Turn(TypedDict, total=False):
-    """history 한 턴. 답변 원문은 담지 않는다 (프롬프트 비용 억제).
+    """history 한 턴. **프롬프트에는** 답변 원문을 싣지 않는다 (프롬프트 비용 억제 · §6).
 
     예외가 둘 있고, 둘 다 **다음 턴의 짧은 대답을 해석하는 데 필요한 최소한**이라는 같은
-    이유로 남는다. 답변 원문을 통째로 들고 다니지 않으면서 이것만 남기는 것이다.
+    이유로 남는다. 답변 원문을 프롬프트에 통째로 들고 다니지 않으면서 이것만 남기는 것이다.
 
       pending_action   이 턴이 "이 화면 연계해드릴까요?" 처럼 제안을 했다면 그 인자.
                        다음 턴의 "네" 가 무엇에 대한 승낙인지 잃지 않기 위해서다.
@@ -42,7 +62,18 @@ class Turn(TypedDict, total=False):
                        LLM 이 그 수치를 되받고, 그 수치는 이번 턴 원장 밖이라
                        `verify` 가 답을 통째로 버린다(§6).
 
-    답변 원문을 남기는 것은 별개의 결정이다(CLAUDE.md §13 '대화 맥락 기반 답변 정정').
+    ━━ 답변 원문은 기록에는 남고 프롬프트에는 안 실린다 (2026-09-10) ━━
+    「고객에게 할 말 좀 더 짧게 줄여줘」는 직전 답변을 **재료**로 써야 답할 수 있는데, 그
+    원문이 어디에도 없었다(고객 화면이 열린 세션의 상담이력에만 있고, 그것도 고객 화면 없는
+    대화에는 없다). 그래서 답변 원문을 여기 남긴다 — 다만 **`format_history` 는 여전히
+    싣지 않는다.** 프롬프트에 실으면 LLM 이 그 수치를 되받고 그 수치는 이번 턴 원장 밖이라
+    §6 이 답을 통째로 버린다(위 tools 주석의 그 사고). 읽는 곳은 `last_answer` 도구 하나이고,
+    도구가 읽으면 그것이 원장이 되어 인용이 허용된다 — `transcript` 와 같은 규약이다.
+
+      answer   이 턴이 화면에 내보낸 답변(추천질문을 붙이기 전, ANSWER_KEEP 자로 자른다).
+               되묻기·LLM 장애로 끝난 턴에는 없다 — 그 턴은 «답변»이 아니다.
+      sources  그 답변의 출처(역할 포함). 다시 쓴 답변의 근거는 원래 답변의 근거와 같다.
+      marks    그 답변에 붙은 재료 성격 표시(§7) — 표시는 재료에 걸리므로 다시 써도 붙는다.
     """
 
     question: str
@@ -53,6 +84,9 @@ class Turn(TypedDict, total=False):
     pending_action: dict | None
     pending_clarify: dict | None
     tools: list[str]
+    answer: str | None
+    sources: list[dict]
+    marks: list[str]
 
 
 class AgentState(TypedDict, total=False):
@@ -132,6 +166,12 @@ class AgentState(TypedDict, total=False):
 # 대화 이력 → 프롬프트 조각
 # ─────────────────────────────────────────────────────────────
 
+def numbered_history(history: list[Turn] | None) -> list[tuple[int, Turn]]:
+    """프롬프트에 실리는 턴들과 그 번호 — `format_history` 의 `[n]` 과 `last_answer` 가 읽는
+    번호가 **같은 함수**에서 나온다. 갈리면 LLM 이 맥락에서 본 번호로 다른 턴을 꺼낸다."""
+    return list(enumerate((history or [])[-HISTORY_LIMIT:], 1))
+
+
 def format_history(history: list[Turn] | None) -> str:
     """최근 대화를 프롬프트에 넣을 짧은 텍스트로 요약한다.
 
@@ -139,17 +179,29 @@ def format_history(history: list[Turn] | None) -> str:
     작성**도 이걸 받는다(§2-1 · §12 gap 1). 후속 질문("그럼 안 된다고 하면요?")은 이전
     턴을 이어받아야 무엇을 묻는지 정해지는데, 계획·작성이 그 맥락을 못 보면 이번 질문
     한 줄만으로 재료를 고르게 된다.
+
+    **답변 원문(`Turn.answer`)은 싣지 않는다** — 그것은 `last_answer` 도구가 원장으로
+    읽는다(Turn 주석). 여기 실리는 것은 턴마다 질문 한 줄과 짧은 표시뿐이다.
+
+    줄 앞의 번호 `[n]` 은 **`last_answer` 가 턴을 가리키는 좌표**다(`numbered_history` 와 같은
+    번호). 최근 HISTORY_VERBATIM 턴 밖의 질문은 HISTORY_OLD_CHARS 자에서 접는다 — 번호와 앞부분은
+    남으므로 「처음에 말한 수수료」를 되짚는 데는 충분하고, 기록 자체는 안 잘린다.
     """
     if not history:
         return ""
+    numbered = numbered_history(history)
+    verbatim_from = len(numbered) - HISTORY_VERBATIM
     lines = ["이전 대화:"]
-    for i, turn in enumerate(history[-HISTORY_LIMIT:], 1):
+    for pos, (i, turn) in enumerate(numbered):
         parsed = " / ".join(
             f"{label} {turn[key]}"
             for label, key in (("고객유형", "customer_type"), ("거절유형", "objection_type"), ("단계", "stage"))
             if turn.get(key)
         )
-        lines.append(f"[{i}] 직원: {turn['question']}" + (f" → {parsed}" if parsed else ""))
+        question = turn["question"]
+        if pos < verbatim_from and len(question) > HISTORY_OLD_CHARS:
+            question = question[:HISTORY_OLD_CHARS] + "…"
+        lines.append(f"[{i}] 직원: {question}" + (f" → {parsed}" if parsed else ""))
         # 도구 실행 제안이 걸려 있으면 드러낸다 — 이게 있어야 understand 가 이번의 "네" 를
         # 새 질문이 아니라 그 제안에 대한 확인(confirm_action)으로 읽는다.
         pending = turn.get("pending_action")

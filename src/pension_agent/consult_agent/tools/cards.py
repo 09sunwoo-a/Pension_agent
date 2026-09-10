@@ -25,6 +25,12 @@ def _fact(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, facts_qa.search(query), "제도·상품 확정값")
     if not hits:
         return None
+    return fact_evidence(query, hits)
+
+
+def fact_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "fact") -> Evidence | None:
+    """팩트 카드 → 원장 항목. 검색 도구와 «카드 id 로 되싣기»(`combine.evidence_from_cards`)가
+    함께 쓴다 — 선언(atomic·표시)이 두 곳에 있으면 한쪽만 원문 강제가 빠지는 날이 온다."""
     atomic: list[str] = []
     notices: list[str] = []
     scopes: list[dict] = []
@@ -42,7 +48,7 @@ def _fact(state: AgentState, query: str) -> Evidence | None:
         notices += marks
         if marks:
             scopes.append(_scope(f.get("label") or f["id"], keys, marks))
-    return _ev("fact", query, facts_qa.render(hits), KBMOD.sources_of(KB, hits),
+    return _ev(tool, query, facts_qa.render(hits), KBMOD.sources_of(KB, hits),
                atomic=atomic, notices=notices, scopes=scopes, cards=[f for _s, f in hits])
 
 
@@ -53,8 +59,14 @@ def _procedure(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, procedure_qa.search(query), "업무 처리 절차")
     if not hits:
         return None
+    return procedure_evidence(query, hits)
+
+
+def procedure_evidence(query: str, hits: list[tuple[float, dict]],
+                       tool: str = "procedure") -> Evidence | None:
+    """절차 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
     atomic, notices, scopes = _procedure_decls([c for _s, c in hits])
-    return _ev("procedure", query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
+    return _ev(tool, query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
                atomic=atomic, notices=notices, scopes=scopes, cards=[c for _s, c in hits])
 
 
@@ -109,6 +121,11 @@ def _screen(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, _T.pick(("screen",), query, top_k=3), "단말 화면번호")
     if not hits:
         return None
+    return screen_evidence(query, hits)
+
+
+def screen_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "screen") -> Evidence | None:
+    """화면 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
     atomic = [c["screen"] for _s, c in hits]
     notices: list[str] = []
     scopes: list[dict] = []
@@ -124,7 +141,7 @@ def _screen(state: AgentState, query: str) -> Evidence | None:
                 notices.append(m)
         if marks:
             scopes.append(_scope(c["title"], [c["screen"]], marks))
-    return _ev("screen", query, "\n\n".join(_render_screen(c) for _, c in hits),
+    return _ev(tool, query, "\n\n".join(_render_screen(c) for _, c in hits),
                KBMOD.sources_of(KB, hits), atomic=atomic,
                notices=notices, scopes=scopes,
                cards=[c for _s, c in hits])
@@ -191,12 +208,17 @@ def _channel(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, _T.pick(("channel",), query, top_k=3), "비대면 채널 경로")
     if not hits:
         return None
+    return channel_evidence(query, hits)
+
+
+def channel_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "channel") -> Evidence | None:
+    """채널 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
     marks: list[str] = []
     for _s, c in hits:
         for mark in (*KBMOD.role_texts(c.get("note"), "caution"), stale_mark(c)):
             if mark and mark not in marks:
                 marks.append(mark)
-    return _ev("channel", query, "\n\n".join(_render_channel(c) for _, c in hits),
+    return _ev(tool, query, "\n\n".join(_render_channel(c) for _, c in hits),
                KBMOD.sources_of(KB, hits), notices=marks,
                scopes=[_scope("비대면 채널 경로", [], marks)] if marks else [],
                cards=[c for _s, c in hits])
@@ -208,9 +230,15 @@ def _segment(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, segment_qa.search(query), "고객군 정의")
     if not hits:
         return None
+    return segment_evidence(query, hits, state.get("customer_id"))
+
+
+def segment_evidence(query: str, hits: list[tuple[float, dict]], customer_id: str | None,
+                     tool: str = "segment") -> Evidence | None:
+    """고객군 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
     # note 중 역할이 caution 인 것(원문 임계값과 코드 판정이 다르다는 기록 등)만 표시로
     # 요구한다 — info(취지가 같다는 설명)는 렌더에는 실리지만 강제하지 않는다.
-    return _ev("segment", query, segment_qa.render(hits, state.get("customer_id")),
+    return _ev(tool, query, segment_qa.render(hits, customer_id),
                KBMOD.sources_of(KB, hits),
                atomic=[c.get("condition_text") or "" for _s, c in hits],
                notices=[t for _s, c in hits
@@ -251,8 +279,13 @@ def _method(state: AgentState, query: str) -> Evidence | None:
     hits = _adopt(state, query, _T.pick(("method",), query, top_k=2), "관리 방법론")
     if not hits:
         return None
+    return method_evidence(query, hits)
+
+
+def method_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "method") -> Evidence | None:
+    """방법론 카드 → 원장 항목. `playbook` 과 카드 되싣기가 함께 쓴다."""
     notices, scopes = _method_decls([c for _s, c in hits])
-    return _ev("method", query, "\n\n".join(_render_method(c) for _, c in hits),
+    return _ev(tool, query, "\n\n".join(_render_method(c) for _, c in hits),
                KBMOD.sources_of(KB, hits),
                notices=notices, scopes=scopes, cards=[c for _s, c in hits])
 
@@ -297,5 +330,10 @@ def _fieldtip(state: AgentState, query: str) -> Evidence | None:
     # 예전에는 여기만 전용 신뢰 표시(FIELDTIP_MARK)를 notices 로 강제했다. 그 표시는
     # 이제 재료 성격 표시의 한 갈래이고(marks.py), 문서 레지스트리의 등급에서 나온다 —
     # 현장 관찰만 표시되고 본부 공식·대외 공개·교육자료는 안 되던 비대칭을 없앤다.
-    return _ev("fieldtip", query, "\n\n".join(_render_fieldtip(c) for _, c in hits),
+    return fieldtip_evidence(query, hits)
+
+
+def fieldtip_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "fieldtip") -> Evidence | None:
+    """현장 관찰 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
+    return _ev(tool, query, "\n\n".join(_render_fieldtip(c) for _, c in hits),
                KBMOD.sources_of(KB, hits), cards=[c for _s, c in hits])
