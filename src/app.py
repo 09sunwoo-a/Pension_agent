@@ -26,12 +26,24 @@ from pension_agent.strategy_agent import sections
 
 from pension_agent import clock
 from pension_agent import llm
+from pension_agent import mcp
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent import screens
 from pension_agent.consult_agent import suggest
 
 st.set_page_config(page_title="IRP 에이전트 평가 룸", layout="wide")
 st.title("📈 IRP 전략 제안 에이전트 평가 대시보드")
+
+
+# 행내 MCP(쪽지 발송)를 붙인다. 설정이 없으면 아무것도 하지 않고, 그때 쪽지는 보내지 않고
+# «미연결»로 답한다(pension_agent/mcp). 스트림릿은 조작할 때마다 이 파일을 처음부터 다시
+# 돌리므로 캐시로 한 번만 붙인다 — 매번 붙이면 로그가 조작 수만큼 쌓인다.
+@st.cache_resource(show_spinner=False)
+def connect_mcp() -> bool:
+    return mcp.install()
+
+
+mcp_connected = connect_mcp()
 
 # 피드백 저장용 CSV 파일 초기화 (Status 컬럼 포함)
 FEEDBACK_FILE = "feedback_log.csv"
@@ -81,7 +93,10 @@ with st.sidebar:
     st.caption(
         f"오늘(상담 시점) · {clock.today():%Y-%m-%d}\n\n"
         f"원장 기준일(AS_OF) · {AS_OF:%Y-%m-%d}\n\n"
-        f"LLM · {'연결됨' if llm.available() else '미설정'}"
+        f"LLM · {'연결됨' if llm.available() else '미설정'}\n\n"
+        # 쪽지는 «미연결»이어도 초안까지는 그대로 만들어진다. 그래서 화면만 보면 붙었는지
+        # 아닌지가 승낙 뒤에야 드러난다 — 여기서 미리 갈라 보여준다.
+        f"행내 MCP(쪽지) · {'연결됨' if mcp_connected else '미설정'}"
     )
     st.caption(
         "«오늘»은 앱을 켠 시각에 고정된다. 특정 날짜로 얼려 보려면 앱을 끄고 "

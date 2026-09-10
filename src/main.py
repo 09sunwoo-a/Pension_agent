@@ -27,11 +27,22 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
 `input_value` 는 **JSON 을 문자열로 직렬화한 것**이다. 이 프로젝트가 그 안에서 읽는 키:
 
     message         (필수) 직원이 입력한 질문
-    x_client_user   (필수) 호출한 직원 식별자. 플랫폼의 감사 기록이자 쿼터 버킷이다
+    x_client_user   (필수) 호출한 직원 식별자. 플랫폼의 감사 기록이자 쿼터 버킷이다.
+                           **사번 7자리로 시작하면** 그것이 쪽지의 받는 사람·보내는
+                           사람이 된다(뒤에 접미가 붙어도 구분자로 이었으면 읽는다 —
+                           `3902172-550e8400-…`). 아래 employee_id
     customer_id     (선택) 지금 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능은
                            이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
     session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
                            이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
+    employee_id     (선택) 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송
+                           주체이고 상담이력에 «누가 상담했나»로 남는다. `x_client_user`
+                           가 사번으로 시작하면 넘길 필요가 없다
+                           (`pension_agent/workb.py::as_emp_no`). 사번을 다른 데서
+                           받아오거나 그 값의 꼴이 다른 배포를 위한 자리이고, 여기 실은
+                           값은 꼴을 검사하지 않고 그대로 쓴다. 사번을 하나도 못 읽으면
+                           `WORKB_EMP_NO` 환경변수로 떨어지고, 그것도 없으면 쪽지 발송을
+                           제안하지 않는다
 
 ━━ 출력 형식 — CHUNK 의 content 는 JSON 이벤트 하나다 ━━
 프론트가 답변·근거·진행·추천질문을 **다른 자리에** 그려야 하는데 플랫폼 스키마는 CHUNK 텍스트
@@ -116,7 +127,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from pension_agent import config, llm, observability
+from pension_agent import config, llm, mcp, observability
 from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.strategy_agent import briefing_store
@@ -146,6 +157,11 @@ QUESTION_PREVIEW = 60
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
+    # 행내 MCP(쪽지 발송)를 이 프로세스에 붙인다 — 설정이 없으면 아무것도 하지 않고,
+    # 그때 쪽지는 «미연결»로 답한다(보내지 않고 본문만 만든다 — pension_agent/mcp).
+    # 여기서 붙이는 이유는 **붙는 시점이 한 곳이어야 하기 때문**이다: 첫 발송 때 붙이면
+    # 그 요청 하나만 토큰 발급 왕복을 물고, 설정이 틀린 것도 그때서야 드러난다.
+    mcp.install()
     # 이 컨테이너가 어떤 설정으로 떴는지 한 줄 — /health 와 같은 내용이다. «키를 넣었는데
     # 왜 안 되나 / train URL 을 보고 있나»를 Grafana 에서 로그 첫 줄로 끝내려고 둔다.
     log.info("기동 · %s", json.dumps(health(), ensure_ascii=False))
@@ -315,6 +331,9 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
         "customer_id": payload.get("customer_id") or None,
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
+        # 사번을 따로 실어 보내는 게이트웨이·프론트를 위한 자리(머리말). 없으면 ask() 가
+        # x_client_user 에서 «사번 꼴일 때만» 가져온다 — 여기서 판정하지 않는다.
+        "employee_id": str(payload.get("employee_id") or "").strip() or None,
         "payload": payload,
     }
 
@@ -375,6 +394,9 @@ def health() -> dict[str, Any]:
         "briefing_cache": briefing_store.stats(),
         # 진행 중인 대화 맥락이 몇 세션 살아 있나(메모리 · 머리말 «대화 맥락»).
         "context_store": context_store.stats(),
+        # 행내 MCP(쪽지 발송)가 붙었나. 안 붙었으면 무엇이 비어 있는지까지 말한다 —
+        # 「보낸다고 했는데 왜 미연결이지」가 여기서 끝나야 한다. 키·토큰은 내보내지 않는다.
+        "mcp": mcp.stats(),
         # 429 를 만났을 때 무엇을 조일지 바로 보이도록 게이트 설정을 함께 노출한다.
         "rate_gate": {
             "max_concurrency": llm.MAX_CONCURRENCY,
@@ -409,9 +431,14 @@ async def chat(req: ChatRequest, request: Request):
         history = context_store.get(x_client_user, session_id)
         history_from = "store" if history else "none"
     log.info(
-        "[%s] 요청 · x_client_user=%s customer_id=%s session_id=%s "
+        "[%s] 요청 · x_client_user=%s emp_no=%s customer_id=%s session_id=%s "
         "맥락=%d턴(%s) · 질문(%d자) %r",
-        rid, x_client_user, args["customer_id"], session_id,
+        rid, x_client_user,
+        # 이 턴의 쪽지가 누구 앞으로 · 누구 이름으로 나갈지가 여기서 정해진다. 값이 «-»
+        # 이면 환경변수 폴백으로 떨어졌다는 뜻이고, 그건 여러 직원이 쓰는 배포에서
+        # 남의 이름으로 나가는 상태다(docs/PRODUCTION_RISKS.md 10).
+        consult_graph.employee_no(args["employee_id"], x_client_user) or "-",
+        args["customer_id"], session_id,
         len(history or []), history_from, len(question),
         question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
     )
@@ -441,7 +468,8 @@ async def chat(req: ChatRequest, request: Request):
                 return consult_graph.ask(
                     question, history,
                     customer_id=args["customer_id"], session_id=session_id,
-                    x_client_user=x_client_user, on_progress=on_progress,
+                    x_client_user=x_client_user, employee_id=args["employee_id"],
+                    on_progress=on_progress,
                 )
         try:
             result = await asyncio.to_thread(run_once)
@@ -473,7 +501,7 @@ async def chat(req: ChatRequest, request: Request):
                     return consult_graph.ask(
                         question, history,
                         customer_id=args["customer_id"], session_id=session_id,
-                        x_client_user=x_client_user,
+                        x_client_user=x_client_user, employee_id=args["employee_id"],
                         on_progress=on_progress,
                     )
             finally:

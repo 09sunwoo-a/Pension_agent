@@ -196,16 +196,41 @@ python -m pension_agent.observability   # 대시보드에 안 찍히면 — 설�
 프롬프트에는 고객 원장이 실린다 — 실데이터 전환 때 정할 것은
 [../docs/PRODUCTION_RISKS.md](../docs/PRODUCTION_RISKS.md) §9.
 
-## 8. WorkB 쪽지 발송 붙이기
+## 8. 행내 MCP — WorkB 쪽지 발송 붙이기
 
-**보내는 쪽은 주입받는다** — 행내 MCP 클라이언트(`mcp_sdk`)는 저장소 밖 패키지라 여기서
-임포트하지 않는다. 앱 시작 시 한 번 등록한다:
+`.env` 에 셋을 넣으면 붙는다. 진입점(`main.py`·`app.py`)이 기동할 때 `mcp.install()` 을
+한 번 부르고, 그 뒤 승낙받은 쪽지는 MCP 도구 `send_memo` 로 나간다.
 
-```python
-from pension_agent import workb
-workb.use_sender(MCPClient(emp_no).send_message)   # send(recipients: list[str], title, body)
+```bash
+MCP_SERVER_URL=...      # 게이트웨이 주소 (분석계·서빙계가 갈리면 _TRNN · _SERV 두 벌)
+MCP_USER_ID=...         # 발급받은 클라이언트 id
+MCP_SECRET_KEY=...      # 발급받은 시크릿 키
+WORKB_EMP_NO=3902172    # 로그인 사번이 없을 때의 폴백. 이 값이 «보내는 주체»다
 ```
 
-등록하지 않으면 **보내지 않고 «미연결»이라고 답한다.** 받는 사람은 로그인 사번
-(`AgentState["employee_id"]`)이고, 없으면 `WORKB_EMP_NO` 환경변수, 그것도 없으면 발송을
-제안하지 않는다. 다른 직원에게 보내는 것은 직원이 **사번을 적었을 때만**이다.
+```bash
+python -m pension_agent.mcp          # 지금 붙는지 — 설정·패키지·서버·도구 목록을 한 화면에
+curl -s localhost:8000/health | jq .mcp
+```
+
+- 설정이 하나라도 비면 **보내지 않고 «미연결»이라고 답한다**(본문은 그대로 만든다).
+  행내 패키지(`mcp_sdk`·`langchain-mcp-adapters`)가 없는 환경도 같다 — 그래서 사외 개발
+  PC 와 테스트는 이 설정 없이 그대로 돈다(`requirements.txt` 의 주석 참고).
+- 받는 사람은 로그인 사번이고, 없으면 `WORKB_EMP_NO`, 그것도 없으면 발송을 제안하지
+  않는다. 다른 직원에게 보내는 것은 직원이 **사번을 적었을 때만**이다.
+- **로그인 사번은 호출이 넘겨준다.** `x_client_user` 가 **사번 7자리로 시작하고** 그
+  뒤가 끝이거나 구분자면 그 사번을 읽는다(`3902172` · `3902172-550e8400-…`). 그 값은
+  LLM 쿼터 버킷 이름이기도 해서 `pension-agent` 같은 값도 들어오고, 사번 뒤에 숫자가
+  바로 이어지는 값은 남의 사번을 만들어낼 수 있어 읽지 않는다(`workb.as_emp_no`).
+  사번을 다른 데서 받는 배포는 `input_value` 에 `employee_id` 를 실으면 그것이 먼저다.
+  진입점 → 상태 → 발송이 같은 값을 보고, 그 값이 **누구 이름으로 나가나**(MCP 인증·
+  행내 감사 기록)도 정한다. 요청 로그의 `x_client_user=` 원문과 `emp_no=` 판정을 나란히
+  보고 확인한다 — `emp_no=-` 면 환경변수 폴백이다.
+- **발송은 재시도하지 않는다.** 타임아웃은 «안 나갔다»가 아니라 «나갔는지 모른다»이고,
+  다시 부르면 같은 쪽지가 두 통 간다. 붙는 단계(토큰·도구 목록)의 실패만 다시 시도한다.
+- 다른 전송 수단을 끼우려면 `workb.use_sender(fn)` 로 직접 등록한다 — `install()` 이
+  하는 일이 그 등록이다(`send(recipients: list[str], title, body)`).
+
+**다른 행내 기능(사내 DB·메일·뉴스…)을 붙일 때** 고치는 자리는 셋으로 갈라 뒀다 —
+서버 표(`pension_agent/mcp/servers.py`) · 연결과 호출(`client.py`, 고치지 않는다) ·
+도구 어댑터(`workb.py` 같은 파일 하나). 자세한 것은 `pension_agent/mcp/__init__.py` 머리말.

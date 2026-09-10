@@ -161,6 +161,12 @@ try:
     # 사고를 여기서 바로 잡아야 한다.
     check(h["llm"].get("stage") in ("train", "serving"),
           "/health 가 어느 단계(ENV_PATH)의 URL 을 읽었는지 보여준다", str(h["llm"].get("stage")))
+    # 행내 MCP(쪽지 발송)가 붙었나. 안 붙어 있으면 쪽지는 보내지 않고 «미연결»로 답하는데,
+    # 화면에는 초안까지 똑같이 뜨므로 승낙 뒤에야 드러난다 — 여기서 먼저 갈려야 한다.
+    # 여기서도 키 값은 나가지 않는다(설정 «여부»와 무엇이 비었는지의 이름까지).
+    check(set(h["mcp"]) >= {"configured", "missing", "servers"}
+          and isinstance(h["mcp"]["configured"], bool),
+          "/health 가 행내 MCP 연결 상태를 보여준다", str(h.get("mcp")))
 
     # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
     # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
@@ -298,6 +304,39 @@ try:
     _events(r)
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
+
+    # ── 사번(employee_id) ────────────────────────────────────
+    # 쪽지의 수신자이자 발송 주체이고 상담이력에 «누가 상담했나»로 남는다. x_client_user
+    # 는 쿼터 버킷 이름이라 사번이라는 보장이 없어서, 진입점은 **판정하지 않고 그대로**
+    # 넘기고 사번 꼴 판정은 graph.employee_no 한 곳이 한다(두 곳이 판정하면 로그에 찍힌
+    # 사번과 실제로 쪽지가 나가는 사번이 갈린다).
+    r = client.post("/chat", json=_body(message="쪽지 보내줘", x_client_user="emp-0417",
+                                        employee_id="3902172"))
+    _events(r)
+    check(_seen.get("employee_id") == "3902172",
+          "input_value 의 employee_id 가 에이전트까지 전달된다", str(_seen.get("employee_id")))
+    # x_client_user 는 사번 뒤에 접미(LLM 호출을 가르는 uuid 등)가 붙어 올 수 있다 —
+    # 구분자로 이었으면 앞의 사번을 읽는다(workb.as_emp_no).
+    check(main.consult_graph.employee_no("3902172", "emp-0417") == "3902172"
+          and main.consult_graph.employee_no(
+              None, "3902172-550e8400-e29b-41d4-a716-446655440000") == "3902172"
+          and main.consult_graph.employee_no(None, "3902172") == "3902172"
+          and main.consult_graph.employee_no(None, "emp-0417") is None
+          and main.consult_graph.employee_no(None, "pension-agent") is None,
+          "사번은 명시한 값이 먼저이고, x_client_user 에서는 앞 7자리를 읽는다")
+    def _last_request_log() -> str:
+        return next((m for m in reversed([r.getMessage() for r in _captured if r.name == "main"])
+                     if "요청 ·" in m), "")
+
+    check("emp_no=3902172" in _last_request_log(),
+          "요청 로그가 이 턴의 사번을 남긴다 — 쪽지가 누구 앞으로 나갈지가 그 값이다",
+          _last_request_log())
+
+    r = client.post("/chat", json=_body(message="쪽지 보내줘", x_client_user="emp-0417"))
+    _events(r)
+    check(_seen.get("employee_id") is None and "emp_no=-" in _last_request_log(),
+          "사번을 못 찾으면 «-» 로 남긴다 — 환경변수 폴백으로 떨어졌다는 뜻이다(위험 10)",
+          _last_request_log())
 
     # 연계 제안 — 본문 끝 문장은 남고, action 이벤트가 버튼용으로 따로 간다(실행 인자는 안 실린다).
     evs = _events(client.post("/chat", json=_body(message="연계", x_client_user="emp-1")))

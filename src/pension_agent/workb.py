@@ -2,7 +2,8 @@
 
 직원이 "오늘 타겟 고객 쪽지로 보내줘" 라고 하면 보내는 그 글이다. 여기가 만드는 것은
 **본문 텍스트 하나**이고, 실제 발송은 앱이 `use_sender` 로 등록한 행내 MCP 클라이언트가
-한다(`send_note` 가 부른다). 등록 전에는 보내지 않고 «미연결»로 답한다.
+한다(`send_note` 가 부른다 — 등록하는 쪽은 `pension_agent/mcp/workb.py`). 등록 전에는
+보내지 않고 «미연결»로 답한다.
 
 ━━ 여기는 «꼴과 발송»이다 ━━
 **무엇을 쓸지는 `consult_agent/memo.py` 가 정한다**(대화 중 직원이 부탁하는 쪽지 — LLM 이
@@ -37,7 +38,10 @@ import asyncio
 import html
 import json
 import os
-from collections.abc import Awaitable
+import re
+from collections.abc import Awaitable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -365,7 +369,8 @@ def daily_targets_note(*, fmt: str = "", max_chars: int = MAX_CHARS) -> Note:
 # ─────────────────────────────────────────────────────────────
 
 #: 주입받는 발송 함수의 모양 — `send(recipients, title, body)` 를 await 하면 원시 결과가
-#: 온다. 행내 클라이언트의 `MCPClient.send_message` 가 그대로 이 모양이다.
+#: 온다(판정은 아래 `parse_result` 가 한다). 행내 어댑터
+#: `pension_agent/mcp/workb.py::send_memo` 가 그대로 이 모양이다.
 Sender = Callable[[list[str], str, str], Awaitable[Any]]
 
 #: 앱이 등록한 발송 함수. 등록 전에는 None 이고, 그동안 발송 시도는 «미연결»로 답한다 —
@@ -378,12 +383,84 @@ SENDER: Sender | None = None
 #: 로그인 사번이 없을 때의 폴백은 환경변수 하나뿐이고, 그것도 없으면 발송하지 않는다.
 EMP_NO_ENV = "WORKB_EMP_NO"
 
+#: 사번의 꼴 — 숫자 7자리(실측: 개발자 사번 3902172). **여기가 유일한 출처다** —
+#: 대화에서 수신자 사번을 읽는 정규식(`consult_agent/nodes/act.py`)도 이 문자열로 만든다.
+#: 자릿수가 다른 사번이 있다는 것이 확인되면 고칠 자리도 여기 하나다.
+EMP_NO_PATTERN = r"\d{7}"
+#: 사번은 **맨 앞**에 있고, 그 뒤는 끝이거나 숫자가 아니어야 한다 — 아래 함수의 머리말.
+_EMP_NO_HEAD = re.compile(rf"^({EMP_NO_PATTERN})(?!\d)")
+
+
+def as_emp_no(value: str | None) -> str | None:
+    """진입점이 받은 직원 식별자에서 사번을 읽는다 — **맨 앞 7자리 숫자**. 아니면 None.
+
+    ━━ 왜 앞자리를 보나 ━━
+    `x_client_user` 는 사번 뒤에 접미가 붙어 올 수 있다 — LLM 호출을 구분하는 uuid
+    같은 것이다(`3902172-550e8400-…`). 전체 일치로 재면 그런 값이 전부 «사번 아님»으로
+    떨어지고, 그러면 쪽지가 환경변수에 적힌 한 사람 앞으로 몰린다. 사번은 길이가
+    고정이고 맨 앞에 오므로 앞 7자리를 읽는다.
+
+    ━━ 뒤에 숫자가 더 붙어 있으면 읽지 않는다 ━━
+    「7자리 + 무엇이든」으로 잘라 읽으면 **사번이 아닌 숫자 id 를 사번으로 오독한다** —
+    `20250910123456` 같은 값이 오면 앞 7자리 `2025091` 이 실재하는 다른 직원의 사번일
+    수 있고, 그 사람 받은편지함에 고객 정보가 남는다. 그건 확인 절차로도 못 막는다.
+    그래서 사번 뒤는 **끝이거나 구분자(숫자가 아닌 문자)** 여야 한다. 못 읽으면
+    환경변수 폴백으로 떨어지므로, 틀리는 방향이 되돌릴 수 있는 쪽이다
+    (`consult_agent/nodes/act.py::employee_no` 와 같은 규칙).
+
+    **아직 실물로 확인하지 못한 것이 여기다** — 접미가 구분자 없이 바로 이어붙고
+    그 첫 글자가 숫자면(`39021725f3a…`) 이 함수는 사번을 못 읽는다. 그 경우는 요청
+    로그의 `emp_no=-` 로 드러나고, 실제 값이 확인되면 이 정규식 한 줄을 고친다.
+
+    ━━ 왜 그냥 쓰지는 않나 ━━
+    이 값은 플랫폼의 감사 기록이자 LLM 쿼터 버킷 이름이라 **사번이 아닌 값도 들어온다**
+    (`pension-agent` 는 이 저장소의 기본값이고 `streamlit-dev` 는 개발 화면이 쓴다).
+    그대로 쓰면 없는 사번 앞으로 쪽지가 나가고, MCP 인증의 사번 자리에 그 문자열이 실린다.
+
+    프론트가 «이것이 사번이다»라고 명시해 넘긴 값은 이 문을 거치지 않는다(`graph.ask`).
+    """
+    found = _EMP_NO_HEAD.match((value or "").strip())
+    return found.group(1) if found else None
+
+
+# ─────────────────────────────────────────────────────────────
+# 이 발송은 «누구 이름으로» 나가나
+#
+# 받는 사람과 다른 축이다. MCP 인증에는 **보내는 직원의 사번**이 들어가고(MCP-User-Key)
+# 행내 감사 기록도 그 사번으로 남는다 — 되돌릴 수 없는 행위의 추적 수단이 그 기록이다.
+#
+# 값은 대화 상태(`AgentState["employee_id"]`)에서 인자로 여기까지 내려온다. 마지막 한
+# 칸(`Sender`)만 ContextVar 로 건넌다: 발송 함수는 **주입받은 것**이라 이 파일이 그
+# 시그니처를 늘릴 수 없다(늘리면 이미 등록된 스텁·가짜가 전부 깨진다). 그래서 인자는
+# 우리 코드의 경계 안까지, ContextVar 는 그 경계를 넘을 때만 쓴다.
+# ─────────────────────────────────────────────────────────────
+
+_ACTING: ContextVar[str] = ContextVar("workb_acting", default="")
+
+
+@contextmanager
+def acting(emp_no: str | None) -> Iterator[None]:
+    """이 블록 안의 발송이 누구 이름으로 나가는지 정한다. None 이면 아무것도 바꾸지 않는다."""
+    token = _ACTING.set((emp_no or "").strip())
+    try:
+        yield
+    finally:
+        _ACTING.reset(token)
+
+
+def acting_employee() -> str | None:
+    """지금 블록에 세워진 «보내는 직원». 없으면 None(환경변수로 떨어진다는 뜻)."""
+    return _ACTING.get() or None
+
 
 def use_sender(fn: Sender | None) -> None:
-    """행내 WorkB 클라이언트를 등록한다(앱 시작 시 1회).
+    """발송 함수를 등록한다(앱 시작 시 1회).
 
-        from pension_agent import workb
-        workb.use_sender(MCPClient(emp_no).send_message)
+        from pension_agent import mcp
+        mcp.install()                    # 행내 MCP 를 이 자리에 등록한다(설정이 있을 때만)
+
+    보통은 `mcp.install()` 이 부른다(`pension_agent/mcp/workb.py::send_memo`). 이 함수를
+    직접 부르는 것은 다른 전송 수단을 끼울 때다 — 스텁·시연용 가짜·미래의 다른 경로.
 
     여기서 임포트하지 않고 등록받는 이유는 `mcp_sdk` 가 저장소 밖 패키지이기 때문이다 —
     임포트하면 그 패키지 없이는 테스트도 임포트도 안 된다(망분리 밖에서는 설치도 못 한다).
@@ -393,12 +470,18 @@ def use_sender(fn: Sender | None) -> None:
 
 
 def employee_id(explicit: str | None = None) -> str | None:
-    """쪽지를 받을 직원 사번. 로그인 사번이 우선이고, 없으면 환경변수, 그것도 없으면 None.
+    """이 직원의 사번 — 쪽지의 기본 수신자이자 발송의 주체다.
 
-    None 이면 발송을 제안하지 않는다 — 받을 사람을 모르는 채로 «보낼까요?» 를 묻는 것은
-    승낙받을 대상이 없는 제안이다.
+    순서는 **로그인 사번 → 지금 블록에 세워진 주체(`acting`) → 환경변수**이고, 셋 다
+    없으면 None 이다. None 이면 발송을 제안하지 않는다 — 받을 사람을 모르는 채로
+    «보낼까요?» 를 묻는 것은 승낙받을 대상이 없는 제안이다.
+
+    환경변수 값은 꼴을 검사하지 않는다(`as_emp_no` 를 거치지 않는다). 사람이 직접 넣은
+    값이라 의도가 분명하고, 사번 자릿수 판정은 실측 한 건에 기대고 있어 그것으로 «사람이
+    적어 준 값»을 거절하면 발송이 통째로 막힐 수 있다.
     """
-    return (explicit or os.getenv(EMP_NO_ENV, "")).strip() or None
+    return ((explicit or "").strip() or _ACTING.get()
+            or os.getenv(EMP_NO_ENV, "").strip() or None)
 
 
 def validate_recipients(recipients: Any) -> list[str]:
@@ -464,12 +547,16 @@ def parse_result(raw: Any) -> dict[str, Any]:
             "error": body.get("error")}
 
 
-async def send_note(recipients: list[str], note: Note, *,
-                    send: Sender | None = None) -> dict[str, Any]:
+async def send_note(recipients: list[str], note: Note, *, send: Sender | None = None,
+                    as_employee: str | None = None) -> dict[str, Any]:
     """WorkB 쪽지 발송. 클라이언트가 없으면 **보내지 않고** 미연결로 답한다.
 
-        workb.use_sender(MCPClient(emp_no).send_message)    # 앱 시작 시 1회
-        await send_note(["3902172"], note)
+        from pension_agent import mcp
+        mcp.install()                                      # 앱 시작 시 1회
+        await send_note(["3902172"], note, as_employee="3902172")
+
+    as_employee: 이 쪽지를 **누구 이름으로** 보내는가(받는 사람이 아니다). MCP 인증에
+    들어가고 행내 감사 기록이 그 사번으로 남는다 — 비우면 환경변수로 떨어진다(`acting`).
 
     ━━ 승낙은 여기서 받지 않는다 ━━
     발송은 되돌릴 수 없다(CLAUDE.md 5번). 이 함수는 **직원이 승낙한 뒤에만** 불려야 하고,
@@ -483,7 +570,10 @@ async def send_note(recipients: list[str], note: Note, *,
                 "detail": "WorkB 클라이언트가 주입되지 않았습니다 — 본문만 생성했습니다",
                 "recipients": ids, "title": note.title, "body": note.body}
     try:
-        raw = await send(ids, note.title, note.body)
+        # 발송 함수는 주입받은 것이라 시그니처를 늘릴 수 없다 — 주체는 ContextVar 로
+        # 건넨다(위 «이 발송은 «누구 이름으로» 나가나»).
+        with acting(as_employee):
+            raw = await send(ids, note.title, note.body)
     except Exception as exc:
         # 실패를 성공으로 접지 않는다. 예외 종류까지 남겨야 다음 사람이 재현할 수 있다.
         return {"status": "failed", "detail": f"발송 호출이 실패했습니다: {type(exc).__name__}: {exc}",
@@ -491,8 +581,8 @@ async def send_note(recipients: list[str], note: Note, *,
     return {**parse_result(raw), "recipients": ids, "title": note.title}
 
 
-def send_note_sync(recipients: list[str], note: Note, *,
-                   send: Sender | None = None) -> dict[str, Any]:
+def send_note_sync(recipients: list[str], note: Note, *, send: Sender | None = None,
+                   as_employee: str | None = None) -> dict[str, Any]:
     """동기 문맥에서의 발송. 대화형 그래프가 동기라서 있다(`consult_agent/nodes/act.py`).
 
     이미 이벤트 루프 안이면 **여기서 기다릴 수 없다** — 그때는 실패로 답한다. 조용히
@@ -501,7 +591,7 @@ def send_note_sync(recipients: list[str], note: Note, *,
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(send_note(recipients, note, send=send))
+        return asyncio.run(send_note(recipients, note, send=send, as_employee=as_employee))
     return {"status": "failed",
             "detail": ("이벤트 루프 안에서는 동기 발송을 기다릴 수 없습니다 — "
                        "await send_note(...) 를 쓰세요"),
