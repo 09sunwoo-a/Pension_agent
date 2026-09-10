@@ -23,6 +23,13 @@ from pension_agent.knowledge.kb import load_kb
 #: 읽으므로 이 수와 무관하게 프롬프트 비용에 안 잡힌다.
 HISTORY_LIMIT = 12
 
+#: 대화 맥락에서 **질문을 원문 그대로** 싣는 최근 턴 수. 그 앞의 턴은 질문을
+#: HISTORY_OLD_CHARS 자에서 접는다 — 되묻기 답·연계 확인·「그 중에」 같은 직전 턴 해석은 전부
+#: 최근 턴에서 일어나고, 오래된 턴은 «무슨 얘기를 했었나»의 색인이면 된다(번호와 앞부분).
+#: 12턴 블록이 4턴 때와 비슷한 크기로 돌아온다(455자 → 약 250자). 기록 자체는 안 자른다.
+HISTORY_VERBATIM = 4
+HISTORY_OLD_CHARS = 40
+
 #: 턴 기록에 남기는 답변 원문의 길이 상한. 프롬프트 비용이 아니라 **메모리** 상한이다 —
 #: 기록은 프로세스 메모리(context_store)에 세션 수 × 턴 수만큼 쌓이고, 게이트웨이 경로에서는
 #: 호출자가 들고 다닐 수도 있다. 화면 답변은 길어야 2천 자 안팎이라 넉넉하다.
@@ -159,6 +166,12 @@ class AgentState(TypedDict, total=False):
 # 대화 이력 → 프롬프트 조각
 # ─────────────────────────────────────────────────────────────
 
+def numbered_history(history: list[Turn] | None) -> list[tuple[int, Turn]]:
+    """프롬프트에 실리는 턴들과 그 번호 — `format_history` 의 `[n]` 과 `last_answer` 가 읽는
+    번호가 **같은 함수**에서 나온다. 갈리면 LLM 이 맥락에서 본 번호로 다른 턴을 꺼낸다."""
+    return list(enumerate((history or [])[-HISTORY_LIMIT:], 1))
+
+
 def format_history(history: list[Turn] | None) -> str:
     """최근 대화를 프롬프트에 넣을 짧은 텍스트로 요약한다.
 
@@ -169,17 +182,26 @@ def format_history(history: list[Turn] | None) -> str:
 
     **답변 원문(`Turn.answer`)은 싣지 않는다** — 그것은 `last_answer` 도구가 원장으로
     읽는다(Turn 주석). 여기 실리는 것은 턴마다 질문 한 줄과 짧은 표시뿐이다.
+
+    줄 앞의 번호 `[n]` 은 **`last_answer` 가 턴을 가리키는 좌표**다(`numbered_history` 와 같은
+    번호). 최근 HISTORY_VERBATIM 턴 밖의 질문은 HISTORY_OLD_CHARS 자에서 접는다 — 번호와 앞부분은
+    남으므로 「처음에 말한 수수료」를 되짚는 데는 충분하고, 기록 자체는 안 잘린다.
     """
     if not history:
         return ""
+    numbered = numbered_history(history)
+    verbatim_from = len(numbered) - HISTORY_VERBATIM
     lines = ["이전 대화:"]
-    for i, turn in enumerate(history[-HISTORY_LIMIT:], 1):
+    for pos, (i, turn) in enumerate(numbered):
         parsed = " / ".join(
             f"{label} {turn[key]}"
             for label, key in (("고객유형", "customer_type"), ("거절유형", "objection_type"), ("단계", "stage"))
             if turn.get(key)
         )
-        lines.append(f"[{i}] 직원: {turn['question']}" + (f" → {parsed}" if parsed else ""))
+        question = turn["question"]
+        if pos < verbatim_from and len(question) > HISTORY_OLD_CHARS:
+            question = question[:HISTORY_OLD_CHARS] + "…"
+        lines.append(f"[{i}] 직원: {question}" + (f" → {parsed}" if parsed else ""))
         # 도구 실행 제안이 걸려 있으면 드러낸다 — 이게 있어야 understand 가 이번의 "네" 를
         # 새 질문이 아니라 그 제안에 대한 확인(confirm_action)으로 읽는다.
         pending = turn.get("pending_action")

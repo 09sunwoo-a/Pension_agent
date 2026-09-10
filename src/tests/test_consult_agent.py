@@ -3063,7 +3063,7 @@ def check_last_answer() -> int:
     finally:
         plan.generate = orig
     hit = out["answer"].startswith('"당행 ETF는 193종이고 400개까지') \
-        and "직전 답변을 다시 쓰는 턴" in seen["p"] and "직전 답변과 겹치는 자료" not in seen["p"] \
+        and "이전 답변을 다시 쓰는 턴" in seen["p"] and "직전 답변과 겹치는 자료" not in seen["p"] \
         and "본부 공식 자료" in out["answer"] and [s["id"] for s in out["sources"]] == ["pitch.k03.005"]
     print(f"{'✓' if hit else '✗'} 다시 쓴 답변이 직전 답변의 수치로 §6 을 통과하고 표시·출처가 따라온다")
     ok += hit
@@ -3074,7 +3074,7 @@ def check_last_answer() -> int:
         plan.compose({"question": "q", "evidence": [tools._ev("fact", "q", "■ 재료", [])]})
     finally:
         plan.generate = orig
-    hit = "직전 답변을 다시 쓰는 턴" not in seen["p"] and "last_answer" in prompts.ANSWER_SHAPES
+    hit = "이전 답변을 다시 쓰는 턴" not in seen["p"] and "last_answer" in prompts.ANSWER_SHAPES
     print(f"{'✓' if hit else '✗'} 다시 쓰는 턴이 아니면 그 블록이 붙지 않는다 · 형태 요구는 등록돼 있다")
     ok += hit
 
@@ -3166,6 +3166,78 @@ def check_last_answer() -> int:
     hit = out["answer"].startswith('"당행 ETF는 193종') and [e["tool"] for e in out["evidence"]] == ["last_answer"] \
         and "반영할게요" not in out["answer"]
     print(f"{'✓' if hit else '✗'} 그래프 — correction 오분류가 다시 쓴 답변으로 끝난다(브리핑을 건드리지 않는다)")
+    ok += hit
+
+    # ⑪ 몇 턴 전 답변 되짚기 — LLM 이 번호를 고르고 코드가 **한 턴만** 확정한다(2026-09-10 결정).
+    #    번호가 없거나 범위 밖이거나 되묻기 턴이면 직전 답변이고, 문장 가운데 숫자(금액)는 번호가
+    #    아니다. 「자세히」는 그 턴의 근거 카드를 id 로 되싣는다 — 재검색이 아니다.
+    from pension_agent.consult_agent.state import KB, numbered_history
+    fact = next(c for c in KB.cards if c["_kind"] == "fact" and c.get("value"))
+    proc = next(c for c in KB.cards if c["_kind"] == "procedure" and c.get("screens"))
+    long_q = "우리 수수료가 얼마고, 증권사는 무료라는데 뭐라고 답하지? 그리고 ETF 는 어떻게 말하지?"
+    many = [{"question": q, "tools": ["fact"], "answer": f"답변{i} — 세액공제 한도 900만원",
+             "sources": [{"id": fact["id"], "title": "t", "doc": "d", "score": 1.5, "page": None, "role": tools.GROUND},
+                         {"id": proc["id"], "title": "p", "doc": "d", "score": 1.0, "page": None, "role": tools.GROUND},
+                         {"id": "session.CX", "title": "상담 이력", "doc": "d", "score": None, "page": None, "role": tools.GROUND}],
+             "marks": ["본부 공식 자료"]}
+            for i, q in enumerate(["수수료 얼마야?", "지난번엔 무슨 얘기 했지?", long_q, "왜 관리 대상이야?",
+                                   "뭘 권할 수 있어?", "세미나 있어?", long_q, "타행보다 싼가?"], 1)]
+    many[1]["answer"] = None            # 되묻기 턴 — 답변이 없다
+    many[1]["pending_clarify"] = {"question": "어느 상담?", "options": ["7월", "8월"]}
+    ref = lambda q: tools.referenced_turn(many, q)[0]  # noqa: E731
+    hit = ref("[3] 근거") == 3 and ref("3") == 3 and ref("300만원 답변 요약") == 8 \
+        and ref("[99]") == 8 and ref("") == 8 and ref("[2]") == 8 \
+        and numbered_history(many)[2][1]["question"] == long_q
+    print(f"{'✓' if hit else '✗'} 턴 번호 해석 — [3]·3 은 그 턴, 금액·범위 밖·빈 값·되묻기 턴은 직전 답변")
+    ok += hit
+
+    detail = tools.run("last_answer", {"question": "아까 수수료 얘기 자세히 설명해줘", "history": many}, "[3] 근거")
+    brief = tools.run("last_answer", {"question": "아까 수수료 얘기 요약해줘", "history": many}, "[3]")
+    hit = (bool(detail) and detail["text"].count("■ 이전 답변 원문") == 1 and "[3]" in detail["text"]
+           and tools.CARDS_HEADER in detail["text"] and proc["screens"][0] in detail["atomic"]
+           and any(c.get("id") == fact["id"] for c in detail["related"])
+           and [s["id"] for s in detail["sources"]] == [fact["id"], proc["id"], "session.CX"]
+           and detail["meta"] == {"turn": 3, "question": long_q, "with_cards": True})
+    print(f"{'✓' if hit else '✗'} «근거» 붙이면 그 턴의 카드를 id 로 되싣는다 — 화면번호 스팬·관계 선언이 따라오고 한 턴만 실린다")
+    ok += hit
+
+    hit = bool(brief) and tools.CARDS_HEADER not in brief["text"] and not brief["atomic"] \
+        and brief["meta"]["with_cards"] is False and "답변3" in brief["text"]
+    print(f"{'✓' if hit else '✗'} «근거» 없으면 답변 원문만 싣는다(요약·줄이기)")
+    ok += hit
+
+    # 카드가 아닌 출처(상담 이력·고객 원장)는 되실을 것이 없어 건너뛴다 — 지어내지 않는다.
+    only_log = [{"question": "지난번?", "answer": "기록: 7월 상담", "marks": [],
+                 "sources": [{"id": "session.CX", "title": "상담 이력", "doc": "d", "score": None, "page": None}]}]
+    got = tools.run("last_answer", {"question": "자세히", "history": only_log}, "[1] 근거")
+    hit = bool(got) and tools.CARDS_HEADER not in got["text"] and got["meta"]["with_cards"] is False
+    print(f"{'✓' if hit else '✗'} 카드가 아닌 출처는 되싣지 않는다")
+    ok += hit
+
+    # ⑫ 대화 맥락 창 — 기록은 전부 남고, 프롬프트 한 줄만 오래된 턴의 질문을 접는다.
+    #    번호는 `numbered_history` 와 같아야 한다 — 갈리면 LLM 이 맥락에서 본 번호로 다른 턴을 꺼낸다.
+    from pension_agent.consult_agent.state import HISTORY_OLD_CHARS, HISTORY_VERBATIM
+    block = format_history(many)
+    hit = (f"[3] 직원: {long_q[:HISTORY_OLD_CHARS]}…" in block          # 오래된 턴 — 접힌다
+           and f"[7] 직원: {long_q}" in block                            # 최근 4턴 — 원문
+           and "[8] 직원: 타행보다 싼가?" in block and "(에이전트가 되물음: 어느 상담?" in block
+           and len(numbered_history(many)) == len(many) and HISTORY_VERBATIM == 4
+           and all(f"[{i}] 직원:" in block for i, _t in numbered_history(many)))
+    print(f"{'✓' if hit else '✗'} 오래된 턴의 질문만 {HISTORY_OLD_CHARS}자로 접히고 번호·되묻기 표시는 남는다")
+    ok += hit
+
+    # ⑬ 호출별 입력 크기가 관측 점수로 남는다 — gemma 부담이 어느 호출에서 오는지 볼 자리.
+    from pension_agent import llm as LLM, observability as OBS
+    seen_scores: list[tuple] = []
+    orig_score = OBS.score
+    OBS.score = lambda n, v, comment=None: seen_scores.append((n, v, comment))
+    try:
+        LLM._observe("consult.compose", 0.0, "p" * 100, "s" * 50, 10, 0.2, "",
+                     meta={}, output="o", error=None)
+    finally:
+        OBS.score = orig_score
+    hit = ("prompt_chars", 150, "consult.compose") in seen_scores
+    print(f"{'✓' if hit else '✗'} LLM 호출마다 prompt_chars 점수가 남는다(시스템 프롬프트 포함)")
     ok += hit
     return ok
 

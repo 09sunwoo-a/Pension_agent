@@ -691,7 +691,7 @@ def compose(state: AgentState) -> dict[str, Any]:
     # 답변 원문이 없어서(state.Turn) LLM 은 자기가 방금 무엇을 나열했는지 볼 수 없다.
     if _repeated_materials(state, evidence):
         prompt = f"{prompt}\n{REPEAT_BLOCK}"
-    # 다시 쓰는 턴 — 원장에 이 에이전트가 방금 한 답변이 실려 있다(`last_answer` 도구).
+    # 다시 쓰는 턴 — 원장에 이 에이전트가 이번 상담에서 한 답변이 실려 있다(`last_answer` 도구).
     # 이번 턴의 질문("좀 더 짧게 줄여줘")에는 주제가 없어서, 알려주지 않으면 작성 LLM 은
     # <자료>를 그 말에 대고 재고 「그 자료는 없어요」로 답한다(승낙 턴과 같은 모양). 판정은
     # 코드가 아는 값(원장의 도구 이름)으로 한다.

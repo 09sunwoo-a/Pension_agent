@@ -587,7 +587,7 @@ def main(argv: list[str]) -> int:
                     and not any(n in sees for n in names):
                 continue
             labelled = (turns if rehearsal else
-                        tuple((str(no) if i == 0 else f"{no}b", q) for i, q in enumerate(turns)))
+                        tuple((str(no) if i == 0 else f"{no}{chr(ord('a') + i)}", q) for i, q in enumerate(turns)))
             if rehearsal and not brief:
                 print(f"\n{'━' * 70}\n{sees}"
                       + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))

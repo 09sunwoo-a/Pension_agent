@@ -960,10 +960,17 @@ try:
           "observability: span 안의 LLM 호출은 그 span 밑에 붙는다")
     check(bool(_span) and _span["traceId"] == _tr2.id,
           "observability: span 이 열려 있는 트레이스에 묶인다")
-    check({(s["name"], s["value"], s["dataType"]) for s in _scores} ==
+    check({(s["name"], s["value"], s["dataType"]) for s in _scores} >=
           {("compose_passed", 1, "BOOLEAN"), ("retries", 2, "NUMERIC"),
            ("outcome", "answer", "CATEGORICAL")},
           "observability: 점수가 bool·숫자·문자열별로 형을 갈라 나간다", str(_scores))
+    # LLM 호출마다 입력 크기가 점수로 남고(llm._observe — gemma 부담이 어느 호출에서 오는지
+    # 볼 자리), 그 점수는 호출이 일어난 span 밑에 붙는다.
+    _size = next((s for s in _scores if s["name"] == "prompt_chars"), None)
+    check(bool(_size) and _size["value"] == len("q") and _size["dataType"] == "NUMERIC"
+          and _size.get("observationId") == (_span or {}).get("id")
+          and _size.get("comment") == "test.in_span",
+          "observability: LLM 호출마다 prompt_chars 점수가 그 span 밑에 남는다", str(_size))
     check(all(s["traceId"] == _tr2.id for s in _scores),
           "observability: 점수가 그 트레이스에 붙는다")
 

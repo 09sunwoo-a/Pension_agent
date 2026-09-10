@@ -72,8 +72,9 @@ CASES: tuple[tuple[int, str, str | None, tuple[str, ...]], ...] = (
 
     # 2026-09-10 실측 — 2턴째가 correction 으로 분류돼 화법과 무관한 브리핑 문장을 고쳤다.
     # 기대는 «직전 답변을 재료로 다시 쓴다»(last_answer)이고, 새 검색을 돌지 않는 것이다.
-    (12, "다듬기 — 「좀 더 짧게 줄여줘」가 직전 답변을 재료로 다시 쓰나 · correction 으로 새지 않나",
-     "188406-7352194", ("고객이 증권사는 ETF 종류가 훨씬 많다는데 뭐라고 하지?", "고객에게 해야 할 말 좀 더 짧게 줄여줘")),
+    (12, "다듬기 — 「좀 더 짧게 줄여줘」가 직전 답변을 재료로 다시 쓰나 · correction 으로 새지 않나 · 「자세히」가 그 턴의 근거를 되싣나",
+     "188406-7352194", ("고객이 증권사는 ETF 종류가 훨씬 많다는데 뭐라고 하지?", "고객에게 해야 할 말 좀 더 짧게 줄여줘",
+                        "아까 ETF 종류 얘기 자세히 설명해줘")),
 )
 
 
@@ -704,6 +705,9 @@ EXPECT: dict[tuple[str, str], Expect] = {
     # 수치(ETF 종수)를 옮기는 것이 정상이고, 그 수치가 원장(직전 답변)에 있어 통과해야 한다.
     ("cases", "12"):  Expect(tools=("pitch",), outcome="answer"),
     ("cases", "12b"): Expect(tools=("last_answer",), outcome="answer", gates_passed=True),
+    # 3턴째는 [1] 을 가리키고 «근거»를 붙여야 한다 — 기대값은 도구까지만 잰다(번호·근거 여부는
+    # 트레이스의 도구 질의에서 사람이 읽는다. 기계 판정 칸을 늘리려면 Expect 에 query 축이 필요하다).
+    ("cases", "12c"): Expect(tools=("last_answer",), outcome="answer", gates_passed=True),
 
     # ── demo — 전체 시연 대본 ──────────────────────────────
     # T8 은 gap 30 이 닫혔는지를 재는 자리다. 같은 질문이 고객 화면 **없이**(cases 8)는
@@ -723,7 +727,7 @@ def expect_for(script: str, label: str) -> Expect | None:
 def _labels_of(script: str) -> set[str]:
     """그 대본이 실제로 내는 턴 라벨. `cases` 는 번호에서 만들어진다(reps 와 같은 규칙)."""
     if script == "cases":
-        return {str(no) if i == 0 else f"{no}b"
+        return {str(no) if i == 0 else f"{no}{chr(ord('a') + i)}"
                 for no, _, _, turns in CASES for i, _ in enumerate(turns)}
     blocks = review_blocks() if script == "review" else {"demo": DEMO, "library": LIBRARY}[script]
     return {label for _, _, _, turns in blocks for label, _ in turns}

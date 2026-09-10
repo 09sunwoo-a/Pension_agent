@@ -150,9 +150,14 @@ from pension_agent.consult_agent.tools.targets import (  # noqa: F401
     _targets,
 )
 from pension_agent.consult_agent.tools.answered import (  # noqa: F401
+    CARDS_HEADER,
     SELF_SOURCE,
     _last_answer,
     last_answered,
+    referenced_turn,
+)
+from pension_agent.consult_agent.tools.combine import (  # noqa: F401
+    evidence_from_cards,
 )
 from pension_agent.consult_agent.tools.ledger import (  # noqa: F401
     CAUTION,
@@ -273,12 +278,16 @@ TOOLS: dict[str, Tool] = {
         # 답변이고, 새로 찾는 것이 아니라 있던 것을 다시 쓴다. 이 도구가 없던 동안 「좀 더
         # 짧게 줄여줘」는 재료가 없어 답할 길이 없었고, 분류는 그것을 브리핑 수정으로 읽어
         # 화법과 무관한 화면 문장을 고쳤다(2026-09-10 실측 — tools/answered.py 머리말).
-        Tool("last_answer", "**이 에이전트가 방금 한 답변**의 원문 — 직원이 그 답변을 «더 "
-             "짧게»·«더 쉽게»·«고객 대사만»·«핵심만»·«다시 써줘»처럼 **고쳐 써 달라고** 할 때 "
-             "쓴다. 새 검색이 아니라 있던 답을 다시 쓰는 재료라 대개 이것 하나로 끝난다. "
-             "직전 답변에 없던 내용을 더해 달라면(«수수료도 넣어서») 그 재료의 도구를 함께 "
+        Tool("last_answer", "**이 에이전트가 이번 상담에서 한 답변**의 원문 — 직원이 이전 답변을 "
+             "가리키는 요청 전부에 쓴다: «더 짧게»·«쉽게»·«고객 대사만»·«핵심만» 같은 다시 쓰기, "
+             "«그 중 두 번째»·«그거 왜»처럼 답변 안의 것을 가리키는 후속 질문, «아까 수수료 "
+             "설명한 거 요약해줘·자세히 설명해줘»처럼 몇 턴 전 답변을 되짚는 요청. query 에는 "
+             "이전 대화의 턴 번호를 «[3]» 꼴로 적는다(없으면 직전 답변). 원문에 없는 세부까지 "
+             "설명해야 하면(자세히·왜) «[3] 근거» 처럼 «근거»를 붙인다 — 그 답변이 썼던 자료를 "
+             "함께 싣는다. 새 검색이 아니라 있던 답을 다시 쓰는 재료라 대개 이것 하나로 끝난다. "
+             "그 답변에 없던 내용을 더해 달라면(«수수료도 넣어서») 그 재료의 도구를 함께 "
              "부른다. 화면(AI브리핑)의 문장을 고치는 요청은 여기가 아니다",
-             _last_answer, progress="직전 답변"),
+             _last_answer, progress="이전 답변"),
     )
 }
 

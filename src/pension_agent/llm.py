@@ -583,12 +583,20 @@ def _observe(name: str, started: float, prompt: str, system: str | None, max_tok
              error: str | None) -> None:
     """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability).
 
+    **입력 크기를 점수로도 찍는다**(`prompt_chars` — 시스템 프롬프트 포함 글자 수). 행내
+    모델(gemma4-31b)의 컨텍스트 부담이 어느 호출에서 오는지는 트레이스를 한 건씩 열어서는
+    못 센다 — 대화 맥락은 12턴에 455자인데 고객 재료 블록 하나가 3천 자, 작성 시스템
+    프롬프트가 3.8천 자다(2026-09-10 측정). 줄일 자리를 정하려면 호출별 분포가 먼저 있어야
+    한다(consult CLAUDE.md §13 「고객 재료 블록 축소」). 값은 코드가 아는 사실이고, 토큰 수는
+    프로바이더가 줄 때만 `usage` 로 따로 실린다 — 글자 수는 프로바이더와 무관하게 늘 있다.
+
     **system 이 있는 호출은 채팅 메시지 꼴로 싣는다.** Langfuse 는 `[{role, content}, …]`
     를 대화로 알아보고 역할별로 갈라 렌더하지만, 그 밖의 dict 는 JSON 한 덩어리로
     직렬화해 보여준다 — `\\n`·`\\"` 가 이스케이프된 채 한 칸에 들어차서 프롬프트를 읽을
     수 없다. 대시보드에서 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
     system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
     """
+    observability.score("prompt_chars", prompt_chars(prompt, system), comment=name)
     observability.record_generation(
         name,
         model=meta.get("model") or _default_model_label(),
@@ -599,9 +607,15 @@ def _observe(name: str, started: float, prompt: str, system: str | None, max_tok
         start=started,
         end=time.time(),
         parameters={"max_tokens": max_tokens, "temperature": temperature},
-        metadata={"provider": PROVIDER, "x_client_user": x_client_user},
+        metadata={"provider": PROVIDER, "x_client_user": x_client_user,
+                  "prompt_chars": prompt_chars(prompt, system)},
         error=error,
     )
+
+
+def prompt_chars(prompt: str, system: str | None) -> int:
+    """호출 입력의 글자 수(시스템 프롬프트 포함). 한글은 대략 2자가 1토큰이다(kb.INDEX_BUDGET_CHARS)."""
+    return len(prompt or "") + len(system or "")
 
 
 def _default_model_label() -> str:
