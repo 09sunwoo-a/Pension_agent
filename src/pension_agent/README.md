@@ -8,10 +8,19 @@
 | 파일 | 역할 |
 |---|---|
 | [config.py](config.py) | 경로·데이터 위치의 단일 출처. 모듈이 `__file__` 로 경로를 되짚지 않는다 |
-| [llm.py](llm.py) | 프로바이더 전환식 LLM 클라이언트. **환경 이전 시 이 파일만 수정** |
+| [clock.py](clock.py) | «오늘»의 단일 출처. `PENSION_TODAY` 로 고정 — 원장 기준일(`customer.AS_OF`)과는 다른 축 |
+| [env.py](env.py) | `.env` 로딩과 실행 단계(train · serving). llm 과 observability 가 함께 쓴다 |
+| [observability/](observability/__init__.py) | Langfuse 관측 — 트레이스·span·score·전송 워커. `python -m pension_agent.observability` 로 자가진단 |
+| [llm.py](llm.py) | 프로바이더 전환식 LLM 클라이언트. **환경 이전 시 이 파일만 수정**. 응답에서 JSON 을 꺼내는 `json_object`·`json_list` 도 여기 |
 | [verify.py](verify.py) | LLM 산출물의 재료(facts) 이탈 여부 판정 — 두 에이전트 공통 |
 | [session_store.py](session_store.py) | 상담 세션/대화이력 — consult_agent 가 기록, strategy_agent 가 브리핑에 노출 |
-| [tools.py](tools.py) | 외부 연동 레지스트리. 되돌릴 수 없는 행위(LMS 발송)의 게이트가 여기 있다 |
+| [tools.py](tools.py) | 외부 연동 레지스트리. 되돌릴 수 없는 행위(발송 화면 연계)의 게이트가 여기 있다 |
+| [note.py](note.py) | WorkB 쪽지의 꼴과 발송 — 본문 표·마스킹·길이 상한·결과 판정. 어댑터는 [mcp/workb.py](mcp/workb.py) |
+| [mcp/](mcp/__init__.py) | 행내 시스템 연동 — 서버 표·클라이언트·도구 어댑터. `python -m pension_agent.mcp` 로 진단 |
+
+층은 세 겹이다 — 단일 출처(config·clock) → 실행 환경(env ← observability ← llm) → 기록·행위
+(session_store·tools·note·mcp). 공용 모듈 사이의 의존은 `tests/infra/s03_boundaries.py` 의 표가
+고정한다.
 
 ## knowledge/ — 데이터 접근 계층
 

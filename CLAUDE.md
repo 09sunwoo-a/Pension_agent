@@ -166,6 +166,8 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
 - **에이전트 사이의 의존은 한 방향이다.** `knowledge ← strategy_agent ← consult_agent`.
   strategy_agent 는 consult_agent 를 임포트하지 않는다 — 대화형은 전략제안의 산출을 받아
   말하는 쪽이지 그 반대가 아니다. 공용 모듈(`pension_agent/*.py`·`knowledge/`·`market/`)도
-  consult_agent 를 임포트하지 않는다(`pension_agent/tools.py` 가 발송 게이트의 자산 목록을
-  위해 strategy_agent.support 를 읽는 것이 공용 → 에이전트 방향의 유일한 간선이다).
+  consult_agent 를 임포트하지 않는다. 공용 → 에이전트 방향의 간선은 둘뿐이다 —
+  `tools.py` 가 발송 게이트의 자산 목록을 위해, `note.py` 가 쪽지 본문의 타겟·잔여일수를
+  위해 strategy_agent 를 읽는다. 공용 모듈 사이의 의존(env ← observability ← llm 등)은
+  `tests/infra/s03_boundaries.py` 의 표가 고정한다 — 간선을 더하면 표에 이유와 함께 적는다.
   `tests/infra/s03_boundaries.py` 가 역방향 간선을 잡는다.
