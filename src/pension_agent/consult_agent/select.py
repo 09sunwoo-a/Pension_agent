@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import re
 
-from pension_agent.consult_agent.kb import index_catalog, index_slice, whole_index
+from pension_agent.consult_agent.kb_index import index_catalog, index_slice, whole_index
 from pension_agent.knowledge.kb import retrieve
 from pension_agent.consult_agent.prompts import BUCKET_PROMPT, SELECT_PROMPT
 from pension_agent.consult_agent.state import KB

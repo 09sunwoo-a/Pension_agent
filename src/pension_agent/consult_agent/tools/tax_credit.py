@@ -5,7 +5,7 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import kb as KBMOD
+from pension_agent.consult_agent import kb_index
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent.tools.base import Evidence, _ev, _scope
 
@@ -174,7 +174,7 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
         # 같은 카드의 같은 문장이라 두 번 실으면 화면에 같은 경고가 겹쳐 선다.
         notices.append(_caveat(card))
     return _ev("tax_credit", query, "\n".join(lines),
-               KBMOD.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
+               kb_index.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
                scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
                cards=cards)
 

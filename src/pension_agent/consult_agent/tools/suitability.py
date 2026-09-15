@@ -5,7 +5,7 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import kb as KBMOD
+from pension_agent.consult_agent import kb_index
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent.tools.base import Evidence, _ev, _scope
 from pension_agent.consult_agent.tools.cards import advisory_mark
@@ -65,7 +65,7 @@ def _suitable(state: AgentState, query: str) -> Evidence | None:
         return None
     if not passed and not blocked:
         return None
-    advice = advisory_mark({"advisory": KBMOD.advisory_note(KB)})
+    advice = advisory_mark({"advisory": kb_index.advisory_note(KB)})
 
     lines = [f"■ 고객 {customer_id} — 투자성향 {profile.rk} · 위험등급 {profile.grade}",
              f"· 적합성 허용 상한: {cap} (이 등급까지의 상품만 안내할 수 있다)",

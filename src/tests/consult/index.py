@@ -25,7 +25,7 @@ def check_fact_in_index() -> int:
     돌아오는지, 그리고 못 골랐을 때 n-gram 이 예전 그대로인지.
     """
     ok = 0
-    from pension_agent.consult_agent import kb as K
+    from pension_agent.consult_agent import kb_index
     from pension_agent.consult_agent.nodes import facts_qa
 
     kb = tools.KB
@@ -36,13 +36,13 @@ def check_fact_in_index() -> int:
     ok += hit
 
     # 버킷 카탈로그에 종류가 뜬다 — 여기 빠지면 LLM 후보에서 통째로 사라진다.
-    cat = K.index_catalog(kb, ("fact",))
+    cat = kb_index.index_catalog(kb, ("fact",))
     hit = cat.startswith("■ fact") and "납입·세액공제" in cat
     print(f"{'✓' if hit else '✗'} 팩트 버킷이 카탈로그에 뜬다")
     ok += hit
 
     # 슬라이스에 카드가 예상질문과 함께 실린다 — LLM 이 id 를 고를 재료다.
-    sl = K.index_slice(kb, ["X01"], kinds=("fact",))
+    sl = kb_index.index_slice(kb, ["X01"], kinds=("fact",))
     hit = "fact.k04.f2" in sl and "예상질문" in sl
     print(f"{'✓' if hit else '✗'} 팩트 슬라이스에 카드와 예상질문이 실린다")
     ok += hit
@@ -76,7 +76,8 @@ def check_hier_index() -> int:
     실을 수 있는지가 이 기능의 존재 이유다. 그래서 "예산이 실제 상한인가"와
     "버킷이 카드를 빠뜨리지 않는가"를 회귀로 잡는다.
     """
-    from pension_agent.consult_agent import kb as K
+    from pension_agent.consult_agent import kb_index
+    from pension_agent.knowledge import kb as K
 
     kb = K.load_kb()
     ok = 0
@@ -84,14 +85,14 @@ def check_hier_index() -> int:
     # ① 버킷이 카드를 하나도 빠뜨리지 않는다.
     #    축을 tags.topics 로 잡으면 429장 중 69장이 어떤 버킷에도 안 들어가서
     #    영구히 검색되지 않는 카드가 생긴다 — group 축을 고른 이유가 이것이다.
-    bk = K.buckets(kb)
+    bk = kb_index.buckets(kb)
     covered = sum(len(b["cards"]) for b in bk.values())
     hit = covered == len(kb.cards)
     print(f"{'✓' if hit else '✗'} 버킷 커버리지 {covered}/{len(kb.cards)}장 (버킷 {len(bk)}개)")
     ok += hit
 
     # ② 카탈로그는 결정론적이다(같은 KB → 같은 문자열). 코드가 흔들리면 프롬프트가 흔들린다.
-    hit = K.index_catalog(kb) == K.index_catalog(kb)
+    hit = kb_index.index_catalog(kb) == kb_index.index_catalog(kb)
     print(f"{'✓' if hit else '✗'} 카탈로그 결정론")
     ok += hit
 
@@ -102,33 +103,33 @@ def check_hier_index() -> int:
     #    팩트가 색인 밖에 있다가 들어왔다). 종류 하나는 머리말 한 줄 + 버킷 줄 몇 개라
     #    약 160자를 쓴다. 카드가 늘어 넘치면 그건 이 테스트가 잡아야 하는 회귀가 맞고,
     #    종류가 늘어 넘치면 여기를 함께 고치는 것이 맞다 — 둘을 구분해 두려고 적는다.
-    cat = K.index_catalog(kb)
+    cat = kb_index.index_catalog(kb)
     hit = len(cat) <= 2200
-    print(f"{'✓' if hit else '✗'} L0 카탈로그 {len(cat)}자 ≤ 2200 (종류 {len(K._KIND_ORDER)})")
+    print(f"{'✓' if hit else '✗'} L0 카탈로그 {len(cat)}자 ≤ 2200 (종류 {len(kb_index._KIND_ORDER)})")
     ok += hit
 
     # ④ 예산은 실제 상한이다 — 헤더·생략안내까지 포함해서 절대 넘지 않는다.
     codes = list(bk)
     over = [b for b in (200, 500, 1000, 2500, 4000)
-            if len(K.index_slice(kb, codes, budget_chars=b)) > b]
+            if len(kb_index.index_slice(kb, codes, budget_chars=b)) > b]
     hit = not over
     print(f"{'✓' if hit else '✗'} 예산 상한 준수 (초과: {over or '없음'})")
     ok += hit
 
     # ⑤ 잘라냈으면 몇 장을 못 보여줬는지 밝힌다(조용히 자르지 않는다).
-    tight = K.index_slice(kb, codes, budget_chars=500)
+    tight = kb_index.index_slice(kb, codes, budget_chars=500)
     hit = "생략" in tight
     print(f"{'✓' if hit else '✗'} 절단 시 생략 사실 명시")
     ok += hit
 
     # ⑥ 버킷 하나는 기본 예산 안에 통째로 들어간다 = 2단으로 충분하다는 보장.
-    worst = max(len(K.index_slice(kb, [c])) for c in bk)
-    hit = worst <= K.INDEX_BUDGET_CHARS
-    print(f"{'✓' if hit else '✗'} 최악 버킷 {worst}자 ≤ 기본예산 {K.INDEX_BUDGET_CHARS}")
+    worst = max(len(kb_index.index_slice(kb, [c])) for c in bk)
+    hit = worst <= kb_index.INDEX_BUDGET_CHARS
+    print(f"{'✓' if hit else '✗'} 최악 버킷 {worst}자 ≤ 기본예산 {kb_index.INDEX_BUDGET_CHARS}")
     ok += hit
 
     # ⑦ 목록에 없는 버킷 코드는 조회되지 않는다(안전장치 ②).
-    hit = K.index_slice(kb, ["ZZ99", "없는코드"]) == ""
+    hit = kb_index.index_slice(kb, ["ZZ99", "없는코드"]) == ""
     print(f"{'✓' if hit else '✗'} 없는 버킷 코드 → 빈 슬라이스")
     ok += hit
 
@@ -190,13 +191,13 @@ def check_l0_skip() -> int:
     한다: 카드가 늘어 예산을 넘으면 저절로 2단으로 돌아간다(check_hier_index ⑧이 pitch
     로 2단 경로를 그대로 고정하고 있다 — 이 검사는 그 반대짝이다).
     """
-    from pension_agent.consult_agent import kb as K
+    from pension_agent.consult_agent import kb_index
 
     ok = 0
 
     # ① 판정 자체 — 작은 종류는 텍스트, 큰 종류는 None(= 2단 유지).
-    small = K.whole_index(tools.KB, ("channel",))
-    hit = small is not None and K.whole_index(tools.KB, ("pitch",)) is None
+    small = kb_index.whole_index(tools.KB, ("channel",))
+    hit = small is not None and kb_index.whole_index(tools.KB, ("pitch",)) is None
     print(f"{'✓' if hit else '✗'} whole_index: channel 은 1단, pitch 는 2단 유지")
     ok += hit
 
@@ -326,7 +327,7 @@ def check_trigger_entrances() -> int:
 
     # ⑤ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
     card = next(c for c in cards if c["_kind"] == "method")
-    from pension_agent.consult_agent import kb as KBMOD
+    from pension_agent.knowledge import kb as KBMOD
     _, with_title = KBMOD.score_parts(card, utterance=card["title"])
     hit = with_title >= 4.0
     print(f"{'✓' if hit else '✗'} 제목 그대로의 질문이 n-gram 점수 상한을 받는다 ({with_title:.2f})")

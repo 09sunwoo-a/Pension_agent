@@ -30,7 +30,7 @@ def check_prompt_is_quotable() -> int:
 
     **짝으로 잰다.** 넓힌 쪽만 재면 헐거워진 것을 못 잡는다.
     """
-    from pension_agent.consult_agent import guard, kb as KBMOD, tools
+    from pension_agent.consult_agent import guard, kb_index, tools
     from pension_agent.consult_agent.nodes import facts_qa, plan as PLAN
     from pension_agent.consult_agent.state import KB
     from pension_agent.verify import verify_texts
@@ -73,7 +73,7 @@ def check_prompt_is_quotable() -> int:
         print("✗ 표시 인용: 기준시점·시효 경고를 가진 채널 카드가 없다")
     else:
         ev = tools._ev("channel", "q", tools._render_channel(chan),
-                       KBMOD.sources_of(KB, [(2.0, chan)]),
+                       kb_index.sources_of(KB, [(2.0, chan)]),
                        notices=[tools.stale_mark(chan)], cards=[chan])
         mark = tools.stale_mark(chan)
         hit = verify_texts(f"메뉴는 위와 같아요.\n{mark}", tools.ledger_texts([ev]),
@@ -93,7 +93,7 @@ def check_prompt_is_quotable() -> int:
         print("✗ 프롬프트 인용: 기준 카드(fact.k04.f47)가 없어 검사를 건너뛴다")
         return ok
     ev = tools._ev("fact", "q", facts_qa.render([(1.0, card)]),
-                   KBMOD.sources_of(KB, [(1.0, card)]), cards=[card])
+                   kb_index.sources_of(KB, [(1.0, card)]), cards=[card])
     known = PLAN._known_products()
     question = "이 절차 얼마나 걸려?"
     injected = ["- 사용계획 있는 자금은 먼저 걸러낼 것 → 6번",
@@ -138,7 +138,7 @@ def check_product_advice() -> int:
     ③ 상품명 정규식이 문장을 삼켜 **실재 상품과 지어낸 상품을 한 이름으로** 붙였다.
     ④ 적합성 게이트가 이미 계산해둔 «허용 범위»를 부를 도구가 대화형에 없었다.
     """
-    from pension_agent.consult_agent import kb as KBMOD
+    from pension_agent.consult_agent import kb_index
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
     from pension_agent.consult_agent.state import KB
     ok = 0
@@ -165,7 +165,7 @@ def check_product_advice() -> int:
     ok += hit
 
     # ── ② 등록부가 지식베이스 상품명을 안다 ────────────────────────
-    names = KBMOD.product_names(KB)
+    names = kb_index.product_names(KB)
     hit = "KB 온국민 TDF 시리즈" in names and "KB RISE 미국ETF 모아드림 (주식-재간접)" in names
     print(f"{'✓' if hit else '✗'} 지식베이스가 선언한 상품명이 등록부에 있다 ({len(names)}종)")
     ok += hit
@@ -271,7 +271,7 @@ def check_product_advice() -> int:
     #
     # 표시는 **코드가** 붙인다(guard.py 규약). 프롬프트로 톤만 잡으면 LLM 이 무시해도
     # 아무도 모른다 — 검증기는 수치·상품명만 보지 톤은 안 본다.
-    note = KBMOD.advisory_note(KB)
+    note = kb_index.advisory_note(KB)
     hit = bool(note) and "정보 제공" in note and "자본시장" in note
     print(f"{'✓' if hit else '✗'} 인용 고지를 지식베이스 선언에서 읽어 온다")
     ok += hit
@@ -964,7 +964,7 @@ def check_followups() -> int:
     나머지는 «매 턴 붙지 않는다»(게이트 넷)와 «고객 화면이 닫히면 고객 질문은 없다»,
     그리고 문구가 매번 같지 않다는 것(회전·슬롯)이다.
     """
-    from pension_agent.consult_agent import kb as KBMOD
+    from pension_agent.knowledge import kb as KBMOD
     from pension_agent.consult_agent import suggest
     from pension_agent.consult_agent.nodes import facts_qa
     from pension_agent.strategy_agent.customer import PERSONAS

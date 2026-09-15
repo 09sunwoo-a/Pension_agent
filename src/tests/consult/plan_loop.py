@@ -641,7 +641,7 @@ def check_notice_scope() -> int:
     절차 카드(교체매매 3경로)의 ⚠ 가 따라 붙고, 그것도 카드 전문 1,000자로 붙었다 —
     답변 3줄에 근거 덤프 2,300자. 정작 관계있는 표시가 그 안에 묻혔다.
     """
-    from pension_agent.consult_agent.kb import role_texts
+    from pension_agent.knowledge.kb import role_texts
     from pension_agent.consult_agent.state import KB
 
     ok = 0

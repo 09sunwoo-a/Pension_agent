@@ -308,7 +308,7 @@ check(all(r["end_date"] >= "2026-12-31" for r in past["event"]),
 import copy
 
 from pension_agent import market as _market
-from pension_agent.consult_agent import kb as _kbmod
+from pension_agent.knowledge import kb as _kbmod
 _kb = support.pitch_kb()
 
 _slotted = [c for c in _kb.pitches if c.get("_rate_slots_applied") or c.get("_rate_notes")]

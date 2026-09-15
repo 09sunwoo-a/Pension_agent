@@ -45,7 +45,7 @@ consult_agent/
 ├── __main__.py         REPL — python -m pension_agent.consult_agent -c <KB-PIN>
 ├── state.py            AgentState/Turn · 대화이력 포맷 · 공용 지식베이스(KB)
 ├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
-├── kb.py               LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
+├── kb_index.py         LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
 ├── tools/              도구 패키지 — __init__ 레지스트리(능력 표면) · base 근거(Evidence) 규약 · ledger 원장 helper
 │                       · 도구별 모듈(cards·market·briefing·history·pitch·playbook·suitability·outreach·targets·dates·tax_credit)
 ├── select.py           카드 선택 — LLM 버킷→카드 2단, LLM 이 0건일 때만 n-gram (종류 무관)

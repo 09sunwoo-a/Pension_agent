@@ -308,7 +308,7 @@ def check_playbook_material() -> int:
     # 붙던 자리다 — strategy_agent 가 넘겨주는 항목에 문서명만 있어서, 「출처에 URL 을
     # 싣는다」는 변경이 이 경로만 비껴갔다. 화면에는 ↗ 줄이 붙는 근거와 안 붙는 근거가
     # 섞여 나갔고, 직원은 왜 어떤 것만 원문으로 갈 수 있는지 알 수 없었다.
-    from pension_agent.consult_agent.kb import card_source_meta
+    from pension_agent.knowledge.kb import card_source_meta
     from pension_agent.consult_agent.state import KB as _KB
     hit = all("url" in s and s["url"] == card_source_meta(_KB, s["id"]).get("url")
               for s in ev["sources"] if s["id"] in card_ids)
@@ -781,7 +781,7 @@ def check_caution_roles() -> int:
     예외표) 소비 코드는 선언만 본다 — guard 의 문자열 휴리스틱(_AUTHORING)은 지웠다.
     """
     from pension_agent.consult_agent import guard as GD
-    from pension_agent.consult_agent.kb import ROLE_FIELDS, role_texts
+    from pension_agent.knowledge.kb import ROLE_FIELDS, role_texts
     from pension_agent.consult_agent.nodes import procedure_qa, segment_qa
     from pension_agent.consult_agent.state import KB
 
@@ -1235,7 +1235,7 @@ def check_market_material() -> int:
     """
     from pension_agent.consult_agent import marks as MARKS
     from pension_agent.consult_agent import relations as REL
-    from pension_agent.consult_agent.kb import buckets
+    from pension_agent.consult_agent.kb_index import buckets
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES
     from pension_agent.consult_agent.state import KB
 
@@ -1484,7 +1484,8 @@ def check_origin() -> int:
     영업화법")로 물러서거나 출처 줄을 통째로 생략했다. 앞은 사내 파일명을 출처라고
     말하는 것이고, 뒤는 행원이 고객에게 옮길 수 없는 답을 주는 것이다.
     """
-    from pension_agent.consult_agent.kb import origin_of, sources_of
+    from pension_agent.knowledge.kb import origin_of
+    from pension_agent.consult_agent.kb_index import sources_of
     from pension_agent.consult_agent.nodes import facts_qa
     from pension_agent.consult_agent.state import KB
 

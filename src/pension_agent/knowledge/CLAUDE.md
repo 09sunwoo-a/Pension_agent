@@ -246,7 +246,7 @@
 상태가 된다:
 
 - `kinds.json` 에 종류 선언(`consumed: retrieval`)
-- `consult_agent/kb.py` 의 `_KIND_ORDER` · `_BUCKET_LETTER` — 버킷 카탈로그에 들어가야
+- `consult_agent/kb_index.py` 의 `_KIND_ORDER` · `_BUCKET_LETTER` — 버킷 카탈로그에 들어가야
   LLM 이 고를 후보 목록에 보인다
 - `consult_agent/tools/` 의 도구 모듈 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
 

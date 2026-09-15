@@ -342,7 +342,7 @@ def _has_material(lead: str, probes: tuple[str, ...], state: dict) -> bool:
     주제인 「수수료 부담 반론」으로는 걸린다. 실제로 누르면 계획이 이번 대화 맥락에서
     질의를 만들므로, 서술어만으로 재본 결과를 «없음»으로 굳히면 있는 자료를 못 띄운다.
     """
-    from pension_agent.consult_agent import kb as KBMOD  # noqa: PLC0415
+    from pension_agent.knowledge import kb as KBMOD  # noqa: PLC0415
     from pension_agent.consult_agent import tools  # noqa: PLC0415
     from pension_agent.consult_agent.nodes import facts_qa  # noqa: PLC0415
     from pension_agent.consult_agent.state import KB  # noqa: PLC0415

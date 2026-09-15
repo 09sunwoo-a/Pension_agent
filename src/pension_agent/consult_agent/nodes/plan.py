@@ -26,7 +26,7 @@ from typing import Any
 
 from pension_agent import observability
 from pension_agent.consult_agent import guard, progress, relations, screens, tools
-from pension_agent.consult_agent import kb as KBMOD
+from pension_agent.consult_agent import kb_index
 from pension_agent.consult_agent.nodes.pitch import situation_line
 from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
@@ -374,7 +374,7 @@ def _known_products() -> set[str]:
     임포트 비용을 지연시킨다(strategy_agent 는 무겁다).
     """
     from pension_agent.strategy_agent import engine  # noqa: PLC0415
-    return {r["name"] for r in engine.PRODUCTS} | KBMOD.product_names(KB)
+    return {r["name"] for r in engine.PRODUCTS} | kb_index.product_names(KB)
 
 
 #: 근거 카드의 화면번호 스팬 꼴(`[04-12-646]`). 다른 `atomic` 스팬과 갈라 판정하기 위한 것이라

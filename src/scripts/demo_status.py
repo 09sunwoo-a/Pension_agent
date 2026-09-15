@@ -24,7 +24,8 @@ import json
 import sys
 
 from pension_agent import config, market
-from pension_agent.consult_agent import kb as kbmod, screens
+from pension_agent.consult_agent import screens
+from pension_agent.knowledge import kb as kbmod
 from pension_agent.strategy_agent import customer, engine, support
 
 OUT = config.REPO_ROOT / "docs" / "DEMO_STATUS.md"

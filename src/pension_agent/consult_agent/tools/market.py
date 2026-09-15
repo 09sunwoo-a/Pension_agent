@@ -6,7 +6,8 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 from __future__ import annotations
 
 from collections.abc import Callable
-from pension_agent.consult_agent import kb as KBMOD
+from pension_agent.consult_agent import kb_index
+from pension_agent.knowledge import kb as KBMOD
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크는 패키지를 거쳐 부른다(머리말)
 from pension_agent.consult_agent.tools.adequacy import _adopt
@@ -110,5 +111,5 @@ def market_evidence(kind: str, query: str, hits: list[tuple[float, dict]],
         notices += [m for m in marks if m not in notices]
         scopes.append(_scope(c["title"], [], marks))
     return _ev(tool or kind, query, "\n\n".join(_render_market(c) for _, c in hits),
-               KBMOD.sources_of(KB, hits), notices=notices, scopes=scopes,
+               kb_index.sources_of(KB, hits), notices=notices, scopes=scopes,
                cards=[c for _s, c in hits])

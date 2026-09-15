@@ -225,7 +225,7 @@ def check_guard() -> int:
     method.cautions(caution 역할)와 민감 응대 화법 카드만 쓴다. 재료가 없으면 만들지 않는다.
     """
     from pension_agent.consult_agent import guard as GD
-    from pension_agent.consult_agent import kb as KBM
+    from pension_agent.knowledge import kb as KBM
 
     gkb = KBM.load_kb()
     cases: list[tuple[bool, str]] = []

@@ -374,7 +374,7 @@ def check_screen_registry() -> int:
     화면번호는 직원이 가장 자주 묻는 것 중 하나다(07/01 "화면번호·처리 순서까지 담는다").
     옮겨 적기만 하면 되는 재료가 적재되지 않은 채로 있었던 것이다.
     """
-    from pension_agent.consult_agent.kb import buckets
+    from pension_agent.consult_agent.kb_index import buckets
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -513,7 +513,7 @@ def check_screen_registry() -> int:
     ok += hit
 
     # 메뉴 이름도 검색 단서다 — 직원이 업무명이 아니라 메뉴명으로 물을 때가 있다.
-    from pension_agent.consult_agent.kb import retrieve
+    from pension_agent.knowledge.kb import retrieve
     menu_hits = retrieve(KB, kinds=["channel"], utterance="변경관리 퇴직연금 상품변경관리 메뉴",
                          top_k=3)
     hit = any("변경관리" in (c.get("starbanking") or "") for _s, c in menu_hits)
