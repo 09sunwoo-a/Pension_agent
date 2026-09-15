@@ -1,77 +1,39 @@
-"""도구 레지스트리 — 에이전트가 할 수 있는 일의 **능력 표면**.
+"""도구 레지스트리 — 에이전트가 할 수 있는 일의 능력 표면.
 
-예전에는 능력 표면이 `routing.INTENTS` 였다. 의도 enum 하나 = 노드 하나 = 답변 하나였고,
-새 기능을 붙이려면 enum·분기표·노드를 함께 늘려야 했고, 무엇보다 **한 턴에 하나만** 쓸 수
-있었다. "이 고객 수수료 불만인데 우리 IRP 수수료가 얼마고 뭐라고 말해야 하나" 같은 질문은
-값·고객·화법 세 재료가 필요한데 그중 하나만 골라졌다.
+능력은 의도 enum 이 아니라 도구 목록이다. 계획 루프(nodes/plan)가 한 턴에 여러 도구를
+부르고, 돌려받은 근거를 원장에 쌓고, compose 가 그것만으로 답을 쓴다. 모든 도구는 같은
+꼴(Evidence)을 내놓고, 원문 강제 여부는 그 안의 atomic·notices 로 선언한다 — 규약은
+evidence/record.py. 못 찾으면 None, 죽으면 ToolFailure — tools/base.py.
 
-여기서는 능력이 도구 목록이다. 계획 루프(nodes/plan.py)가 한 턴에 여러 도구를 부르고,
-반환된 근거를 **원장**에 쌓고, compose 가 그것만으로 답을 만든다.
-
-━━ 모든 도구는 같다. 다른 것은 `atomic` 목록 하나다 ━━
-도구는 종류로 갈리지 않는다. 전부 근거를 내놓고, compose 가 그 근거로 답을 쓴다. 화법도
-예외가 아니다 — 화법은 `atomic` 이 비어 있는 도구일 뿐이다.
-
-`atomic` 은 **원문 그대로여야 하는 스팬** 목록이다. 이게 필요한 이유는 verify_texts 가
-수치의 *집합 포함* 검사라서, 원장에 있는 숫자를 **잘못 짝지은 것을 못 잡기** 때문이다.
-"총급여 5,500만원 이하 16.5%, 초과 13.2%" 가 원장에 있으면 "초과면 16.5%" 도 통과한다
-(두 숫자가 다 원장에 있으므로). 값과 조건이 한 줄에 붙어 있어 분리 검증이 불가능하다.
-그래서 그 줄은 **통째로 그대로** 나가야 한다.
-
-원문 요구는 두 종류이고, **도구가 명시적으로 갈라 선언한다**(숫자가 있는지로 추론하지
-않는다 — ⚠ 경고문이 화면번호를 인용하고 있어서 수치 주장으로 오판되는 일이 실제로 있었다).
-
-  atomic    값 + 그 값이 성립하는 조건이 붙은 한 덩이. 답변이 그 숫자를 쓸 때만 원문을
-            요구한다(값을 언급하지 않는 답변까지 강요하면 전부 표 덤프가 된다).
-            어기면 생성문을 **폐기**한다 — 틀린 짝을 옳은 블록 옆에 남겨둘 수 없다.
-  notices   빠지면 안 되는 표시(⚠ 유의 · 「하지 말 것」 · 「본부 지침 아님」). 언급 여부와
-            무관하게 항상 요구한다. 누락은 답변이 틀린 게 아니라 덜 갖춰진 것이므로
-            블록을 **덧붙여** 채운다.
-
-atomic 이 비어 있는 도구(pitch·customer)는 수치 집합 검사만 걸린다.
-
-━━ 반환 규약 ━━
-Evidence 또는 None. None 은 "이 도구로는 근거를 못 찾았다"는 뜻이고, 루프는 다른 도구를
-시도하거나 원장이 빈 채로 끝낸다(→ 정직한 '없음' 답변). 도구가 억지로 뭔가 만들어내는
-경로는 두지 않는다.
-
-━━ 이 폴더에 있는 것 ━━
-도구 함수는 `_이름` 이고 레지스트리(아래 TOOLS)에 Tool 로 올라간다. [LLM] 은 그 도구가 근거를
-만들면서 LLM 을 부른다는 뜻이다(카드 선택 evidence/select · 슬롯 추출 evidence/pitch_slots ·
-적합성 판정). 도구가 **쓰는** 것(검색·원장 규약·검사)은 `evidence/` 에 있고, 이 머리말이 그중
-몇 이름(pick·ledger_*·source_lines…)을 재노출한다 — 테스트·디버그 실행기가 `tools.X` 로
-갈아끼우는 후크라서다. 새 코드는 소유자에서 직접 가져온다.
+도구 함수는 `_이름` 이고 아래 TOOLS 에 Tool 로 올라간다. [LLM] 은 근거를 만들며 LLM 을
+부른다는 뜻이다. 도구가 쓰는 검색·규약·검사는 evidence/ 에 있고, 그중 몇 이름을 여기서
+재노출한다 — 테스트·디버그 실행기가 `tools.X` 로 갈아끼우는 후크다.
 
     규약
-    base.py         Tool · ToolFailure       도구 선언 · «확인하지 못함» 예외 (Evidence 규약은 evidence/record)
+    base.py         Tool · ToolFailure       도구 선언 · «확인하지 못함» 예외
 
-    지식베이스 도구 — 카드를 찾아 근거 블록으로
+    지식베이스 도구
     cards.py        fact procedure screen channel segment method fieldtip
-                                             제도·상품 수치 · 업무 절차 · 단말 화면번호 · 비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 현장 관찰 [LLM]
-    market.py       market lineup            시황·투자전략 · 이달의 추천펀드·디폴트옵션·TDF (05_시황_상품) [LLM]
-    pitch.py        pitch                    직원이 전한 고객의 말·반응으로 화법(대사·반론 대응·논거)을 찾는다 [LLM]
-    playbook.py     playbook                 이 고객 상태에 걸린 참고자료 — 화면 ⑥⑦⑧ 과 같은 후보군
+                                             수치·절차·화면번호·채널·고객군·방법론·현장 [LLM]
+    market.py       market lineup            시황·투자전략 · 추천펀드·디폴트옵션·TDF [LLM]
+    pitch.py        pitch                    고객의 말·반응으로 화법을 찾는다 [LLM]
+    playbook.py     playbook                 이 고객 상태에 걸린 참고자료(화면 ⑥⑦⑧)
 
-    현재 고객 도구 — strategy_agent 가 계산한 것을 그대로 옮긴다
-    briefing.py     customer                 열려 있는 고객의 브리핑 재료 — 잔액·수익률·요건 · 왜 타겟인지
-    suitability.py  suitable                 이 고객 투자성향으로 어디까지 안내할 수 있는지 — 허용 상한·통과 상품·제외 사유
-    outreach.py     outreach                 이 고객에게 안내할 세미나·이벤트와 발송 문구
-    history.py      history transcript       지난 상담(이전 세션) · 이번 상담(진행 중인 세션)의 대화
+    현재 고객 도구 — strategy_agent 가 계산한 것을 그대로
+    briefing.py     customer                 브리핑 재료 — 잔액·수익률·요건·타겟 근거
+    suitability.py  suitable                 투자성향으로 어디까지 안내할 수 있는지
+    outreach.py     outreach                 안내할 세미나·이벤트와 발송 문구
+    history.py      history transcript       지난 상담 · 이번 상담의 대화
 
     고객 화면 없이 쓰는 도구
     targets.py      targets                  오늘의 타겟 고객 목록
     dates.py        date                     오늘 날짜 · 연말까지 남은 일수
-    tax_credit.py   tax_credit               «얼마 더 넣으면 얼마 돌려받나» — 검색이 아니라 코드 계산 (ISA 전환 특례 포함)
-    answered.py     last_answer              이번 상담에서 한 답변 원문 — 줄여줘·쉽게·그 중 두 번째는
+    tax_credit.py   tax_credit               «얼마 더 넣으면 얼마 받나» — 코드 계산
+    answered.py     last_answer              이번 상담에서 한 답변 원문
 
     도구 위에서 도는 것
-    adequacy.py     fits_question            적합성 게이트 — 고른 근거가 질문에 답이 되는가. 모든 검색 도구가 채택 직전에 거친다 [LLM]
-    combine.py      evidence_from_cards      여러 종류의 카드 묶음 → 원장 항목 하나 (종류별 렌더러·선언을 그대로 쓴다)
-
-**도구가 죽은 것은 «못 찾았다»가 아니다.** 세 번째 결과가 `ToolFailure` 다(`base.py`) —
-확인한 0건과 확인하지 못한 것은 다른 사건이고, 뒤를 앞으로 접으면 지식베이스에 있는 자료를
-«없습니다»로 답하게 된다(§11 이 LLM 미연결에 대해 막는 것과 같은 사고). `run()` 이 그
-경계를 세운다.
+    adequacy.py     fits_question            고른 근거가 질문에 답이 되는가 [LLM]
+    combine.py      evidence_from_cards      여러 종류의 카드 묶음 → 원장 항목 하나
 """
 
 from __future__ import annotations

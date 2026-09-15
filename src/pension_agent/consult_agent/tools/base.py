@@ -1,7 +1,12 @@
 """Tool 선언 · ToolFailure. 모든 도구 모듈이 여기에 기댄다.
 
-근거(Evidence) 규약과 근거 블록 조립 헬퍼(_ev)는 `evidence/record.py` 에 있다.
-tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말한다.
+━━ 반환 규약 ━━
+Evidence 또는 None. None 은 «이 도구로는 근거를 못 찾았다»이고, 루프는 다른 도구를
+시도하거나 원장이 빈 채로 끝낸다(→ 정직한 '없음' 답변). 도구가 억지로 뭔가 만들어내는
+경로는 두지 않는다. 세 번째 결과가 ToolFailure 다 — 확인한 0건과 확인하지 못한 것은 다른
+사건이고, `run()`(tools/__init__)이 그 경계를 세운다.
+
+Evidence 의 규약과 조립 헬퍼(_ev)는 `evidence/record.py` 에 있다.
 """
 
 from __future__ import annotations
