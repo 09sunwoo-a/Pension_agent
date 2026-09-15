@@ -3,42 +3,20 @@
 두 에이전트(consult · strategy)와 그것들이 공유하는 인프라. `src/` 에서
 `python -m pension_agent...` 로 실행하고, 임포트는 전부 `from pension_agent...` 절대 경로다.
 
-## 공용 인프라 (패키지 최상단)
+## 파일 구조
 
-| 파일 | 역할 |
-|---|---|
-| [config.py](config.py) | 경로·데이터 위치의 단일 출처. 모듈이 `__file__` 로 경로를 되짚지 않는다 |
-| [clock.py](clock.py) | «오늘»의 단일 출처. `PENSION_TODAY` 로 고정 — 원장 기준일(`customer.AS_OF`)과는 다른 축 |
-| [env.py](env.py) | `.env` 로딩과 실행 단계(train · serving). llm 과 observability 가 함께 쓴다 |
-| [observability/](observability/__init__.py) | Langfuse 관측 — 트레이스·span·score·전송 워커. `python -m pension_agent.observability` 로 자가진단 |
-| [llm.py](llm.py) | 프로바이더 전환식 LLM 클라이언트. **환경 이전 시 이 파일만 수정**. 응답에서 JSON 을 꺼내는 `json_object`·`json_list` 도 여기 |
-| [verify.py](verify.py) | LLM 산출물의 재료(facts) 이탈 여부 판정 — 두 에이전트 공통 |
-| [session_store.py](session_store.py) | 상담 세션/대화이력 — consult_agent 가 기록, strategy_agent 가 브리핑에 노출 |
-| [note.py](note.py) | WorkB 쪽지의 꼴과 발송 — 본문 표·마스킹·길이 상한·결과 판정. 어댑터는 [mcp/workb.py](mcp/workb.py) |
-| [mcp/](mcp/__init__.py) | 행내 시스템 연동 — 서버 표·클라이언트·도구 어댑터. `python -m pension_agent.mcp` 로 진단 |
+최상단 모듈·패키지의 역할과 층은 [`__init__.py`](__init__.py) 머리말이 지도다 — 지도에 빠진
+항목과 층을 거스르는 임포트는 `tests/infra/s03_boundaries.py` 가 잡는다. 하위 패키지의 파일별
+설명은 각 폴더의 `__init__.py` 머리말에 있다(`knowledge/` · `consult_agent/` 등).
 
 층은 세 겹이다 — 단일 출처(config·clock) → 실행 환경(env ← observability ← llm) → 기록·행위
-(session_store·note·mcp). 승낙 뒤 실행하는 행위의 게이트(발송 화면·쪽지)는 consult 만 부르므로
-`consult_agent/effects/actions.py` 에 있다. 공용 모듈 사이의 의존은 `tests/infra/s03_boundaries.py` 의 표가
-고정한다.
-
-## knowledge/ — 데이터 접근 계층
-
-| 파일 | 역할 |
-|---|---|
-| [knowledge/kinds.json](knowledge/kinds.json) | 레코드 종류 레지스트리(선언형). 검증·저작 프롬프트가 여기서 나온다 |
-| [knowledge/store.py](knowledge/store.py) | 통합 레코드 스토어. 모든 데이터의 단일 로더 (`fields_of`·`records`) |
-| [knowledge/schema.py](knowledge/schema.py) | 종류 구동 검증 + 단일 저작 프롬프트 생성기 (CLI) |
-| [knowledge/similarity.py](knowledge/similarity.py) | 문자열 n-gram 유사도 — 검색 채점의 기초 |
-| [knowledge/checks.py](knowledge/checks.py) | 범용 무결성 검증 (ID 중복 · 깨진 참조 · 사실충돌) |
-| [knowledge/data/](knowledge/data/) | 공용 지식 카드 — 두 에이전트가 함께 읽는다 (`scripts/kb_build` 산출물) |
-
-`knowledge.shared_store()` 가 `config.DATA_ROOTS`(공용 지식 + 상품·전략 카탈로그) 전체를
-프로세스당 한 번만 적재한다. engine·support·situations 가 각자 `Store(...)` 를 만들던 것을
-한 곳으로 모은 것 — 같은 JSON 을 세 번 파싱하지 않고, 루트 목록도 한 곳에만 적혀 있다.
+(session_store·note·mcp). 두 에이전트는 `knowledge ← strategy_agent ← consult_agent` 한 방향이다.
+승낙 뒤 실행하는 행위의 게이트(발송 화면·쪽지)는 consult 만 부르므로
+`consult_agent/effects/actions.py` 에 있다.
 
 ## 데이터 규격 (모든 지식/데이터 공통)
 
+적재는 `knowledge.shared_store()` 한 곳에서만 한다(`knowledge/__init__.py`).
 모든 파일이 하나의 형태를 쓴다: `{ meta:{kind,…}, records:[{id, kind, fields, source?, refs?}] }`.
 종류(`product`·`pitch`·`fact`·`strategy`…)는 [knowledge/kinds.json](knowledge/kinds.json) 에
 **데이터로 선언**하며, 새 종류는 여기 한 항목만 추가하면 검증·저작·적재가 코드 수정 없이
