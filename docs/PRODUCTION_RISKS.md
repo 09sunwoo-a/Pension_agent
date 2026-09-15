@@ -165,7 +165,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 ## 9. 관측이 프롬프트를 외부로 내보낸다 — 🔴 실데이터 전환 시 개인정보 유출
 
-**어디** `pension_agent/observability.py` · 켜는 스위치는 `.env` 의 `LANGFUSE_PUBLIC_KEY` ·
+**어디** `pension_agent/observability/`(전송은 `_transport.py`) · 켜는 스위치는 `.env` 의 `LANGFUSE_PUBLIC_KEY` ·
 `LANGFUSE_SECRET_KEY`
 
 LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간다. 프롬프트에는 고객 원장이

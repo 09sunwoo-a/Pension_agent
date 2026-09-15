@@ -72,7 +72,7 @@ JSON 의 `note`·README 는 요건을 인용할 때 이 문서를 가리키고, 
 ## 2. ①~⑨ 화면 섹션 정의 · §15 섹션별 생성 주체
 
 AI 브리핑 화면은 아래 9개 섹션으로 구성된다. `구현` 열은 `engine.section_summaries()` 가
-쓰는 키이며, 코드의 단일 출처는 `src/strategy_agent/sections.py` 다(이 표와 1:1).
+쓰는 키이며, 코드의 단일 출처는 `src/pension_agent/strategy_agent/sections.py` 다(이 표와 1:1).
 
 **§15 는 섹션마다 "무엇을 규칙이 정하고 무엇을 LLM 이 쓰는지"를 지정한다.** 이 분업이
 "코드=사실" 원칙의 실체다 — 수치·상품명·선정 결과는 항상 코드가 정하고, LLM 은 그 재료를
