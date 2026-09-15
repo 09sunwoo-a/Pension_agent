@@ -1,13 +1,13 @@
 # CLI 단축 정의 — 실행이 아니라 «읽어 들이는» 파일이다.
 #
-#     cd src && source ./cli.sh
+#     cd src && source bin/cli.sh
 #
 # 행내에 코드를 들고 갈 때마다 README 에서 세 줄을 찾아 붙여넣지 않으려고 둔다.
-# 서버(run_local.sh)와는 상관이 없다 — 아래 셋은 HTTP 를 타지 않고 graph.ask() 를
+# 서버(bin/run_local.sh)와는 상관이 없다 — 아래 셋은 HTTP 를 타지 않고 graph.ask() 를
 # 직접 부른다. .env 만 잡혀 있으면 행내에서도 사외에서와 똑같이 돈다.
 
 if [ -n "${BASH_SOURCE[0]:-}" ] && [ "${BASH_SOURCE[0]}" = "${0}" ]; then
-  echo "이 파일은 실행하지 말고 읽어 들이십시오:  source ./cli.sh" >&2
+  echo "이 파일은 실행하지 말고 읽어 들이십시오:  source bin/cli.sh" >&2
   exit 1
 fi
 

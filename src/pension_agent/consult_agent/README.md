@@ -27,7 +27,7 @@ r3 = ask("이 고객 만기 언제야?", customer_id="198734-1205842", session_i
 `customer_id` 가 없으면 고객 관련 기능(브리핑 질의·수정·화면 연계)은 "고객 화면을 먼저
 열어주세요"라고 답한다. 지식 질의응답과 화법 코칭은 고객 화면 없이도 답한다.
 
-CLI · 디버그 · 대본 실행은 [../../README.md](../../README.md) §3 에 있다(`source ./cli.sh`
+CLI · 디버그 · 대본 실행은 [../../README.md](../../README.md) §3 에 있다(`source bin/cli.sh`
 → `$CA` · `$CAD` · `$CADR`). 시연용 고객의 id 와 상태는 코드가 찍어준다:
 
 ```bash

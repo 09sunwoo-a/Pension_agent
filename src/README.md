@@ -48,7 +48,7 @@ python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로�
 ## 3. 실행
 
 ```bash
-source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
+source bin/cli.sh                    # CA · CAD · CADR 정의 + 사용법 출력
 ```
 
 셋 다 **HTTP 를 타지 않고** `graph.ask()` 를 직접 부르므로 서버와 무관하고, `.env` 만 잡혀
@@ -84,9 +84,9 @@ $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을
 streamlit run app.py                                  # 개발·테스트 화면
 
 # ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
-./run_local.sh                                        # uvicorn main:app :8000
-./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
-CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"
+bin/run_local.sh                                      # uvicorn main:app :8000
+bin/test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
+CUSTOMER_ID=198734-1205842 bin/test_local.sh "이 고객 왜 관리 대상이야?"
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다)
 $CAD --debug "세액공제 한도가 얼마야?"
