@@ -187,7 +187,7 @@ Jenkins 가 넣는 환경변수가 정한다(`Dockerfile` 주석). 플랫폼 규
 
 `.env` 에 `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` 를 넣으면 켜지고, **없으면 통째로
 꺼진다**(테스트·시연은 그대로 돈다). 브리핑 한 건 · 대화 한 턴이 트레이스 하나로 묶이고,
-점수는 전부 코드가 아는 사실이다. 환경변수 목록과 설계는 `pension_agent/observability.py` 머리말.
+점수는 전부 코드가 아는 사실이다. 환경변수 목록과 설계는 `pension_agent/observability/__init__.py` 머리말.
 
 ```bash
 python -m pension_agent.observability   # 대시보드에 안 찍히면 — 설정을 찍고 이벤트 한 건을 실제로 보낸다

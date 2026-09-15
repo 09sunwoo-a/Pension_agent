@@ -49,7 +49,7 @@
 ━━ 관측 ━━
 모든 호출은 성공·실패 양쪽 다 `observability.record_generation()` 으로 한 건씩 남는다
 (Langfuse). 키가 없으면 통째로 꺼지고, 켜져 있어도 전송은 백그라운드라 호출을 늦추지
-않는다 — 자세한 것은 `observability.py`.
+않는다 — 자세한 것은 `observability/` 패키지 머리말.
 
 available() 가 False 면 strategy_agent 는 규칙 기반 폴백으로 동작한다(그쪽 규약).
 consult_agent 는 폴백하지 않는다 — LLM 이 없으면 답을 만들지 않고 그렇게 말한다
