@@ -205,7 +205,7 @@ for key, rows in support.outreach_candidates().items():
 #
 # 이 저장소는 한때 3종 표시(dummy + 이름 앞 "(더미) " + 발송문 앞 "[더미] ")를 함께 강제했다.
 # 발표용 데모에서는 화면도 발송문도 산출물이라 딱지가 없어야 한다는 결정으로 텍스트 딱지를
-# 뗐고, 대신 보호막을 게이트로 옮겼다(consult_agent/actions.py::open_lms_screen). 이 테스트는 방향이
+# 뗐고, 대신 보호막을 게이트로 옮겼다(consult_agent/effects/actions.py::open_lms_screen). 이 테스트는 방향이
 # 반대다 — "딱지가 있는가"가 아니라 **"딱지가 없고 dummy 플래그는 남아 있는가"**를 본다.
 for a in support.ASSETS:
     if a.get("content_type") not in ("이벤트", "세미나"):
@@ -227,7 +227,7 @@ for a in support.ASSETS:
 # 게이트를 **레지스트리에 남은 더미로** 검사할 수 없고, 검사용 자산을 하나 끼워 넣어 확인한다
 # (실데이터로 갈아탈수록 조용히 검사가 사라지는 것이 이 자리의 위험이다 — 예전에는 "더미가
 # 하나라도 남아 있어야 한다"고 데이터에 요구했는데, 그건 데이터를 테스트에 맞추는 것이다).
-from pension_agent.consult_agent import actions as _actions
+from pension_agent.consult_agent.effects import actions as _actions
 
 _probe = {"id": "TEST-DUMMY", "name": "게이트 검사용 더미 콘텐츠", "content_type": "이벤트",
           "url": "https://example.invalid/demo/gate-probe", "dummy": True,

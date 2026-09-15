@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pension_agent import clock
 from pension_agent.consult_agent.state import AgentState
-from pension_agent.consult_agent.tools.base import Evidence, _ev
+from pension_agent.consult_agent.evidence.record import Evidence, _ev
 
 
 # ─────────────────────────────────────────────────────────────

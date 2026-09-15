@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import marks, select
+from pension_agent.consult_agent.evidence import marks, select
 from pension_agent.knowledge.kb import origin_of
 from pension_agent.consult_agent.state import KB
 

@@ -118,7 +118,7 @@ def first_clause(text: str, limit: int = 70) -> str | None:
 def triggers_of(card_id: str, *texts: str | None, limit: int = 3) -> list[str]:
     """카드의 검색 예시(trigger_examples) — 본문 첫 절들 + config.TRIGGER_EXTRA.
 
-    **제목은 넣지 않는다.** 카드 목록 한 줄(`consult_agent/kb_index.py::_card_line`)은 제목 뒤에
+    **제목은 넣지 않는다.** 카드 목록 한 줄(`consult_agent/evidence/kb_index.py::_card_line`)은 제목 뒤에
     예상질문을 최대 2개만 싣는다. 제목이 첫 칸을 차지하면 LLM 이 보는 정보 칸은 하나뿐이다
     (2026-09-04 실측: 633장 중 388장이 그랬다). 제목은 이미 한 줄 앞에 있고, n-gram 폴백은
     `kb.score_parts` 가 제목을 예상질문과 같은 방식으로 함께 잰다.

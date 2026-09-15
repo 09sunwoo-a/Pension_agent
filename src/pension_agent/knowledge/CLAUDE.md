@@ -246,7 +246,7 @@
 상태가 된다:
 
 - `kinds.json` 에 종류 선언(`consumed: retrieval`)
-- `consult_agent/kb_index.py` 의 `_KIND_ORDER` · `_BUCKET_LETTER` — 버킷 카탈로그에 들어가야
+- `consult_agent/evidence/kb_index.py` 의 `_KIND_ORDER` · `_BUCKET_LETTER` — 버킷 카탈로그에 들어가야
   LLM 이 고를 후보 목록에 보인다
 - `consult_agent/tools/` 의 도구 모듈 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
 
@@ -451,7 +451,7 @@ category(시황/상품) 둘로 묶지 않았다. 대신 주간 자료가 한 회
 - **저작**: 06/04 에 `**조건별 값**` 필드를 신설하고(항목 읽는 법에 규격을 적었다) 팩트
   문장이 조건→값 짝을 명시한 항목부터 채웠다. `**검증 포인트**` 는 이미 있던 내용이라
   변환기가 항목으로 쪼갠다 — **내용을 새로 만들지 않는다.**
-- **검증**: `consult_agent/relations.py` 가 조건–값 오짝과 알려진 오답을 대조하고,
+- **검증**: `consult_agent/evidence/relations.py` 가 조건–값 오짝과 알려진 오답을 대조하고,
   `compose` 가 걸린 생성문을 내보내지 않는다.
 - **해제**: **선언이 있는 카드만** `atomic` 에서 놓아준다(`tools._fact`). 선언이 없는
   카드는 그대로 강제된다 — 저작이 넓어지는 만큼만 원문 강제가 물러난다.

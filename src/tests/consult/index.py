@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import select, tools
+from pension_agent.consult_agent import tools
+from pension_agent.consult_agent.evidence import select
 
 from tests.consult._common import print, _REAL_LLM_PICK  # noqa: A001 — 집계용 print
 
@@ -25,8 +26,8 @@ def check_fact_in_index() -> int:
     돌아오는지, 그리고 못 골랐을 때 n-gram 이 예전 그대로인지.
     """
     ok = 0
-    from pension_agent.consult_agent import kb_index
-    from pension_agent.consult_agent.tools import facts_qa
+    from pension_agent.consult_agent.evidence import kb_index
+    from pension_agent.consult_agent.evidence import facts_qa
 
     kb = tools.KB
     # 같은 객체로 두 자리에 산다 — 사본이면 한쪽만 고쳐지는 자리가 생긴다(화법과 같은 규약).
@@ -76,7 +77,7 @@ def check_hier_index() -> int:
     실을 수 있는지가 이 기능의 존재 이유다. 그래서 "예산이 실제 상한인가"와
     "버킷이 카드를 빠뜨리지 않는가"를 회귀로 잡는다.
     """
-    from pension_agent.consult_agent import kb_index
+    from pension_agent.consult_agent.evidence import kb_index
     from pension_agent.knowledge import kb as K
 
     kb = K.load_kb()
@@ -191,7 +192,7 @@ def check_l0_skip() -> int:
     한다: 카드가 늘어 예산을 넘으면 저절로 2단으로 돌아간다(check_hier_index ⑧이 pitch
     로 2단 경로를 그대로 고정하고 있다 — 이 검사는 그 반대짝이다).
     """
-    from pension_agent.consult_agent import kb_index
+    from pension_agent.consult_agent.evidence import kb_index
 
     ok = 0
 

@@ -6,7 +6,7 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 from __future__ import annotations
 
 from pension_agent.consult_agent.state import AgentState
-from pension_agent.consult_agent.tools.base import Evidence, _ev
+from pension_agent.consult_agent.evidence.record import Evidence, _ev
 from pension_agent.consult_agent.tools.briefing import _cond_labels
 
 

@@ -167,3 +167,19 @@ _tools_to_nodes = sorted(
            for line in f.read_text(encoding="utf-8").splitlines()))
 check(not _tools_to_nodes, "consult_agent/tools/ 가 nodes/ 를 임포트하지 않는다 — 도구는 노드 아래 층이다",
       str(_tools_to_nodes))
+
+
+# consult_agent 의 층은 셋이고 방향은 하나다 — evidence/(근거를 찾고·맞추고·검사) ← tools/(LLM 이
+# 고르는 도구) ← effects/(답변 뒤·그래프 밖). 2026-09-15 재배치 때 세운 경계다: 그 전에는 최상위에
+# 열여섯 파일이 한 층으로 있었고 tools/ 에 도구와 보조가 섞여 있어 «이게 도구인가»를 폴더가
+# 답하지 못했다. 방향이 거꾸로면 지연 임포트여도 거꾸로다. (FENCE 가 그 예다 — 떼는 쪽 tools/history
+# 가 쓰는 쪽 effects/memo 를 임포트하고 있어서 state.py 로 올렸다.)
+_CA = _PKG / "consult_agent"
+def _imports_from(folder: str, *forbidden: str) -> list[str]:
+    heads = tuple(f"{p}pension_agent.consult_agent.{x}" for x in forbidden for p in ("from ", "import "))
+    return sorted(str(f.relative_to(_PKG)) for f in (_CA / folder).rglob("*.py")
+                  if any(line.lstrip().startswith(heads) for line in f.read_text(encoding="utf-8").splitlines()))
+_bad = _imports_from("evidence", "tools", "effects", "nodes")
+check(not _bad, "consult_agent/evidence/ 가 tools/·effects/·nodes/ 를 임포트하지 않는다 — 근거 층이 맨 아래다", str(_bad))
+_bad = _imports_from("tools", "effects")
+check(not _bad, "consult_agent/tools/ 가 effects/ 를 임포트하지 않는다 — 도구는 효과 아래 층이다", str(_bad))

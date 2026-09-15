@@ -125,7 +125,7 @@ def check_customer_material() -> int:
     실존 고객이 필요한 검사는 시연용 목업 9케이스의 이준호(KB-PIN 198734-1205842)를
     쓴다. "CX" 는 존재하지 않는 id 로 남겨 "고객 없음" 경로를 함께 검증한다.
     """
-    from pension_agent.consult_agent import guard as GD
+    from pension_agent.consult_agent.evidence import guard as GD
     from pension_agent.consult_agent.nodes import plan as P
 
     ok = 0
@@ -521,9 +521,9 @@ def check_material_marks() -> int:
        붙였고, 본부 공식·대외 공개·교육자료 구분은 답변에 나타나지 않았다 — 현장 노하우가
        본부 지침으로 읽히면 그게 곧 잘못된 안내다.
     """
-    from pension_agent.consult_agent import marks as M
+    from pension_agent.consult_agent.evidence import marks as M
     from pension_agent.consult_agent.nodes import plan as P
-    from pension_agent.consult_agent.tools import facts_qa, procedure_qa
+    from pension_agent.consult_agent.evidence import facts_qa, procedure_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -643,9 +643,9 @@ def check_relations() -> int:
     **검증기가 옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다 나쁘다** — 직원은
     왜 막혔는지 알 수 없다. 그래서 잡는 것만큼 통과시키는 것도 함께 잰다.
     """
-    from pension_agent.consult_agent import relations as R
+    from pension_agent.consult_agent.evidence import relations as R
     from pension_agent.consult_agent.nodes import plan as P
-    from pension_agent.consult_agent.tools import facts_qa
+    from pension_agent.consult_agent.evidence import facts_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -782,9 +782,9 @@ def check_caution_roles() -> int:
     답변에 그대로 나갔다(§12 지워진 gap 17). 역할은 데이터가 선언하고(build_kb + config
     예외표) 소비 코드는 선언만 본다 — guard 의 문자열 휴리스틱(_AUTHORING)은 지웠다.
     """
-    from pension_agent.consult_agent import guard as GD
+    from pension_agent.consult_agent.evidence import guard as GD
     from pension_agent.knowledge.kb import ROLE_FIELDS, role_texts
-    from pension_agent.consult_agent.tools import procedure_qa, segment_qa
+    from pension_agent.consult_agent.evidence import procedure_qa, segment_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -817,7 +817,7 @@ def check_caution_roles() -> int:
     ok += hit
 
     # ③ 절차 표시(notices)에도 새지 않는다 — proc.001 의 ⚠ 유의는 "필자 해석" 메모다.
-    from pension_agent.consult_agent.tools import procedure_qa as PQ
+    from pension_agent.consult_agent.evidence import procedure_qa as PQ
     by_id = {c["id"]: c for c in KB.cards}
     orig_search, orig_fits = PQ.search, tools.fits_question
     tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
@@ -1152,7 +1152,7 @@ def check_history_selection() -> int:
     from pathlib import Path
 
     from pension_agent import session_store
-    from pension_agent.consult_agent import suggest
+    from pension_agent.consult_agent.effects import suggest
 
     ok = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -1235,9 +1235,9 @@ def check_market_material() -> int:
     이 재료가 다른 것과 갈리는 지점은 **시효**다(CLAUDE.md §9). 제도 확정값과 달리 시황
     수치는 주·월 단위로 낡으므로, 기준시점과 원문의 시효 경고가 답변에 함께 나가야 한다.
     """
-    from pension_agent.consult_agent import marks as MARKS
-    from pension_agent.consult_agent import relations as REL
-    from pension_agent.consult_agent.kb_index import buckets
+    from pension_agent.consult_agent.evidence import marks as MARKS
+    from pension_agent.consult_agent.evidence import relations as REL
+    from pension_agent.consult_agent.evidence.kb_index import buckets
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES
     from pension_agent.consult_agent.state import KB
 
@@ -1487,8 +1487,8 @@ def check_origin() -> int:
     말하는 것이고, 뒤는 행원이 고객에게 옮길 수 없는 답을 주는 것이다.
     """
     from pension_agent.knowledge.kb import origin_of
-    from pension_agent.consult_agent.kb_index import sources_of
-    from pension_agent.consult_agent.tools import facts_qa
+    from pension_agent.consult_agent.evidence.kb_index import sources_of
+    from pension_agent.consult_agent.evidence import facts_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -1527,7 +1527,7 @@ def check_origin() -> int:
     # 파일 텍스트로 확인한다. main.py 도 uvicorn 이 부르는 진입점이라 같게 다룬다.
     import inspect
 
-    from pension_agent.consult_agent import render
+    from pension_agent.consult_agent.effects import render
     from tests.debug import __main__ as dbg_main
     from tests.debug import reps as dbg_reps
     # 경로를 되짚지 않고 config 에서 받는다(루트 CLAUDE.md 규칙 4).

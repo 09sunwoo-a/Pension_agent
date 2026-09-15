@@ -6,7 +6,7 @@
 보내지 않고 «미연결»로 답한다.
 
 ━━ 여기는 «꼴과 발송»이다 ━━
-**무엇을 쓸지는 `consult_agent/memo.py` 가 정한다**(대화 중 직원이 부탁하는 쪽지 — LLM 이
+**무엇을 쓸지는 `consult_agent/effects/memo.py` 가 정한다**(대화 중 직원이 부탁하는 쪽지 — LLM 이
 가이드라인 안에서 쓰고 코드가 검사한다). 여기 있는 것은 그 아래 층이다: 표의 속성, 고객
 id 마스킹, 길이 상한, 그리고 MCP 발송과 응답 판정. 두 층을 갈라 두는 이유는 **꼴과 발송은
 쪽지 종류와 무관하게 같아야 하기 때문**이다 — 마스킹이나 상한이 종류마다 갈리면 한쪽만
@@ -190,7 +190,7 @@ def _block(no: int, target: Target) -> str:
 #: 사실을 쪽지가 말하지 않으면 직원은 전부 오늘 값으로 읽는다.
 #: 두 줄을 갈라 둔다 — 앞줄(기준일)은 원장 값을 실은 **모든** 쪽지에 필요하고, 뒷줄
 #: (선정 기준)은 **목록** 쪽지에만 뜻이 있다. 한 상수로 묶여 있으면 고객 한 명을 담은
-#: 쪽지에도 "선정 기준은…"이 따라붙는다(consult_agent/memo.py 가 골라 쓴다).
+#: 쪽지에도 "선정 기준은…"이 따라붙는다(consult_agent/effects/memo.py 가 골라 쓴다).
 FOOTER_ASOF = "※ 평가금액·보유 현황은 {as_of} 원장 기준이고, 잔여일수·경과일은 {today} 기준입니다."
 FOOTER_RULE = "※ 선정 기준은 사후관리 타겟 룰베이스입니다. 상세 근거는 에이전트 화면에서 확인하세요."
 FOOTER = f"{FOOTER_ASOF}\n{FOOTER_RULE}"
@@ -271,7 +271,7 @@ _MUTED = 'style="color:#777"'
 
 
 def esc(text: str) -> str:
-    """HTML 본문에 실을 텍스트의 이스케이프. 쪽지 초안(consult_agent/memo.py)도 이것을 쓴다 —
+    """HTML 본문에 실을 텍스트의 이스케이프. 쪽지 초안(consult_agent/effects/memo.py)도 이것을 쓴다 —
     꼴은 쪽지 종류와 무관하게 같아야 한다(모듈 머리말)."""
     return html.escape(str(text), quote=False)
 
@@ -301,7 +301,7 @@ def targets_table(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple
     """표 하나(`<table>…</table>`)와 «실린 고객 수». 머리말·꼬리말은 붙이지 않는다.
 
     표만 따로 내는 이유는 **쓰는 곳이 둘**이기 때문이다 — 목록만 있는 쪽지(`daily_targets_note`)와,
-    LLM 이 쓴 본문 아래에 값 표로 붙는 쪽지(`consult_agent/memo.py`). 표를 두 번 만들면
+    LLM 이 쓴 본문 아래에 값 표로 붙는 쪽지(`consult_agent/effects/memo.py`). 표를 두 번 만들면
     한쪽만 마스킹하거나 한쪽만 잘라내는 상태가 곧 생긴다.
     """
     thead = "<tr>" + "".join(f"<th {_TH}>{esc(c)}</th>" for c in COLS) + "</tr>"

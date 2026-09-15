@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from scripts.kb_build import config
-from pension_agent.consult_agent import screens
+from pension_agent.consult_agent.effects import screens
 
 from scripts.kb_build.common import EXTRACT, clean, note, record, redact, role_entries, topics_of, triggers_of
 from scripts.kb_build.docs import DocResolver

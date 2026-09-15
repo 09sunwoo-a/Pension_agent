@@ -5,7 +5,7 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 
 from __future__ import annotations
 
-from pension_agent.consult_agent.tools.base import Evidence
+from pension_agent.consult_agent.evidence.record import Evidence
 
 
 def ledger_slots(evidence: list[Evidence]) -> dict:

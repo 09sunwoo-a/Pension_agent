@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from pension_agent.consult_agent import kb_index
+from pension_agent.consult_agent.evidence import kb_index
 from pension_agent.consult_agent.state import KB
-from pension_agent.consult_agent.tools.base import Evidence, _ev
+from pension_agent.consult_agent.evidence.record import Evidence, _ev
 from pension_agent.consult_agent.tools.cards import (
     channel_evidence, fact_evidence, fieldtip_evidence, method_evidence, procedure_evidence,
     screen_evidence, segment_evidence,

@@ -26,9 +26,10 @@ from typing import Any
 
 from pension_agent import note
 from pension_agent import observability
-from pension_agent.consult_agent import memo, screens, tools
+from pension_agent.consult_agent import tools
+from pension_agent.consult_agent.effects import memo, screens
 from pension_agent.consult_agent.state import KB, AgentState
-from pension_agent.consult_agent.actions import ACTIONS, MEMO_DEFAULT_TO
+from pension_agent.consult_agent.effects.actions import ACTIONS, MEMO_DEFAULT_TO
 
 #: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
 _SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")

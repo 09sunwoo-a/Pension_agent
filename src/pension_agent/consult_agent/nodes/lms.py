@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pension_agent.consult_agent import screens
+from pension_agent.consult_agent.effects import screens
 from pension_agent.consult_agent.state import KB, AgentState
 
 _QUOTE = re.compile(r"[\"'“”‘’](.+?)[\"'“”‘’]")

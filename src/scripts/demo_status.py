@@ -24,7 +24,7 @@ import json
 import sys
 
 from pension_agent import config, market
-from pension_agent.consult_agent import screens
+from pension_agent.consult_agent.effects import screens
 from pension_agent.knowledge import kb as kbmod
 from pension_agent.strategy_agent import customer, engine, support
 
@@ -115,7 +115,7 @@ def build() -> tuple[str, dict[str, int]]:
     n["assets"] = len(dummies)
     L += [f"## 1. 안내 콘텐츠 — 시연용 {len(outreach)}건 · 게이트가 막는 더미 {len(dummies)}건", "",
           "⑨ 「고객님께 안내해보세요」의 이벤트·세미나다. 출처가 있는 콘텐츠(`source`)는",
-          "`dummy` 를 달지 않으므로 `consult_agent/actions.py::open_lms_screen()` 게이트가 막지 않고,",
+          "`dummy` 를 달지 않으므로 `consult_agent/effects/actions.py::open_lms_screen()` 게이트가 막지 않고,",
           "발송 화면 연계까지 이어진다. **일정·링크·수신거부 번호는 시연을 위해 구성된 값이다** —",
           "화면과 발송문에는 그 표시가 없으므로(발표용 데모라 딱지를 붙이지 않는다) 여기가",
           "유일한 기록이다. 실제 콘텐츠 캘린더가 붙으면 이 표가 그대로 실제 일정으로 바뀐다.", "",
@@ -229,14 +229,14 @@ def build() -> tuple[str, dict[str, int]]:
          "타입드 필드로 비교하기 때문이다"),
         ("engine.TOP_N / ALT_N", f"{engine.TOP_N} / {engine.ALT_N}",
          "제안 1개 + 예비 1개 (07_에이전트_기능정의/01 ① 4)"),
-        ("consult_agent.screens.MODE", f"{screens.MODE} ({screens.MODES[screens.MODE]})",
+        ("consult_agent.effects.screens.MODE", f"{screens.MODE} ({screens.MODES[screens.MODE]})",
          "단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 "
          "TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, "
          "화면번호 자체는 지식베이스 절차 카드에서 온다"),
-        ("consult_agent.screens.link() 파라미터", "scnNo · mode",
+        ("consult_agent.effects.screens.link() 파라미터", "scnNo · mode",
          "규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 "
          "링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 "
-         "consult_agent/screens.py 의 조립부에 추가"),
+         "consult_agent/effects/screens.py 의 조립부에 추가"),
     ]
     n["consts"] = len(consts)
     L += [f"## 5. 데모 상수 — {len(consts)}건", ""]

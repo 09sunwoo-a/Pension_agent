@@ -34,8 +34,9 @@ def check_memo() -> int:
     from pathlib import Path
 
     from pension_agent import note, session_store
-    from pension_agent.consult_agent import actions as REG
-    from pension_agent.consult_agent import memo, prompts
+    from pension_agent.consult_agent.effects import actions as REG
+    from pension_agent.consult_agent import prompts
+    from pension_agent.consult_agent.effects import memo
     from pension_agent.consult_agent.nodes import act
     from pension_agent.consult_agent.nodes import clarify as CL
 

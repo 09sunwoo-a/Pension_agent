@@ -9,7 +9,7 @@ from __future__ import annotations
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import routing, tools
 from pension_agent.consult_agent.nodes import plan, understand
-from pension_agent.consult_agent.tools import pitch_slots
+from pension_agent.consult_agent.evidence import pitch_slots
 from pension_agent.llm import LLMError
 
 from tests.consult._common import print, _OVERRIDES, stub_understand, stub_plan_pitch  # noqa: A001 — 집계용 print
@@ -153,7 +153,7 @@ def check_knowledge_intents() -> bool:
     출처처럼 '이 값을 언제·어디 근거로 말하는지'가 함께 나오는가. ②가 빠지면 숫자만 맞고
     근거가 없는 답이 되어, 직원이 그대로 고객에게 옮길 수 없다.
     """
-    from pension_agent.consult_agent.tools import facts_qa
+    from pension_agent.consult_agent.evidence import facts_qa
 
     checks = [
         ("fact", "세액공제 한도가 얼마야?", ("만원", "출처")),
@@ -187,7 +187,7 @@ def check_knowledge_intents() -> bool:
     print(f"{'✓' if no_invent else '✗'} fact 도구: 없는 값은 지어내지 않고 0건으로 답한다")
 
     # 지운 즉답 노드가 되살아나지 않았는가 (§11 회귀).
-    from pension_agent.consult_agent.tools import procedure_qa, segment_qa
+    from pension_agent.consult_agent.evidence import procedure_qa, segment_qa
     gone = not any(hasattr(m, fn) for m, fn in
                    ((facts_qa, "fact_lookup"), (procedure_qa, "procedure"),
                     (segment_qa, "segment_explain")))
@@ -225,7 +225,7 @@ def check_guard() -> int:
     07_에이전트_기능정의/01 ① 필수 구성 요소 6. 규칙을 새로 쓰지 않고 행원들이 정리해둔
     method.cautions(caution 역할)와 민감 응대 화법 카드만 쓴다. 재료가 없으면 만들지 않는다.
     """
-    from pension_agent.consult_agent import guard as GD
+    from pension_agent.consult_agent.evidence import guard as GD
     from pension_agent.knowledge import kb as KBM
 
     gkb = KBM.load_kb()

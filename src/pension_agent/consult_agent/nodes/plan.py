@@ -24,10 +24,11 @@ from collections.abc import Iterable
 from typing import Any
 
 from pension_agent import observability
-from pension_agent.consult_agent import guard, progress, relations, screens, tools
-from pension_agent.consult_agent import kb_index
-from pension_agent.consult_agent.marks import MATERIAL_MARKS
-from pension_agent.consult_agent.tools.pitch_slots import situation_line
+from pension_agent.consult_agent import progress, tools
+from pension_agent.consult_agent.effects import screens
+from pension_agent.consult_agent.evidence import guard, kb_index, relations
+from pension_agent.consult_agent.evidence.marks import MATERIAL_MARKS
+from pension_agent.consult_agent.evidence.pitch_slots import situation_line
 from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
     MUST_BLOCK,
@@ -613,7 +614,7 @@ def screen(answer: str, evidence: list[tools.Evidence], question: str,
            *, prompt_texts: Iterable[str] = ()) -> list[str]:
     """§6 검사 한 벌 — 걸린 자리 목록(비어 있으면 통과). 화면 답변 밖에서 쓰는 공개 이름.
 
-    **쪽지 본문도 같은 검사를 받는다**(§10 · `consult_agent/memo.py`). 쪽지는 화면 답변과
+    **쪽지 본문도 같은 검사를 받는다**(§10 · `consult_agent/effects/memo.py`). 쪽지는 화면 답변과
     달리 되돌릴 수 없고, 검사를 따로 구현하면 두 벌이 곧 갈린다 — 한쪽만 관계 선언을 보고
     한쪽만 상품 등록부를 보는 식으로. 그래서 검사는 여기 하나이고, 갈리는 것은 **걸렸을 때의
     처분**뿐이다: 화면은 다시 쓰게 하고(compose), 쪽지는 보내지 않는다(폴백 없음).

@@ -6,8 +6,8 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 from __future__ import annotations
 
 import re
-from pension_agent.consult_agent.state import AgentState
-from pension_agent.consult_agent.tools.base import Evidence, _ev
+from pension_agent.consult_agent.state import FENCE, AgentState
+from pension_agent.consult_agent.evidence.record import Evidence, _ev
 
 
 # ─────────────────────────────────────────────────────────────
@@ -162,15 +162,14 @@ TRANSCRIPT_NONE = "· 기록 없음 — 이번 상담에서 아직 오간 대화
 
 #: 기록된 답변 끝에 붙어 있는 제안 문구(act.offer — 화면 연계·화법 제시·쪽지 보내기). 안내가
 #: 아니라 화면 장치라 요약 재료에서 뗀다 — 추천질문을 기록에서 빼는 것과 같은 이유다(graph.ask).
-#: 쪽지 본문을 감싼 코드블록 펜스(memo.FENCE)도 같은 이유로 뗀다(_strip_devices).
+#: 쪽지 본문을 감싼 코드블록 펜스(state.FENCE)도 같은 이유로 뗀다(_strip_devices).
 _OFFER_TRAILER = re.compile(r"\n*— [^\n]*\(네 / 아니오\)\s*$")
 
 
 def _strip_devices(text: str) -> str:
     """기록된 답변에서 화면 장치(제안 문구·코드블록 펜스)를 뗀 본문."""
-    from pension_agent.consult_agent import memo  # noqa: PLC0415
     text = _OFFER_TRAILER.sub("", text.strip())
-    return "\n".join(ln for ln in text.splitlines() if ln.strip() != memo.FENCE)
+    return "\n".join(ln for ln in text.splitlines() if ln.strip() != FENCE)
 
 
 def _transcript(state: AgentState, query: str) -> Evidence | None:

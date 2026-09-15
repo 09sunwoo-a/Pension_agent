@@ -19,7 +19,7 @@
 
 ━━ relations 는 모듈이라 조심한다 ━━
 `plan.relations` 는 모듈 객체다. 진짜 모듈의 `check` 를 갈아끼우면 같은 모듈을 쓰는
-`tools.py`(`import relations as REL`)까지 오염된다. 그래서 **plan 쪽 바인딩만**
+`tools/base.py`·`tools/cards.py`(`import relations as REL`)까지 오염된다. 그래서 **plan 쪽 바인딩만**
 `SimpleNamespace` 로 바꾼다.
 """
 
@@ -33,7 +33,7 @@ from dataclasses import dataclass, field
 
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import prompts as PROMPTS
-from pension_agent.consult_agent import select as S
+from pension_agent.consult_agent.evidence import select as S
 from pension_agent.consult_agent import tools as T
 from pension_agent.consult_agent.nodes import clarify as CL
 from pension_agent.consult_agent.nodes import plan as P

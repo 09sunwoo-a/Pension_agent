@@ -28,8 +28,8 @@ from pension_agent import clock
 from pension_agent import llm
 from pension_agent import mcp
 from pension_agent.consult_agent import graph as consult_graph
-from pension_agent.consult_agent import screens
-from pension_agent.consult_agent import suggest
+from pension_agent.consult_agent.effects import screens
+from pension_agent.consult_agent.effects import suggest
 
 st.set_page_config(page_title="IRP 에이전트 평가 룸", layout="wide")
 st.title("📈 IRP 전략 제안 에이전트 평가 대시보드")
@@ -417,7 +417,7 @@ with tab2:
 with tab_chat:
     st.subheader("💬 대화형 에이전트 테스트 (consult_agent)")
 
-    #: 답변에 실린 단말 화면 딥링크 — consult_agent/screens.py 가 만드는 형식.
+    #: 답변에 실린 단말 화면 딥링크 — consult_agent/effects/screens.py 가 만드는 형식.
     SCREEN_LINK = re.compile(re.escape(screens.SCHEME) + r"\S+")
     st.caption(
         "화법 코칭뿐 아니라 브리핑/고객정보 질의·화면 연계·브리핑 수정 요청까지 "
@@ -489,7 +489,7 @@ with tab_chat:
     if "pending_question" not in st.session_state:
         st.session_state.pending_question = None
 
-    # ── 이 고객 관련 추천 질문 (consult_agent/suggest.py — 코드 조립, 상황 기반)
+    # ── 이 고객 관련 추천 질문 (consult_agent/effects/suggest.py — 코드 조립, 상황 기반)
     # 상황이 맞는 고객에게만 뜬다. 칩 문구 자체가 알림이고("지난 상담이 있었다" ·
     # "이 고객에게 맞는 세미나가 열려 있다"), 누르면 아래 pending_question 경로로 계획
     # 루프(history · outreach 도구)를 탄다. 조건이 아니면 아무것도 안 뜬다 — 항상 뜨는

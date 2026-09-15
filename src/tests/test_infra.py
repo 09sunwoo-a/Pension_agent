@@ -29,6 +29,7 @@ from tests.infra import (  # noqa: F401 — 임포트 순서가 실행 순서다
     s13_scenarios,
     s14_note_body,
     s15_mcp,
+    s16_doc_paths,
 )
 
 failed = [(label, detail) for ok, label, detail in _results if not ok]
