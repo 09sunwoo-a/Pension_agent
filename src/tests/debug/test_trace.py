@@ -29,7 +29,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from pension_agent import session_store, verify as V
 from pension_agent.consult_agent import graph as G
-from pension_agent.consult_agent import relations as REL
+from pension_agent.consult_agent.tools import relations as REL
 from pension_agent.consult_agent import tools as T
 from pension_agent.consult_agent.nodes import plan as P
 from tests.debug import script, trace as TR

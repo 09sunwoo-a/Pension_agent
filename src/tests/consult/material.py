@@ -643,7 +643,7 @@ def check_relations() -> int:
     **검증기가 옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다 나쁘다** — 직원은
     왜 막혔는지 알 수 없다. 그래서 잡는 것만큼 통과시키는 것도 함께 잰다.
     """
-    from pension_agent.consult_agent import relations as R
+    from pension_agent.consult_agent.tools import relations as R
     from pension_agent.consult_agent.nodes import plan as P
     from pension_agent.consult_agent.tools import facts_qa
     from pension_agent.consult_agent.state import KB
@@ -1236,7 +1236,7 @@ def check_market_material() -> int:
     수치는 주·월 단위로 낡으므로, 기준시점과 원문의 시효 경고가 답변에 함께 나가야 한다.
     """
     from pension_agent.consult_agent import marks as MARKS
-    from pension_agent.consult_agent import relations as REL
+    from pension_agent.consult_agent.tools import relations as REL
     from pension_agent.consult_agent.kb_index import buckets
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES
     from pension_agent.consult_agent.state import KB

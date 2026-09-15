@@ -594,7 +594,7 @@ def check_atomic_spans() -> int:
         # ⑥ 도구가 실제로 스팬을 선언하는지 — 선언이 비면 집행할 것이 없다. fact 는 관계
         #    선언이 **없는** 카드를 집어 본다 — 선언이 있는 카드의 atomic 이 비는 것은
         #    정상이고(relations 가 대신한다), 그건 check_relations 가 잰다.
-        from pension_agent.consult_agent import relations as REL
+        from pension_agent.consult_agent.tools import relations as REL
         from pension_agent.consult_agent.tools import facts_qa as FQ
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))

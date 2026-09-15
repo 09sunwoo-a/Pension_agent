@@ -24,7 +24,8 @@ from collections.abc import Iterable
 from typing import Any
 
 from pension_agent import observability
-from pension_agent.consult_agent import guard, progress, relations, screens, tools
+from pension_agent.consult_agent import guard, progress, screens, tools
+from pension_agent.consult_agent.tools import relations
 from pension_agent.consult_agent import kb_index
 from pension_agent.consult_agent.marks import MATERIAL_MARKS
 from pension_agent.consult_agent.tools.pitch_slots import situation_line

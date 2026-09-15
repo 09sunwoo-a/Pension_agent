@@ -654,7 +654,7 @@ def check_table_row_names() -> int:
     이름을 못 알아본 것은 판정 불가이지 위반이 아니다(§6). 별칭은 «말한 행»을 늘리는
     쪽이라 판정을 좁히기만 한다 — 오짝 검출은 그대로여야 한다(아래 ③④).
     """
-    from pension_agent.consult_agent import relations
+    from pension_agent.consult_agent.tools import relations
     from pension_agent.consult_agent.state import KB as _KB
     ok = 0
     card = next((c for c in _KB.cards if c["id"] == "fact.k04.f50"), None)
@@ -883,7 +883,7 @@ def check_labeled_pairs() -> int:
       ③ 이름이 재료의 다른 자리에도 나오는 항목은 아예 판정하지 않는다(판정 불가)
     """
     ok = 0
-    from pension_agent.consult_agent import relations as REL
+    from pension_agent.consult_agent.tools import relations as REL
     from pension_agent.strategy_agent import customer as CUST
 
     evs = {p.id: tools.TOOLS["customer"].run({"customer_id": p.id}, "확인") for p in CUST.PERSONAS}

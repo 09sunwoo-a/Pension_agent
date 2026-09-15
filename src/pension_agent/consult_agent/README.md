@@ -53,6 +53,7 @@ consult_agent/
 ├── tools/              도구 패키지 — 근거를 **찾는** 쪽. LLM 이 계획 루프에서 고른다
 │   ├── __init__.py         TOOLS 레지스트리(능력 표면 · 도구 20종) · run() (ToolFailure 경계)
 │   ├── base.py · ledger.py 근거(Evidence) 규약 · 원장 helper
+│   ├── relations.py        관계 기반 점검 — 값–조건 오짝 · 알려진 오답 대조 (§6). base·cards 와 nodes/plan 의 compose 게이트가 쓴다
 │   ├── cards · market · briefing · history · pitch · playbook · suitability · outreach · targets · dates · tax_credit · answered   도구별 모듈
 │   ├── adequacy.py         적합성 게이트(fits_question) — 고른 근거가 질문에 답이 되는가
 │   ├── combine.py          여러 도구의 근거 결합
@@ -63,7 +64,6 @@ consult_agent/
 ├── guard.py            「하지 말 것」 — 지식베이스에 있는 금지 문장만 띄운다
 ├── marks.py            재료 성격 표시 — 신뢰 등급 · 내부용 주의 (§7)
 ├── screens.py          화면 연계 — mystar-link:// 딥링크 조립 · 발송 화면번호 조회 (§10). 화면번호는 KB 가 갖는다
-├── relations.py        관계 기반 점검 — 값–조건 오짝 · 알려진 오답 대조 (§6)
 ├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../note.py) (§10)
 ├── suggest.py          추천 질문 칩 — 지난 상담 · 열린 세미나가 있는 고객에게만
 ├── render.py           답변 + 출처 블록을 텍스트 한 덩어리로 — CLI(__main__)가 쓴다. main.py 는 이벤트로 따로 내보낸다

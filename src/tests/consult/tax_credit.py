@@ -31,7 +31,7 @@ def check_tax_credit_calc() -> int:
          연금저축과 함께 쓰는 한도라(fact.k04.f2) 그 사실도 함께 적혀야 한다
     """
     ok = 0
-    from pension_agent.consult_agent import relations as REL
+    from pension_agent.consult_agent.tools import relations as REL
     from pension_agent.strategy_agent import customer as CUST
 
     room = next(p for p in CUST.PERSONAS if p.room > 0)          # 잔여한도가 있는 고객

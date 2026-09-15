@@ -8,7 +8,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypedDict
-from pension_agent.consult_agent import marks as MARKS, relations as REL
+from pension_agent.consult_agent import marks as MARKS
+from pension_agent.consult_agent.tools import relations as REL
 from pension_agent.consult_agent.state import KB, AgentState
 
 
