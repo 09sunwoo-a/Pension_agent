@@ -68,7 +68,7 @@
 하나라도 있으면 검증기가 `source.doc` 의 깨진 참조를 ERROR 로 잡는다.
 
 **`doc` 의 제목은 원문에서 읽는다.** 01~04 폴더 문서의 `title` 은 원문 `.md` 의 H1(+판·차수
-부제)을 `build_kb.doc_title()` 이 파싱한 값이다 — 사람이 다시 타이핑하지 않는다. 원문 제목만으로
+부제)을 `kb_build/docs.py::doc_title()` 이 파싱한 값이다 — 사람이 다시 타이핑하지 않는다. 원문 제목만으로
 문서를 특정할 수 없을 때만 `config.GUIDE_DOCS` 의 `title_override` 로 대체하고, 원문과 다르면
 `title_override_reason` 으로 이유를 남긴다(없으면 변환 리포트가 [제목불일치]로 알리고
 `test_paths` 가 실패한다). 부서·시점은 문서 표기가 일정하지 않아 시드가 계속 갖는다.

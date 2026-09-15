@@ -24,7 +24,8 @@ import json
 import sys
 
 from pension_agent import config, market
-from pension_agent.consult_agent import kb as kbmod, screens
+from pension_agent.consult_agent import screens
+from pension_agent.knowledge import kb as kbmod
 from pension_agent.strategy_agent import customer, engine, support
 
 OUT = config.REPO_ROOT / "docs" / "DEMO_STATUS.md"
@@ -114,7 +115,7 @@ def build() -> tuple[str, dict[str, int]]:
     n["assets"] = len(dummies)
     L += [f"## 1. 안내 콘텐츠 — 시연용 {len(outreach)}건 · 게이트가 막는 더미 {len(dummies)}건", "",
           "⑨ 「고객님께 안내해보세요」의 이벤트·세미나다. 출처가 있는 콘텐츠(`source`)는",
-          "`dummy` 를 달지 않으므로 `pension_agent/tools.py::open_lms_screen()` 게이트가 막지 않고,",
+          "`dummy` 를 달지 않으므로 `consult_agent/actions.py::open_lms_screen()` 게이트가 막지 않고,",
           "발송 화면 연계까지 이어진다. **일정·링크·수신거부 번호는 시연을 위해 구성된 값이다** —",
           "화면과 발송문에는 그 표시가 없으므로(발표용 데모라 딱지를 붙이지 않는다) 여기가",
           "유일한 기록이다. 실제 콘텐츠 캘린더가 붙으면 이 표가 그대로 실제 일정으로 바뀐다.", "",

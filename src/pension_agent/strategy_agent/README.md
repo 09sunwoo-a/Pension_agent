@@ -187,9 +187,9 @@ engine 을 임포트하지 않는다. engine 의 표기 유틸(`won`·`_pname`)�
 
 | 위치 | 값 | 의미 |
 |---|---|---|
-| `engine.py` `TOP_N` / `ALT_N` | 3 / 3 | 문장에 넣을 실행 항목 수 / 「다른 제안」 노출 수 |
-| `engine.py` `EFFECT_BANDS` | 1.0/0.5%p | 수익률 개선폭 → 정성 등급(큼·보통·작음) 경계 |
-| `engine.py` `MIN_ALLOC` / `PROTECTION_LIMIT` | 100만원 / 5,000만원 | 배분액 하한 / 예금자보호 한도 |
+| `engine/catalog.py` `TOP_N` / `ALT_N` | 3 / 3 | 문장에 넣을 실행 항목 수 / 「다른 제안」 노출 수 |
+| `engine/catalog.py` `EFFECT_BANDS` | 1.0/0.5%p | 수익률 개선폭 → 정성 등급(큼·보통·작음) 경계 |
+| `engine/catalog.py` `MIN_ALLOC` / `PROTECTION_LIMIT` | 100만원 / 5,000만원 | 배분액 하한 / 예금자보호 한도 |
 | `customer.py` `RISK_ASSET_CAP_PCT` / `MAT_WINDOW_DAYS` | 70 / 30 | 위험자산 투자한도 / 만기 요건 인정 범위("만기 1개월 전 안내" — 세그먼트 9·방법론 18) |
 
 ## 주의

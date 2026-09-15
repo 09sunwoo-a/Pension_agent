@@ -119,7 +119,7 @@ def _flat(r: dict, kind: str) -> dict:
 # 주의·비고의 역할 — 데이터 선언을 읽는 유일한 통로
 #
 # note·cautions 필드는 `[{"role", "text"}]` 다(kinds.json). 역할은 변환기가 데이터에
-# 선언해 두고(build_kb.role_entries + config 예외표), 소비 코드는 여기서 선언만 읽는다 —
+# 선언해 두고(kb_build/common.py::role_entries + config 예외표), 소비 코드는 여기서 선언만 읽는다 —
 # 예전에는 guard 가 문자열 휴리스틱(_AUTHORING)으로 런타임에 걸렀는데, 그러면 분류가
 # 어디에도 남지 않아 검토할 수 없고, screen·channel 비고처럼 거르는 코드가 없는 자리로는
 # 저작 메모가 그대로 새어 나갔다(consult CLAUDE.md §12 지워진 gap 17).
@@ -424,7 +424,7 @@ def score_parts(
         utterance = _expand_synonyms(utterance)
         # 제목도 예상질문과 같은 방식으로 잰다. 예전에는 변환기가 제목을 trigger_examples 첫
         # 칸에 그대로 넣어 이 점수에 실렸는데, 그 칸은 LLM 카드 목록에서 정보를 더하지
-        # 못하는 중복이라 변환기에서 뺐다(build_kb.triggers_of). 폴백 점수는 여기서 지킨다.
+        # 못하는 중복이라 변환기에서 뺐다(kb_build/common.py::triggers_of). 폴백 점수는 여기서 지킨다.
         entrances = list(pitch.get("trigger_examples") or []) + [pitch.get("title") or ""]
         topical_s += max((_sim(utterance, ex) for ex in entrances if ex), default=0.0) * 4.0
         flat = re.sub(r"[^0-9a-zA-Z가-힣]", "", utterance)

@@ -37,6 +37,9 @@ from __future__ import annotations
 
 from pension_agent.knowledge.kb import KnowledgeBase
 
+#: 답변 끝에 붙는 재료 성격 표시 블록의 머리말(«── 참고한 자료» · compose 가 붙이고 answered 가 뗀다).
+MATERIAL_MARKS = "── 참고한 자료"
+
 #: 문서 레지스트리의 tier → 답변에 옮길 신뢰 표시. 07_에이전트_기능정의/01 ② 의 분류다.
 TIER_NOTE: dict[str, str] = {
     "본부공식": "본부 공식 자료",

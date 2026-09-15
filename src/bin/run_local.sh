@@ -1,7 +1,8 @@
 #!/bin/bash
-# 로컬 실행 — uvicorn. src/ 에서 돈다(패키지 임포트가 절대경로라 여기가 실행 루트다).
+# 로컬 실행 — uvicorn. src/ 에서 돈다(패키지 임포트가 절대경로라 거기가 실행 루트다 —
+# 이 파일은 src/bin/ 에 있으므로 한 칸 올라간다).
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # 지금 활성화된 파이썬을 쓴다. 행내 컨테이너에는 conda 가 없다 —
 # 다른 인터프리터를 쓰려면 PYTHON=/경로/python 으로 넘긴다.

@@ -38,7 +38,7 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
     employee_id     (선택) 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송
                            주체이고 상담이력에 «누가 상담했나»로 남는다. `x_client_user`
                            가 사번으로 시작하면 넘길 필요가 없다
-                           (`pension_agent/workb.py::as_emp_no`). 사번을 다른 데서
+                           (`pension_agent/note.py::as_emp_no`). 사번을 다른 데서
                            받아오거나 그 값의 꼴이 다른 배포를 위한 자리이고, 여기 실은
                            값은 꼴을 검사하지 않고 그대로 쓴다. 사번을 하나도 못 읽으면
                            `WORKB_EMP_NO` 환경변수로 떨어지고, 그것도 없으면 쪽지 발송을
@@ -105,7 +105,7 @@ pension_agent 의 `log.info` 는 **어디에도 나가지 않는다** — 행내
 에이전트 안에서 일어난 일(도구 실행 결과 · 연계 실행 결과 · 검증 게이트 · 판정)은 `[agent]`
 로거의 «상태» 줄로 찍힌다 — observability.score() 가 Langfuse 활성 여부와 무관하게 남기고,
 여기서 연 request_id 컨텍스트로 같은 요청 id 가 붙는다. 직원이 받는 답이 실패·축소로 바뀐
-사실만 WARNING 이다(observability._state_level).
+사실만 WARNING 이다(observability._trace._state_level).
 """
 
 from __future__ import annotations
@@ -498,12 +498,19 @@ async def chat(req: ChatRequest, request: Request):
         def run() -> dict[str, Any]:
             try:
                 with observability.request_id(rid):
-                    return consult_graph.ask(
+                    result = consult_graph.ask(
                         question, history,
                         customer_id=args["customer_id"], session_id=session_id,
                         x_client_user=x_client_user, employee_id=args["employee_id"],
                         on_progress=on_progress,
                     )
+                # 맥락은 **여기서** 기억한다 — 답을 다 흘려보낸 뒤가 아니라. 호출자가 중간에
+                # 끊으면(게이트웨이 타임아웃·취소) 아래 generate 는 더 돌지 않지만 이 스레드는
+                # 끝까지 돈다. 그때도 다음 턴이 이 턴을 이어받아야 한다 — 상담이력은 ask() 안에서
+                # 이미 남았는데 맥락(연계 제안·되묻기)만 빠지면 다음 «네»가 갈 곳을 잃는다.
+                _remember(result)
+                _log_done(result)
+                return result
             finally:
                 # 성공이든 실패든 반드시 닫는다 — 안 닫으면 아래 루프가 영원히 기다린다.
                 loop.call_soon_threadsafe(lines.put_nowait, DONE)
@@ -513,6 +520,14 @@ async def chat(req: ChatRequest, request: Request):
         # 넘기므로 x-client-user 도 스레드 안까지 따라간다.
         task = asyncio.create_task(asyncio.to_thread(run))
         finished = False
+        closed = False
+
+        def _settle(t: "asyncio.Task[dict[str, Any]]") -> None:
+            # 호출자가 끊긴 뒤 ask() 가 죽으면 아무도 await 하지 않는다 — 여기서 거둬 남긴다.
+            if closed and not t.cancelled() and t.exception() is not None:
+                log.error("[%s] 연결이 끊긴 뒤 ask() 실패: %r", rid, t.exception())
+
+        task.add_done_callback(_settle)
         try:
             while True:
                 item = await lines.get()
@@ -530,13 +545,12 @@ async def chat(req: ChatRequest, request: Request):
                 finished = True
                 return
 
-            _remember(result)
             for ev in _turn_events(result):
                 yield _event(ev)
             finished = True
-            _log_done(result)
         finally:
             if not finished:
+                closed = True
                 # 호출자가 다 받기 전에 끊었다(게이트웨이 타임아웃 등). 접속 로그에는
                 # 200 으로만 남아 «답이 비었다»와 구분이 안 되므로 여기서 갈라 찍는다.
                 log.warning("[%s] 응답을 다 보내기 전에 연결이 끊겼다 %.1f초",

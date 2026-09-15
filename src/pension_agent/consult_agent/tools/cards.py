@@ -5,8 +5,10 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import kb as KBMOD, relations as REL
-from pension_agent.consult_agent.nodes import facts_qa, procedure_qa, segment_qa
+from pension_agent.consult_agent import relations as REL
+from pension_agent.consult_agent import kb_index
+from pension_agent.knowledge import kb as KBMOD
+from pension_agent.consult_agent.tools import facts_qa, procedure_qa, segment_qa
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크는 패키지를 거쳐 부른다(머리말)
 from pension_agent.consult_agent.tools.adequacy import _adopt
@@ -48,7 +50,7 @@ def fact_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "fact"
         notices += marks
         if marks:
             scopes.append(_scope(f.get("label") or f["id"], keys, marks))
-    return _ev(tool, query, facts_qa.render(hits), KBMOD.sources_of(KB, hits),
+    return _ev(tool, query, facts_qa.render(hits), kb_index.sources_of(KB, hits),
                atomic=atomic, notices=notices, scopes=scopes, cards=[f for _s, f in hits])
 
 
@@ -66,7 +68,7 @@ def procedure_evidence(query: str, hits: list[tuple[float, dict]],
                        tool: str = "procedure") -> Evidence | None:
     """절차 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
     atomic, notices, scopes = _procedure_decls([c for _s, c in hits])
-    return _ev(tool, query, procedure_qa.render(hits), KBMOD.sources_of(KB, hits),
+    return _ev(tool, query, procedure_qa.render(hits), kb_index.sources_of(KB, hits),
                atomic=atomic, notices=notices, scopes=scopes, cards=[c for _s, c in hits])
 
 
@@ -142,7 +144,7 @@ def screen_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "scr
         if marks:
             scopes.append(_scope(c["title"], [c["screen"]], marks))
     return _ev(tool, query, "\n\n".join(_render_screen(c) for _, c in hits),
-               KBMOD.sources_of(KB, hits), atomic=atomic,
+               kb_index.sources_of(KB, hits), atomic=atomic,
                notices=notices, scopes=scopes,
                cards=[c for _s, c in hits])
 
@@ -219,7 +221,7 @@ def channel_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "ch
             if mark and mark not in marks:
                 marks.append(mark)
     return _ev(tool, query, "\n\n".join(_render_channel(c) for _, c in hits),
-               KBMOD.sources_of(KB, hits), notices=marks,
+               kb_index.sources_of(KB, hits), notices=marks,
                scopes=[_scope("비대면 채널 경로", [], marks)] if marks else [],
                cards=[c for _s, c in hits])
 
@@ -239,7 +241,7 @@ def segment_evidence(query: str, hits: list[tuple[float, dict]], customer_id: st
     # note 중 역할이 caution 인 것(원문 임계값과 코드 판정이 다르다는 기록 등)만 표시로
     # 요구한다 — info(취지가 같다는 설명)는 렌더에는 실리지만 강제하지 않는다.
     return _ev(tool, query, segment_qa.render(hits, customer_id),
-               KBMOD.sources_of(KB, hits),
+               kb_index.sources_of(KB, hits),
                atomic=[c.get("condition_text") or "" for _s, c in hits],
                notices=[t for _s, c in hits
                         for t in KBMOD.role_texts(c.get("note"), "caution")],
@@ -286,7 +288,7 @@ def method_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "met
     """방법론 카드 → 원장 항목. `playbook` 과 카드 되싣기가 함께 쓴다."""
     notices, scopes = _method_decls([c for _s, c in hits])
     return _ev(tool, query, "\n\n".join(_render_method(c) for _, c in hits),
-               KBMOD.sources_of(KB, hits),
+               kb_index.sources_of(KB, hits),
                notices=notices, scopes=scopes, cards=[c for _s, c in hits])
 
 
@@ -336,4 +338,4 @@ def _fieldtip(state: AgentState, query: str) -> Evidence | None:
 def fieldtip_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "fieldtip") -> Evidence | None:
     """현장 관찰 카드 → 원장 항목(fact_evidence 와 같은 이유로 갈라 둔다)."""
     return _ev(tool, query, "\n\n".join(_render_fieldtip(c) for _, c in hits),
-               KBMOD.sources_of(KB, hits), cards=[c for _s, c in hits])
+               kb_index.sources_of(KB, hits), cards=[c for _s, c in hits])

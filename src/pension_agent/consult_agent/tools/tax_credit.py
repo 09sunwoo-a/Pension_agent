@@ -5,7 +5,7 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import kb as KBMOD
+from pension_agent.consult_agent import kb_index
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent.tools.base import Evidence, _ev, _scope
 
@@ -63,6 +63,10 @@ ISA_FACT_ID = "fact.k04.f4"
 
 
 def _won(v: int) -> str:
+    """`engine.text.won` 을 도구 호출 시점에 부른다 — 구현이 아니라 지연 임포트 자리다.
+
+    strategy_agent 는 무거워서 도구 모듈은 적재 때 끌어오지 않는다(nodes/plan.py 의 같은
+    규약). 표기 로직을 여기 두지 않는 것이 요점이라, 본문을 늘리지 않는다."""
     from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
 
     return won(v)
@@ -174,7 +178,7 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
         # 같은 카드의 같은 문장이라 두 번 실으면 화면에 같은 경고가 겹쳐 선다.
         notices.append(_caveat(card))
     return _ev("tax_credit", query, "\n".join(lines),
-               KBMOD.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
+               kb_index.sources_of(KB, [(1.0, c) for c in cards]), notices=notices,
                scopes=[_scope(card.get("label") or TAX_FACT_ID, [], notices)] if notices else None,
                cards=cards)
 

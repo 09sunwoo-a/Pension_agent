@@ -91,7 +91,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 5. **되돌릴 수 없는 행위는 게이트로 막는다.** 에이전트는 대외로 나가는 행위를 **수행하지
    않는다** — 문자를 보낼지는 직원이 발송 화면에서 정하고, 에이전트는 그 화면을 열어줄
    뿐이다(`consult_agent/CLAUDE.md` §10). 그래도 게이트는 남는다: 화면에 채워 넣으면
-   직원이 **그대로 보낼 수 있기 때문**이다. `pension_agent/tools.py::open_lms_screen()` 은
+   직원이 **그대로 보낼 수 있기 때문**이다. `consult_agent/actions.py::open_lms_screen()` 은
    `dummy: true` 자산에서 온 문구를 발송 화면에 채우는 것을 거부한다. 접두 문자열은
    LLM 이 지울 수 있지만 게이트는 못 지운다.
 
@@ -154,7 +154,7 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
 
 - **`sys.path` 를 손대지 않는다.** 예전에는 모듈마다 umbrella 를 올리는 블록이 30곳 있었고,
   두 에이전트의 동명 모듈(`prompts`·`llm`)이 `sys.modules` 를 놓고 경합하는 것을 막으려고
-  전용 로더까지 있었다. 패키지화로 둘 다 없앴다 — `tests/test_infra.py` 가 재발을 막는다.
+  전용 로더까지 있었다. 패키지화로 둘 다 없앴다 — `tests/infra/s03_boundaries.py` 가 재발을 막는다.
 - **경로를 아는 파일은 `config.py` 하나다.** 모듈이 `Path(__file__).parent...` 로 경로를
   되짚으면 파일이 한 칸만 움직여도 조용히 엉뚱한 곳을 가리킨다(규칙 4번이 그 사고 기록이다).
 - **데이터는 소유가 있는 곳에 둔다.** 두 에이전트가 함께 읽는 지식 카드는
@@ -166,6 +166,9 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
 - **에이전트 사이의 의존은 한 방향이다.** `knowledge ← strategy_agent ← consult_agent`.
   strategy_agent 는 consult_agent 를 임포트하지 않는다 — 대화형은 전략제안의 산출을 받아
   말하는 쪽이지 그 반대가 아니다. 공용 모듈(`pension_agent/*.py`·`knowledge/`·`market/`)도
-  consult_agent 를 임포트하지 않는다(`pension_agent/tools.py` 가 발송 게이트의 자산 목록을
-  위해 strategy_agent.support 를 읽는 것이 공용 → 에이전트 방향의 유일한 간선이다).
-  `tests/test_infra.py` 가 역방향 간선을 잡는다.
+  consult_agent 를 임포트하지 않는다. 공용 → 에이전트 방향의 간선은 하나뿐이다 —
+  `note.py` 가 쪽지 본문의 타겟·잔여일수를 위해 strategy_agent 를 읽는다(`mcp/` 가 쓰므로
+  공용에 남는다). 승낙 뒤 실행하는 행위(발송 화면 게이트·쪽지)는 consult 만 부르므로
+  `consult_agent/actions.py` 에 있다. 공용 모듈 사이의 의존(env ← observability ← llm 등)은
+  `tests/infra/s03_boundaries.py` 의 표가 고정한다 — 간선을 더하면 표에 이유와 함께 적는다.
+  `tests/infra/s03_boundaries.py` 가 역방향 간선을 잡는다.

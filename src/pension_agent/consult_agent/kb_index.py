@@ -1,38 +1,21 @@
 """consult_agent 전용 지식베이스 도구 — LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트.
 
 적재·시효성·출처·검색은 두 에이전트가 함께 쓰는 것이라 `pension_agent.knowledge.kb` 가
-소유한다. 여기 남은 것은 대화형만 쓰는 것들이다 — 카드를 종류별 버킷으로 묶어 LLM 이
+소유한다. 여기 있는 것은 대화형만 쓰는 것들이다 — 카드를 종류별 버킷으로 묶어 LLM 이
 고르게 하는 인덱스(`buckets`·`index_catalog`·`whole_index`·`index_slice`), 고른 카드와 그
 근거 사실·자료를 프롬프트 텍스트로 펴는 `build_context`, 검색 결과의 출처 표기 `sources_of`.
 
-공용 이름은 아래에서 그대로 재노출한다 — 이 모듈을 `KBMOD` 로 받아 `KBMOD.retrieve`·
-`KBMOD.role_texts` 로 부르던 자리(노드·테스트·스크립트)가 그대로 성립하게 하기 위해서다.
-새 코드는 소유자(`pension_agent.knowledge.kb`)에서 직접 가져온다.
+예전 이름은 `consult_agent/kb.py` 였고 소유자의 이름(`retrieve`·`role_texts`·`load_kb` …)을
+그대로 재노출했다. 같은 이름의 파일이 둘이라 어느 쪽인지 경로를 봐야 했고, 재노출 때문에
+«어느 모듈이 소유자인가»가 코드에서 안 보였다. 지금은 재노출하지 않는다 — 공용 이름은
+`pension_agent.knowledge.kb` 에서 직접 가져온다.
 
-검증 리포트:  python -m pension_agent.knowledge.kb  (이 모듈로 실행해도 같은 리포트가 나온다)
+검증 리포트:  python -m pension_agent.knowledge.kb
 """
 
 from __future__ import annotations
 
-from pension_agent.knowledge.kb import (  # noqa: F401 — 공용 이름 재노출 (위 머리말)
-    DATA_DIR,
-    MIN_TOPICAL,
-    ROLE_FIELDS,
-    SEGMENT_BONUS,
-    KnowledgeBase,
-    apply_freshness,
-    card_source_meta,
-    load_kb,
-    matches_scope,
-    origin_of,
-    retrieve,
-    role_texts,
-    score_parts,
-    source_label,
-    source_url,
-    usable,
-    validate,
-)
+from pension_agent.knowledge.kb import KnowledgeBase, origin_of, source_url
 
 
 # ─────────────────────────────────────────────────────────────
@@ -113,7 +96,7 @@ def product_names(kb: KnowledgeBase) -> set[str]:
     '미등록'으로 판정돼 통째로 버려졌다 — 그 자리에 근거 원문이 덤프됐다.
 
     이름을 여기서 **추론하지 않는다.** 카드가 선언한 것만 읽는다 — 어느 칸을 상품명으로
-    볼지는 변환기가 정한다(`build_kb._PRODUCT_COLUMNS`).
+    볼지는 변환기가 정한다(`kb_build/market.py::_PRODUCT_COLUMNS`).
     """
     return {n for c in kb.cards for n in (c.get("product_names") or []) if n}
 
@@ -324,8 +307,3 @@ def build_context(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> str:
 
     return "\n\n".join(blocks)
 
-
-if __name__ == "__main__":
-    from pension_agent.knowledge.kb import main
-
-    main()

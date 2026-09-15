@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from pension_agent.consult_agent import kb as KBMOD
+from pension_agent.consult_agent import kb_index
 from pension_agent.consult_agent.state import KB
 from pension_agent.consult_agent.tools.base import Evidence, _ev
 from pension_agent.consult_agent.tools.cards import (
@@ -30,7 +30,7 @@ Hits = list[tuple[float, dict]]
 
 
 def _pitch_evidence(query: str, hits: Hits, tool: str) -> Evidence | None:
-    return _ev(tool, query, KBMOD.build_context(KB, hits), KBMOD.sources_of(KB, hits),
+    return _ev(tool, query, kb_index.build_context(KB, hits), kb_index.sources_of(KB, hits),
                cards=[c for _s, c in hits])
 
 

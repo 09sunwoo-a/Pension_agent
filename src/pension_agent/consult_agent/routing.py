@@ -49,7 +49,7 @@ INTENTS = (
 
 # 기본 도착지는 계획 루프다. 한때 그 앞에 화법 슬롯 분해 노드가 하나 더 있었는데, 모든
 # 턴이 화법 검색을 한다고 전제한 배선이라 값 하나 묻는 턴에도 LLM 호출을 한 번 썼다 —
-# 지금은 화법 도구가 필요할 때 스스로 뽑는다(nodes/pitch.py::extract_slots).
+# 지금은 화법 도구가 필요할 때 스스로 뽑는다(tools/pitch_slots.py::extract_slots).
 _INTENT_NODE = {
     "agent_help": "agent_help",
     "correction": "correction",

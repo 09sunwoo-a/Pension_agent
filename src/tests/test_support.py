@@ -205,7 +205,7 @@ for key, rows in support.outreach_candidates().items():
 #
 # 이 저장소는 한때 3종 표시(dummy + 이름 앞 "(더미) " + 발송문 앞 "[더미] ")를 함께 강제했다.
 # 발표용 데모에서는 화면도 발송문도 산출물이라 딱지가 없어야 한다는 결정으로 텍스트 딱지를
-# 뗐고, 대신 보호막을 게이트로 옮겼다(pension_agent.tools.open_lms_screen). 이 테스트는 방향이
+# 뗐고, 대신 보호막을 게이트로 옮겼다(consult_agent/actions.py::open_lms_screen). 이 테스트는 방향이
 # 반대다 — "딱지가 있는가"가 아니라 **"딱지가 없고 dummy 플래그는 남아 있는가"**를 본다.
 for a in support.ASSETS:
     if a.get("content_type") not in ("이벤트", "세미나"):
@@ -227,7 +227,7 @@ for a in support.ASSETS:
 # 게이트를 **레지스트리에 남은 더미로** 검사할 수 없고, 검사용 자산을 하나 끼워 넣어 확인한다
 # (실데이터로 갈아탈수록 조용히 검사가 사라지는 것이 이 자리의 위험이다 — 예전에는 "더미가
 # 하나라도 남아 있어야 한다"고 데이터에 요구했는데, 그건 데이터를 테스트에 맞추는 것이다).
-from pension_agent import tools as _tools
+from pension_agent.consult_agent import actions as _actions
 
 _probe = {"id": "TEST-DUMMY", "name": "게이트 검사용 더미 콘텐츠", "content_type": "이벤트",
           "url": "https://example.invalid/demo/gate-probe", "dummy": True,
@@ -235,7 +235,7 @@ _probe = {"id": "TEST-DUMMY", "name": "게이트 검사용 더미 콘텐츠", "c
 support.ASSETS.append(_probe)
 try:
     _msg = f"(광고) 검사 고객님, KB국민은행입니다.\n안내드려요.\n▶ {_probe['url']}\n{support.OPT_OUT}"
-    _blocked = _tools.open_lms_screen("TEST", _msg, session_id="test-gate")
+    _blocked = _actions.open_lms_screen("TEST", _msg, session_id="test-gate")
     check(_blocked["status"] == "blocked",
           "⑨ 더미 문구는 발송 화면에 채우는 것이 거부됨", str(_blocked["status"]))
     check(_blocked.get("asset_id") == "TEST-DUMMY",
@@ -249,10 +249,10 @@ for a in support.ASSETS:
     if a.get("content_type") not in ("이벤트", "세미나"):
         continue
     _real = support.lms_frame("검사", "안내드려요.", a.get("url") or "")
-    check(_tools.open_lms_screen("TEST", _real, session_id="test-gate")["status"] != "blocked",
+    check(_actions.open_lms_screen("TEST", _real, session_id="test-gate")["status"] != "blocked",
           f"⑨ {a['id']} 는 발송 화면 연계가 막히지 않는다")
 
-check(_tools.open_lms_screen("TEST", "행내 자산과 무관한 직접 작성 문구입니다",
+check(_actions.open_lms_screen("TEST", "행내 자산과 무관한 직접 작성 문구입니다",
                              session_id="test-gate")["status"] != "blocked",
       "⑨ 더미 자산에서 온 문구가 아니면 막지 않음")
 # 게이트 검사가 세션이력을 남긴다(도구 호출 기록). 이 테스트가 만든 것만 지운다 —
@@ -308,7 +308,7 @@ check(all(r["end_date"] >= "2026-12-31" for r in past["event"]),
 import copy
 
 from pension_agent import market as _market
-from pension_agent.consult_agent import kb as _kbmod
+from pension_agent.knowledge import kb as _kbmod
 _kb = support.pitch_kb()
 
 _slotted = [c for c in _kb.pitches if c.get("_rate_slots_applied") or c.get("_rate_notes")]

@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from pension_agent import workb as notes
+from pension_agent import note
 from pension_agent.mcp import client, servers
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -45,20 +45,20 @@ async def _connect(emp_no: str) -> None:
 
 
 async def _send(emp_no: str) -> None:
-    note = notes.Note(title=TEST_TITLE, body=TEST_BODY)
+    msg = note.Note(title=TEST_TITLE, body=TEST_BODY)
     from pension_agent.mcp import workb as adapter  # noqa: PLC0415 — 보낼 때만 필요하다
 
-    result = await notes.send_note([emp_no], note, send=adapter.send_memo)
+    result = await note.send_note([emp_no], msg, send=adapter.send_memo)
     print(f"발송            {result.get('status')} · {result.get('detail')}")
 
 
 def main(argv: list[str]) -> int:
     cfg = client.settings()
-    emp_no = notes.employee_id()
+    emp_no = note.employee_id()
     print(f"게이트웨이      {cfg.base_url or '(비어 있음)'}")
     print(f"설정            {'갖춰짐' if cfg.configured else '모자람 — ' + ', '.join(cfg.missing())}")
     print(f"행내 패키지     {_packages()}")
-    print(f"보내는 사번     {emp_no or f'(비어 있음 — {notes.EMP_NO_ENV})'}")
+    print(f"보내는 사번     {emp_no or f'(비어 있음 — {note.EMP_NO_ENV})'}")
     for label, spec in servers.endpoints(
             cfg.servers, base_url=cfg.base_url or "(주소 없음)",
             client_id=cfg.client_id or "(id 없음)", conn_id=cfg.conn_id).items():

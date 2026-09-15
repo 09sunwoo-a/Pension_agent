@@ -117,7 +117,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 행내 게이트웨이가 몰린 호출에 429 를 내던 문제는 세 겹으로 막아 두었다 — 동시성 상한
 (`LLM_MAX_CONCURRENCY`) · 최소 간격(`LLM_MIN_INTERVAL`) · 429 를 맞으면 프로세스 전체가
-쉬는 적응형 감속. 회귀는 `tests/test_infra.py` 의 「llm — 429 게이트」 절이 잡는다.
+쉬는 적응형 감속. 회귀는 `tests/infra/s10_llm_retry.py` 가 잡는다.
 
 **그런데 세마포어도 감속 시각도 모듈 전역 변수다.** 즉 «전체»의 범위가 한 파이썬
 프로세스다:
@@ -165,7 +165,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 ## 9. 관측이 프롬프트를 외부로 내보낸다 — 🔴 실데이터 전환 시 개인정보 유출
 
-**어디** `pension_agent/observability.py` · 켜는 스위치는 `.env` 의 `LANGFUSE_PUBLIC_KEY` ·
+**어디** `pension_agent/observability/`(전송은 `_transport.py`) · 켜는 스위치는 `.env` 의 `LANGFUSE_PUBLIC_KEY` ·
 `LANGFUSE_SECRET_KEY`
 
 LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간다. 프롬프트에는 고객 원장이
@@ -193,7 +193,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 ## 10. 호출자가 사번을 주지 않으면 쪽지가 한 사람 이름으로 나간다 — 🟡 배포 설정에 달렸다
 
 **어디** `pension_agent/consult_agent/graph.py::employee_no` ·
-`pension_agent/workb.py::employee_id` · `pension_agent/mcp/workb.py::send_memo`
+`pension_agent/note.py::employee_id` · `pension_agent/mcp/workb.py::send_memo`
 
 행내 MCP 인증에는 **사번이 들어간다**(MCP-User-Key). 그 사번이 «누가 이 쪽지를 보냈나»의
 행내 기록이고 받는 사람의 기본값이기도 하다.
@@ -201,16 +201,16 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 **배선은 끝났다**(2026-09-10): 진입점이 받은 사번이 `AgentState["employee_id"]` 를 거쳐
 발송(`send_memo(as_employee=…)`)과 상담이력까지 같은 값으로 내려간다. 회귀는
 `tests/test_api.py`(진입점 → 에이전트) · `tests/test_consult_agent.py`(받는 사람 ·
-보내는 사람) · `tests/test_infra.py`(인증에 실리는 사번)가 잡는다.
+보내는 사람) · `tests/infra/s15_mcp.py`(인증에 실리는 사번)가 잡는다.
 
 **남은 것은 «x_client_user 가 사번으로 시작한다»는 전제다 — 아직 실물로 확인하지
 못했다.** 플랫폼 규격(`skills/genai-platform-agent-dev/refs/genai-platform.md`)은 이
 값을 «호출 사용자 식별자»라고만 적고 꼴을 정하지 않으며, 예시는 `user-id-123` 이다.
 저장소의 호출 클라이언트가 보내는 값은 개발자 사번(`client/call_agent.py` ·
-`src/test_local.sh`)인데, **그건 우리가 정한 값이지 게이트웨이가 보낸 값이 아니다** —
+`src/bin/test_local.sh`)인데, **그건 우리가 정한 값이지 게이트웨이가 보낸 값이 아니다** —
 운영에서 로그인 사번이 이 자리에 실리는 것은 아직 앞의 일이다.
 지금 코드는 **사번 7자리로 시작하고 그
-뒤가 끝이거나 구분자일 때만** 사번으로 읽는다(`workb.as_emp_no`). 그 꼴이 아니면
+뒤가 끝이거나 구분자일 때만** 사번으로 읽는다(`note.as_emp_no`). 그 꼴이 아니면
 `WORKB_EMP_NO` 하나로 떨어져 쪽지가 전부 그 사번 앞으로 간다.
 
 **일부러 좁게 잡았다.** 「앞 7자리를 무조건 자른다」로 하면 사번이 아닌 숫자 id
@@ -223,27 +223,29 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 **최소 조치** 배포 뒤 요청 로그 한 줄을 본다 — 그 줄에 `x_client_user=` 원문과
 `emp_no=` 판정이 나란히 찍힌다. 사번이 찍히면 연결된 것이고, `-` 면 폴백 상태다.
 그때 처방은 원문이 정한다: 사번으로 시작하는데 못 읽었으면(구분자 없이 숫자 접미가
-붙는 꼴) `workb.as_emp_no` 의 정규식을 그 꼴에 맞추고, 아예 사번이 없으면 프론트가
+붙는 꼴) `note.as_emp_no` 의 정규식을 그 꼴에 맞추고, 아예 사번이 없으면 프론트가
 `input_value` 에 `employee_id` 를 실어 보낸다(`client/README.md` §1). 자릿수가 다른
-사번이 있다는 것이 확인되면 고칠 자리는 `workb.EMP_NO_PATTERN` 하나다.
+사번이 있다는 것이 확인되면 고칠 자리는 `note.EMP_NO_PATTERN` 하나다.
 
-## 10-b. MCP 요청 컨텍스트가 SDK 전역이다 — 🟡 다른 직원의 컨텍스트로 나갈 수 있다
+## 10-b. MCP 요청 컨텍스트가 SDK 전역이다 — 🟢 프로세스 단위 잠금으로 막았다, 남는 것은 처리량
 
-**어디** `pension_agent/mcp/client.py::MCPClient.call` (`mcp_sdk.set_request_context`)
+**어디** `pension_agent/mcp/client.py::MCPClient.call` · `connect` (`mcp_sdk.set_request_context`)
 
-행내 SDK 의 요청 컨텍스트는 **모듈 전역**이다 — 마지막에 세운 사람이 남는다. 그래서
-컨텍스트 세우기와 도구 호출을 이벤트 루프 단위 잠금으로 묶어 두었다(`_lock`). 그 잠금이
-닿는 범위는 **한 이벤트 루프 안의 끼어들기**까지다:
+행내 SDK 의 요청 컨텍스트는 **모듈 전역**이다 — 마지막에 세운 사람이 남는다. 컨텍스트
+세우기와 도구 호출(그리고 세우기와 세션 열기)을 **프로세스 단위** 잠금 `_CALL_LOCK`
+(`threading.Lock`)으로 묶는다. 2026-09-15 이전에는 이벤트 루프 단위 `asyncio.Lock` 이었는데,
+실제 발송 경로가 스레드마다 새 루프(`note.send_note_sync` → `asyncio.run`)라 잠금이 루프마다
+따로 생겨 아무것도 막지 못했다 — 두 직원이 동시에 «네»라고 하면 A 의 쪽지가 B 의 사번으로
+나가고 감사 기록도 그렇게 남을 수 있었다. `tests/infra/s15_mcp.py` 가 두 스레드를 겹쳐
+보내 각자 자기 사번으로 나가는지 잰다.
 
 - `uvicorn --workers N` 은 문제가 없다 — SDK 전역이 프로세스마다 따로다.
-- 한 프로세스 안에서 **여러 스레드**가 각자 `asyncio.run` 으로 MCP 를 부르면 잠금이
-  갈린다(지금 동기 경로가 그 모양이다 — `workb.send_note_sync`). 지금은 쪽지 발송이
-  승낙 턴에만 있어 동시에 둘이 겹칠 일이 드물지만, 읽기 도구가 붙어 호출이 잦아지면
-  달라진다.
+- 잠금은 도구 호출(await 구간)에 걸쳐 잡혀 있다. 발송 하나가 타임아웃(`MCP_TIMEOUT`)까지
+  가면 그동안 같은 프로세스의 다른 발송이 기다린다. 쪽지가 승낙 턴에만 있는 지금은 문제가
+  아니지만, 읽기 도구가 붙어 호출이 잦아지면 처리량이 이 잠금에 걸린다.
 
-**최소 조치** 지금 구조 그대로면 프로세스 단위 잠금(`threading.Lock`)으로 올리되, 그
-잠금을 await 구간에 걸치지 않도록 «컨텍스트 세우기 + 호출»을 한 스레드에서 끝낸다.
-제대로 고치려면 SDK 가 요청 컨텍스트를 인자로 받는 경로가 있는지 플랫폼팀에 확인한다.
+**제대로 고치려면** SDK 가 요청 컨텍스트를 인자로 받는 경로(호출마다 헤더로 싣는 방식)가
+있는지 플랫폼팀에 확인한다. 그러면 잠금 자체가 필요 없다.
 
 ---
 

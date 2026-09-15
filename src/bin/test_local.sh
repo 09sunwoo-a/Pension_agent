@@ -1,23 +1,23 @@
 #!/bin/bash
 # 수동 확인 — /health 로 설정을 보고, /chat 으로 한 턴 돌린다.
-#     ./test_local.sh "IRP 수수료 부담된다고 하시는데 뭐라고 답하죠?"
-#     RAW=1 ./test_local.sh "…"     # 그리지 않고 이벤트 JSON 을 한 줄씩 그대로 — 프론트가 받는 원문
-#     RAW=2 ./test_local.sh "…"     # 게이트웨이 없이 에이전트가 내보내는 SSE 줄 그대로(data: …)
+#     bin/test_local.sh "IRP 수수료 부담된다고 하시는데 뭐라고 답하죠?"
+#     RAW=1 bin/test_local.sh "…"     # 그리지 않고 이벤트 JSON 을 한 줄씩 그대로 — 프론트가 받는 원문
+#     RAW=2 bin/test_local.sh "…"     # 게이트웨이 없이 에이전트가 내보내는 SSE 줄 그대로(data: …)
 #
 # 게이트웨이가 보낸 것을 흉내 내기 — INPUT_VALUE_RAW 를 주면 JSON 으로 싸지 않고 그 문자열을
 # input_value 에 그대로 싣는다. 행내 실측(2026-09-10)에서 같은 세션 4턴째에 게이트웨이가
 # JSON 이 아닌 input_value 를 넘겨 422 가 났는데, 그때 무엇이 왔는지는 서버 로그의
 # «거부된 요청 모양» 줄로 본다(main.py). 후보 둘을 로컬에서 그대로 만들 수 있다:
-#     INPUT_VALUE_RAW="" ./test_local.sh                       # 빈 문자열
-#     INPUT_VALUE_RAW="IRP 세액공제 얼마지" ./test_local.sh     # 질문 평문
+#     INPUT_VALUE_RAW="" bin/test_local.sh                       # 빈 문자열
+#     INPUT_VALUE_RAW="IRP 세액공제 얼마지" bin/test_local.sh     # 질문 평문
 # 같은 4턴 대화를 에이전트에 직접 넣어 422 가 나지 않으면 문제는 게이트웨이 쪽이다
 # (LLM 키가 없어도 된다 — input_value 검사는 LLM 호출 전이라 200 + error 이벤트로 끝난다):
 #     export CUSTOMER_ID=198734-1205842 SESSION_ID=repro-$$
-#     ./test_local.sh "이 고객 왜 관리 대상이야?"
-#     ./test_local.sh "이 고객한테 지금 안내할 이벤트가 있어?"
-#     ./test_local.sh "IRP 세액공제 얼마지"
+#     bin/test_local.sh "이 고객 왜 관리 대상이야?"
+#     bin/test_local.sh "이 고객한테 지금 안내할 이벤트가 있어?"
+#     bin/test_local.sh "IRP 세액공제 얼마지"
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."     # src/ 가 실행 루트다(run_local.sh 와 같다)
 
 BASE_URL="${BASE_URL:-http://localhost:8000}"
 # 지금 활성화된 파이썬을 쓴다. 행내 컨테이너에는 conda 가 없다 —
@@ -26,7 +26,7 @@ PYTHON="${PYTHON:-$(command -v python3 || command -v python)}"
 
 MESSAGE="${1:-IRP 수수료가 부담된다고 하시는데 뭐라고 답하면 좋을까요?}"
 # 호출 직원 식별자. **개발자 사번**이다 — 에이전트가 여기서 사번을 읽어 쪽지의 받는
-# 사람·보내는 사람을 정하므로(workb.as_emp_no), 다른 사람이 시험하면
+# 사람·보내는 사람을 정하므로(note.as_emp_no), 다른 사람이 시험하면
 # CLIENT_USER=<자기 사번> 으로 넘긴다. 운영에서는 로그인 사번이 실려 온다.
 CLIENT_USER="${CLIENT_USER:-3902172}"
 

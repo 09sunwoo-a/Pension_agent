@@ -118,7 +118,7 @@ Content-Type: application/json
 
 ## 5. 확인·진단
 
-- 에이전트를 직접 띄운 상태(`src/run_local.sh`)에서 `RAW=1 src/test_local.sh "질문"` 을 실행하면
+- 에이전트를 직접 띄운 상태(`src/bin/run_local.sh`)에서 `RAW=1 src/bin/test_local.sh "질문"` 을 실행하면
   게이트웨이 없이 위 이벤트 JSON 이 한 줄씩 그대로 찍힌다. `RAW=2` 면 SSE 줄 자체가 나온다.
 - 게이트웨이를 거친 결과는 `call_agent.py` 의 `ask()` 가 종류별로 모은 dict 로 돌려준다.
   `raw` 에 무엇인가 들어 있으면 게이트웨이가 이벤트가 아닌 텍스트를 보낸 것이다.

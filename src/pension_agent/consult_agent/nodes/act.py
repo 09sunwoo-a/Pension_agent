@@ -24,11 +24,11 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pension_agent import workb
+from pension_agent import note
 from pension_agent import observability
 from pension_agent.consult_agent import memo, screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
-from pension_agent.tools import MEMO_DEFAULT_TO, TOOL_REGISTRY
+from pension_agent.consult_agent.actions import ACTIONS, MEMO_DEFAULT_TO
 
 #: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
 _SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
@@ -83,10 +83,10 @@ def _propose(state: AgentState) -> dict[str, Any] | None:
 #: 직원이 «쪽지로» 보내 달라고 말했는지의 판정어. 규칙이지 LLM 판단이 아니다(§10).
 _MEMO_WORDS = ("쪽지",)
 
-#: 수신자 사번의 꼴 — 자릿수는 `workb.EMP_NO_PATTERN` 하나가 정한다(실측: 3902172).
+#: 수신자 사번의 꼴 — 자릿수는 `note.EMP_NO_PATTERN` 하나가 정한다(실측: 3902172).
 #: 여기서 숫자를 다시 적으면 「사번이 몇 자리인가」의 출처가 둘이 되고, 자릿수가 바뀌는 날
 #: 한쪽만 고쳐진다 — 그러면 대화에서는 읽히는 사번이 발송 게이트에서는 안 읽힌다.
-_EMP_NO = re.compile(rf"(?<!\d)({workb.EMP_NO_PATTERN})(?!\d)")
+_EMP_NO = re.compile(rf"(?<!\d)({note.EMP_NO_PATTERN})(?!\d)")
 
 #: 그 7자리가 **사번으로 불린** 것인지의 단서. 숫자 꼴만으로는 사번과 금액이 갈리지 않는다.
 #: 앞에 「사번」이 붙었거나, 뒤에 사람에게 붙는 조사가 붙은 경우만 사번으로 읽는다.
@@ -127,7 +127,7 @@ def _recipients(state: AgentState) -> tuple[list[str], str, bool]:
     other = employee_no(state.get("question") or "")
     if other:
         return [other], f"사번 {other}", False
-    mine = workb.employee_id(state.get("employee_id"))
+    mine = note.employee_id(state.get("employee_id"))
     return ([mine], MEMO_DEFAULT_TO, True) if mine else ([], "", True)
 
 
@@ -401,9 +401,9 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
     **받는 사람은 제안한 턴이 정했고, 보내는 사람은 이번 턴의 로그인 사번이다.** 둘은 다른
     축이다 — 받는 사람은 초안에 적혀 직원이 읽고 승낙한 값이라 여기서 다시 정하지 않고,
     보내는 사람은 이 요청을 지금 부른 직원이라 이번 턴의 상태에서 온다(MCP 인증에 들어가고
-    행내 감사 기록이 그 사번으로 남는다 — `pension_agent/workb.py` 의 «누구 이름으로»).
+    행내 감사 기록이 그 사번으로 남는다 — `pension_agent/note.py` 의 «누구 이름으로»).
 
-    **판정 못 한 결과를 «보냈다»로 접지 않는다**(workb.parse_result). WorkB 는 실패를
+    **판정 못 한 결과를 «보냈다»로 접지 않는다**(note.parse_result). WorkB 는 실패를
     본문에 담아 보내므로, 어댑터가 성공이라고 한 것만 보고 보고하면 거부당한 호출이
     «발송 완료»로 화면에 뜬다.
     """
@@ -414,10 +414,10 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 부탁해 주세요.",
                 "sources": [], "pending_action": None}
     to = pending.get("to") or MEMO_DEFAULT_TO
-    result = TOOL_REGISTRY["send_memo"](
+    result = ACTIONS["send_memo"](
         (pending.get("params") or {}).get("customer_id") or "", markup,
         title=title, recipients=ids, to=to,
-        as_employee=workb.employee_id(state.get("employee_id")))
+        as_employee=note.employee_id(state.get("employee_id")))
     # 되돌릴 수 없는 행위의 결과는 반드시 기록에 남긴다 — 제목·본문·사번은 싣지 않는다.
     observability.score("action_outcome", result.get("status") or "unknown",
                         comment=f"send_memo · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
@@ -476,7 +476,7 @@ def _link(pending: dict) -> dict[str, Any]:
         # 발송 화면으로 넘기는 문구는 코드가 한 가지를 거부한다 — 아직 실제 콘텐츠로
         # 확정되지 않은 더미 문구다. 화면을 열어 그 문구를 건네면 직원이 그대로 보낼 수
         # 있기 때문이고, 이 판정은 답변에 붙인 경고 문구가 아니라 코드가 한다(§10).
-        gate = TOOL_REGISTRY["open_lms_screen"](
+        gate = ACTIONS["open_lms_screen"](
             (pending.get("params") or {}).get("customer_id") or "", message)
         if gate["status"] == "blocked":
             observability.score("action_outcome", "blocked",

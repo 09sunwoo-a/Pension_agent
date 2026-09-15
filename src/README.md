@@ -48,7 +48,7 @@ python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로�
 ## 3. 실행
 
 ```bash
-source ./cli.sh                      # CA · CAD · CADR 정의 + 사용법 출력
+source bin/cli.sh                    # CA · CAD · CADR 정의 + 사용법 출력
 ```
 
 셋 다 **HTTP 를 타지 않고** `graph.ask()` 를 직접 부르므로 서버와 무관하고, `.env` 만 잡혀
@@ -84,9 +84,9 @@ $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을
 streamlit run app.py                                  # 개발·테스트 화면
 
 # ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
-./run_local.sh                                        # uvicorn main:app :8000
-./test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
-CUSTOMER_ID=198734-1205842 ./test_local.sh "이 고객 왜 관리 대상이야?"
+bin/run_local.sh                                      # uvicorn main:app :8000
+bin/test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
+CUSTOMER_ID=198734-1205842 bin/test_local.sh "이 고객 왜 관리 대상이야?"
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다)
 $CAD --debug "세액공제 한도가 얼마야?"
@@ -106,7 +106,7 @@ $CADR --versions · --diff v5 v6 · review@v3           # 중간점검본 판 �
 python -m tests.test_engine            # ①~⑤ 결정론 로직
 python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치
 python -m tests.test_strategy_agent    # LLM 산출 검증 · 폴백
-python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드
+python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드 (검사 본문은 tests/consult/)
 python -m tests.test_infra             # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api               # HTTP 진입점 — 플랫폼 I/O 스키마 계약
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
@@ -187,7 +187,7 @@ Jenkins 가 넣는 환경변수가 정한다(`Dockerfile` 주석). 플랫폼 규
 
 `.env` 에 `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` 를 넣으면 켜지고, **없으면 통째로
 꺼진다**(테스트·시연은 그대로 돈다). 브리핑 한 건 · 대화 한 턴이 트레이스 하나로 묶이고,
-점수는 전부 코드가 아는 사실이다. 환경변수 목록과 설계는 `pension_agent/observability.py` 머리말.
+점수는 전부 코드가 아는 사실이다. 환경변수 목록과 설계는 `pension_agent/observability/__init__.py` 머리말.
 
 ```bash
 python -m pension_agent.observability   # 대시보드에 안 찍히면 — 설정을 찍고 이벤트 한 건을 실제로 보낸다
@@ -221,14 +221,14 @@ curl -s localhost:8000/health | jq .mcp
 - **로그인 사번은 호출이 넘겨준다.** `x_client_user` 가 **사번 7자리로 시작하고** 그
   뒤가 끝이거나 구분자면 그 사번을 읽는다(`3902172` · `3902172-550e8400-…`). 그 값은
   LLM 쿼터 버킷 이름이기도 해서 `pension-agent` 같은 값도 들어오고, 사번 뒤에 숫자가
-  바로 이어지는 값은 남의 사번을 만들어낼 수 있어 읽지 않는다(`workb.as_emp_no`).
+  바로 이어지는 값은 남의 사번을 만들어낼 수 있어 읽지 않는다(`note.as_emp_no`).
   사번을 다른 데서 받는 배포는 `input_value` 에 `employee_id` 를 실으면 그것이 먼저다.
   진입점 → 상태 → 발송이 같은 값을 보고, 그 값이 **누구 이름으로 나가나**(MCP 인증·
   행내 감사 기록)도 정한다. 요청 로그의 `x_client_user=` 원문과 `emp_no=` 판정을 나란히
   보고 확인한다 — `emp_no=-` 면 환경변수 폴백이다.
 - **발송은 재시도하지 않는다.** 타임아웃은 «안 나갔다»가 아니라 «나갔는지 모른다»이고,
   다시 부르면 같은 쪽지가 두 통 간다. 붙는 단계(토큰·도구 목록)의 실패만 다시 시도한다.
-- 다른 전송 수단을 끼우려면 `workb.use_sender(fn)` 로 직접 등록한다 — `install()` 이
+- 다른 전송 수단을 끼우려면 `note.use_sender(fn)` 로 직접 등록한다 — `install()` 이
   하는 일이 그 등록이다(`send(recipients: list[str], title, body)`).
 
 **다른 행내 기능(사내 DB·메일·뉴스…)을 붙일 때** 고치는 자리는 셋으로 갈라 뒀다 —

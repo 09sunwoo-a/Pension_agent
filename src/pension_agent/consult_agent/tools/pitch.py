@@ -5,8 +5,8 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 
 from __future__ import annotations
 
-from pension_agent.consult_agent import kb as KBMOD
-from pension_agent.consult_agent.nodes import pitch as PITCHMOD
+from pension_agent.consult_agent import kb_index
+from pension_agent.consult_agent.tools import pitch_slots as PITCHMOD
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크는 패키지를 거쳐 부른다(머리말)
 from pension_agent.consult_agent.tools.adequacy import _adopt
@@ -49,5 +49,5 @@ def _pitch(state: AgentState, query: str) -> Evidence | None:
         return None
     # 슬롯을 원장에 남긴다 — compose 의 '파악된 상황' 한 줄이 이걸 읽는다. 화법을 안 부른
     # 턴에는 그 줄이 아예 붙지 않는다(있지도 않은 상담 상황을 상상하게 두지 않는다).
-    return _ev("pitch", query, KBMOD.build_context(KB, hits), KBMOD.sources_of(KB, hits),
+    return _ev("pitch", query, kb_index.build_context(KB, hits), kb_index.sources_of(KB, hits),
                cards=[c for _s, c in hits], meta={"slots": slots})

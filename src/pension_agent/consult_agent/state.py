@@ -102,7 +102,7 @@ class AgentState(TypedDict, total=False):
     # graph.employee_no). 이 값이 두 가지를 정한다: WorkB 쪽지의 **수신자**(기본은 본인)와
     # **발송 주체**(MCP 인증에 들어가고 행내 감사 기록이 그 사번으로 남는다). 코드가
     # 정하므로 LLM 이 수신자를 만들어낼 자리가 없다. 없으면 환경변수로 떨어지고, 그것도
-    # 없으면 쪽지 발송을 제안하지 않는다(workb.employee_id).
+    # 없으면 쪽지 발송을 제안하지 않는다(note.employee_id).
     employee_id: str | None
     intent: str                      # understand 가 채움 — routing.INTENTS 중 하나
     customer_type: str | None

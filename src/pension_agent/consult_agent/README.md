@@ -20,14 +20,17 @@ r["sources"]   # [{"id": "pitch.k03.001", "title": "...", "score": 4.80}]
 r2 = ask("그럼 안 된다고 하면요?", history=r["history"])   # 후속 질문 — 이전 맥락 이어받음
 
 # 브리핑질의·LMS발송·수정은 customer_id 가 필요하다(현재 열려 있는 브리핑 화면의 고객).
-# 넘기면 모든 턴이 src/session_data 에 상담이력으로도 함께 기록된다(REQUIREMENTS.md §14).
+# 넘기면 그 턴이 src/session_data 에 상담이력으로도 함께 기록된다(REQUIREMENTS.md §14).
 r3 = ask("이 고객 만기 언제야?", customer_id="198734-1205842", session_id="branch-101-2026-08-24")
+
+# 쪽지 발송(«오늘 타겟 쪽지로 보내줘»)은 보내는 직원의 사번(employee_id)이 있어야 제안한다.
+r4 = ask("오늘 타겟 고객 쪽지로 보내줘", employee_id="3902172", x_client_user="3902172")
 ```
 
 `customer_id` 가 없으면 고객 관련 기능(브리핑 질의·수정·화면 연계)은 "고객 화면을 먼저
 열어주세요"라고 답한다. 지식 질의응답과 화법 코칭은 고객 화면 없이도 답한다.
 
-CLI · 디버그 · 대본 실행은 [../../README.md](../../README.md) §3 에 있다(`source ./cli.sh`
+CLI · 디버그 · 대본 실행은 [../../README.md](../../README.md) §3 에 있다(`source bin/cli.sh`
 → `$CA` · `$CAD` · `$CADR`). 시연용 고객의 id 와 상태는 코드가 찍어준다:
 
 ```bash
@@ -41,35 +44,39 @@ python -m pension_agent.knowledge.kb                # 지식베이스 점검 리
 ```
 consult_agent/
 ├── CLAUDE.md           대화형 기준서 — 있어야 할 동작과 구현 gap 목록. 구현과 어긋나면 문서가 기준
-├── graph.py            그래프 조립 · ask() (모든 턴을 session_store 에 기록)
+├── graph.py            그래프 조립 · ask() (customer_id 가 있는 턴을 session_store 에 기록)
 ├── __main__.py         REPL — python -m pension_agent.consult_agent -c <KB-PIN>
 ├── state.py            AgentState/Turn · 대화이력 포맷 · 공용 지식베이스(KB)
+├── context_store.py    대화 맥락(history) 보관 — 프로세스 메모리, (x_client_user, session_id) 키. 게이트웨이가 history 를 못 넘기는 경로용
 ├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
-├── kb.py               LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
-├── tools/              도구 패키지 — __init__ 레지스트리(능력 표면) · base 근거(Evidence) 규약 · ledger 원장 helper
-│                       · 도구별 모듈(cards·market·briefing·history·pitch·playbook·suitability·outreach·targets·dates·tax_credit)
+├── kb_index.py         LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
+├── tools/              도구 패키지 — 근거를 **찾는** 쪽. LLM 이 계획 루프에서 고른다
+│   ├── __init__.py         TOOLS 레지스트리(능력 표면 · 도구 20종) · run() (ToolFailure 경계)
+│   ├── base.py · ledger.py 근거(Evidence) 규약 · 원장 helper
+│   ├── cards · market · briefing · history · pitch · playbook · suitability · outreach · targets · dates · tax_credit · answered   도구별 모듈
+│   ├── adequacy.py         적합성 게이트(fits_question) — 고른 근거가 질문에 답이 되는가
+│   ├── combine.py          여러 도구의 근거 결합
+│   ├── facts_qa · procedure_qa · segment_qa   fact·procedure·segment 도구의 검색·근거 블록 조립
+│   └── pitch_slots.py      화법 검색 전용 슬롯 분해 (tools/pitch·playbook 이 부른다)
+├── actions.py          행위 레지스트리(ACTIONS) — 승낙 뒤 코드가 실행하는 것(발송 화면 게이트 · 쪽지 발송). 흔적을 **남기는** 쪽, LLM 이 고르지 않는다 (§10)
 ├── select.py           카드 선택 — LLM 버킷→카드 2단, LLM 이 0건일 때만 n-gram (종류 무관)
 ├── guard.py            「하지 말 것」 — 지식베이스에 있는 금지 문장만 띄운다
 ├── marks.py            재료 성격 표시 — 신뢰 등급 · 내부용 주의 (§7)
 ├── screens.py          화면 연계 — mystar-link:// 딥링크 조립 · 발송 화면번호 조회 (§10). 화면번호는 KB 가 갖는다
 ├── relations.py        관계 기반 점검 — 값–조건 오짝 · 알려진 오답 대조 (§6)
-├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../workb.py) (§10)
+├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../note.py) (§10)
 ├── suggest.py          추천 질문 칩 — 지난 상담 · 열린 세미나가 있는 고객에게만
-├── render.py           답변 + 출처 블록을 텍스트 한 덩어리로 — CLI 와 main.py 가 함께 쓴다
-├── prompts.py          LLM 프롬프트 템플릿 (기능별 섹션으로 구분)
+├── render.py           답변 + 출처 블록을 텍스트 한 덩어리로 — CLI(__main__)가 쓴다. main.py 는 이벤트로 따로 내보낸다
+├── prompts/            LLM 프롬프트 템플릿 (노드와 같은 이름의 모듈 9개 · __init__ 이 재노출)
 ├── progress.py         진행 표시 — 답변이 만들어지는 동안 무엇을 하는 중인지 (문구는 코드 소유)
 └── nodes/
     ├── understand.py       의도분류 (도메인 어휘 없는 라우팅 전용, 실패하면 답하지 않는다)
-    ├── pitch.py            화법 검색 전용 슬롯 분해 — 화법 도구가 필요할 때 부른다
     ├── plan.py             계획 루프 — plan_step(도구 선택·실행) / compose(결합·검증) / llm_down
     ├── answer.py           형태 판정과 답변 작성을 동시에 돌리고 하나를 고른다
     ├── clarify.py          형태 판정 — 답한다·전제를 밝힌다·되묻는다·없다 (§5)
     ├── meta.py             메타 질문("뭘 도와줄 수 있어?") 응답 노드
     ├── lms.py              LMS 화면 연계 요청 — 보내지 않고 발송 화면을 제안한다
     ├── correction.py       브리핑 수정 요청 — 편집 가능 필드만, 이번 범위는 감사로그까지
-    ├── facts_qa.py         제도·상품 확정값 — fact 도구의 검색·근거 블록 조립 (노드 아님)
-    ├── procedure_qa.py     업무 처리 절차 — procedure 도구의 검색·근거 블록 조립 (노드 아님)
-    ├── segment_qa.py       고객군 정의 — segment 도구의 검색·근거 블록 조립 (노드 아님)
     └── act.py              화면 연계 제안(offer)·확인 연계(confirm_action)
 ```
 
@@ -132,7 +139,7 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 | `understand` | 질문(+이전 대화) → `intent`·`utterance`만 판단(도메인 어휘 없는 라우팅 전용) | ○ |
 | `agent_help` | "뭘 도와줄 수 있어?" 같은 메타 질문에 KB 메타데이터로 안내 | ✕ |
 | `plan` | 다음에 부를 도구 하나를 고르고 실행해 원장에 쌓음. 상한은 `plan.MAX_STEPS` | ○ |
-| `answer` | 형태 판정(`clarify`)과 답변 작성(`compose`)을 **동시에** 돌리고 하나를 고름. `assume`·`none` 이면 블록을 얹어 한 번 다시 씀 | ○×2 |
+| `compose` (`nodes/answer.py`) | 형태 판정(`clarify`)과 답변 작성(`compose`)을 **동시에** 돌리고 하나를 고름. `assume`·`none` 이면 블록을 얹어 한 번 다시 씀 | ○×2 |
 | ├ `clarify` | 답의 형태를 넷으로 판정 — 답한다 / 전제를 밝히고 답한다 / 되묻는다 / 핵심 대상이 없다 | ○ |
 | └ `compose` | 원장만으로 답변 하나를 씀 → 원장 밖 수치·원문 스팬을 코드가 집행. 원장 0건이면 정직하게 없다고 답변 | ○ |
 | `llm_down` | LLM 이 죽어 분류조차 못 한 턴 — "LLM 연결이 안 되어 있다"고 원인과 함께 답변 | ✕ |
@@ -152,7 +159,7 @@ LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 
 |---|---|---|
 | `tools/pitch.py` `PITCH_TOP_K` | 3 | 프롬프트에 넣을 화법 카드 수. 늘리면 맥락↑ 토큰↑ |
 | `knowledge/kb.py` `MIN_TOPICAL` | 0.5 | 낮추면 n-gram 폴백이 줄고 오답이 늘어남 (실측: 유관 0.55~2.1 / 무관 0.00~0.42) |
-| `state.py` `HISTORY_LIMIT` | 12 | 프롬프트에 싣고 다음 턴에 넘기는 최근 턴 수. `last_answer` 가 되짚을 수 있는 범위이기도 하다. 12턴 블록이 455자다 |
+| `state.py` `HISTORY_LIMIT` | 12 | 프롬프트에 싣고 다음 턴에 넘기는 최근 턴 수. `last_answer` 가 되짚을 수 있는 범위이기도 하다. 12턴 블록은 접기 전 455자, 아래 접기 뒤 약 250자 |
 | `state.py` `HISTORY_VERBATIM` / `HISTORY_OLD_CHARS` | 4 / 40 | 최근 4턴은 질문 원문, 그 앞은 40자에서 접는다(프롬프트 한 줄만 — 기록은 안 자른다) |
 
 ## 주의

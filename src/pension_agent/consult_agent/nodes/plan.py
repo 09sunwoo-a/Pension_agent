@@ -19,15 +19,15 @@ compose 는 모든 근거를 한 번에 받아 답변 전체를 쓴다. 화법�
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from typing import Any
 
 from pension_agent import observability
 from pension_agent.consult_agent import guard, progress, relations, screens, tools
-from pension_agent.consult_agent import kb as KBMOD
-from pension_agent.consult_agent.nodes.pitch import situation_line
+from pension_agent.consult_agent import kb_index
+from pension_agent.consult_agent.marks import MATERIAL_MARKS
+from pension_agent.consult_agent.tools.pitch_slots import situation_line
 from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
     MUST_BLOCK,
@@ -35,7 +35,7 @@ from pension_agent.consult_agent.prompts import (
     REWRITE_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
-from pension_agent.llm import LLMError, generate
+from pension_agent.llm import LLMError, generate, json_object
 from pension_agent.verify import numbers, verify_texts
 
 #: 한 턴에 부를 수 있는 도구 호출 수. 코드가 쥔 상한이다.
@@ -94,7 +94,7 @@ def _record_tool(name: str, query: str, outcome: str, reason: str = "") -> None:
     """도구 실행 한 건을 «코드가 아는 사실»로 남긴다(observability.score → Langfuse + 로그).
 
     장부(`steps`)는 이 턴의 답을 만드는 재료이고, 이것은 나중에 되짚는 기록이다. 고장(failed)만
-    WARNING 으로 찍힌다(observability._state_level).
+    WARNING 으로 찍힌다(observability._trace._state_level).
     """
     preview = " ".join(query.split())
     if len(preview) > _QUERY_PREVIEW:
@@ -159,7 +159,6 @@ MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
 #: 재료 성격 표시 블록의 머리말(§7). 어느 자료에서 온 말인지 · 고객에게 그대로 옮겨도
 #: 되는지. 답을 읽는 사람은 직원이고, 무엇을 옮길지는 직원이 거른다 — 그 판단에 필요한
 #: 표시를 주는 데까지가 에이전트의 몫이다.
-MATERIAL_MARKS = "── 참고한 자료"
 
 #: LLM 단계가 깨졌을 때의 답. **'근거가 없다'와 절대 같은 말을 하면 안 된다** —
 #: 찾아보고 없는 것과 찾아보지도 못한 것은 다르고, 뒤를 앞으로 말하면 지식베이스에 있는
@@ -169,18 +168,6 @@ LLM_FAILED = (
     "지금은 답변을 만들 수 없어요 — LLM 호출이 실패했습니다. "
     "지식베이스에 자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reason})"
 )
-
-
-def _json_obj(text: str) -> dict:
-    """LLM 응답에서 JSON 객체만 꺼낸다. 못 찾으면 빈 dict(= 더 할 일 없음)."""
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        return {}
-    try:
-        val = json.loads(m.group())
-    except ValueError:
-        return {}
-    return val if isinstance(val, dict) else {}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -272,7 +259,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # 'LLM 실패'로 답해진다(뒤집힌 방향의 같은 사고).
     alive: dict[str, Any] = {"llm_error": ""}
 
-    action = _json_obj(raw)
+    action = json_object(raw) or {}
     if not action:
         # 규격 밖 응답(설명문·잘린 JSON). 같은 이유로 조용히 넘기지 않는다.
         return {"plan_done": True,
@@ -374,7 +361,7 @@ def _known_products() -> set[str]:
     임포트 비용을 지연시킨다(strategy_agent 는 무겁다).
     """
     from pension_agent.strategy_agent import engine  # noqa: PLC0415
-    return {r["name"] for r in engine.PRODUCTS} | KBMOD.product_names(KB)
+    return {r["name"] for r in engine.PRODUCTS} | kb_index.product_names(KB)
 
 
 #: 근거 카드의 화면번호 스팬 꼴(`[04-12-646]`). 다른 `atomic` 스팬과 갈라 판정하기 위한 것이라

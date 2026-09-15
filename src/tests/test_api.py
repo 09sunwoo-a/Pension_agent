@@ -20,11 +20,14 @@ LLM 은 부르지 않는다 — graph.ask 를 갈아끼워 위 계약만 본다.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -316,7 +319,7 @@ try:
     check(_seen.get("employee_id") == "3902172",
           "input_value 의 employee_id 가 에이전트까지 전달된다", str(_seen.get("employee_id")))
     # x_client_user 는 사번 뒤에 접미(LLM 호출을 가르는 uuid 등)가 붙어 올 수 있다 —
-    # 구분자로 이었으면 앞의 사번을 읽는다(workb.as_emp_no).
+    # 구분자로 이었으면 앞의 사번을 읽는다(note.as_emp_no).
     check(main.consult_graph.employee_no("3902172", "emp-0417") == "3902172"
           and main.consult_graph.employee_no(
               None, "3902172-550e8400-e29b-41d4-a716-446655440000") == "3902172"
@@ -484,6 +487,72 @@ try:
     check(not _missing, "client/README.md 가 모든 이벤트 type 을 설명한다", str(_missing))
     _keys = ["message", "x_client_user", "customer_id", "session_id"]
     check(all(f"`{k}`" in _readme for k in _keys), "client/README.md 가 요청 키 4개를 설명한다")
+
+    # ── 호출자가 중간에 끊어도 맥락은 남는다 ─────────────────
+    # 게이트웨이 타임아웃으로 답을 다 받기 전에 끊기면 generate 는 멈추지만 ask() 스레드는
+    # 끝까지 돈다. 그 턴의 맥락(연계 제안)이 다음 «네»에 이어져야 한다 — 예전에는 맥락 기억이
+    # 답을 다 흘려보낸 뒤에 있어서, 끊긴 턴은 상담이력에만 남고 맥락에서는 빠졌다.
+    from pension_agent.consult_agent import context_store as _ctx
+
+    _release, _slow_done = threading.Event(), threading.Event()
+
+    def _slow_ask(question, history=None, **kw):
+        kw["on_progress"]("검색 중")          # 한 줄은 흘려보낸 뒤 — 호출자가 끊을 틈
+        _release.wait(timeout=10)
+        try:
+            return _fake_ask(question, history, **{k: v for k, v in kw.items() if k != "on_progress"})
+        finally:
+            _slow_done.set()
+
+    async def _drive_then_disconnect(payload: dict) -> list[dict]:
+        """앱을 ASGI 로 직접 몬다 — TestClient 는 스트림을 닫아도 서버 쪽 생성기를 취소하지
+        않아 끊김이 재현되지 않는다. 첫 본문 조각이 나가면 http.disconnect 를 보낸다(uvicorn 이
+        소켓이 닫혔을 때 하는 일 그대로 — StreamingResponse 가 그것을 듣고 생성기를 취소한다)."""
+        sent: list[dict] = []
+        first_chunk = asyncio.Event()
+        state = {"body_sent": False}
+
+        async def receive():
+            if not state["body_sent"]:
+                state["body_sent"] = True
+                return {"type": "http.request", "body": json.dumps(payload).encode(), "more_body": False}
+            await first_chunk.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(msg):
+            sent.append(msg)
+            if msg["type"] == "http.response.body" and msg.get("body"):
+                first_chunk.set()
+                # 끊긴 뒤에도 ask() 스레드는 돈다 — 잠시 뒤 풀어 준다(이 루프가 닫히기 전에 끝나게)
+                threading.Timer(0.2, _release.set).start()
+
+        scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+                 "scheme": "http", "path": "/chat", "raw_path": b"/chat", "query_string": b"",
+                 "root_path": "", "headers": [(b"content-type", b"application/json"), (b"host", b"test")],
+                 "client": ("127.0.0.1", 1), "server": ("test", 80)}
+        await main.app(scope, receive, send)
+        return sent
+
+    main.consult_graph.ask = _slow_ask
+    _ctx.clear()
+    _captured.clear()
+    _sent = asyncio.run(_drive_then_disconnect(_body(message="연계", x_client_user="emp-cut", session_id="cut-1")))
+    _slow_done.wait(timeout=10)
+    check(sum(1 for m in _sent if m["type"] == "http.response.body" and m.get("body")) == 1,
+          "끊기 전에 나간 것은 진행 한 조각뿐이다(답변은 나가지 않았다)", str(len(_sent)))
+    _kept = None
+    for _ in range(100):                       # 기억은 워커 스레드가 한다 — 잠깐 기다린다
+        _kept = _ctx.get("emp-cut", "cut-1")
+        if _kept:
+            break
+        time.sleep(0.05)
+    check(bool(_kept) and _kept[-1]["question"] == "연계",
+          "호출자가 중간에 끊어도 그 턴의 맥락은 남는다 — 다음 «네»가 이어진다", str(_kept))
+    check(any("연결이 끊겼다" in rec.getMessage() for rec in _captured),
+          "중간에 끊긴 것은 «연결 끊김» WARNING 으로 갈라 찍힌다",
+          str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
+    main.consult_graph.ask = _fake_ask
+    _captured.clear()
 
     # ── 실패해도 스트림은 끊지 않는다 ────────────────────────
     def _boom(*a, **k):
