@@ -47,6 +47,7 @@ consult_agent/
 ├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
 ├── kb_index.py         LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
 ├── tools/              도구 패키지 — __init__ 레지스트리(능력 표면) · base 근거(Evidence) 규약 · ledger 원장 helper — 근거를 찾는 쪽
+│                       facts_qa · procedure_qa · segment_qa (fact·procedure·segment 도구의 검색·근거 블록 조립) · pitch_slots (화법 검색 전용 슬롯 분해)
 ├── actions.py          행위 레지스트리 — 승낙 뒤 코드가 실행하는 것(발송 화면 게이트 · 쪽지 발송) — 흔적을 남기는 쪽 (§10)
 │                       · 도구별 모듈(cards·market·briefing·history·pitch·playbook·suitability·outreach·targets·dates·tax_credit)
 ├── select.py           카드 선택 — LLM 버킷→카드 2단, LLM 이 0건일 때만 n-gram (종류 무관)
@@ -61,16 +62,12 @@ consult_agent/
 ├── progress.py         진행 표시 — 답변이 만들어지는 동안 무엇을 하는 중인지 (문구는 코드 소유)
 └── nodes/
     ├── understand.py       의도분류 (도메인 어휘 없는 라우팅 전용, 실패하면 답하지 않는다)
-    ├── pitch.py            화법 검색 전용 슬롯 분해 — 화법 도구가 필요할 때 부른다
     ├── plan.py             계획 루프 — plan_step(도구 선택·실행) / compose(결합·검증) / llm_down
     ├── answer.py           형태 판정과 답변 작성을 동시에 돌리고 하나를 고른다
     ├── clarify.py          형태 판정 — 답한다·전제를 밝힌다·되묻는다·없다 (§5)
     ├── meta.py             메타 질문("뭘 도와줄 수 있어?") 응답 노드
     ├── lms.py              LMS 화면 연계 요청 — 보내지 않고 발송 화면을 제안한다
     ├── correction.py       브리핑 수정 요청 — 편집 가능 필드만, 이번 범위는 감사로그까지
-    ├── facts_qa.py         제도·상품 확정값 — fact 도구의 검색·근거 블록 조립 (노드 아님)
-    ├── procedure_qa.py     업무 처리 절차 — procedure 도구의 검색·근거 블록 조립 (노드 아님)
-    ├── segment_qa.py       고객군 정의 — segment 도구의 검색·근거 블록 조립 (노드 아님)
     └── act.py              화면 연계 제안(offer)·확인 연계(confirm_action)
 ```
 

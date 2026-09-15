@@ -26,7 +26,8 @@ from typing import Any
 from pension_agent import observability
 from pension_agent.consult_agent import guard, progress, relations, screens, tools
 from pension_agent.consult_agent import kb_index
-from pension_agent.consult_agent.nodes.pitch import situation_line
+from pension_agent.consult_agent.marks import MATERIAL_MARKS
+from pension_agent.consult_agent.tools.pitch_slots import situation_line
 from pension_agent.consult_agent.prompts import (
     ACCEPTED_BLOCK, ANSWER_SHAPES, COMPOSE_PROMPT, COMPOSE_RETRY_BLOCK, COMPOSE_SYSTEM,
     MUST_BLOCK,
@@ -158,7 +159,6 @@ MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
 #: 재료 성격 표시 블록의 머리말(§7). 어느 자료에서 온 말인지 · 고객에게 그대로 옮겨도
 #: 되는지. 답을 읽는 사람은 직원이고, 무엇을 옮길지는 직원이 거른다 — 그 판단에 필요한
 #: 표시를 주는 데까지가 에이전트의 몫이다.
-MATERIAL_MARKS = "── 참고한 자료"
 
 #: LLM 단계가 깨졌을 때의 답. **'근거가 없다'와 절대 같은 말을 하면 안 된다** —
 #: 찾아보고 없는 것과 찾아보지도 못한 것은 다르고, 뒤를 앞으로 말하면 지식베이스에 있는

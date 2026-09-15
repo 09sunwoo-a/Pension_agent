@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import tools
-from pension_agent.consult_agent.nodes import pitch, plan, understand
+from pension_agent.consult_agent.nodes import plan, understand
+from pension_agent.consult_agent.tools import pitch_slots
 from pension_agent.llm import LLMError
 from pension_agent.verify import numbers, verify_texts
 
@@ -39,15 +40,15 @@ def check_turn_cost() -> int:
 
     # ① 화법 슬롯 분해가 화법을 안 부르는 턴에서는 아예 안 돈다.
     called: list[str] = []
-    orig_extract = pitch.extract_slots
-    pitch.extract_slots = lambda st: called.append("slots") or {}
+    orig_extract = pitch_slots.extract_slots
+    pitch_slots.extract_slots = lambda st: called.append("slots") or {}
     orig_plan_gen = P.generate
     P.generate = lambda prompt, **kw: '{"tool": "customer", "query": "예금 잔액", "last": true}'
     try:
         state = {"question": "이 고객 예금 잔액 얼마지", "customer_id": "198734-1205842"}
         state.update(P.plan_step(state))
     finally:
-        pitch.extract_slots, P.generate = orig_extract, orig_plan_gen
+        pitch_slots.extract_slots, P.generate = orig_extract, orig_plan_gen
     hit = not called
     print(f"{'✓' if hit else '✗'} 화법을 안 부르는 턴은 슬롯 분해 호출이 없다")
     ok += hit
@@ -83,23 +84,23 @@ def check_turn_cost() -> int:
 
     # ④ 화법을 부르는 턴에는 슬롯 분해가 살아 있다(n-gram 폴백에 들어갈 때).
     called.clear()
-    orig_extract, orig_pick = pitch.extract_slots, tools.llm_pick
+    orig_extract, orig_pick = pitch_slots.extract_slots, tools.llm_pick
     orig_fits = tools.fits_question
-    pitch.extract_slots = lambda st: called.append("slots") or {}
+    pitch_slots.extract_slots = lambda st: called.append("slots") or {}
     tools.llm_pick = lambda kinds, q: []
     tools.fits_question = lambda question, h, kind="", history=None, query=None, sink=None: h
     try:
         tools.run("pitch", {"question": "수수료 부담된다고 하시네요"}, "수수료 부담")
     finally:
-        pitch.extract_slots, tools.llm_pick = orig_extract, orig_pick
+        pitch_slots.extract_slots, tools.llm_pick = orig_extract, orig_pick
         tools.fits_question = orig_fits
     hit = called == ["slots"]
     print(f"{'✓' if hit else '✗'} 화법 도구가 n-gram 으로 물러설 때는 슬롯을 뽑는다")
     ok += hit
 
     # ⑤ 화법을 안 쓴 답변에 '파악된 상황' 줄을 붙이지 않는다(없는 상담 상황을 상상하게 둔다).
-    hit = pitch.situation_line("situation", {}) == "" and \
-        "고객유형" in pitch.situation_line("situation", {"customer_type": "사업자"})
+    hit = pitch_slots.situation_line("situation", {}) == "" and \
+        "고객유형" in pitch_slots.situation_line("situation", {"customer_type": "사업자"})
     print(f"{'✓' if hit else '✗'} 슬롯이 없으면 '파악된 상황' 줄을 싣지 않는다")
     ok += hit
     return ok
@@ -120,7 +121,7 @@ def check_miss_recovery() -> int:
        알 수 없다 — 진단이 화면에서 끝나야 한다.
     """
     from pension_agent.consult_agent.nodes import plan as P
-    from pension_agent.consult_agent.nodes import procedure_qa
+    from pension_agent.consult_agent.tools import procedure_qa
 
     ok = 0
 
@@ -412,7 +413,7 @@ def check_tool_loop() -> int:
     # 데이터를 고치며 비었고(build_kb 의 화면번호 추출), 화면을 묻는 질의는 화면번호가 있는
     # 카드를 앞세우므로(procedure_qa.search) 1위가 바뀌었다. 표시 복구를 보는 검사가 검색
     # 순위에 흔들리지 않게 한다 — 이 검사가 보는 것은 검색이 아니라 근거별 선별 복구다.
-    from pension_agent.consult_agent.nodes import procedure_qa as _proc_qa
+    from pension_agent.consult_agent.tools import procedure_qa as _proc_qa
     _proc_card = next(c for c in tools.KB.cards if c["id"] == "proc.041")   # 화면번호 + status=확인 필요
     _orig_proc_search = _proc_qa.search
     _proc_qa.search = lambda q, _c=_proc_card: [(2.0, _c)]
@@ -594,7 +595,7 @@ def check_atomic_spans() -> int:
         #    선언이 **없는** 카드를 집어 본다 — 선언이 있는 카드의 atomic 이 비는 것은
         #    정상이고(relations 가 대신한다), 그건 check_relations 가 잰다.
         from pension_agent.consult_agent import relations as REL
-        from pension_agent.consult_agent.nodes import facts_qa as FQ
+        from pension_agent.consult_agent.tools import facts_qa as FQ
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))
         orig_fits, orig_search = tools.fits_question, FQ.search
@@ -816,10 +817,10 @@ def check_llm_down() -> int:
         raise LLMError("LLM 미설정 — PROVIDER=none")
 
     # ① 슬롯 분해에서 죽어도 계획 루프가 받아 같은 안내로 끝난다.
-    orig_pitch, orig_plan = pitch.generate, plan.generate
-    orig_extract, orig_pick = pitch.extract_slots, tools.llm_pick
-    pitch.generate = dead
-    pitch.extract_slots = _REAL_EXTRACT_SLOTS   # 분해 자체를 재는 검사라 원본으로 되돌린다
+    orig_pitch, orig_plan = pitch_slots.generate, plan.generate
+    orig_extract, orig_pick = pitch_slots.extract_slots, tools.llm_pick
+    pitch_slots.generate = dead
+    pitch_slots.extract_slots = _REAL_EXTRACT_SLOTS   # 분해 자체를 재는 검사라 원본으로 되돌린다
     plan.generate = lambda p, **kw: '{"tool": "pitch", "query": "수수료"}'
     tools.llm_pick = lambda kinds, q: []        # n-gram 폴백으로 들어가야 슬롯을 뽑는다
     try:
@@ -830,16 +831,16 @@ def check_llm_down() -> int:
     except Exception:
         hit = False
     finally:
-        pitch.generate, plan.generate = orig_pitch, orig_plan
-        pitch.extract_slots, tools.llm_pick = orig_extract, orig_pick
+        pitch_slots.generate, plan.generate = orig_pitch, orig_plan
+        pitch_slots.extract_slots, tools.llm_pick = orig_extract, orig_pick
     print(f"{'✓' if hit else '✗'} 슬롯 분해가 죽어도 크래시가 아니라 원인 기록으로 끝난다")
     ok += hit
 
     # ② 그래프 전체 — 모든 단계가 죽어도 턴은 안내로 끝난다(스텁 없이 진짜 노드로 돈다).
     saved = {n: getattr(G, n) for n in ("understand", "plan_step")}
-    origs = (understand.generate, pitch.generate, plan.generate)
+    origs = (understand.generate, pitch_slots.generate, plan.generate)
     G.understand, G.plan_step = understand.understand, plan.plan_step
-    understand.generate = pitch.generate = plan.generate = dead
+    understand.generate = pitch_slots.generate = plan.generate = dead
     try:
         out = G.build_agent().invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
         answer = out.get("answer", "")
@@ -850,7 +851,7 @@ def check_llm_down() -> int:
     finally:
         for name, fn in saved.items():
             setattr(G, name, fn)
-        understand.generate, pitch.generate, plan.generate = origs
+        understand.generate, pitch_slots.generate, plan.generate = origs
     print(f"{'✓' if hit else '✗'} 화법 상황 질문 + LLM 미설정 → 크래시 없이 안내 — {answer[:38]}")
     ok += hit
 

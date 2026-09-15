@@ -522,7 +522,8 @@ def check_material_marks() -> int:
        본부 지침으로 읽히면 그게 곧 잘못된 안내다.
     """
     from pension_agent.consult_agent import marks as M
-    from pension_agent.consult_agent.nodes import facts_qa, plan as P, procedure_qa
+    from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.tools import facts_qa, procedure_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -643,7 +644,8 @@ def check_relations() -> int:
     왜 막혔는지 알 수 없다. 그래서 잡는 것만큼 통과시키는 것도 함께 잰다.
     """
     from pension_agent.consult_agent import relations as R
-    from pension_agent.consult_agent.nodes import facts_qa, plan as P
+    from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.tools import facts_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -782,7 +784,7 @@ def check_caution_roles() -> int:
     """
     from pension_agent.consult_agent import guard as GD
     from pension_agent.knowledge.kb import ROLE_FIELDS, role_texts
-    from pension_agent.consult_agent.nodes import procedure_qa, segment_qa
+    from pension_agent.consult_agent.tools import procedure_qa, segment_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0
@@ -815,7 +817,7 @@ def check_caution_roles() -> int:
     ok += hit
 
     # ③ 절차 표시(notices)에도 새지 않는다 — proc.001 의 ⚠ 유의는 "필자 해석" 메모다.
-    from pension_agent.consult_agent.nodes import procedure_qa as PQ
+    from pension_agent.consult_agent.tools import procedure_qa as PQ
     by_id = {c["id"]: c for c in KB.cards}
     orig_search, orig_fits = PQ.search, tools.fits_question
     tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
@@ -1486,7 +1488,7 @@ def check_origin() -> int:
     """
     from pension_agent.knowledge.kb import origin_of
     from pension_agent.consult_agent.kb_index import sources_of
-    from pension_agent.consult_agent.nodes import facts_qa
+    from pension_agent.consult_agent.tools import facts_qa
     from pension_agent.consult_agent.state import KB
 
     ok = 0

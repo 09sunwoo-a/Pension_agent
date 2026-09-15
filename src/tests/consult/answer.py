@@ -31,7 +31,8 @@ def check_prompt_is_quotable() -> int:
     **짝으로 잰다.** 넓힌 쪽만 재면 헐거워진 것을 못 잡는다.
     """
     from pension_agent.consult_agent import guard, kb_index, tools
-    from pension_agent.consult_agent.nodes import facts_qa, plan as PLAN
+    from pension_agent.consult_agent.nodes import plan as PLAN
+    from pension_agent.consult_agent.tools import facts_qa
     from pension_agent.consult_agent.state import KB
     from pension_agent.verify import verify_texts
 
@@ -966,7 +967,7 @@ def check_followups() -> int:
     """
     from pension_agent.knowledge import kb as KBMOD
     from pension_agent.consult_agent import suggest
-    from pension_agent.consult_agent.nodes import facts_qa
+    from pension_agent.consult_agent.tools import facts_qa
     from pension_agent.strategy_agent.customer import PERSONAS
 
     def ev(tool: str, title: str | None = None) -> dict:

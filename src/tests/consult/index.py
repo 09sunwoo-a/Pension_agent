@@ -26,7 +26,7 @@ def check_fact_in_index() -> int:
     """
     ok = 0
     from pension_agent.consult_agent import kb_index
-    from pension_agent.consult_agent.nodes import facts_qa
+    from pension_agent.consult_agent.tools import facts_qa
 
     kb = tools.KB
     # 같은 객체로 두 자리에 산다 — 사본이면 한쪽만 고쳐지는 자리가 생긴다(화법과 같은 규약).

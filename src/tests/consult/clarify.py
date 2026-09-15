@@ -191,7 +191,8 @@ def check_adequacy_and_shape() -> int:
     ② 형태 요구가 작성 프롬프트의 산문 지시로만 있고 유형별 기준이 없었다. 근거가 맞아도
        값을 물었는데 화법이 나오면 답이 아니다.
     """
-    from pension_agent.consult_agent.nodes import plan as P, procedure_qa
+    from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.tools import procedure_qa
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
 
     ok = 0

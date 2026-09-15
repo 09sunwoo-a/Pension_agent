@@ -13,7 +13,8 @@ from __future__ import annotations
 from pension_agent import config
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import tools
-from pension_agent.consult_agent.nodes import pitch, plan
+from pension_agent.consult_agent.nodes import plan
+from pension_agent.consult_agent.tools import pitch_slots
 
 from tests.consult._common import (  # noqa: A001 — 집계용 print
     CASES, _TALLY, _stdout_print, print, stub_plan_pitch, stub_slots, stub_talk, stub_understand,
@@ -102,7 +103,7 @@ def main() -> int:
 
     # build_agent() 는 호출 시점에 모듈 전역에서 노드 함수를 찾으므로 치환이 그대로 먹는다
     # 화법 슬롯 분해는 이제 노드가 아니라 화법 도구가 부른다 — 모듈 함수를 갈아끼운다.
-    pitch.extract_slots = stub_slots
+    pitch_slots.extract_slots = stub_slots
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성

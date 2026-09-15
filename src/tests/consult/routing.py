@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import routing, tools
-from pension_agent.consult_agent.nodes import pitch, plan, understand
+from pension_agent.consult_agent.nodes import plan, understand
+from pension_agent.consult_agent.tools import pitch_slots
 from pension_agent.llm import LLMError
 
 from tests.consult._common import print, _OVERRIDES, stub_understand, stub_plan_pitch  # noqa: A001 — 집계용 print
@@ -24,7 +25,7 @@ def check_pitch_stages() -> bool:
     real = tools.KB.pitches[0]
     # 이 검사가 재는 것은 후퇴 단계이지 슬롯 분해가 아니다 — 상태에 심어둔 슬롯을 그대로
     # 돌려주게 해서, 1회차가 조건으로 좁히는지만 본다.
-    pitch.extract_slots = lambda st: {k: st.get(k)
+    pitch_slots.extract_slots = lambda st: {k: st.get(k)
                                       for k in ("customer_type", "objection_type", "stage")}
 
     def spy_retrieve(kb, **kw):
@@ -152,7 +153,7 @@ def check_knowledge_intents() -> bool:
     출처처럼 '이 값을 언제·어디 근거로 말하는지'가 함께 나오는가. ②가 빠지면 숫자만 맞고
     근거가 없는 답이 되어, 직원이 그대로 고객에게 옮길 수 없다.
     """
-    from pension_agent.consult_agent.nodes import facts_qa
+    from pension_agent.consult_agent.tools import facts_qa
 
     checks = [
         ("fact", "세액공제 한도가 얼마야?", ("만원", "출처")),
@@ -186,7 +187,7 @@ def check_knowledge_intents() -> bool:
     print(f"{'✓' if no_invent else '✗'} fact 도구: 없는 값은 지어내지 않고 0건으로 답한다")
 
     # 지운 즉답 노드가 되살아나지 않았는가 (§11 회귀).
-    from pension_agent.consult_agent.nodes import procedure_qa, segment_qa
+    from pension_agent.consult_agent.tools import procedure_qa, segment_qa
     gone = not any(hasattr(m, fn) for m, fn in
                    ((facts_qa, "fact_lookup"), (procedure_qa, "procedure"),
                     (segment_qa, "segment_explain")))

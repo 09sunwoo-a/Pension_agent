@@ -8,7 +8,7 @@ from __future__ import annotations
 from pension_agent.consult_agent import relations as REL
 from pension_agent.consult_agent import kb_index
 from pension_agent.knowledge import kb as KBMOD
-from pension_agent.consult_agent.nodes import facts_qa, procedure_qa, segment_qa
+from pension_agent.consult_agent.tools import facts_qa, procedure_qa, segment_qa
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크는 패키지를 거쳐 부른다(머리말)
 from pension_agent.consult_agent.tools.adequacy import _adopt

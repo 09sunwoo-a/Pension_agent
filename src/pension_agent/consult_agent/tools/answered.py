@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import re
 
+from pension_agent.consult_agent import marks
 from pension_agent.consult_agent.state import KB, AgentState, Turn, numbered_history
 from pension_agent.consult_agent.tools.base import Evidence, _ev
 from pension_agent.consult_agent.tools.history import _strip_devices
@@ -107,10 +108,8 @@ def referenced_turn(history: list[Turn] | None, query: str) -> tuple[int, Turn] 
 def _body(answer: str) -> str:
     """기록된 답변에서 화면 장치를 뗀 본문 — 제안 문구·쪽지 펜스(`_strip_devices`)와
     「── 참고한 자료」 블록. 표시 블록은 `marks` 로 다시 붙는다."""
-    from pension_agent.consult_agent.nodes import plan as P  # noqa: PLC0415 — 순환 회피
-
     text = _strip_devices(answer)
-    head, sep, _tail = text.partition("\n\n" + P.MATERIAL_MARKS + "\n")
+    head, sep, _tail = text.partition("\n\n" + marks.MATERIAL_MARKS + "\n")
     return (head if sep else text).strip()
 
 

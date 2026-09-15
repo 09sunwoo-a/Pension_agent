@@ -37,7 +37,7 @@ def print(*args, **kwargs):  # noqa: A001 — 이 모듈 안에서만 가리는 
     _stdout_print(*args, **kwargs)
 
 from pension_agent.consult_agent import select, tools
-from pension_agent.consult_agent.nodes import pitch
+from pension_agent.consult_agent.tools import pitch_slots
 from pension_agent.verify import verify_texts
 
 _vt = verify_texts
@@ -51,7 +51,7 @@ _REAL_LLM_PICK = select.llm_pick
 _REAL_FITS = tools.fits_question
 # 화법 슬롯 분해도 main() 이 스텁으로 갈아끼운다. 분해 자체(와 그 LLM 실패)를 재는 검사는
 # 이 원본을 되돌려 놓고 부른다.
-_REAL_EXTRACT_SLOTS = pitch.extract_slots
+_REAL_EXTRACT_SLOTS = pitch_slots.extract_slots
 select.llm_pick = lambda kinds, query: []
 tools.llm_pick = select.llm_pick
 
@@ -111,7 +111,7 @@ _AGENT_HELP_HINTS = ("화법이 뭐가 있", "화법은 뭐가 있", "도와줄"
 
 def stub_understand(state):
     """understand 는 intent+utterance 만 낸다 — 화법 슬롯은 stub_slots 가 낸다
-    (실제로도 화법 도구가 n-gram 폴백에 들어갈 때만 pitch.extract_slots 를 부른다)."""
+    (실제로도 화법 도구가 n-gram 폴백에 들어갈 때만 pitch_slots.extract_slots 를 부른다)."""
     q = state["question"]
     if q in _OVERRIDES:
         return {"intent": _OVERRIDES[q].get("intent", "situation"), "utterance": q, "broaden_count": 0}
@@ -123,7 +123,7 @@ def stub_understand(state):
 
 
 def stub_slots(state):
-    """pitch.extract_slots 가 실제로 뽑아낼 법한 화법 슬롯을 규칙으로 흉내낸다.
+    """pitch_slots.extract_slots 가 실제로 뽑아낼 법한 화법 슬롯을 규칙으로 흉내낸다.
 
     **단계(stage)는 지정한 케이스에만 채운다.** 예전에는 모든 질문에 "신규"를 넣었는데,
     지식베이스가 사후관리 범위로 정리되면서 그 단계가 없어졌다. 없는 단계를 채우면
