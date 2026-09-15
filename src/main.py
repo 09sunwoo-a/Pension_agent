@@ -105,7 +105,7 @@ pension_agent 의 `log.info` 는 **어디에도 나가지 않는다** — 행내
 에이전트 안에서 일어난 일(도구 실행 결과 · 연계 실행 결과 · 검증 게이트 · 판정)은 `[agent]`
 로거의 «상태» 줄로 찍힌다 — observability.score() 가 Langfuse 활성 여부와 무관하게 남기고,
 여기서 연 request_id 컨텍스트로 같은 요청 id 가 붙는다. 직원이 받는 답이 실패·축소로 바뀐
-사실만 WARNING 이다(observability._state_level).
+사실만 WARNING 이다(observability._trace._state_level).
 """
 
 from __future__ import annotations

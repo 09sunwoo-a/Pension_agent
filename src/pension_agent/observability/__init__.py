@@ -47,21 +47,15 @@ SaaS 로 나간다. 그때 정해야 할 것은 `docs/PRODUCTION_RISKS.md` §9 �
 
 from __future__ import annotations
 
+# 패키지 밖에서 부르는 이름만 재노출한다 — 상수(MAX_QUEUE 등)와 내부 함수는 _conf·_trace·_transport 가 갖는다.
 from pension_agent.observability._conf import (  # noqa: F401
-    DEFAULT_HOST,
-    INGESTION_PATH,
-    MAX_QUEUE,
-    BATCH_SIZE,
-    FLUSH_INTERVAL,
     conf,
     enabled,
     reset,
 )
 from pension_agent.observability._trace import (  # noqa: F401
-    STATE_COMMENT_MAX,
     request_id,
     current_request_id,
-    _state_level,
     Trace,
     trace,
     current_trace_id,

@@ -43,9 +43,9 @@ check(not any("sys.path" in (f.read_text(encoding="utf-8"))
 # 간선 하나 때문에 공용 모듈에 순환 회피용 지연 임포트가 늘었다. 공용 카드 지식베이스를
 # knowledge/kb.py 로 옮겨 없앤 간선이 다시 생기지 않게 여기서 고정한다.
 _PKG = Path(pension_agent.__file__).parent
-_ONE_WAY = (*_PKG.glob("*.py"), *_PKG.joinpath("knowledge").rglob("*.py"),
-            *_PKG.joinpath("market").rglob("*.py"), *_PKG.joinpath("mcp").rglob("*.py"),
-            *_PKG.joinpath("strategy_agent").rglob("*.py"))
+# consult_agent 를 뺀 **전부**다 — 폴더를 손으로 나열하면 새 패키지(observability/ 가 그랬다)가
+# 검사 밖에 남는다. 함수 안의 지연 임포트도 잡는다: 방향이 거꾸로면 지연이어도 거꾸로다.
+_ONE_WAY = sorted(f for f in _PKG.rglob("*.py") if "consult_agent" not in f.relative_to(_PKG).parts)
 _back_edges = sorted(
     str(f.relative_to(_PKG)) for f in _ONE_WAY
     if any(line.lstrip().startswith(("from pension_agent.consult_agent", "import pension_agent.consult_agent"))
@@ -85,7 +85,7 @@ check(not _dupes, "본문이 같은 함수가 서로 다른 모듈에 없다 —
 # ─────────────────────────────────────────────────────────────
 # 최상단 공용 모듈의 층 — 폴더로 묶지 않는 대신 표로 고정한다 (pension_agent/__init__.py 지도)
 #
-# 아홉 모듈은 각자 책임이 하나라 평평하게 두기로 했다(2026-09-15). 층이 문서에만 있으면
+# 최상단 모듈·패키지는 각자 책임이 하나라 평평하게 두기로 했다(2026-09-15). 층이 문서에만 있으면
 # 새 임포트 한 줄이 조용히 무너뜨린다 — env 가 llm 을 모듈 수준에서 임포트하는 순간 순환이고,
 # 그 다음은 «순환 회피용 지연 임포트»가 늘어나는 길이다(env.py 머리말이 그 이유로 갈라졌다).
 # 표는 **모듈 수준** 임포트만 본다(함수 안의 지연 임포트는 그 함수의 결정이다). 간선을
@@ -108,12 +108,28 @@ _ALLOWED_EDGES: dict[str, set[str]] = {
 
 def _unit_files(name: str) -> list[Path]:
     p = _PKG / f"{name}.py"
-    return [p] if p.exists() else sorted((_PKG / name).glob("*.py"))
+    return [p] if p.exists() else sorted((_PKG / name).rglob("*.py"))     # 하위 패키지까지
+
+def _is_main_guard(node) -> bool:
+    """`if __name__ == "__main__":` — 모듈로 임포트될 때는 돌지 않으므로 임포트 시점이 아니다."""
+    return (isinstance(node, _ast.If) and isinstance(node.test, _ast.Compare)
+            and isinstance(node.test.left, _ast.Name) and node.test.left.id == "__name__")
+
+def _import_time_nodes(tree):
+    """임포트 시점에 실행되는 구문만 — 함수·클래스 본문과 __main__ 가드는 빼고, 모듈 수준의
+    try/if/with 안은 포함한다(거기 있는 임포트도 적재 때 돈다)."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef, _ast.ClassDef)) or _is_main_guard(node):
+            continue
+        yield node
+        stack.extend(_ast.iter_child_nodes(node))
 
 def _module_level_edges(name: str) -> set[str]:
     out: set[str] = set()
     for f in _unit_files(name):
-        for node in _ast.parse(f.read_text(encoding="utf-8")).body:      # 모듈 수준만
+        for node in _import_time_nodes(_ast.parse(f.read_text(encoding="utf-8"))):
             if isinstance(node, _ast.ImportFrom) and node.module and node.module.startswith("pension_agent"):
                 parts = node.module.split(".")
                 out |= {a.name for a in node.names} if len(parts) == 1 else {parts[1]}

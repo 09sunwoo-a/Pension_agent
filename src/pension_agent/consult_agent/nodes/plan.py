@@ -93,7 +93,7 @@ def _record_tool(name: str, query: str, outcome: str, reason: str = "") -> None:
     """도구 실행 한 건을 «코드가 아는 사실»로 남긴다(observability.score → Langfuse + 로그).
 
     장부(`steps`)는 이 턴의 답을 만드는 재료이고, 이것은 나중에 되짚는 기록이다. 고장(failed)만
-    WARNING 으로 찍힌다(observability._state_level).
+    WARNING 으로 찍힌다(observability._trace._state_level).
     """
     preview = " ".join(query.split())
     if len(preview) > _QUERY_PREVIEW:
