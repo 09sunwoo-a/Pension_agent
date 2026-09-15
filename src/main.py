@@ -498,12 +498,19 @@ async def chat(req: ChatRequest, request: Request):
         def run() -> dict[str, Any]:
             try:
                 with observability.request_id(rid):
-                    return consult_graph.ask(
+                    result = consult_graph.ask(
                         question, history,
                         customer_id=args["customer_id"], session_id=session_id,
                         x_client_user=x_client_user, employee_id=args["employee_id"],
                         on_progress=on_progress,
                     )
+                # 맥락은 **여기서** 기억한다 — 답을 다 흘려보낸 뒤가 아니라. 호출자가 중간에
+                # 끊으면(게이트웨이 타임아웃·취소) 아래 generate 는 더 돌지 않지만 이 스레드는
+                # 끝까지 돈다. 그때도 다음 턴이 이 턴을 이어받아야 한다 — 상담이력은 ask() 안에서
+                # 이미 남았는데 맥락(연계 제안·되묻기)만 빠지면 다음 «네»가 갈 곳을 잃는다.
+                _remember(result)
+                _log_done(result)
+                return result
             finally:
                 # 성공이든 실패든 반드시 닫는다 — 안 닫으면 아래 루프가 영원히 기다린다.
                 loop.call_soon_threadsafe(lines.put_nowait, DONE)
@@ -513,6 +520,14 @@ async def chat(req: ChatRequest, request: Request):
         # 넘기므로 x-client-user 도 스레드 안까지 따라간다.
         task = asyncio.create_task(asyncio.to_thread(run))
         finished = False
+        closed = False
+
+        def _settle(t: "asyncio.Task[dict[str, Any]]") -> None:
+            # 호출자가 끊긴 뒤 ask() 가 죽으면 아무도 await 하지 않는다 — 여기서 거둬 남긴다.
+            if closed and not t.cancelled() and t.exception() is not None:
+                log.error("[%s] 연결이 끊긴 뒤 ask() 실패: %r", rid, t.exception())
+
+        task.add_done_callback(_settle)
         try:
             while True:
                 item = await lines.get()
@@ -530,13 +545,12 @@ async def chat(req: ChatRequest, request: Request):
                 finished = True
                 return
 
-            _remember(result)
             for ev in _turn_events(result):
                 yield _event(ev)
             finished = True
-            _log_done(result)
         finally:
             if not finished:
+                closed = True
                 # 호출자가 다 받기 전에 끊었다(게이트웨이 타임아웃 등). 접속 로그에는
                 # 200 으로만 남아 «답이 비었다»와 구분이 안 되므로 여기서 갈라 찍는다.
                 log.warning("[%s] 응답을 다 보내기 전에 연결이 끊겼다 %.1f초",
