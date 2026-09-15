@@ -192,7 +192,7 @@ def check_adequacy_and_shape() -> int:
        값을 물었는데 화법이 나오면 답이 아니다.
     """
     from pension_agent.consult_agent.nodes import plan as P
-    from pension_agent.consult_agent.tools import procedure_qa
+    from pension_agent.consult_agent.evidence import procedure_qa
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
 
     ok = 0

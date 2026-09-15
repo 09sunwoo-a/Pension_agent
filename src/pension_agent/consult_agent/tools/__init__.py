@@ -35,6 +35,13 @@ Evidence 또는 None. None 은 "이 도구로는 근거를 못 찾았다"는 뜻
 시도하거나 원장이 빈 채로 끝낸다(→ 정직한 '없음' 답변). 도구가 억지로 뭔가 만들어내는
 경로는 두지 않는다.
 
+━━ 이 폴더에 있는 것 ━━
+도구 함수 모듈(cards·market·briefing·history·pitch·playbook·suitability·outreach·targets·dates·
+tax_credit·answered)과 도구 규약(base), 그리고 도구 **위에서** 도는 둘 — combine(여러 도구의
+근거 결합)·adequacy(고른 근거가 질문에 답이 되는가). 도구가 **쓰는** 것(검색·원장 규약·검사)은
+`evidence/` 에 있고 이 머리말이 그중 몇 이름(pick·ledger_*·source_lines…)을 재노출한다 —
+테스트·디버그 실행기가 `tools.X` 로 갈아끼우는 후크라서다. 새 코드는 소유자에서 직접 가져온다.
+
 **도구가 죽은 것은 «못 찾았다»가 아니다.** 세 번째 결과가 `ToolFailure` 다(`base.py`) —
 확인한 0건과 확인하지 못한 것은 다른 사건이고, 뒤를 앞으로 접으면 지식베이스에 있는 자료를
 «없습니다»로 답하게 된다(§11 이 LLM 미연결에 대해 막는 것과 같은 사고). `run()` 이 그
@@ -45,15 +52,17 @@ from __future__ import annotations
 
 from pension_agent import observability
 from pension_agent.consult_agent import progress
-from pension_agent.consult_agent.select import llm_pick, pick  # noqa: F401 — 후크(머리말)
+from pension_agent.consult_agent.evidence.select import llm_pick, pick  # noqa: F401 — 후크(머리말)
 from pension_agent.consult_agent.state import KB, AgentState  # noqa: F401 — 후크(머리말)
 from pension_agent.knowledge.kb import retrieve  # noqa: F401 — 후크(머리말)
 from pension_agent.llm import LLMError, generate  # noqa: F401 — 후크(머리말)
 
 from pension_agent.consult_agent.tools.base import (  # noqa: F401
-    Evidence,
     Tool,
     ToolFailure,
+)
+from pension_agent.consult_agent.evidence.record import (  # noqa: F401
+    Evidence,
     _clean,
     _ev,
     _scope,
@@ -159,7 +168,7 @@ from pension_agent.consult_agent.tools.answered import (  # noqa: F401
 from pension_agent.consult_agent.tools.combine import (  # noqa: F401
     evidence_from_cards,
 )
-from pension_agent.consult_agent.tools.ledger import (  # noqa: F401
+from pension_agent.consult_agent.evidence.ledger import (  # noqa: F401
     CAUTION,
     GROUND,
     ledger_marks,

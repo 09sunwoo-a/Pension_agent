@@ -30,9 +30,10 @@ def check_prompt_is_quotable() -> int:
 
     **짝으로 잰다.** 넓힌 쪽만 재면 헐거워진 것을 못 잡는다.
     """
-    from pension_agent.consult_agent import guard, kb_index, tools
+    from pension_agent.consult_agent import tools
+    from pension_agent.consult_agent.evidence import guard, kb_index
     from pension_agent.consult_agent.nodes import plan as PLAN
-    from pension_agent.consult_agent.tools import facts_qa
+    from pension_agent.consult_agent.evidence import facts_qa
     from pension_agent.consult_agent.state import KB
     from pension_agent.verify import verify_texts
 
@@ -139,7 +140,7 @@ def check_product_advice() -> int:
     ③ 상품명 정규식이 문장을 삼켜 **실재 상품과 지어낸 상품을 한 이름으로** 붙였다.
     ④ 적합성 게이트가 이미 계산해둔 «허용 범위»를 부를 도구가 대화형에 없었다.
     """
-    from pension_agent.consult_agent import kb_index
+    from pension_agent.consult_agent.evidence import kb_index
     from pension_agent.consult_agent.prompts import ANSWER_SHAPES, COMPOSE_SYSTEM
     from pension_agent.consult_agent.state import KB
     ok = 0
@@ -654,7 +655,7 @@ def check_table_row_names() -> int:
     이름을 못 알아본 것은 판정 불가이지 위반이 아니다(§6). 별칭은 «말한 행»을 늘리는
     쪽이라 판정을 좁히기만 한다 — 오짝 검출은 그대로여야 한다(아래 ③④).
     """
-    from pension_agent.consult_agent.tools import relations
+    from pension_agent.consult_agent.evidence import relations
     from pension_agent.consult_agent.state import KB as _KB
     ok = 0
     card = next((c for c in _KB.cards if c["id"] == "fact.k04.f50"), None)
@@ -883,7 +884,7 @@ def check_labeled_pairs() -> int:
       ③ 이름이 재료의 다른 자리에도 나오는 항목은 아예 판정하지 않는다(판정 불가)
     """
     ok = 0
-    from pension_agent.consult_agent.tools import relations as REL
+    from pension_agent.consult_agent.evidence import relations as REL
     from pension_agent.strategy_agent import customer as CUST
 
     evs = {p.id: tools.TOOLS["customer"].run({"customer_id": p.id}, "확인") for p in CUST.PERSONAS}
@@ -966,8 +967,8 @@ def check_followups() -> int:
     그리고 문구가 매번 같지 않다는 것(회전·슬롯)이다.
     """
     from pension_agent.knowledge import kb as KBMOD
-    from pension_agent.consult_agent import suggest
-    from pension_agent.consult_agent.tools import facts_qa
+    from pension_agent.consult_agent.effects import suggest
+    from pension_agent.consult_agent.evidence import facts_qa
     from pension_agent.strategy_agent.customer import PERSONAS
 
     def ev(tool: str, title: str | None = None) -> dict:

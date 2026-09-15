@@ -34,7 +34,9 @@ from pension_agent import llm, observability, note
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
-from pension_agent.consult_agent import guard, progress, suggest, tools
+from pension_agent.consult_agent import progress, tools
+from pension_agent.consult_agent.evidence import guard
+from pension_agent.consult_agent.effects import suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer

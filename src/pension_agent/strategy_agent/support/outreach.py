@@ -1,7 +1,7 @@
 """⑨ 고객님께 안내해보세요 — 고객에게 실제로 나가는 콘텐츠.
 
 여기 있는 자산만 LMS 발송 대상이 된다. 더미 콘텐츠의 발송은 텍스트 표시가 아니라
-`consult_agent/actions.py::open_lms_screen()` 의 게이트가 막는다(CLAUDE.md 5번).
+`consult_agent/effects/actions.py::open_lms_screen()` 의 게이트가 막는다(CLAUDE.md 5번).
 
 ━━ 콘텐츠 DB 는 「무엇이 열려 있나」만 말한다 ━━
 `data/assets.json` 의 세미나·이벤트 9건은 연금사업부가 확인해준 「IRP 세미나·이벤트 DB」에서
@@ -185,7 +185,7 @@ def relevant_outreach(situations: list[dict] | None = None,
     고객에게 보낼 만한 것이 있는가»를 묻는 쪽은 그 폴백을 세면 안 된다 — 어느 고객에게나
     항상 참이 되어 «조건이 맞을 때만»이라는 말이 없어진다.
 
-    추천 질문 칩(consult_agent/suggest.py)이 이 판정을 쓴다. LLM 을 부르지 않는다.
+    추천 질문 칩(consult_agent/effects/suggest.py)이 이 판정을 쓴다. LLM 을 부르지 않는다.
     """
     wanted = {c for s in (situations or []) for c in (s.get("conds") or [])}
     if not wanted:

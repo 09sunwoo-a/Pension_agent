@@ -36,8 +36,9 @@ def print(*args, **kwargs):  # noqa: A001 — 이 모듈 안에서만 가리는 
             _TALLY["fail"] += 1
     _stdout_print(*args, **kwargs)
 
-from pension_agent.consult_agent import select, tools
-from pension_agent.consult_agent.tools import pitch_slots
+from pension_agent.consult_agent import tools
+from pension_agent.consult_agent.evidence import select
+from pension_agent.consult_agent.evidence import pitch_slots
 from pension_agent.verify import verify_texts
 
 _vt = verify_texts

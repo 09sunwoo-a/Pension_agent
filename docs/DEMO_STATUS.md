@@ -9,7 +9,7 @@
 ## 1. 안내 콘텐츠 — 시연용 9건 · 게이트가 막는 더미 0건
 
 ⑨ 「고객님께 안내해보세요」의 이벤트·세미나다. 출처가 있는 콘텐츠(`source`)는
-`dummy` 를 달지 않으므로 `consult_agent/actions.py::open_lms_screen()` 게이트가 막지 않고,
+`dummy` 를 달지 않으므로 `consult_agent/effects/actions.py::open_lms_screen()` 게이트가 막지 않고,
 발송 화면 연계까지 이어진다. **일정·링크·수신거부 번호는 시연을 위해 구성된 값이다** —
 화면과 발송문에는 그 표시가 없으므로(발표용 데모라 딱지를 붙이지 않는다) 여기가
 유일한 기록이다. 실제 콘텐츠 캘린더가 붙으면 이 표가 그대로 실제 일정으로 바뀐다.
@@ -122,8 +122,8 @@
 | customer.PERSONAS | 12명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx 9케이스 + scripts/demo_cases.json 3명) | 시연용 목업. scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체 |
 | data/portfolios.json | 1건 | 채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체. 교체할 원문은 05_시황_상품_기반지식/02_상품/01_퇴직연금펀드_포트폴리오 다(대화형에는 market 카드로 이미 적재돼 있다). 옮기려면 그 문서의 펀드 40여 종을 먼저 product 레코드로 저작해야 한다 — allocation[].product_id 가 그것을 참조하고, 적합성 게이트가 타입드 필드로 비교하기 때문이다 |
 | engine.TOP_N / ALT_N | 1 / 1 | 제안 1개 + 예비 1개 (07_에이전트_기능정의/01 ① 4) |
-| consult_agent.screens.MODE | D (개발) | 단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, 화면번호 자체는 지식베이스 절차 카드에서 온다 |
-| consult_agent.screens.link() 파라미터 | scnNo · mode | 규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 consult_agent/screens.py 의 조립부에 추가 |
+| consult_agent.effects.screens.MODE | D (개발) | 단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, 화면번호 자체는 지식베이스 절차 카드에서 온다 |
+| consult_agent.effects.screens.link() 파라미터 | scnNo · mode | 규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 consult_agent/effects/screens.py 의 조립부에 추가 |
 
 ## 6. 기준시점 미기재 사실 — 0 / 64건
 

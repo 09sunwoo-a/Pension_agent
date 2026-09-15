@@ -6,11 +6,11 @@ tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말
 from __future__ import annotations
 
 from pension_agent.knowledge import kb as KBMOD
-from pension_agent.consult_agent.tools import pitch_slots as PITCHMOD
+from pension_agent.consult_agent.evidence import pitch_slots as PITCHMOD
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.llm import LLMError
 from pension_agent.consult_agent.tools.adequacy import _adopt
-from pension_agent.consult_agent.tools.base import Evidence
+from pension_agent.consult_agent.evidence.record import Evidence
 
 
 # 문제상황에 걸린 화법 — 화면 ⑥⑦⑧ 과 같은 후보군

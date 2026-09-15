@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sys
 
-from pension_agent.consult_agent import render
+from pension_agent.consult_agent.effects import render
 from pension_agent.consult_agent.graph import ask
 from pension_agent.session_store import scrub_text
 

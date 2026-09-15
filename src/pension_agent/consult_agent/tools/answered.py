@@ -49,11 +49,11 @@ from __future__ import annotations
 
 import re
 
-from pension_agent.consult_agent import marks
+from pension_agent.consult_agent.evidence import marks
 from pension_agent.consult_agent.state import KB, AgentState, Turn, numbered_history
-from pension_agent.consult_agent.tools.base import Evidence, _ev
+from pension_agent.consult_agent.evidence.record import Evidence, _ev
 from pension_agent.consult_agent.tools.history import _strip_devices
-from pension_agent.consult_agent.tools.ledger import GROUND
+from pension_agent.consult_agent.evidence.ledger import GROUND
 
 #: 출처가 하나도 남지 않은 답변(메타 안내·연계 URL 등)을 재료로 실을 때의 출처 표기.
 #: 지어내지 않는다 — «이번 상담에서 이 에이전트가 한 답변»이라는 사실 하나다.

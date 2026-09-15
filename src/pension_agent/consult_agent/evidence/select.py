@@ -1,6 +1,6 @@
 """카드 선택 — LLM 이 버킷 → 카드 2단으로 고르고, 못 고르면 n-gram 으로 물러선다.
 
-`tools/pitch_slots.py`(당시 nodes/pitch.py) 안에 있던 llm_select 본체를 여기로 옮겼다. 화법 전용이었을 때는 노드
+`evidence/pitch_slots.py`(당시 nodes/pitch.py) 안에 있던 llm_select 본체를 여기로 옮겼다. 화법 전용이었을 때는 노드
 안에 있어도 됐지만, 도구 루프가 종류별 도구(팩트·절차·세그먼트·방법론·현장팁)를 갖게
 되면서 "어떤 종류에서든 카드를 고른다"가 공용 기능이 됐다. 종류는 인자로 받는다.
 
@@ -26,7 +26,7 @@ LLM 없이도 재료가 모이는 것처럼 보였다. 그건 §11 이 막으려
 from __future__ import annotations
 
 
-from pension_agent.consult_agent.kb_index import index_catalog, index_slice, whole_index
+from pension_agent.consult_agent.evidence.kb_index import index_catalog, index_slice, whole_index
 from pension_agent.knowledge.kb import retrieve
 from pension_agent.consult_agent.prompts import BUCKET_PROMPT, SELECT_PROMPT
 from pension_agent.consult_agent.state import KB

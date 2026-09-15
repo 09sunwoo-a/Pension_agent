@@ -19,7 +19,7 @@
 
 층은 세 겹이다 — 단일 출처(config·clock) → 실행 환경(env ← observability ← llm) → 기록·행위
 (session_store·note·mcp). 승낙 뒤 실행하는 행위의 게이트(발송 화면·쪽지)는 consult 만 부르므로
-`consult_agent/actions.py` 에 있다. 공용 모듈 사이의 의존은 `tests/infra/s03_boundaries.py` 의 표가
+`consult_agent/effects/actions.py` 에 있다. 공용 모듈 사이의 의존은 `tests/infra/s03_boundaries.py` 의 표가
 고정한다.
 
 ## knowledge/ — 데이터 접근 계층

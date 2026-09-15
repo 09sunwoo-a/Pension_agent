@@ -14,7 +14,7 @@ from pension_agent import config
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.nodes import plan
-from pension_agent.consult_agent.tools import pitch_slots
+from pension_agent.consult_agent.evidence import pitch_slots
 
 from tests.consult._common import (  # noqa: A001 — 집계용 print
     CASES, _TALLY, _stdout_print, print, stub_plan_pitch, stub_slots, stub_talk, stub_understand,

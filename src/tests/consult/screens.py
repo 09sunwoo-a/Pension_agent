@@ -208,7 +208,7 @@ def check_screen_link() -> int:
        오간 뒤의 "네"도 몇 턴 전 제안을 실행할 수 있었다. 직원이 잊은 제안이 뒤늦게
        실행되는 것은 승낙이 아니다.
     """
-    from pension_agent.consult_agent import screens
+    from pension_agent.consult_agent.effects import screens
     from pension_agent.consult_agent.nodes import act
     from pension_agent.consult_agent.state import KB
     from pension_agent import session_store
@@ -374,7 +374,7 @@ def check_screen_registry() -> int:
     화면번호는 직원이 가장 자주 묻는 것 중 하나다(07/01 "화면번호·처리 순서까지 담는다").
     옮겨 적기만 하면 되는 재료가 적재되지 않은 채로 있었던 것이다.
     """
-    from pension_agent.consult_agent.kb_index import buckets
+    from pension_agent.consult_agent.evidence.kb_index import buckets
     from pension_agent.consult_agent.state import KB
 
     ok = 0

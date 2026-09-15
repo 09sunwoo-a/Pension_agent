@@ -50,6 +50,7 @@ from pension_agent.consult_agent.prompts import (
     COMPOSE_RETRY_BLOCK, MEMO_OTHER_GUIDE, MEMO_PROMPT, MEMO_SELF_GUIDE, MEMO_SYSTEM,
     MEMO_TABLE_BLOCK,
 )
+from pension_agent.consult_agent import state
 from pension_agent.consult_agent.state import AgentState, format_history
 from pension_agent.llm import LLMError, generate, json_object
 
@@ -76,10 +77,11 @@ SCREENED = ("쪽지 본문이 근거를 벗어나서 보내지 않았어요. 걸
 TOO_LONG = "쪽지 본문이 길이 상한({limit:,}자)을 넘어서 보내지 않았어요."
 
 #: 화면에서 쪽지 초안을 감싸는 코드블록 펜스(act.offer). 초안의 일부가 아니라 **화면 장치**다 —
-#: 나가는 본문(`Draft.html`)에는 없고, 세션 기록에서 재료를 만들 때는 뗀다(tools._strip_devices).
+#: 나가는 본문(`Draft.html`)에는 없고, 세션 기록에서 재료를 만들 때는 뗀다(tools/history._strip_devices).
 #: 감싸는 이유는 «여기까지가 쪽지»를 직원이 화면에서 가릴 수 있어야 하기 때문이다 — 초안이
 #: 답변 자리를 통째로 차지하므로, 표시가 없으면 에이전트가 하는 말과 구별되지 않는다.
-FENCE = "```"
+#: 값은 state.py 가 갖는다(떼는 쪽 tools/ 가 effects/ 를 임포트하지 않도록). 여기서 재노출한다.
+FENCE = state.FENCE
 
 
 @dataclass(frozen=True)

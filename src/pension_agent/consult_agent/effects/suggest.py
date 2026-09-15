@@ -344,7 +344,7 @@ def _has_material(lead: str, probes: tuple[str, ...], state: dict) -> bool:
     """
     from pension_agent.knowledge import kb as KBMOD  # noqa: PLC0415
     from pension_agent.consult_agent import tools  # noqa: PLC0415
-    from pension_agent.consult_agent.tools import facts_qa  # noqa: PLC0415
+    from pension_agent.consult_agent.evidence import facts_qa  # noqa: PLC0415
     from pension_agent.consult_agent.state import KB  # noqa: PLC0415
 
     try:

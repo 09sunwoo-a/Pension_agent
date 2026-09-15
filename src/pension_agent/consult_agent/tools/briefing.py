@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from pension_agent.knowledge import kb as KBMOD
 from pension_agent.consult_agent.state import KB, AgentState
-from pension_agent.consult_agent.tools.base import Evidence, _ev
+from pension_agent.consult_agent.evidence.record import Evidence, _ev
 
 
 def _customer(state: AgentState, query: str) -> Evidence | None:

@@ -41,44 +41,20 @@ python -m pension_agent.knowledge.kb                # 지식베이스 점검 리
 
 ## 파일 구조
 
-```
-consult_agent/
-├── CLAUDE.md           대화형 기준서 — 있어야 할 동작과 구현 gap 목록. 구현과 어긋나면 문서가 기준
-├── graph.py            그래프 조립 · ask() (customer_id 가 있는 턴을 session_store 에 기록)
-├── __main__.py         REPL — python -m pension_agent.consult_agent -c <KB-PIN>
-├── state.py            AgentState/Turn · 대화이력 포맷 · 공용 지식베이스(KB)
-├── context_store.py    대화 맥락(history) 보관 — 프로세스 메모리, (x_client_user, session_id) 키. 게이트웨이가 history 를 못 넘기는 경로용
-├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
-├── kb_index.py         LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
-├── tools/              도구 패키지 — 근거를 **찾는** 쪽. LLM 이 계획 루프에서 고른다
-│   ├── __init__.py         TOOLS 레지스트리(능력 표면 · 도구 20종) · run() (ToolFailure 경계)
-│   ├── base.py · ledger.py 근거(Evidence) 규약 · 원장 helper
-│   ├── relations.py        관계 기반 점검 — 값–조건 오짝 · 알려진 오답 대조 (§6). base·cards 와 nodes/plan 의 compose 게이트가 쓴다
-│   ├── cards · market · briefing · history · pitch · playbook · suitability · outreach · targets · dates · tax_credit · answered   도구별 모듈
-│   ├── adequacy.py         적합성 게이트(fits_question) — 고른 근거가 질문에 답이 되는가
-│   ├── combine.py          여러 도구의 근거 결합
-│   ├── facts_qa · procedure_qa · segment_qa   fact·procedure·segment 도구의 검색·근거 블록 조립
-│   └── pitch_slots.py      화법 검색 전용 슬롯 분해 (tools/pitch·playbook 이 부른다)
-├── actions.py          행위 레지스트리(ACTIONS) — 승낙 뒤 코드가 실행하는 것(발송 화면 게이트 · 쪽지 발송). 흔적을 **남기는** 쪽, LLM 이 고르지 않는다 (§10)
-├── select.py           카드 선택 — LLM 버킷→카드 2단, LLM 이 0건일 때만 n-gram (종류 무관)
-├── guard.py            「하지 말 것」 — 지식베이스에 있는 금지 문장만 띄운다
-├── marks.py            재료 성격 표시 — 신뢰 등급 · 내부용 주의 (§7)
-├── screens.py          화면 연계 — mystar-link:// 딥링크 조립 · 발송 화면번호 조회 (§10). 화면번호는 KB 가 갖는다
-├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../note.py) (§10)
-├── suggest.py          추천 질문 칩 — 지난 상담 · 열린 세미나가 있는 고객에게만
-├── render.py           답변 + 출처 블록을 텍스트 한 덩어리로 — CLI(__main__)가 쓴다. main.py 는 이벤트로 따로 내보낸다
-├── prompts/            LLM 프롬프트 템플릿 (노드와 같은 이름의 모듈 9개 · __init__ 이 재노출)
-├── progress.py         진행 표시 — 답변이 만들어지는 동안 무엇을 하는 중인지 (문구는 코드 소유)
-└── nodes/
-    ├── understand.py       의도분류 (도메인 어휘 없는 라우팅 전용, 실패하면 답하지 않는다)
-    ├── plan.py             계획 루프 — plan_step(도구 선택·실행) / compose(결합·검증) / llm_down
-    ├── answer.py           형태 판정과 답변 작성을 동시에 돌리고 하나를 고른다
-    ├── clarify.py          형태 판정 — 답한다·전제를 밝힌다·되묻는다·없다 (§5)
-    ├── meta.py             메타 질문("뭘 도와줄 수 있어?") 응답 노드
-    ├── lms.py              LMS 화면 연계 요청 — 보내지 않고 발송 화면을 제안한다
-    ├── correction.py       브리핑 수정 요청 — 편집 가능 필드만, 이번 범위는 감사로그까지
-    └── act.py              화면 연계 제안(offer)·확인 연계(confirm_action)
-```
+층은 넷이고 방향은 한쪽이다 — `evidence/` ← `tools/` ← `effects/` ← 그래프(`nodes/`·`graph.py`).
+아래 층은 위 층을 임포트하지 않는다(`tests/infra/s03_boundaries.py` 가 고정). 파일마다의
+한 줄 설명은 각 폴더의 `__init__.py` 머리말에 있다.
+
+| 자리 | 무엇 | 파일 |
+|---|---|---|
+| `graph.py` `state.py` `routing.py` `context_store.py` `__main__.py` | 그래프 뼈대 — LangGraph 조립·`ask()` · 상태·대화이력 포맷 · 분기 표 · 게이트웨이용 맥락 보관 · REPL | 5 |
+| `nodes/` | 그래프 노드만 — understand · plan · answer(+clarify) · meta · lms · correction · act | 8 |
+| `prompts/` | LLM 프롬프트 문자열 — 노드와 같은 이름의 모듈로 나눠 둔다 | 10 |
+| `tools/` | **LLM 이 계획 루프에서 고르는 도구 20종.** `__init__` 이 레지스트리(`TOOLS`)이자 능력 표면. 도구 규약 `base`(Tool·ToolFailure), 도구 위에서 도는 `combine`(근거 결합)·`adequacy`(적합성 게이트)도 여기 | 16 |
+| `evidence/` | 도구가 근거를 **찾고**(kb_index·select·*_qa·pitch_slots·guard) **원장 항목으로 맞추고**(record·ledger) 답변을 **대조하는**(relations·marks) 것. 도구가 아니고, 도구를 임포트하지 않는다 | 12 |
+| `effects/` | 답변 뒤·그래프 밖 — actions(승낙 뒤 행위 게이트) · memo(쪽지 초안) · screens(딥링크) · suggest(추천 칩) · render(텍스트 출력) | 5 |
+| `progress.py` | 진행 표시 — nodes·tools 가 함께 쓰는 가로지르는 모듈이라 최상위 | 1 |
+| `CLAUDE.md` | 대화형 **기준서** — 있어야 할 동작과 구현 gap 목록. 구현과 어긋나면 문서가 기준. 코드를 파악할 때가 아니라 **동작을 바꿀 때** 해당 절을 읽는다 | |
 
 지식 카드는 이 폴더가 아니라 `../knowledge/data/` 에 있다 — strategy_agent 도 함께 읽는
 공용 자산이라 한쪽 에이전트가 소유하지 않는다(`kb_*.json` 은 `scripts/kb_build` 생성물,

@@ -9,7 +9,7 @@ from __future__ import annotations
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.nodes import plan, understand
-from pension_agent.consult_agent.tools import pitch_slots
+from pension_agent.consult_agent.evidence import pitch_slots
 from pension_agent.llm import LLMError
 from pension_agent.verify import numbers, verify_texts
 
@@ -121,7 +121,7 @@ def check_miss_recovery() -> int:
        알 수 없다 — 진단이 화면에서 끝나야 한다.
     """
     from pension_agent.consult_agent.nodes import plan as P
-    from pension_agent.consult_agent.tools import procedure_qa
+    from pension_agent.consult_agent.evidence import procedure_qa
 
     ok = 0
 
@@ -413,7 +413,7 @@ def check_tool_loop() -> int:
     # 데이터를 고치며 비었고(build_kb 의 화면번호 추출), 화면을 묻는 질의는 화면번호가 있는
     # 카드를 앞세우므로(procedure_qa.search) 1위가 바뀌었다. 표시 복구를 보는 검사가 검색
     # 순위에 흔들리지 않게 한다 — 이 검사가 보는 것은 검색이 아니라 근거별 선별 복구다.
-    from pension_agent.consult_agent.tools import procedure_qa as _proc_qa
+    from pension_agent.consult_agent.evidence import procedure_qa as _proc_qa
     _proc_card = next(c for c in tools.KB.cards if c["id"] == "proc.041")   # 화면번호 + status=확인 필요
     _orig_proc_search = _proc_qa.search
     _proc_qa.search = lambda q, _c=_proc_card: [(2.0, _c)]
@@ -594,8 +594,8 @@ def check_atomic_spans() -> int:
         # ⑥ 도구가 실제로 스팬을 선언하는지 — 선언이 비면 집행할 것이 없다. fact 는 관계
         #    선언이 **없는** 카드를 집어 본다 — 선언이 있는 카드의 atomic 이 비는 것은
         #    정상이고(relations 가 대신한다), 그건 check_relations 가 잰다.
-        from pension_agent.consult_agent.tools import relations as REL
-        from pension_agent.consult_agent.tools import facts_qa as FQ
+        from pension_agent.consult_agent.evidence import relations as REL
+        from pension_agent.consult_agent.evidence import facts_qa as FQ
         from pension_agent.consult_agent.state import KB as _KB
         bare = next(x for x in _KB.facts.values() if not REL.declared(x) and x.get("value"))
         orig_fits, orig_search = tools.fits_question, FQ.search
