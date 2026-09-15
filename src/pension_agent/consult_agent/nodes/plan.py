@@ -287,7 +287,15 @@ def plan_step(state: AgentState) -> dict[str, Any]:
                 "llm_error": f"계획 응답을 JSON 으로 읽지 못함 — {raw.strip()[:120]!r}"}
 
     name = action.get("tool")
-    if action.get("done") or not isinstance(name, str) or name not in tools.TOOLS:
+    # 판정은 **이번 턴 카탈로그**(tools.usable)로 한다 — 등록 여부(tools.TOOLS)가 아니다.
+    # 카탈로그에서 뺀 도구는 이번 턴에 재료가 없는 도구다(고객 화면이 닫혀 있을 때의 고객
+    # 도구 · 다시 쓸 답변이 없을 때의 last_answer · 이번 턴에 죽은 도구). 그런데 계획
+    # 프롬프트 본문이 도구 이름을 규칙 안에 적고 있어(PLAN_PROMPT 「직원이 이전 답변을
+    # 가리키면 last_answer 를 부른다」) LLM 은 카탈로그에 없는 이름도 고른다. 등록 여부로만
+    # 거르면 그 호출이 실행돼 빈손으로 돌아오고, 같은 이름이 반복 차단에 걸릴 때까지 바퀴를
+    # 버린 뒤 «찾아본 곳: last_answer:[1]» 이 직원 화면에 나갔다(2026-09-15 케이스 12b).
+    # 카탈로그 밖 이름은 없는 도구와 같은 처분이다 — 실행하지 않고 재계획으로 넘긴다.
+    if action.get("done") or not isinstance(name, str) or name not in tools.usable(state):
         return {**alive, **_wrap_up(state, evidence, steps)}
 
     # 이 도구가 마지막이라고 말했으면 한 바퀴를 아낀다 — 재료 하나로 끝나는 질문
