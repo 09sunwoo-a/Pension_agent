@@ -28,7 +28,7 @@ from pension_agent import note
 from pension_agent import observability
 from pension_agent.consult_agent import memo, screens, tools
 from pension_agent.consult_agent.state import KB, AgentState
-from pension_agent.tools import MEMO_DEFAULT_TO, TOOL_REGISTRY
+from pension_agent.consult_agent.actions import ACTIONS, MEMO_DEFAULT_TO
 
 #: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
 _SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
@@ -414,7 +414,7 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 부탁해 주세요.",
                 "sources": [], "pending_action": None}
     to = pending.get("to") or MEMO_DEFAULT_TO
-    result = TOOL_REGISTRY["send_memo"](
+    result = ACTIONS["send_memo"](
         (pending.get("params") or {}).get("customer_id") or "", markup,
         title=title, recipients=ids, to=to,
         as_employee=note.employee_id(state.get("employee_id")))
@@ -476,7 +476,7 @@ def _link(pending: dict) -> dict[str, Any]:
         # 발송 화면으로 넘기는 문구는 코드가 한 가지를 거부한다 — 아직 실제 콘텐츠로
         # 확정되지 않은 더미 문구다. 화면을 열어 그 문구를 건네면 직원이 그대로 보낼 수
         # 있기 때문이고, 이 판정은 답변에 붙인 경고 문구가 아니라 코드가 한다(§10).
-        gate = TOOL_REGISTRY["open_lms_screen"](
+        gate = ACTIONS["open_lms_screen"](
             (pending.get("params") or {}).get("customer_id") or "", message)
         if gate["status"] == "blocked":
             observability.score("action_outcome", "blocked",

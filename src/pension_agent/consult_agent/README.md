@@ -46,7 +46,8 @@ consult_agent/
 ├── state.py            AgentState/Turn · 대화이력 포맷 · 공용 지식베이스(KB)
 ├── routing.py          INTENTS · 모든 분기(route_*) predicate — 상태만 보고 다음 노드를 고른다
 ├── kb_index.py         LLM 카드 선택용 계층 인덱스(버킷) · 프롬프트 컨텍스트 (적재·검색은 ../knowledge/kb.py)
-├── tools/              도구 패키지 — __init__ 레지스트리(능력 표면) · base 근거(Evidence) 규약 · ledger 원장 helper
+├── tools/              도구 패키지 — __init__ 레지스트리(능력 표면) · base 근거(Evidence) 규약 · ledger 원장 helper — 근거를 찾는 쪽
+├── actions.py          행위 레지스트리 — 승낙 뒤 코드가 실행하는 것(발송 화면 게이트 · 쪽지 발송) — 흔적을 남기는 쪽 (§10)
 │                       · 도구별 모듈(cards·market·briefing·history·pitch·playbook·suitability·outreach·targets·dates·tax_credit)
 ├── select.py           카드 선택 — LLM 버킷→카드 2단, LLM 이 0건일 때만 n-gram (종류 무관)
 ├── guard.py            「하지 말 것」 — 지식베이스에 있는 금지 문장만 띄운다

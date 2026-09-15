@@ -99,8 +99,7 @@ _ALLOWED_EDGES: dict[str, set[str]] = {
     "llm": {"env", "observability"},                       # 클라이언트가 관측을 부른다 — 반대는 순환
     "verify": {"clock"},                                   # 연도 없는 날짜를 «오늘 언저리»로 읽는다
     "session_store": {"config"},
-    "note": {"clock", "strategy_agent"},                   # 공용 → 에이전트 간선 ① 쪽지 본문의 타겟·잔여일수
-    "tools": {"session_store", "strategy_agent"},          # 공용 → 에이전트 간선 ② 발송 게이트의 자산 목록
+    "note": {"clock", "strategy_agent"},                   # 공용 → 에이전트 간선(유일) 쪽지 본문의 타겟·잔여일수
     "mcp": {"env", "note"},                                # 어댑터는 위층(note)의 발송 함수에 자기를 등록한다
     "market": set(),
     "knowledge": {"config", "market"},

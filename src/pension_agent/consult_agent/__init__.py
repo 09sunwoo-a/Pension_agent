@@ -3,8 +3,9 @@
     state.py     AgentState · 대화이력 · 공용 지식베이스(KB)
     routing.py   그래프 분기 표 (상태만 보고 다음 노드를 고른다)
     graph.py     그래프 조립 + 단발 진입점 ask()
-    kb.py        LLM 카드 선택용 계층 인덱스 · 프롬프트 컨텍스트 (적재·검색은 knowledge/kb.py)
-    tools/       도구 패키지 — 레지스트리(__init__) · 근거 규약(base) · 도구별 모듈 · 원장 helper(ledger)
+    kb_index.py  LLM 카드 선택용 계층 인덱스 · 프롬프트 컨텍스트 (적재·검색은 knowledge/kb.py)
+    tools/       도구 패키지 — 레지스트리(__init__) · 근거 규약(base) · 도구별 모듈 · 원장 helper(ledger). 근거를 **찾는** 쪽
+    actions.py   행위 레지스트리 — 승낙 뒤 코드가 실행하는 것(발송 화면 게이트 · 쪽지). 세상에 흔적을 **남기는** 쪽
     guard.py     「하지 말 것」 — 지식베이스에 있는 금지 문장만 띄운다
     prompts/     프롬프트 문자열 — 노드와 같은 이름의 모듈로 나눠 둔다 (문구만 고칠 때 로직을 건드리지 않도록 분리)
     nodes/       노드 구현 — understand · pitch · plan · drill · lms · correction · act · meta

@@ -461,7 +461,7 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
         body = str((llm.json_object(raw) or {}).get("body") or "").strip()
         # 예전에는 여기서 '[더미] ' 접두를 코드가 다시 붙였다. 지금은 붙이지 않는다 —
         # 발송문도 데모 산출물이라 딱지가 없어야 한다는 결정. 대신 보호막을 텍스트가
-        # 아니라 게이트로 옮겼다: pension_agent.tools.open_lms_screen() 이 dummy 자산의
+        # 아니라 게이트로 옮겼다: consult_agent/actions.py::open_lms_screen() 이 dummy 자산의
         # 문구를 발송 화면에 채우는 것을 거부한다. 접두는 LLM 이 지울 수 있지만
         # 게이트는 못 지운다.
         if body and engine.verify(body, facts,

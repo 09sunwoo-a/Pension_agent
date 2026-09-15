@@ -16,9 +16,8 @@
   검증
     verify.py          LLM 산출물의 재료 이탈 판정 — 두 에이전트 공통
 
-  기록·행위 — 되돌릴 수 없는 것의 게이트가 여기 있다
+  기록·행위 — 승낙 뒤 실행하는 행위의 게이트는 consult_agent/actions.py (부르는 쪽이 거기뿐이다)
     session_store.py   상담 세션·대화이력 (consult 가 쓰고 strategy 가 읽는다)
-    tools.py           외부 연동 레지스트리 (발송 화면 연계 등 — 되돌릴 수 없는 행위의 게이트)
     note.py            WorkB 쪽지의 꼴과 발송 (본문 표·마스킹·길이 상한·결과 판정)
     mcp/               행내 시스템 연동 — 서버 표·클라이언트·도구 어댑터(workb.py) (진단: python -m pension_agent.mcp)
 

@@ -34,7 +34,7 @@ def check_memo() -> int:
     from pathlib import Path
 
     from pension_agent import note, session_store
-    from pension_agent import tools as REG
+    from pension_agent.consult_agent import actions as REG
     from pension_agent.consult_agent import memo, prompts
     from pension_agent.consult_agent.nodes import act
     from pension_agent.consult_agent.nodes import clarify as CL
@@ -309,7 +309,7 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 요약 형태 요구가 항목 줄만 쓰게 하고 쪽지·발송 언급을 금지하며, 시스템이 무엇을 하는지는 적지 않는다")
     ok += hit
 
-    hit = ("send_memo" in REG.TOOL_REGISTRY and "쪽지로 보내줘" in prompts.ROUTE_PROMPT
+    hit = ("send_memo" in REG.ACTIONS and "쪽지로 보내줘" in prompts.ROUTE_PROMPT
            and prompts.MEMO_SELF_GUIDE != prompts.MEMO_OTHER_GUIDE)
     print(f"{'✓' if hit else '✗'} 발송이 레지스트리에 있고, 가이드라인이 받는 사람으로 갈린다")
     ok += hit

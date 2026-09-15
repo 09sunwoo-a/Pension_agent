@@ -1,7 +1,7 @@
 """⑨ 고객님께 안내해보세요 — 고객에게 실제로 나가는 콘텐츠.
 
 여기 있는 자산만 LMS 발송 대상이 된다. 더미 콘텐츠의 발송은 텍스트 표시가 아니라
-`pension_agent/tools.py::open_lms_screen()` 의 게이트가 막는다(CLAUDE.md 5번).
+`consult_agent/actions.py::open_lms_screen()` 의 게이트가 막는다(CLAUDE.md 5번).
 
 ━━ 콘텐츠 DB 는 「무엇이 열려 있나」만 말한다 ━━
 `data/assets.json` 의 세미나·이벤트 9건은 연금사업부가 확인해준 「IRP 세미나·이벤트 DB」에서

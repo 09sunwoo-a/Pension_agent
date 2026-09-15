@@ -1,4 +1,9 @@
-"""도구(tool) 레지스트리 — 대화형 에이전트(consult_agent)가 부르는 부수효과 함수들.
+"""행위(action) 레지스트리 — 직원이 승낙한 뒤 코드가 실행하는 부수효과 함수들.
+
+`tools/` 와 다르다. `tools/` 는 근거를 **찾아오는** 도구이고 LLM 이 고른다. 여기 있는 것은
+세상에 흔적을 남기는 **행위**이고 LLM 이 고르지 않는다 — 직원이 «네»라고 한 뒤 `nodes/act.py`
+가 이름을 박아 부른다(`ACTIONS["send_memo"]`). 예전에는 `pension_agent/tools.py` 였는데,
+부르는 코드가 consult_agent 뿐이라 여기로 옮겼다(2026-09-15).
 
 `open_lms_screen`·`register_consult_note` 는 아직 스텁이고 호출 사실만 세션이력에 남긴다.
 단말·CRM 연동이 붙으면 함수 **본문만** 교체한다 — 레지스트리 키와 시그니처는 그대로라
@@ -177,7 +182,7 @@ def send_memo(customer_id: str, text: str, *, title: str,
     return result
 
 
-TOOL_REGISTRY: dict[str, Callable[..., dict[str, Any]]] = {
+ACTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "open_lms_screen": open_lms_screen,
     "register_consult_note": register_consult_note,
     "send_memo": send_memo,
