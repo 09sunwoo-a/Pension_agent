@@ -171,6 +171,26 @@ LLM_FAILED = (
 )
 
 
+#: 답변 자리에 나가지만 **답변이 아닌** 안내문의 머리말 셋 — 찾아봤는데 없음(NO_EVIDENCE) ·
+#: 도구 고장(TOOL_FAILED) · LLM 장애(LLM_FAILED). 서식 자리(`{what}`·`{reason}`) 앞까지가
+#: 고정 문구라 그 앞부분으로 가린다.
+_NOTICE_HEADS = tuple(t.split("{", 1)[0] for t in (NO_EVIDENCE, TOOL_FAILED, LLM_FAILED))
+
+
+def is_failure_notice(answer: str | None) -> bool:
+    """이 답변이 위 안내문 중 하나인가.
+
+    진입점이 턴 기록의 `answer` 를 채울지 정할 때 쓴다(graph.ask). 되묻기·LLM 장애는 상태
+    키(`clarify`·`llm_error`)로 갈리지만 **근거 0건 안내와 도구 고장 안내는 상태에 표지가
+    없다** — 문장으로만 남는다. 그래서 그 둘이 «답변»으로 저장됐고, 다음 턴의 `last_answer`
+    가 그것을 다시 쓰는 재료로 실었다(2026-09-15 리허설 케이스 12c — 「근거를 찾지 못했다」는
+    안내문이 «이전 답변»이 되어, 지식베이스에 있는 ETF 화법 2장을 두고 "자료가 없어요"로
+    답했다). 안내문은 재료가 아니다 — 다시 쓰면 실패 안내가 답변처럼 나간다.
+    """
+    text = (answer or "").lstrip()
+    return bool(text) and text.startswith(_NOTICE_HEADS)
+
+
 # ─────────────────────────────────────────────────────────────
 # Node. plan_step — 다음 도구 하나를 고르고 실행해 원장에 쌓는다
 # ─────────────────────────────────────────────────────────────

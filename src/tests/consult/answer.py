@@ -503,11 +503,23 @@ def check_last_answer() -> int:
         G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
             "answer": plan.LLM_FAILED.format(reason="x"), "sources": [], "llm_error": "x"})})
         dead = G.ask("q")["history"][-1]
+        # 근거 0건·도구 고장 안내는 상태 키가 없다 — 문장으로 가려야 한다(케이스 12c: 「찾지
+        # 못했다」가 «이전 답변»이 되어 있는 자료를 없다고 답했다).
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": plan.NO_EVIDENCE + plan.TRIED.format(calls="last_answer:[1]"), "sources": [],
+            "steps": [{"tool": "last_answer", "query": "[1]", "outcome": "miss"}]})})
+        empty = G.ask("q")["history"][-1]
+        G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
+            "answer": plan.TOOL_FAILED.format(what="화법", reasons="KeyError: x"), "sources": [],
+            "steps": [{"tool": "pitch", "query": "q", "outcome": "failed", "reason": "KeyError: x"}]})})
+        broken = G.ask("q")["history"][-1]
     finally:
         G._AGENT = orig_agent
     hit = (answered.get("answer") == "답변 본문" and answered.get("sources") == [{"id": "x", "role": tools.GROUND}]
-           and asked.get("answer") is None and dead.get("answer") is None)
-    print(f"{'✓' if hit else '✗'} 진입점이 답변 원문을 턴에 남기고 되묻기·장애 턴은 비운다")
+           and asked.get("answer") is None and dead.get("answer") is None
+           and empty.get("answer") is None and broken.get("answer") is None
+           and not plan.is_failure_notice("답변 본문") and not plan.is_failure_notice(None))
+    print(f"{'✓' if hit else '✗'} 진입점이 답변 원문을 턴에 남기고 되묻기·장애·근거 0건·도구 고장 턴은 비운다")
     ok += hit
 
     # ⑧ 라우팅·계획 프롬프트가 이 요청을 correction 이 아니라 situation·last_answer 로 이끈다.
