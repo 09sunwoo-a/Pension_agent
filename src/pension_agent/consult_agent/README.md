@@ -56,7 +56,7 @@ consult_agent/
 ├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../note.py) (§10)
 ├── suggest.py          추천 질문 칩 — 지난 상담 · 열린 세미나가 있는 고객에게만
 ├── render.py           답변 + 출처 블록을 텍스트 한 덩어리로 — CLI 와 main.py 가 함께 쓴다
-├── prompts.py          LLM 프롬프트 템플릿 (기능별 섹션으로 구분)
+├── prompts/            LLM 프롬프트 템플릿 (노드와 같은 이름의 모듈 9개 · __init__ 이 재노출)
 ├── progress.py         진행 표시 — 답변이 만들어지는 동안 무엇을 하는 중인지 (문구는 코드 소유)
 └── nodes/
     ├── understand.py       의도분류 (도메인 어휘 없는 라우팅 전용, 실패하면 답하지 않는다)
