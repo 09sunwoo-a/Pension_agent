@@ -63,6 +63,10 @@ ISA_FACT_ID = "fact.k04.f4"
 
 
 def _won(v: int) -> str:
+    """`engine.text.won` 을 도구 호출 시점에 부른다 — 구현이 아니라 지연 임포트 자리다.
+
+    strategy_agent 는 무거워서 도구 모듈은 적재 때 끌어오지 않는다(nodes/plan.py 의 같은
+    규약). 표기 로직을 여기 두지 않는 것이 요점이라, 본문을 늘리지 않는다."""
     from pension_agent.strategy_agent.engine.text import won  # noqa: PLC0415
 
     return won(v)

@@ -270,7 +270,9 @@ _TD_NUM = 'align="right" style="text-align:right;white-space:nowrap"'
 _MUTED = 'style="color:#777"'
 
 
-def _esc(text: str) -> str:
+def esc(text: str) -> str:
+    """HTML 본문에 실을 텍스트의 이스케이프. 쪽지 초안(consult_agent/memo.py)도 이것을 쓴다 —
+    꼴은 쪽지 종류와 무관하게 같아야 한다(모듈 머리말)."""
     return html.escape(str(text), quote=False)
 
 
@@ -281,13 +283,13 @@ def _row(no: int, target: Target) -> str:
     attrs = " · ".join([f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else []))
     shown = target.conds[:MAX_CONDS]
     rest = len(target.conds) - len(shown)
-    conds = "<br>".join(_esc(cond_text(target, c)) for c in shown)
+    conds = "<br>".join(esc(cond_text(target, c)) for c in shown)
     if rest > 0:
         conds += f"<br><span {_MUTED}>외 {rest}건</span>"
     return (f"<tr><td {_TD_NO}>{no}</td>"
-            f"<td><b>{_esc(p.nm)}</b><br>{_esc(attrs)}"
-            f"<br><span {_MUTED}>{_esc(_customer_id(p.id))}</span></td>"
-            f"<td {_TD_NUM}>{_esc(won(p.bal))}</td>"
+            f"<td><b>{esc(p.nm)}</b><br>{esc(attrs)}"
+            f"<br><span {_MUTED}>{esc(_customer_id(p.id))}</span></td>"
+            f"<td {_TD_NUM}>{esc(won(p.bal))}</td>"
             f"<td>{conds}</td></tr>")
 
 
@@ -302,13 +304,13 @@ def targets_table(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple
     LLM 이 쓴 본문 아래에 값 표로 붙는 쪽지(`consult_agent/memo.py`). 표를 두 번 만들면
     한쪽만 마스킹하거나 한쪽만 잘라내는 상태가 곧 생긴다.
     """
-    thead = "<tr>" + "".join(f"<th {_TH}>{_esc(c)}</th>" for c in COLS) + "</tr>"
+    thead = "<tr>" + "".join(f"<th {_TH}>{esc(c)}</th>" for c in COLS) + "</tr>"
     rows = [_row(i, t) for i, t in enumerate(targets, 1)]
     # 표의 열고 닫는 태그는 «머리»와 «꼬리»에 붙여 둔다 — 행 단위로 덜어내도 표가 깨지지
     # 않아야 하고, 그러려면 잘라내기가 보는 조각이 곧 행이어야 한다.
     return _fit(f"<table {TABLE}>{thead}", rows, "</table>",
                 joiner="", cut=lambda n: f'<tr><td colspan="{len(COLS)}" {_MUTED}>'
-                                         f'{_esc(CUT_LINE.format(n=n))}</td></tr>',
+                                         f'{esc(CUT_LINE.format(n=n))}</td></tr>',
                 max_chars=max_chars)
 
 
@@ -318,10 +320,10 @@ def render_html(targets: list[Target], *, max_chars: int = MAX_CHARS) -> tuple[s
     상한 판정은 **태그를 포함한 문자열 길이**로 한다 — 서버가 받는 것이 그 문자열이기
     때문이다. 그래서 같은 인원이라도 텍스트보다 훨씬 길다(대략 두 배 반).
     """
-    head = f"<b>{_esc(_head(len(targets)))}</b>"
-    foot = f"<span {_MUTED}>{_esc(_foot()).replace(chr(10), '<br>')}</span>"
+    head = f"<b>{esc(_head(len(targets)))}</b>"
+    foot = f"<span {_MUTED}>{esc(_foot()).replace(chr(10), '<br>')}</span>"
     if not targets:
-        return f"{head}<br><br>{_esc(EMPTY_BODY)}<br><br>{foot}", 0
+        return f"{head}<br><br>{esc(EMPTY_BODY)}<br><br>{foot}", 0
     # 표 바깥의 머리·꼬리가 차지하는 만큼을 상한에서 뺀다 — 표만 상한에 맞추면 합쳐서 넘친다.
     table, shown = targets_table(targets, max_chars=max_chars - len(head) - len(foot) - 8)
     return f"{head}<br>{table}<br>{foot}", shown

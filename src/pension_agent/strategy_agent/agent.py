@@ -25,7 +25,6 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
-import re
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -127,18 +126,6 @@ def _fallback_prompt(facts: dict) -> str:
     )
 
 
-def _parse(raw: str) -> dict | None:
-    """응답에서 JSON 객체를 추출한다. 코드블록·전후 설명이 붙어도 처리한다."""
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group())
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
 # 대화형 브리핑 수정(consult_agent.correction)이 건드릴 수 있는 필드 — 전부 LLM 이 쓴 산문
 # (의견)이지, engine.py 가 계산한 숫자·상품명·조건 판정이 아니다. 이 밖의 요청은 "시스템이
 # 계산한 사실이라 대화로 못 고친다"고 거절해야 한다. 이번 범위는 검토 기록(감사로그)까지만—
@@ -172,7 +159,7 @@ def _write_talking_scripts(facts: dict) -> None:
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         _call_failed(facts, "talking_scripts", e, "화법 카드 원문만 표시됨")
         return
-    data = _parse(raw)
+    data = llm.json_object(raw)
     if not isinstance(data, dict):
         facts["llm_skipped"]["talking_scripts"] = "LLM 응답 파싱 실패 — 화법 카드 원문만 표시됨"
         return
@@ -204,7 +191,7 @@ def _write_why_this_customer(facts: dict) -> None:
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         _call_failed(facts, "why_this_customer", e, "규칙 문장 그대로 표시됨")
         return
-    data = _parse(raw)
+    data = llm.json_object(raw)
     lines = [str(x).strip() for x in (data or {}).get("lines", []) if str(x).strip()]
     if not lines:
         facts["llm_skipped"]["why_this_customer"] = "LLM 응답 파싱 실패 — 규칙 문장 그대로 표시됨"
@@ -242,7 +229,7 @@ def _write_coaching(facts: dict) -> None:
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         _call_failed(facts, "coaching", e)
         return
-    data = _parse(raw)
+    data = llm.json_object(raw)
     if not isinstance(data, dict):
         facts["llm_skipped"]["coaching"] = "LLM 응답 파싱 실패 — JSON 객체를 찾을 수 없음"
         return
@@ -328,7 +315,7 @@ def _select(p: Profile, facts: dict, key: str, label: str,
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         _call_failed(facts, key, e, "규칙 순서로 표시됨")
         return None
-    data = _parse(raw)
+    data = llm.json_object(raw)
     picks = (data or {}).get("pick")
     if not isinstance(picks, list):
         skipped[key] = "LLM 응답 파싱 실패 — 규칙 순서로 표시됨"
@@ -382,7 +369,7 @@ def _select_outreach(p: Profile, facts: dict, key: str, label: str,
     except Exception as e:  # 게이트웨이 장애·DNS 실패·타임아웃 등
         _call_failed(facts, key, e, "규칙 순서로 표시됨")
         return None
-    data = _parse(raw) or {}
+    data = llm.json_object(raw) or {}
     pick = data.get("pick")
     if not isinstance(pick, int) or not 0 <= pick < len(candidates):
         skipped[key] = "LLM 이 후보 밖 번호를 지목함 — 규칙 순서로 표시됨"
@@ -435,7 +422,7 @@ def _write_top_holdings_insight(p: Profile, facts: dict) -> None:
     except Exception as e:
         _call_failed(facts, "top_holdings_insight", e)
         return
-    insight = str((_parse(raw) or {}).get("insight") or "").strip()
+    insight = str((llm.json_object(raw) or {}).get("insight") or "").strip()
     if not insight:
         facts["llm_skipped"]["top_holdings_insight"] = "LLM 응답에 insight 없음"
         return
@@ -471,7 +458,7 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
         except Exception as e:
             _call_failed(facts, "lms_message", e, "규칙 본문이 표시됨")
             return
-        body = str((_parse(raw) or {}).get("body") or "").strip()
+        body = str((llm.json_object(raw) or {}).get("body") or "").strip()
         # 예전에는 여기서 '[더미] ' 접두를 코드가 다시 붙였다. 지금은 붙이지 않는다 —
         # 발송문도 데모 산출물이라 딱지가 없어야 한다는 결정. 대신 보호막을 텍스트가
         # 아니라 게이트로 옮겼다: pension_agent.tools.open_lms_screen() 이 dummy 자산의
@@ -555,7 +542,7 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
         _call_failed(facts, "recommendation", e)
         return None
 
-    data = _parse(raw)
+    data = llm.json_object(raw)
     if not isinstance(data, dict):
         skipped["recommendation"] = "LLM 응답 파싱 실패 — JSON 객체를 찾을 수 없음"
         return None
@@ -791,7 +778,7 @@ def _propose(p: Profile, *, use_llm: bool, top_n: int) -> dict[str, Any]:
         _record_call_failure(facts, "sentence", e)
         return out
 
-    data = _parse(raw)
+    data = llm.json_object(raw)
     if not data:
         out["reason"] = "LLM 응답 파싱 실패 — JSON 객체를 찾을 수 없음"
         return out
@@ -841,7 +828,7 @@ def _fallback(facts: dict, out: dict[str, Any], use_llm: bool) -> dict[str, Any]
         _record_call_failure(facts, "sentence", e)
         return out
 
-    data = _parse(raw)
+    data = llm.json_object(raw)
     sentence = str((data or {}).get("sentence") or "").strip()
     if not sentence:
         out["reason"] = "행내 매칭 전략 없음 · LLM 응답 없음/파싱 실패"

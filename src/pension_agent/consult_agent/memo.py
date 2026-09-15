@@ -40,8 +40,6 @@
 
 from __future__ import annotations
 
-import html
-import json
 import re
 from dataclasses import dataclass, field
 
@@ -53,7 +51,7 @@ from pension_agent.consult_agent.prompts import (
     MEMO_TABLE_BLOCK,
 )
 from pension_agent.consult_agent.state import AgentState, format_history
-from pension_agent.llm import LLMError, generate
+from pension_agent.llm import LLMError, generate, json_object
 
 #: 본문 생성 토큰 상한. 쪽지는 훑는 글이라 화면 답변(1500)보다 짧다 — 길면 아무도 안 읽고,
 #: 표에 들어갈 값을 본문이 다시 나열하기 시작한다.
@@ -131,10 +129,6 @@ def material(state: AgentState) -> list[tools.Evidence]:
 _TD_LABEL = 'align="center" style="text-align:center;white-space:nowrap"'
 
 
-def _esc(text: str) -> str:
-    return html.escape(str(text), quote=False)
-
-
 def _key_info(customer_id: str) -> list[tuple[str, str]]:
     """고객 주요 정보 6항목. 값은 전부 strategy_agent 산출 문자열을 옮긴 것이다.
 
@@ -170,7 +164,7 @@ def _key_info_table(customer_id: str) -> str:
         return ""
     if not rows:
         return ""
-    body = "".join(f"<tr><td {_TD_LABEL}><b>{_esc(k)}</b></td><td>{_esc(v)}</td></tr>"
+    body = "".join(f"<tr><td {_TD_LABEL}><b>{note.esc(k)}</b></td><td>{note.esc(v)}</td></tr>"
                    for k, v in rows)
     return f"<table {note.TABLE}>{body}</table>"
 
@@ -184,7 +178,7 @@ def table_for(state: AgentState, evidence: list[tools.Evidence]) -> tuple[str, s
     """
     if state.get("customer_id"):
         found = _key_info_table(state["customer_id"])
-        return (f"<b>{_esc(KEY_INFO_HEADER)}</b><br>{found}",
+        return (f"<b>{note.esc(KEY_INFO_HEADER)}</b><br>{found}",
                 "이 고객의 연령·투자성향·평가금액·수익률·연금개시·세액공제 잔여한도·관리 사유") \
             if found else ("", "")
     if not any(e["tool"] == "targets" for e in evidence):
@@ -219,7 +213,7 @@ def to_html(text: str) -> str:
             out.append("")
             continue
         indent = len(line) - len(line.lstrip(" \t"))
-        marked = _esc(stripped)
+        marked = note.esc(stripped)
         if stripped.startswith("[") and stripped.endswith("]"):
             marked = f"<b>{marked}</b>"
         out.append("&nbsp;" * indent + marked)
@@ -231,24 +225,12 @@ def _footer_html(*, rule: bool) -> str:
     lines = [note.FOOTER_ASOF.format(as_of=AS_OF.isoformat(), today=today().isoformat())]
     if rule:
         lines.append(note.FOOTER_RULE)
-    return "<br>".join(_esc(x) for x in lines)
+    return "<br>".join(note.esc(x) for x in lines)
 
 
 # ─────────────────────────────────────────────────────────────
 # 초안 — LLM 이 쓰고 코드가 검사한다
 # ─────────────────────────────────────────────────────────────
-
-def _json_obj(text: str) -> dict:
-    """LLM 응답에서 JSON 객체만 꺼낸다. 못 찾으면 빈 dict."""
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        return {}
-    try:
-        val = json.loads(m.group())
-    except ValueError:
-        return {}
-    return val if isinstance(val, dict) else {}
-
 
 def _clean_body(body: str) -> str:
     """지시를 어긴 꼴만 걷어낸다 — 마크다운 표·강조. **문장은 고치지 않는다.**
@@ -269,7 +251,7 @@ def _clean_body(body: str) -> str:
 
 def _generate(prompt: str, name: str) -> tuple[str, str]:
     raw = generate(prompt, max_tokens=MAX_TOKENS, system=MEMO_SYSTEM, name=name)
-    obj = _json_obj(raw)
+    obj = json_object(raw) or {}
     title = " ".join(str(obj.get("title") or "").split())
     body = _clean_body(str(obj.get("body") or ""))
     return title, body

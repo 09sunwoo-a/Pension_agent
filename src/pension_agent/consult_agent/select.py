@@ -25,29 +25,15 @@ LLM 없이도 재료가 모이는 것처럼 보였다. 그건 §11 이 막으려
 
 from __future__ import annotations
 
-import json
-import re
 
 from pension_agent.consult_agent.kb_index import index_catalog, index_slice, whole_index
 from pension_agent.knowledge.kb import retrieve
 from pension_agent.consult_agent.prompts import BUCKET_PROMPT, SELECT_PROMPT
 from pension_agent.consult_agent.state import KB
-from pension_agent.llm import generate
+from pension_agent.llm import generate, json_list
 
 #: LLM 이 고른 카드에 붙이는 점수. n-gram 점수(0~1 근방)와 섞였을 때 앞에 오도록 크게 둔다.
 LLM_SCORE = 2.0
-
-
-def _json_list(text: str) -> list:
-    """LLM 응답에서 JSON 배열만 꺼낸다. 못 찾으면 빈 목록(= 고른 것 없음)."""
-    m = re.search(r"\[.*\]", text, re.S)
-    if not m:
-        return []
-    try:
-        val = json.loads(m.group())
-    except ValueError:
-        return []
-    return val if isinstance(val, list) else []
 
 
 def llm_pick(kinds: tuple[str, ...], query: str) -> list[tuple[float, dict]]:
@@ -61,14 +47,14 @@ def llm_pick(kinds: tuple[str, ...], query: str) -> list[tuple[float, dict]]:
     """
     card_slice = whole_index(KB, kinds)
     if card_slice is None:
-        codes = _json_list(generate(
+        codes = json_list(generate(
             BUCKET_PROMPT.format(catalog=index_catalog(KB, kinds), question=query),
             max_tokens=60,
             name="consult.select.bucket",
         ))
         card_slice = index_slice(KB, codes, kinds=kinds)
     # 고른 버킷이 없으면 2차 호출은 낭비다 — 빈 결과로 두고 호출부가 폴백하게 한다.
-    picked = _json_list(generate(
+    picked = json_list(generate(
         SELECT_PROMPT.format(card_slice=card_slice, question=query),
         max_tokens=200,
         name="consult.select.card",

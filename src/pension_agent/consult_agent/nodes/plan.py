@@ -19,7 +19,6 @@ compose 는 모든 근거를 한 번에 받아 답변 전체를 쓴다. 화법�
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -35,7 +34,7 @@ from pension_agent.consult_agent.prompts import (
     REWRITE_BLOCK, SHAPE_BLOCK,
 )
 from pension_agent.consult_agent.state import KB, AgentState, format_history
-from pension_agent.llm import LLMError, generate
+from pension_agent.llm import LLMError, generate, json_object
 from pension_agent.verify import numbers, verify_texts
 
 #: 한 턴에 부를 수 있는 도구 호출 수. 코드가 쥔 상한이다.
@@ -171,18 +170,6 @@ LLM_FAILED = (
 )
 
 
-def _json_obj(text: str) -> dict:
-    """LLM 응답에서 JSON 객체만 꺼낸다. 못 찾으면 빈 dict(= 더 할 일 없음)."""
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        return {}
-    try:
-        val = json.loads(m.group())
-    except ValueError:
-        return {}
-    return val if isinstance(val, dict) else {}
-
-
 # ─────────────────────────────────────────────────────────────
 # Node. plan_step — 다음 도구 하나를 고르고 실행해 원장에 쌓는다
 # ─────────────────────────────────────────────────────────────
@@ -272,7 +259,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # 'LLM 실패'로 답해진다(뒤집힌 방향의 같은 사고).
     alive: dict[str, Any] = {"llm_error": ""}
 
-    action = _json_obj(raw)
+    action = json_object(raw) or {}
     if not action:
         # 규격 밖 응답(설명문·잘린 JSON). 같은 이유로 조용히 넘기지 않는다.
         return {"plan_done": True,

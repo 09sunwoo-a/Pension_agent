@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import os
 import random
@@ -611,6 +612,37 @@ def _observe(name: str, started: float, prompt: str, system: str | None, max_tok
                   "prompt_chars": prompt_chars(prompt, system)},
         error=error,
     )
+
+
+# ─────────────────────────────────────────────────────────────
+# 응답에서 JSON 꺼내기 — 네 모듈(계획·쪽지·브리핑 수정·브리핑 생성)이 각자 같은 함수를
+# 갖고 있던 것을 여기로 모았다. 응답 형식은 프로바이더가 정하므로 클라이언트가 소유한다.
+# 코드블록·전후 설명이 붙어도 처리하고, 못 찾으면 «없음»으로 답한다 — 부르는 쪽이 그것을
+# «규격 밖 응답»으로 다룬다(조용히 빈 값으로 넘기지 않는다).
+# ─────────────────────────────────────────────────────────────
+
+def json_object(text: str) -> dict | None:
+    """응답에서 첫 JSON 객체를 꺼낸다. 없거나 깨졌거나 객체가 아니면 None."""
+    m = re.search(r"\{.*\}", text or "", re.S)
+    if not m:
+        return None
+    try:
+        val = json.loads(m.group())
+    except ValueError:
+        return None
+    return val if isinstance(val, dict) else None
+
+
+def json_list(text: str) -> list:
+    """응답에서 JSON 배열을 꺼낸다. 없거나 깨졌거나 배열이 아니면 빈 목록(= 고른 것 없음)."""
+    m = re.search(r"\[.*\]", text or "", re.S)
+    if not m:
+        return []
+    try:
+        val = json.loads(m.group())
+    except ValueError:
+        return []
+    return val if isinstance(val, list) else []
 
 
 def prompt_chars(prompt: str, system: str | None) -> int:

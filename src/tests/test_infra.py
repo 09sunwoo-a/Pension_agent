@@ -171,6 +171,35 @@ _back_edges = sorted(
            for line in f.read_text(encoding="utf-8").splitlines()))
 check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임포트하지 않는다", str(_back_edges))
 
+# 본문이 같은 함수가 서로 다른 모듈에 있지 않다. 이름이 아니라 본문(독스트링 제외)을 비교한다 —
+# 이름이 같아도 논리가 다른 함수(_norm 셋)는 중복이 아니고, 이름이 달라도 본문이 같으면
+# 중복이다(_parse·_json_obj 가 그랬다 — 2026-09-15 에 llm.json_object 로 합쳤다). 한쪽만
+# 고쳐지는 것이 이 중복의 실제 비용이라, 다시 생기면 여기서 잡는다. 사소한 한 줄짜리는
+# 우연히 같을 수 있어 본문 길이 하한을 둔다.
+import ast as _ast  # noqa: E402
+from collections import defaultdict as _defaultdict  # noqa: E402
+
+def _body_key(fn) -> str | None:
+    body = fn.body
+    if body and isinstance(body[0], _ast.Expr) and isinstance(getattr(body[0], "value", None), _ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]                       # 독스트링은 본문이 아니다
+    if len(body) == 1 and isinstance(body[0], _ast.Pass):
+        return None
+    key = _ast.dump(_ast.Module(body=body, type_ignores=[]), annotate_fields=False)
+    return key if len(key) >= 60 else None
+
+_same_body: dict[str, list[str]] = _defaultdict(list)
+for _py in sorted((*_PKG.rglob("*.py"), *Path("scripts").rglob("*.py"))):
+    for _node in _ast.walk(_ast.parse(_py.read_text(encoding="utf-8"))):
+        if isinstance(_node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            _k = _body_key(_node)
+            if _k:
+                _same_body[_k].append(f"{_py}:{_node.lineno} {_node.name}")
+_dupes = [v for v in _same_body.values() if len({x.split(":")[0] for x in v}) > 1]
+check(not _dupes, "본문이 같은 함수가 서로 다른 모듈에 없다 — 소유자 한 곳으로 합친다",
+      "; ".join(" == ".join(v) for v in _dupes))
+
 
 # ─────────────────────────────────────────────────────────────
 # env — 값의 우선순위 · 실행 단계 (env.py 머리말)

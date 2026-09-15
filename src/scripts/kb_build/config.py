@@ -321,7 +321,7 @@ SEGMENT_NOTES: dict[str, dict[str, str]] = {
 # authoring(저작 메모 — 직원에게 띄우지 않음).
 # ─────────────────────────────────────────────────────────────
 
-#: 표A 비고. 키는 화면번호(normalize_screen 형).
+#: 표A 비고. 키는 화면번호(screens.normalize 형 — 대괄호 없음).
 SCREEN_NOTE_ROLES: dict[str, list[dict[str, str]]] = {
     # 굵은 주의 + 저작 메모가 한 칸에 섞인 행 — 주의만 남기면 저작 맥락이, 통째로 저작
     # 메모로 내리면 징구 의무가 사라진다.

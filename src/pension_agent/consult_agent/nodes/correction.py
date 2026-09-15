@@ -24,14 +24,13 @@ correction 으로 읽었고 이 노드는 화법과 무관한 AI브리핑 문장
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from pension_agent.consult_agent.prompts import CORRECTION_PROMPT, CORRECTION_SYSTEM
 from pension_agent.consult_agent.routing import DEFAULT_INTENT
 from pension_agent.consult_agent.state import AgentState, format_history
 from pension_agent.consult_agent.tools import last_answered
-from pension_agent.llm import generate
+from pension_agent.llm import generate, json_object
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import agent as strategy_agent, customer as strategy_customer, engine
 
@@ -41,17 +40,6 @@ NOT_BRIEFING = "not_briefing"
 #: 계획 루프로 넘기는 반환값 — 답을 내지 않고 의도를 기본값으로 되돌린다. `answer` 를
 #: 비워 두는 것이 곧 분기 신호다(routing.route_correction 은 코드가 아는 값만 본다).
 _FALL_THROUGH: dict[str, Any] = {"intent": DEFAULT_INTENT}
-
-def _parse(raw: str) -> dict | None:
-    m = re.search(r"\{.*\}", raw, re.S)
-    if not m:
-        return None
-    try:
-        data = json.loads(m.group())
-    except json.JSONDecodeError:
-        return None
-    return data if isinstance(data, dict) else None
-
 
 def _before_value(target: str, item_id: str | None, result: dict) -> str | None:
     if target == "ai_briefing_sentence":
@@ -102,7 +90,7 @@ def correction(state: AgentState) -> dict[str, Any]:
     except Exception:
         return {"answer": "지금은 수정 요청을 처리할 수 없어요. 잠시 후 다시 시도해주세요.", "sources": []}
 
-    data = _parse(raw)
+    data = json_object(raw)
     if not isinstance(data, dict):
         return {"answer": "요청을 이해하지 못했어요. 어느 부분을 어떻게 고칠지 다시 말씀해주시겠어요?", "sources": []}
 

@@ -31,6 +31,7 @@ from typing import Any
 
 from scripts.kb_build import config
 
+from pension_agent.consult_agent import screens
 from pension_agent.knowledge.similarity import ngram_sim
 
 # 경로는 전부 config 가 폴더 번호와 무관하게 해석한다(config.kb_folder). 여기에 `05_…` 같은
@@ -1657,9 +1658,6 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
 _FACT_LABEL = re.compile(r"\*\*([^*]{2,10})\*\*\s*:\s*")
 
 
-def normalize_screen(screen: str) -> str:
-    """`[06-12-604]` → `06-12-604`. id 와 대조에 쓰는 표준형."""
-    return (screen or "").strip().strip("[]").strip()
 _SCREEN = re.compile(r"\[\d{2}-[0-9A-Z]{2}-[0-9A-Z]{3}\]")
 
 
@@ -1942,7 +1940,7 @@ def build_screens(resolver: DocResolver) -> list[dict]:
 
         # 같은 화면번호가 여러 그룹에 나오면 먼저 나온 것을 남긴다 — 표가 업무 그룹별
         # 재배열이라 중복이 있을 수 있고, 번호가 곧 id 이므로 중복 id 를 만들 수 없다.
-        key = normalize_screen(screen)
+        key = screens.normalize(screen)   # 런타임과 같은 표준형 — 대조 상대가 그쪽이다
         if key in seen:
             continue
         seen.add(key)
