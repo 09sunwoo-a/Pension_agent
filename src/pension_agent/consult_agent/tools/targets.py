@@ -28,10 +28,10 @@ from pension_agent.consult_agent.tools.base import Evidence, _ev
 
 def _targets(state: AgentState, query: str) -> Evidence | None:
     """오늘의 타겟 고객 목록. 선정도 순서도 여기서 만들지 않는다(target_list 그대로)."""
-    from pension_agent import workb  # noqa: PLC0415 — strategy_agent 임포트를 지연시킨다
+    from pension_agent import note  # noqa: PLC0415 — strategy_agent 임포트를 지연시킨다
 
     try:
-        found = workb.today_targets()
+        found = note.today_targets()
     except Exception:
         return None
     day = clock.today().isoformat()
@@ -43,10 +43,10 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     for i, t in enumerate(found, 1):
         p = t.profile
         attrs = " · ".join([f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else []))
-        lines.append(f"· {i}. {p.nm} — {attrs} · 평가금액 {workb.won(p.bal)}")
+        lines.append(f"· {i}. {p.nm} — {attrs} · 평가금액 {note.won(p.bal)}")
         # 요건 이름 옆에 «무엇 때문에 걸렸나»의 원장 값을 붙인다. 이름만 적으면 답변도
         # 이름만 옮기게 되고, 그러면 직원은 결국 고객을 하나씩 열어봐야 한다.
-        lines += [f"    - {workb.cond_text(t, c)}" for c in t.conds]
+        lines += [f"    - {note.cond_text(t, c)}" for c in t.conds]
     text = "\n".join(lines)
     return _ev("targets", query, text,
                [{"id": "targets.today",

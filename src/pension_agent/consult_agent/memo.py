@@ -1,6 +1,6 @@
 """WorkB 쪽지 초안 — **무엇을 쓸지**(CLAUDE.md §10 「쪽지 보내기」).
 
-꼴과 발송은 `pension_agent/workb.py` 가 안다(표 속성·마스킹·길이 상한·MCP 클라이언트).
+꼴과 발송은 `pension_agent/note.py` 가 안다(표 속성·마스킹·길이 상한·MCP 클라이언트).
 여기는 그 앞 단계다 — 이번 턴의 재료로 제목과 본문을 만들고, 근거를 벗어났으면 만들지
 않는다.
 
@@ -45,7 +45,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from pension_agent import workb
+from pension_agent import note
 from pension_agent.clock import today
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import (
@@ -172,7 +172,7 @@ def _key_info_table(customer_id: str) -> str:
         return ""
     body = "".join(f"<tr><td {_TD_LABEL}><b>{_esc(k)}</b></td><td>{_esc(v)}</td></tr>"
                    for k, v in rows)
-    return f"<table {workb.TABLE}>{body}</table>"
+    return f"<table {note.TABLE}>{body}</table>"
 
 
 def table_for(state: AgentState, evidence: list[tools.Evidence]) -> tuple[str, str]:
@@ -189,10 +189,10 @@ def table_for(state: AgentState, evidence: list[tools.Evidence]) -> tuple[str, s
             if found else ("", "")
     if not any(e["tool"] == "targets" for e in evidence):
         return "", ""
-    targets = workb.today_targets()
+    targets = note.today_targets()
     if not targets:
         return "", ""
-    table, _shown = workb.targets_table(targets)
+    table, _shown = note.targets_table(targets)
     return table, "오늘의 타겟 고객 목록(순번·이름·나이·성향·평가금액·선정 요건)"
 
 
@@ -228,9 +228,9 @@ def to_html(text: str) -> str:
 
 def _footer_html(*, rule: bool) -> str:
     from pension_agent.strategy_agent.customer import AS_OF  # noqa: PLC0415
-    lines = [workb.FOOTER_ASOF.format(as_of=AS_OF.isoformat(), today=today().isoformat())]
+    lines = [note.FOOTER_ASOF.format(as_of=AS_OF.isoformat(), today=today().isoformat())]
     if rule:
-        lines.append(workb.FOOTER_RULE)
+        lines.append(note.FOOTER_RULE)
     return "<br>".join(_esc(x) for x in lines)
 
 
@@ -327,9 +327,9 @@ def draft(state: AgentState, *, recipients: list[str], to: str,
     if table:
         parts += [table, _footer_html(rule=listed)]
     markup = "<br><br>".join(parts)
-    if len(markup) > workb.MAX_CHARS:
-        # 조용히 잘라내지 않는다 — 잘린 쪽지는 «전부인 줄» 읽힌다(workb.MAX_CHARS 머리말).
-        return None, TOO_LONG.format(limit=workb.MAX_CHARS)
+    if len(markup) > note.MAX_CHARS:
+        # 조용히 잘라내지 않는다 — 잘린 쪽지는 «전부인 줄» 읽힌다(note.MAX_CHARS 머리말).
+        return None, TOO_LONG.format(limit=note.MAX_CHARS)
 
     preview = body if not table else f"{body}\n\n(아래에 {what} 표가 붙습니다)"
     return Draft(title=title, text=preview, html=markup, to=to,

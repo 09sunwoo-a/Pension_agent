@@ -30,7 +30,7 @@ from typing import Any
 from langgraph.graph import END, START, StateGraph
 
 
-from pension_agent import llm, observability, workb
+from pension_agent import llm, observability, note
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
@@ -122,13 +122,13 @@ def employee_no(explicit: str | None, x_client_user: str | None) -> str | None:
 
     명시한 값은 그대로 믿고(프론트가 «이것이 사번이다»라고 말한 값이다), `x_client_user`
     에서는 **사번으로 확정되는 꼴일 때만** 읽는다 — 사번이 아닌 값도 들어오는 자리다
-    (`ask` 머리말 · `workb.as_emp_no`).
+    (`ask` 머리말 · `note.as_emp_no`).
 
     `ask()` 안에 두지 않고 함수로 꺼내 둔 것은 **진입점이 같은 판정을 로그에 찍기**
     때문이다(`main.py`). 두 곳이 각자 판정하면 로그에 찍힌 사번과 실제로 쪽지가 나가는
     사번이 갈릴 수 있고, 그때 로그는 진단을 돕는 대신 틀린 값을 확인시켜 준다.
     """
-    return (explicit or "").strip() or workb.as_emp_no(x_client_user)
+    return (explicit or "").strip() or note.as_emp_no(x_client_user)
 
 
 def ask(
@@ -158,15 +158,15 @@ def ask(
     도구로 갈라지므로 인자 대신 ContextVar 로 흘린다.
     employee_id: 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송 주체이고,
     상담이력에 «누가 상담했나»로 남는다. 넘기지 않으면 `x_client_user` 에서 가져오되
-    **사번 꼴일 때만** 쓴다(`workb.as_emp_no`) — 아래.
+    **사번 꼴일 때만** 쓴다(`note.as_emp_no`) — 아래.
 
     ━━ 사번과 x_client_user 는 같은 값이 아닐 수 있다 ━━
     `x_client_user` 는 플랫폼의 감사 기록이자 쿼터 버킷 이름이라 사번이 아닌 값도
     들어온다(`pension-agent`·`streamlit-dev`). 사번 뒤에 접미가 붙어 오기도 한다.
     그래서 **사번 7자리로 시작하고 그 뒤가 끝이거나 구분자일 때만** 사번으로 읽는다
-    (`workb.as_emp_no` — 그 함수 머리말에 무엇을 왜 거르는지가 있다).
+    (`note.as_emp_no` — 그 함수 머리말에 무엇을 왜 거르는지가 있다).
     **명시한 `employee_id` 는 그대로 믿는다**(프론트가 «이것이 사번이다»라고 말한 값이다).
-    둘 다 못 읽으면 환경변수 폴백으로 떨어지므로(`workb.employee_id`) 틀리는 방향이
+    둘 다 못 읽으면 환경변수 폴백으로 떨어지므로(`note.employee_id`) 틀리는 방향이
     되돌릴 수 있는 쪽이다 — 없는 사번, 남의 사번 앞으로 쪽지를 보내지 않는다.
     """
     global _AGENT

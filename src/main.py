@@ -38,7 +38,7 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
     employee_id     (선택) 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송
                            주체이고 상담이력에 «누가 상담했나»로 남는다. `x_client_user`
                            가 사번으로 시작하면 넘길 필요가 없다
-                           (`pension_agent/workb.py::as_emp_no`). 사번을 다른 데서
+                           (`pension_agent/note.py::as_emp_no`). 사번을 다른 데서
                            받아오거나 그 값의 꼴이 다른 배포를 위한 자리이고, 여기 실은
                            값은 꼴을 검사하지 않고 그대로 쓴다. 사번을 하나도 못 읽으면
                            `WORKB_EMP_NO` 환경변수로 떨어지고, 그것도 없으면 쪽지 발송을

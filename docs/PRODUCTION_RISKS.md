@@ -193,7 +193,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 ## 10. 호출자가 사번을 주지 않으면 쪽지가 한 사람 이름으로 나간다 — 🟡 배포 설정에 달렸다
 
 **어디** `pension_agent/consult_agent/graph.py::employee_no` ·
-`pension_agent/workb.py::employee_id` · `pension_agent/mcp/workb.py::send_memo`
+`pension_agent/note.py::employee_id` · `pension_agent/mcp/workb.py::send_memo`
 
 행내 MCP 인증에는 **사번이 들어간다**(MCP-User-Key). 그 사번이 «누가 이 쪽지를 보냈나»의
 행내 기록이고 받는 사람의 기본값이기도 하다.
@@ -210,7 +210,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 `src/test_local.sh`)인데, **그건 우리가 정한 값이지 게이트웨이가 보낸 값이 아니다** —
 운영에서 로그인 사번이 이 자리에 실리는 것은 아직 앞의 일이다.
 지금 코드는 **사번 7자리로 시작하고 그
-뒤가 끝이거나 구분자일 때만** 사번으로 읽는다(`workb.as_emp_no`). 그 꼴이 아니면
+뒤가 끝이거나 구분자일 때만** 사번으로 읽는다(`note.as_emp_no`). 그 꼴이 아니면
 `WORKB_EMP_NO` 하나로 떨어져 쪽지가 전부 그 사번 앞으로 간다.
 
 **일부러 좁게 잡았다.** 「앞 7자리를 무조건 자른다」로 하면 사번이 아닌 숫자 id
@@ -223,9 +223,9 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 **최소 조치** 배포 뒤 요청 로그 한 줄을 본다 — 그 줄에 `x_client_user=` 원문과
 `emp_no=` 판정이 나란히 찍힌다. 사번이 찍히면 연결된 것이고, `-` 면 폴백 상태다.
 그때 처방은 원문이 정한다: 사번으로 시작하는데 못 읽었으면(구분자 없이 숫자 접미가
-붙는 꼴) `workb.as_emp_no` 의 정규식을 그 꼴에 맞추고, 아예 사번이 없으면 프론트가
+붙는 꼴) `note.as_emp_no` 의 정규식을 그 꼴에 맞추고, 아예 사번이 없으면 프론트가
 `input_value` 에 `employee_id` 를 실어 보낸다(`client/README.md` §1). 자릿수가 다른
-사번이 있다는 것이 확인되면 고칠 자리는 `workb.EMP_NO_PATTERN` 하나다.
+사번이 있다는 것이 확인되면 고칠 자리는 `note.EMP_NO_PATTERN` 하나다.
 
 ## 10-b. MCP 요청 컨텍스트가 SDK 전역이다 — 🟡 다른 직원의 컨텍스트로 나갈 수 있다
 
@@ -237,7 +237,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 
 - `uvicorn --workers N` 은 문제가 없다 — SDK 전역이 프로세스마다 따로다.
 - 한 프로세스 안에서 **여러 스레드**가 각자 `asyncio.run` 으로 MCP 를 부르면 잠금이
-  갈린다(지금 동기 경로가 그 모양이다 — `workb.send_note_sync`). 지금은 쪽지 발송이
+  갈린다(지금 동기 경로가 그 모양이다 — `note.send_note_sync`). 지금은 쪽지 발송이
   승낙 턴에만 있어 동시에 둘이 겹칠 일이 드물지만, 읽기 도구가 붙어 호출이 잦아지면
   달라진다.
 

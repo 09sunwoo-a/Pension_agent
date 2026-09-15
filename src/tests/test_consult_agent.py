@@ -4175,7 +4175,7 @@ def check_memo() -> int:
     import tempfile
     from pathlib import Path
 
-    from pension_agent import session_store, workb
+    from pension_agent import note, session_store
     from pension_agent import tools as REG
     from pension_agent.consult_agent import memo, prompts
     from pension_agent.consult_agent.nodes import act
@@ -4190,18 +4190,18 @@ def check_memo() -> int:
                                                ensure_ascii=False)
 
     ok = 0
-    orig_gen, orig_sender = memo.generate, workb.SENDER
-    orig_env = os.environ.get(workb.EMP_NO_ENV)
-    os.environ[workb.EMP_NO_ENV] = "3902172"
+    orig_gen, orig_sender = memo.generate, note.SENDER
+    orig_env = os.environ.get(note.EMP_NO_ENV)
+    os.environ[note.EMP_NO_ENV] = "3902172"
     outbox: list[tuple] = []
 
     async def _send(ids, title, body):
         # 「누구 이름으로」는 발송 함수의 인자가 아니라 블록에 세워진 값이다 — 주입받은
-        # 함수라 시그니처를 늘릴 수 없어서다(workb 의 «누구 이름으로 나가나»).
-        outbox.append((ids, title, body, workb.acting_employee()))
+        # 함수라 시그니처를 늘릴 수 없어서다(note 의 «누구 이름으로 나가나»).
+        outbox.append((ids, title, body, note.acting_employee()))
         return '{"success": true}'
 
-    workb.use_sender(_send)
+    note.use_sender(_send)
     with tempfile.TemporaryDirectory() as tmp:
         orig_dir = session_store.SESSION_DATA_DIR
         session_store.SESSION_DATA_DIR = Path(tmp)
@@ -4288,11 +4288,11 @@ def check_memo() -> int:
                                if s2["session_id"] == "s-emp"), None)
         finally:
             session_store.SESSION_DATA_DIR = orig_dir
-            memo.generate, workb.SENDER = orig_gen, orig_sender
+            memo.generate, note.SENDER = orig_gen, orig_sender
             if orig_env is None:
-                os.environ.pop(workb.EMP_NO_ENV, None)
+                os.environ.pop(note.EMP_NO_ENV, None)
             else:
-                os.environ[workb.EMP_NO_ENV] = orig_env
+                os.environ[note.EMP_NO_ENV] = orig_env
 
     # ① 시점으로 갈린다.
     hit = (bool(found) and "과세이연 등록은 어떻게 해?" in found["text"]
@@ -4429,7 +4429,7 @@ def check_memo() -> int:
     # 꼬리말의 «선정 기준» 줄은 목록 표에만 붙는다 — 고객 한 명을 담은 쪽지에는 고를 목록이 없다.
     _foot_one, _foot_two = memo._footer_html(rule=False), memo._footer_html(rule=True)
     hit = (CUST.AS_OF.isoformat() in _foot_one and memo.today().isoformat() in _foot_one
-           and workb.FOOTER_RULE not in _foot_one and workb.FOOTER_RULE in _foot_two)
+           and note.FOOTER_RULE not in _foot_one and note.FOOTER_RULE in _foot_two)
     print(f"{'✓' if hit else '✗'} 기준일 안내는 늘 붙고 «선정 기준»은 목록 쪽지에만 붙는다")
     ok += hit
 

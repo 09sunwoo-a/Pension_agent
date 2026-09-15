@@ -598,7 +598,7 @@ def send_note_sync(recipients: list[str], note: Note, *, send: Sender | None = N
             "error": "RunningLoop", "recipients": list(recipients), "title": note.title}
 
 
-if __name__ == "__main__":  # 아웃풋 눈으로 보기: python -m pension_agent.workb
+if __name__ == "__main__":  # 아웃풋 눈으로 보기: python -m pension_agent.note
     import sys
 
     if hasattr(sys.stdout, "reconfigure"):

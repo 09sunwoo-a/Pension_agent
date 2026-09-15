@@ -1145,7 +1145,7 @@ check(_SCEN.questions_of()["④"] == "고객이 '그 돈 그냥 예금으로 둬
 # 글이 나와야 하고, 자를 때도 값이 반쪽으로 남지 않아야 한다(보내고 나면 못 되돌린다).
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent import workb  # noqa: E402
+from pension_agent import note  # noqa: E402
 from pension_agent.strategy_agent import customer as _customer  # noqa: E402
 from pension_agent.strategy_agent.target_list import today_targets  # noqa: E402
 
@@ -1163,74 +1163,74 @@ check(all(c in _customer.CONDS for t in _targets for c in t.conds),
 # 잘라내기 상한은 형식마다 다르게 잡는다 — HTML 은 표 뼈대(머리·머리행·꼬리)만 700자를
 # 넘어서, 텍스트 기준 상한을 그대로 쓰면 «한 명은 담는다» 하한에 걸려 상한을 넘게 된다.
 for _fmt, _cap in (("text", 700), ("html", 1800)):
-    _n = workb.daily_targets_note(fmt=_fmt)
-    check(_n.body == workb.daily_targets_note(fmt=_fmt).body,
-          f"workb[{_fmt}]: 같은 입력이면 같은 본문 (LLM 을 타지 않는다)")
+    _n = note.daily_targets_note(fmt=_fmt)
+    check(_n.body == note.daily_targets_note(fmt=_fmt).body,
+          f"note[{_fmt}]: 같은 입력이면 같은 본문 (LLM 을 타지 않는다)")
     check(_n.count == len(_targets) and not _n.truncated,
-          f"workb[{_fmt}]: 기본 상한에서는 전원이 실린다", f"{_n.shown}/{_n.count}")
+          f"note[{_fmt}]: 기본 상한에서는 전원이 실린다", f"{_n.shown}/{_n.count}")
     check(_customer.AS_OF.isoformat() in _n.body,
-          f"workb[{_fmt}]: 원장 기준일이 본문에 남는다 — 평가금액이 오늘 값으로 읽히지 않게")
+          f"note[{_fmt}]: 원장 기준일이 본문에 남는다 — 평가금액이 오늘 값으로 읽히지 않게")
     check(all(t.profile.nm in _n.body for t in _targets),
-          f"workb[{_fmt}]: 목록에 오른 고객이 본문에서 빠지지 않는다")
+          f"note[{_fmt}]: 목록에 오른 고객이 본문에서 빠지지 않는다")
     check(all(t.profile.id not in _n.body for t in _targets),
-          f"workb[{_fmt}]: 고객 id 원문이 본문에 실리지 않는다 (MASK_ID 기본값)")
-    _cb, _cs = workb.RENDERERS[_fmt](_targets, max_chars=_cap)
+          f"note[{_fmt}]: 고객 id 원문이 본문에 실리지 않는다 (MASK_ID 기본값)")
+    _cb, _cs = note.RENDERERS[_fmt](_targets, max_chars=_cap)
     check(0 < _cs < len(_targets) and len(_cb) <= _cap,
-          f"workb[{_fmt}]: 상한을 넘으면 고객 수가 줄고 본문이 상한 안에 든다",
+          f"note[{_fmt}]: 상한을 넘으면 고객 수가 줄고 본문이 상한 안에 든다",
           f"{_cs}/{len(_targets)} · {len(_cb)}자 (상한 {_cap})")
     check(f"외 {len(_targets) - _cs}명" in _cb,
-          f"workb[{_fmt}]: 몇 명이 빠졌는지 본문이 밝힌다")
-    check(workb.RENDERERS[_fmt]([], max_chars=_cap)[1] == 0,
-          f"workb[{_fmt}]: 타겟이 0명이어도 렌더가 죽지 않는다")
+          f"note[{_fmt}]: 몇 명이 빠졌는지 본문이 밝힌다")
+    check(note.RENDERERS[_fmt]([], max_chars=_cap)[1] == 0,
+          f"note[{_fmt}]: 타겟이 0명이어도 렌더가 죽지 않는다")
 
 # HTML 은 뷰어·위생처리기가 걷어내는 것을 처음부터 쓰지 않는다(이메일 HTML 규율).
-_html = workb.daily_targets_note(fmt="html").body
+_html = note.daily_targets_note(fmt="html").body
 check("<table" in _html and _html.count("<tr") == len(_targets) + 1,
-      "workb[html]: 고객 한 명이 표의 한 줄이다(머리행 포함)", str(_html.count("<tr")))
+      "note[html]: 고객 한 명이 표의 한 줄이다(머리행 포함)", str(_html.count("<tr")))
 check("<style" not in _html and "class=" not in _html,
-      "workb[html]: <style> 블록·클래스를 쓰지 않는다 — 위생처리기가 걷어낸다")
+      "note[html]: <style> 블록·클래스를 쓰지 않는다 — 위생처리기가 걷어낸다")
 check("http://" not in _html and "https://" not in _html,
-      "workb[html]: 바깥 자원을 부르지 않는다 — 막히면 표가 무너진다")
+      "note[html]: 바깥 자원을 부르지 않는다 — 막히면 표가 무너진다")
 # 행 단위로 덜어내도 표가 깨지지 않아야 한다.
 # WorkB 쪽지 뷰어는 **인라인 style 을 걷어낸다**(2026-09-03 실물 확인). 그래서 여백·크기를
 # style 로 만들려는 시도는 무효였고, 블록 요소도 뷰어가 자기 간격을 얹는다 — 남는 것은
 # <br>·<b>·표의 옛 속성뿐이다. 여기가 다시 늘면 화면에서 조용히 어긋난다.
 check(not any(t in _html for t in ("<p ", "<p>", "<div", "<h1", "<h2", "<ul", "<li")),
-      "workb[html]: 블록 요소를 쓰지 않는다 — 뷰어가 자기 간격을 얹는다")
+      "note[html]: 블록 요소를 쓰지 않는다 — 뷰어가 자기 간격을 얹는다")
 
 # 표를 만드는 곳은 하나다. 둘이 되면 한쪽만 마스킹하거나 한쪽만 잘라내는 상태가 곧 생긴다.
-_bare, _bare_shown = workb.targets_table(_targets)
+_bare, _bare_shown = note.targets_table(_targets)
 check(_bare.startswith("<table ") and _bare.endswith("</table>") and _bare in _html
       and _bare_shown == len(_targets),
-      "workb.targets_table: 표만 따로 내고, 목록 쪽지는 그 표를 그대로 쓴다")
+      "note.targets_table: 표만 따로 내고, 목록 쪽지는 그 표를 그대로 쓴다")
 
-_cut_html = workb.render_html(_targets, max_chars=1200)[0]
+_cut_html = note.render_html(_targets, max_chars=1200)[0]
 check(_cut_html.count("<table") == _cut_html.count("</table") == 1,
-      "workb[html]: 잘라내도 표가 열고 닫힌다")
+      "note[html]: 잘라내도 표가 열고 닫힌다")
 # 속성이 중복되면 뒤엣것이 통째로 무시된다(실제로 style 이 두 번 붙어 font-size 가 죽었다).
 import re as _re
 check(not [t for t in _re.findall(r"<[^>]+>", _html) if t.count("style=") > 1],
-      "workb[html]: 한 태그에 같은 속성을 두 번 쓰지 않는다")
+      "note[html]: 한 태그에 같은 속성을 두 번 쓰지 않는다")
 
-_note = workb.daily_targets_note()
+_note = note.daily_targets_note()
 
 # 요건 이름은 CONDS 원문 그대로 실린다 — 쪽지가 요건 이름을 새로 지어내면 화면과 갈린다.
 _lead = _targets[0]
 check(_customer.CONDS[_lead.conds[0]] in _note.body,
-      "workb: 요건 이름이 CONDS 원문 그대로 실린다", _customer.CONDS[_lead.conds[0]])
+      "note: 요건 이름이 CONDS 원문 그대로 실린다", _customer.CONDS[_lead.conds[0]])
 
 # 고객 id 는 기본으로 가린다 (KB-PIN 앞자리가 생년월일이고, 쪽지는 받은편지함에 남는다).
 check(all(t.profile.id.partition("-")[0] in _note.body for t in _targets),
-      "workb: 마스킹해도 앞자리는 남아 화면과 대조할 수 있다")
+      "note: 마스킹해도 앞자리는 남아 화면과 대조할 수 있다")
 
 # 자를 때는 고객 블록 단위 — 줄 중간에서 끊으면 반쪽 수치가 남고, 그건 틀린 값을 보낸 것이다.
 
 # 한 명도 못 담는 상한이어도 한 명은 담는다 — 빈 쪽지가 «장애»처럼 읽히는 것보다 낫다.
-check(workb.EMPTY_BODY in workb.render([])[0],
-      "workb: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
+check(note.EMPTY_BODY in note.render([])[0],
+      "note: 타겟이 0명이면 빈 쪽지가 아니라 «0명»이라고 적는다")
 
-_min_body, _min_shown = workb.render(_targets, max_chars=1)
-check(_min_shown == 1, "workb: 상한이 아무리 작아도 고객 한 명은 담는다", str(_min_shown))
+_min_body, _min_shown = note.render(_targets, max_chars=1)
+check(_min_shown == 1, "note: 상한이 아무리 작아도 고객 한 명은 담는다", str(_min_shown))
 
 
 # ── 발송 ───────────────────────────────────────────────────
@@ -1238,56 +1238,56 @@ check(_min_shown == 1, "workb: 상한이 아무리 작아도 고객 한 명은 �
 # 파이썬은 문자열도 시퀀스라 타입 오류 없이 거기까지 가고 서버 사유도 «기타»라 어디가
 # 틀렸는지 아무 데서도 안 나온다(실제로 그렇게 한 번 잡았다).
 try:
-    workb.validate_recipients("3902172")
-    check(False, "workb: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
+    note.validate_recipients("3902172")
+    check(False, "note: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
 except TypeError as _exc:
-    check("리스트" in str(_exc), "workb: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
+    check("리스트" in str(_exc), "note: 수신자에 문자열 하나를 넘기면 나가기 전에 막는다")
 for _bad in ([], ["", "3902172"], None):
     try:
-        workb.validate_recipients(_bad)
-        check(False, f"workb: 빈 수신자를 막는다 ({_bad!r})")
+        note.validate_recipients(_bad)
+        check(False, f"note: 빈 수신자를 막는다 ({_bad!r})")
     except (TypeError, ValueError):
-        check(True, f"workb: 빈 수신자를 막는다 ({_bad!r})")
+        check(True, f"note: 빈 수신자를 막는다 ({_bad!r})")
 
 # 어댑터의 성공은 서버의 성공이 아니다 — WorkB 는 실패를 isError 가 아니라 본문에 담는다.
 # 아래 두 형태는 실제로 관측된 응답이다.
 _REFUSED = [{"type": "text", "text": '{\n  "success": false,\n  "error": "64;ETC_ERR"\n}'}]
-check(workb.parse_result(_REFUSED)["status"] == "failed",
-      "workb.parse_result: 본문의 success:false 를 «발송 완료»로 보고하지 않는다",
-      str(workb.parse_result(_REFUSED)))
-check(workb.parse_result(_REFUSED).get("error") == "64;ETC_ERR",
-      "workb.parse_result: 서버 오류코드를 그대로 남긴다")
-check(workb.parse_result([{"type": "text", "text": '{"success": true}'}])["status"] == "sent",
-      "workb.parse_result: success:true 는 발송으로 본다")
-check(workb.parse_result('{"success": true}')["status"] == "sent",
-      "workb.parse_result: 문자열로 온 응답도 읽는다")
-check(workb.parse_result(([{"type": "text", "text": '{"success": true}'}], None))["status"] == "sent",
-      "workb.parse_result: (content, artifact) 튜플도 읽는다")
+check(note.parse_result(_REFUSED)["status"] == "failed",
+      "note.parse_result: 본문의 success:false 를 «발송 완료»로 보고하지 않는다",
+      str(note.parse_result(_REFUSED)))
+check(note.parse_result(_REFUSED).get("error") == "64;ETC_ERR",
+      "note.parse_result: 서버 오류코드를 그대로 남긴다")
+check(note.parse_result([{"type": "text", "text": '{"success": true}'}])["status"] == "sent",
+      "note.parse_result: success:true 는 발송으로 본다")
+check(note.parse_result('{"success": true}')["status"] == "sent",
+      "note.parse_result: 문자열로 온 응답도 읽는다")
+check(note.parse_result(([{"type": "text", "text": '{"success": true}'}], None))["status"] == "sent",
+      "note.parse_result: (content, artifact) 튜플도 읽는다")
 # 판정하지 못한 것을 성공 쪽으로 접지 않는다 — 그게 안 한 일을 했다고 말하는 경로다.
 for _amb in ("", "OK", '{"result": 1}', None):
-    check(workb.parse_result(_amb)["status"] == "unknown",
-          f"workb.parse_result: 판정 불가는 unknown 이다 ({_amb!r})",
-          str(workb.parse_result(_amb)))
+    check(note.parse_result(_amb)["status"] == "unknown",
+          f"note.parse_result: 판정 불가는 unknown 이다 ({_amb!r})",
+          str(note.parse_result(_amb)))
 
-_sent = asyncio.run(workb.send_note(["E00000"], _note))
+_sent = asyncio.run(note.send_note(["E00000"], _note))
 check(_sent["status"] == "not_connected" and _sent["body"] == _note.body,
-      "workb.send_note: 클라이언트 미주입을 «보냄»으로 보고하지 않는다", str(_sent["status"]))
+      "note.send_note: 클라이언트 미주입을 «보냄»으로 보고하지 않는다", str(_sent["status"]))
 
 async def _fake_send(recipients, title, body):
     _fake_send.seen = (recipients, title, body)
     return [{"type": "text", "text": '{"success": true}'}]
 
-_ok = asyncio.run(workb.send_note(["3902172"], _note, send=_fake_send))
+_ok = asyncio.run(note.send_note(["3902172"], _note, send=_fake_send))
 check(_ok["status"] == "sent" and _fake_send.seen[0] == ["3902172"],
-      "workb.send_note: 주입한 클라이언트로 수신자·제목·본문을 그대로 넘긴다", str(_ok))
-check(_fake_send.seen[2] == _note.body, "workb.send_note: 본문을 손대지 않고 넘긴다")
+      "note.send_note: 주입한 클라이언트로 수신자·제목·본문을 그대로 넘긴다", str(_ok))
+check(_fake_send.seen[2] == _note.body, "note.send_note: 본문을 손대지 않고 넘긴다")
 
 async def _boom(recipients, title, body):
     raise RuntimeError("전송 끊김")
 
-_err = asyncio.run(workb.send_note(["3902172"], _note, send=_boom))
+_err = asyncio.run(note.send_note(["3902172"], _note, send=_boom))
 check(_err["status"] == "failed" and "전송 끊김" in _err["detail"],
-      "workb.send_note: 호출이 죽으면 실패로 보고한다(삼키지 않는다)", str(_err))
+      "note.send_note: 호출이 죽으면 실패로 보고한다(삼키지 않는다)", str(_err))
 
 # ── 「누구 이름으로 보내나」 ────────────────────────────────
 # 받는 사람과 다른 축이다. MCP 인증에 들어가고 행내 감사 기록이 그 사번으로 남는다.
@@ -1298,56 +1298,56 @@ check(_err["status"] == "failed" and "전송 끊김" in _err["detail"],
 # 적힌 한 사람 앞으로 몰린다 — 이 함수가 막으려는 바로 그 상태다.
 for _raw in ("3902172", " 3902172 ", "3902172-550e8400-e29b-41d4-a716-446655440000",
              "3902172_550e8400e29b", "3902172:a1b2"):
-    check(workb.as_emp_no(_raw) == "3902172",
-          f"workb.as_emp_no: 사번 뒤에 구분자와 접미가 붙어도 읽는다 ({_raw!r})",
-          str(workb.as_emp_no(_raw)))
+    check(note.as_emp_no(_raw) == "3902172",
+          f"note.as_emp_no: 사번 뒤에 구분자와 접미가 붙어도 읽는다 ({_raw!r})",
+          str(note.as_emp_no(_raw)))
 # 뒤에 **숫자가 더 붙어 있으면 읽지 않는다.** 「7자리 + 무엇이든」으로 자르면 사번이 아닌
 # 숫자 id 에서 실재하는 남의 사번을 만들어내고, 그 사람 받은편지함에 고객 정보가 남는다.
 # 못 읽으면 환경변수 폴백으로 떨어지므로 틀리는 방향이 되돌릴 수 있는 쪽이다.
 # 그 값은 쿼터 버킷 이름이기도 해서 사번이 아닌 값도 들어온다(pension-agent 는 기본값이다).
 for _bad in ("pension-agent", "streamlit-dev", "390217", "emp-3902172",
              "20250910123456", "39021725f3a9c", "", None):
-    check(workb.as_emp_no(_bad) is None,
-          f"workb.as_emp_no: 사번으로 확정되지 않으면 읽지 않는다 ({_bad!r})",
-          str(workb.as_emp_no(_bad)))
+    check(note.as_emp_no(_bad) is None,
+          f"note.as_emp_no: 사번으로 확정되지 않으면 읽지 않는다 ({_bad!r})",
+          str(note.as_emp_no(_bad)))
 
-_saved_emp_env = os.environ.get(workb.EMP_NO_ENV)
-os.environ[workb.EMP_NO_ENV] = "3900000"
+_saved_emp_env = os.environ.get(note.EMP_NO_ENV)
+os.environ[note.EMP_NO_ENV] = "3900000"
 try:
-    check(workb.employee_id() == "3900000",
-          "workb.employee_id: 아무것도 없으면 환경변수로 떨어진다", str(workb.employee_id()))
-    with workb.acting("3902174"):
-        check(workb.employee_id() == "3902174" and workb.acting_employee() == "3902174",
-              "workb.acting: 블록 안에서는 그 사번이 «보내는 사람»이다", str(workb.employee_id()))
-        check(workb.employee_id("3902175") == "3902175",
-              "workb.employee_id: 로그인 사번(명시)이 가장 먼저다")
-    check(workb.employee_id() == "3900000" and workb.acting_employee() is None,
-          "workb.acting: 블록을 벗어나면 원래대로 돌아온다", str(workb.employee_id()))
+    check(note.employee_id() == "3900000",
+          "note.employee_id: 아무것도 없으면 환경변수로 떨어진다", str(note.employee_id()))
+    with note.acting("3902174"):
+        check(note.employee_id() == "3902174" and note.acting_employee() == "3902174",
+              "note.acting: 블록 안에서는 그 사번이 «보내는 사람»이다", str(note.employee_id()))
+        check(note.employee_id("3902175") == "3902175",
+              "note.employee_id: 로그인 사번(명시)이 가장 먼저다")
+    check(note.employee_id() == "3900000" and note.acting_employee() is None,
+          "note.acting: 블록을 벗어나면 원래대로 돌아온다", str(note.employee_id()))
 
     # 발송 함수는 주입받은 것이라 시그니처를 늘릴 수 없다 — 주체는 ContextVar 로 건넨다.
     _seen_actor: list = []
 
     async def _who(recipients, title, body):
-        _seen_actor.append(workb.acting_employee())
+        _seen_actor.append(note.acting_employee())
         return '{"success": true}'
 
-    asyncio.run(workb.send_note(["3902172"], _note, send=_who, as_employee="3902174"))
-    asyncio.run(workb.send_note(["3902172"], _note, send=_who))
+    asyncio.run(note.send_note(["3902172"], _note, send=_who, as_employee="3902174"))
+    asyncio.run(note.send_note(["3902172"], _note, send=_who))
     check(_seen_actor == ["3902174", None],
-          "workb.send_note: as_employee 가 발송 함수에게 «보내는 사람»으로 건네진다",
+          "note.send_note: as_employee 가 발송 함수에게 «보내는 사람»으로 건네진다",
           str(_seen_actor))
 finally:
     if _saved_emp_env is None:
-        os.environ.pop(workb.EMP_NO_ENV, None)
+        os.environ.pop(note.EMP_NO_ENV, None)
     else:
-        os.environ[workb.EMP_NO_ENV] = _saved_emp_env
+        os.environ[note.EMP_NO_ENV] = _saved_emp_env
 
 
 # ─────────────────────────────────────────────────────────────
 # 행내 MCP 연동 (pension_agent/mcp) — 쪽지가 실제로 나가는 층
 #
 # 행내 패키지(mcp_sdk · langchain_mcp_adapters)는 저장소 밖이라 여기서는 가짜를 끼운다
-# (`client.use_backend` — workb.use_sender 와 같은 규약). 그래서 이 테스트가 재는 것은
+# (`client.use_backend` — note.use_sender 와 같은 규약). 그래서 이 테스트가 재는 것은
 # «행내 서버가 무엇을 답하나»가 아니라 **우리가 무엇을 어떻게 내보내고 실패를 어떻게
 # 다루나**다: 인증 헤더의 꼴 · 도구 이름과 인자 이름 · 재시도 정책 · 미연결 처리.
 # ─────────────────────────────────────────────────────────────
@@ -1363,9 +1363,9 @@ from pension_agent.mcp import servers as _mcps  # noqa: E402
 from pension_agent.mcp import workb as _mcpw  # noqa: E402
 
 _MCP_ENV = ("MCP_SERVER_URL", "MCP_USER_ID", "MCP_SECRET_KEY", "MCP_CONN_ID", "MCP_SERVERS",
-            "MCP_RETRY_ATTEMPTS", "MCP_RETRY_BACKOFF_SEC", "MCP_AUTH_TTL_SEC", workb.EMP_NO_ENV)
+            "MCP_RETRY_ATTEMPTS", "MCP_RETRY_BACKOFF_SEC", "MCP_AUTH_TTL_SEC", note.EMP_NO_ENV)
 _saved_mcp_env = {k: os.environ.get(k) for k in _MCP_ENV}
-_saved_issue_token, _saved_sender = _mcpc.issue_token, workb.SENDER
+_saved_issue_token, _saved_sender = _mcpc.issue_token, note.SENDER
 
 
 class _FakeTool:
@@ -1420,7 +1420,7 @@ def _use_mcp(*, tools, retry: str = "2", servers_env: str = "workb"):
     os.environ.update({"MCP_SERVER_URL": "https://mcp.test/api", "MCP_USER_ID": "tea000",
                        "MCP_SECRET_KEY": "s3cret", "MCP_SERVERS": servers_env,
                        "MCP_RETRY_ATTEMPTS": retry, "MCP_RETRY_BACKOFF_SEC": "0",
-                       workb.EMP_NO_ENV: "3902172"})
+                       note.EMP_NO_ENV: "3902172"})
     adapter = _fake_adapter(tools)
     _FakeSdk.log.clear()
     _mcp.reset()
@@ -1433,8 +1433,8 @@ try:
     # ── 설정이 없으면 붙이지 않는다 — 쪽지는 «미연결»로 답한다(보내지 않는다) ──
     for _k in _MCP_ENV:
         os.environ.pop(_k, None)
-    workb.use_sender(None)
-    check(_mcp.install() is False and workb.SENDER is None,
+    note.use_sender(None)
+    check(_mcp.install() is False and note.SENDER is None,
           "mcp.install: 설정이 없으면 붙이지 않는다 — 쪽지는 «미연결»로 답한다")
     check(_mcp.stats()["missing"] == ["MCP_SERVER_URL", "MCP_USER_ID", "MCP_SECRET_KEY"],
           "mcp.stats: 무엇이 비어 있는지 이름으로 말한다", str(_mcp.stats()))
@@ -1442,10 +1442,10 @@ try:
     # ── 붙었을 때: 인증 헤더 · 주소 · 도구 인자 ──
     _memo_tool = _FakeTool("send_memo")
     _adapter = _use_mcp(tools=[_memo_tool, _FakeTool("search_emp_and_send_memo")])
-    check(_mcp.install() is True and workb.SENDER is _mcpw.send_memo,
-          "mcp.install: 설정이 갖춰지면 위층(workb)의 발송 함수로 등록된다")
+    check(_mcp.install() is True and note.SENDER is _mcpw.send_memo,
+          "mcp.install: 설정이 갖춰지면 위층(note)의 발송 함수로 등록된다")
 
-    _sent = workb.send_note_sync(["3902172"], _note)
+    _sent = note.send_note_sync(["3902172"], _note)
     check(_sent["status"] == "sent", "mcp: 승낙받은 쪽지가 MCP 도구로 나가고 발송으로 판정된다",
           str(_sent))
     check(_memo_tool.calls == [{"RECIPIENT": ["3902172"], "TITLE": _note.title,
@@ -1471,7 +1471,7 @@ try:
 
     # 로그인 사번이 넘어온 발송은 **그 사번으로** 인증한다 — 감사 기록이 그 사번으로
     # 남는다. 받는 사람(3902172)과 다른 축이라는 것도 여기서 갈린다.
-    workb.send_note_sync(["3902172"], _note, as_employee="3902174")
+    note.send_note_sync(["3902172"], _note, as_employee="3902174")
     _key2 = _js.loads(_b64.b64decode(
         _adapter.made[-1]["workb-mcp-server"]["headers"]["MCP-User-Key"]).decode())
     check(_key2["emp_no"] == "3902174" and _memo_tool.calls[-1]["RECIPIENT"] == ["3902172"],
@@ -1494,7 +1494,7 @@ try:
     _flaky = _FakeTool("send_memo", fail=99)
     _use_mcp(tools=[_flaky])
     _mcp.install()
-    _failed = workb.send_note_sync(["3902172"], _note)
+    _failed = note.send_note_sync(["3902172"], _note)
     check(_failed["status"] == "failed" and len(_flaky.calls) == 1,
           "mcp: 발송이 실패해도 다시 부르지 않는다 — 재시도가 곧 중복 발송이다",
           f"{_failed['status']} · 호출 {len(_flaky.calls)}회")
@@ -1524,7 +1524,7 @@ try:
     _use_mcp(tools=[_late])
     _mcpc.use_backend(sdk=_FakeSdk, adapter=_FlakyAdapter)
     _mcp.install()
-    _retried = workb.send_note_sync(["3902172"], _note)
+    _retried = note.send_note_sync(["3902172"], _note)
     check(_retried["status"] == "sent" and _FlakyAdapter.tries == 2 and len(_late.calls) == 1,
           "mcp: 접속·도구 목록 실패는 다시 붙어 본다(부수효과가 없다)",
           f"{_retried['status']} · 접속 {_FlakyAdapter.tries}회 · 발송 {len(_late.calls)}회")
@@ -1540,9 +1540,9 @@ try:
 
     # ── 보내는 주체(사번)가 없으면 보내지 않는다 ──
     _use_mcp(tools=[_FakeTool("send_memo")])
-    os.environ.pop(workb.EMP_NO_ENV, None)
+    os.environ.pop(note.EMP_NO_ENV, None)
     _mcp.install()
-    _nobody = workb.send_note_sync(["3902172"], _note)
+    _nobody = note.send_note_sync(["3902172"], _note)
     check(_nobody["status"] == "failed" and "사번" in _nobody["detail"],
           "mcp: 보내는 직원 사번이 없으면 보내지 않고 사유를 말한다", str(_nobody["detail"]))
 
@@ -1579,7 +1579,7 @@ finally:
     _mcpc.use_backend()
     _mcpc.issue_token = _saved_issue_token
     _mcp.reset()
-    workb.use_sender(_saved_sender)
+    note.use_sender(_saved_sender)
     for _k, _v in _saved_mcp_env.items():
         if _v is None:
             os.environ.pop(_k, None)

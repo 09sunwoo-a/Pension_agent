@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pension_agent import workb as notes          # 위층 — 본문·수신자 검증·결과 판정
+from pension_agent import note                   # 위층 — 본문·수신자 검증·결과 판정
 from pension_agent.mcp import client as mcp_client
 
 log = logging.getLogger(__name__)
@@ -62,16 +62,16 @@ async def send_memo(recipients: list[str], title: str, body: str,
     «나갔는지 모른다»이고, 그대로 다시 부르면 같은 쪽지가 두 통 간다. 붙는 단계의 실패는
     `client.call` 이 알아서 다시 시도한다(부수효과가 없다).
     """
-    ids = notes.validate_recipients(recipients)   # 문자열 하나를 리스트 대신 넘기는 것을 막는다
-    sender = notes.employee_id(emp_no)
+    ids = note.validate_recipients(recipients)   # 문자열 하나를 리스트 대신 넘기는 것을 막는다
+    sender = note.employee_id(emp_no)
     if not sender:
         raise mcp_client.MCPUnavailable(
             "쪽지를 보낼 직원 사번이 없습니다 — 로그인 사번이 넘어오지 않았고 "
-            f"{notes.EMP_NO_ENV} 환경변수도 비어 있습니다")
-    if not ((emp_no or "").strip() or notes.acting_employee()):
+            f"{note.EMP_NO_ENV} 환경변수도 비어 있습니다")
+    if not ((emp_no or "").strip() or note.acting_employee()):
         log.warning("쪽지를 %s 사번으로 보냅니다 — 로그인 사번이 넘어오지 않아 %s 환경변수로 "
                     "떨어졌습니다(여러 직원이 쓰는 배포면 전부 이 사번으로 나갑니다)",
-                    sender, notes.EMP_NO_ENV)
+                    sender, note.EMP_NO_ENV)
     return await mcp_client.client_for(sender).call(
         TOOL, {ARG_RECIPIENT: ids, ARG_TITLE: title, ARG_BODY: body}, idempotent=False)
 
@@ -87,6 +87,6 @@ def install() -> bool:
         log.info("MCP 미설정 — 쪽지 발송을 붙이지 않습니다(본문만 생성): %s",
                  ", ".join(mcp_client.settings().missing()))
         return False
-    notes.use_sender(send_memo)
+    note.use_sender(send_memo)
     log.info("MCP 쪽지 발송을 붙였습니다 — 도구 %s", TOOL)
     return True

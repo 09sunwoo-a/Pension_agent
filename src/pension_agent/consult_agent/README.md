@@ -53,7 +53,7 @@ consult_agent/
 ├── marks.py            재료 성격 표시 — 신뢰 등급 · 내부용 주의 (§7)
 ├── screens.py          화면 연계 — mystar-link:// 딥링크 조립 · 발송 화면번호 조회 (§10). 화면번호는 KB 가 갖는다
 ├── relations.py        관계 기반 점검 — 값–조건 오짝 · 알려진 오답 대조 (§6)
-├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../workb.py) (§10)
+├── memo.py             WorkB 쪽지 초안 — 무엇을 쓸지 (꼴과 발송은 ../note.py) (§10)
 ├── suggest.py          추천 질문 칩 — 지난 상담 · 열린 세미나가 있는 고객에게만
 ├── render.py           답변 + 출처 블록을 텍스트 한 덩어리로 — CLI 와 main.py 가 함께 쓴다
 ├── prompts.py          LLM 프롬프트 템플릿 (기능별 섹션으로 구분)
