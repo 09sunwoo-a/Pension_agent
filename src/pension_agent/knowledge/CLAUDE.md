@@ -250,7 +250,7 @@
   LLM 이 고를 후보 목록에 보인다
 - `consult_agent/tools/` 의 도구 모듈 하나 + `prompts.ANSWER_SHAPES` 의 형태 요구
 
-`tests/test_consult_agent.py::check_hier_index` 의 버킷 커버리지 검사가 두 번째를 잡는다.
+`tests/consult/index.py::check_hier_index` 의 버킷 커버리지 검사가 두 번째를 잡는다.
 
 ### 적재 감사 (2026-08-25)
 
@@ -421,7 +421,7 @@
 group 은 **문서 제목**이다 — 회차를 구분해야 LLM 이 이번 주 자료를 고를 수 있기 때문에
 category(시황/상품) 둘로 묶지 않았다. 대신 주간 자료가 한 회차 쌓일 때마다 카탈로그가
 한 줄(약 45자)씩 는다. 지금 1,793자이고 회귀 테스트의 상한이 2,000자이므로
-(`test_consult_agent.py::check_hier_index`), **주간 자료 네댓 회차쯤에서 그 상한이 먼저
+(`tests/consult/index.py::check_hier_index`), **주간 자료 네댓 회차쯤에서 그 상한이 먼저
 깨진다.** 그때 고를 것은 상한을 올리는 것이 아니라(작은 컨텍스트에 싣는 것이 계층 인덱스의
 존재 이유다) 지난 회차를 어떻게 접을지다 — 회차 축을 버킷 밖으로 빼거나, 최신 회차만
 카탈로그에 세우거나. 정하기 전에 회차를 더 쌓지 않는 편이 낫다.

@@ -329,7 +329,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    맞는지를 추천 질문 칩과 같은 함수(`support.relevant_outreach`)로 판정해, 맞으면
    «요건 일치: <요건 이름>» 을, 아니면 «요건 일치: 없음 — 이 고객 요건과 무관» 을 적고
    추천 사유를 싣지 않는다. 머리말의 «지금 안내할 것 N건»은 맞는 것만 세고, 폴백은 발송
-   화면 제안 목록에서 뺀다. 회귀: `tests.test_consult_agent::check_outreach` ⑤.
+   화면 제안 목록에서 뺀다. 회귀: `tests.consult.screens::check_outreach` ⑤.
 2. **개발자 메모가 직원 안내로 나간다 (DY5).** 「고객 발송 가능 자료 미등록 — assets.json 의
    customer_facing 확인 필요」(`strategy_agent/engine/pipeline.py:258` 이 `needs_confirm` 에
    넣는 문장)가 `customer` 재료의 «확인 필요»로 실려 «하면 안 되는 것»의 답에 그대로 나갔다.
@@ -349,7 +349,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    차례에서는 통과한 [06-12-622] 가 화면 카드 근거 차례에서 «이 근거에 없는 화면»으로
    걸렸다. `nodes/plan.py::_screen` 이 원장 전체의 화면번호 합집합(`_ledger_screens`)을 만들어
    `_span_verdict` 에 넘기고, 화면번호 판정은 그 합집합으로 한다. 지어낸 번호는 여전히
-   걸린다. 회귀: `tests.test_consult_agent::check_atomic_spans` 「원장의 다른 근거가 아는
+   걸린다. 회귀: `tests.consult.plan_loop::check_atomic_spans` 「원장의 다른 근거가 아는
    화면번호는 통과한다」.
 4. **안정추구형 적합성 범위 답변이 «5종»으로 잘못 센다 (SH6 · PJ3 — 두 번 재현).** 재료는
    안내 가능 6종 · 불가 6종인데 생성문이 원장에 없는 수 «5» 를 써서 verify 게이트가 폐기했다.
@@ -357,7 +357,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    공격 12종)에서는 세는 것이 맞았다 — 안정추구형 재료의 목록 모양을 볼 자리.
    **고침(2026-09-07).** 원인은 `suitable` 도구가 제외 목록을 5건에서 자르던 상한
    (`BLOCKED_MAX`)이었다 — 재료가 «6종»이라 쓰고 5건만 보여주니 LLM 이 «5종»으로 셌다. 상한을
-   없애 제외 상품을 전부 싣는다. 회귀: `tests.test_consult_agent::check_suitable_shape`
+   없애 제외 상품을 전부 싣는다. 회귀: `tests.consult.answer::check_suitable_shape`
    「머리말의 수와 목록 줄 수가 같다」.
 5. **콘텐츠 이름을 바꿔 쓰면 발송 화면 제안이 안 붙는다 (SE6 → SE7).** `act._propose_lms` 는
    답변이 콘텐츠 이름을 그대로 인용했는지로 «가리켰다»를 판정한다(`_mentions`). 답변이
@@ -366,7 +366,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    **고침(2026-09-07).** 판정 기준에 링크를 더했다 — `outreach` 재료가 콘텐츠마다 `url` 을
    발송 목록에 함께 싣고, `act._mentions` 는 이름 대조 **또는** 그 링크 인용 중 하나면 «가리켰다»로
    본다. 링크는 원문 스팬이라 답변이 바꿔 쓸 수 없고 콘텐츠마다 다르다. 이름도 링크도 없는
-   답변에는 지금처럼 안 붙는다. 회귀: `tests.test_consult_agent::check_outreach` 「이름을 바꿔
+   답변에는 지금처럼 안 붙는다. 회귀: `tests.consult.screens::check_outreach` 「이름을 바꿔
    써도 링크를 인용한 답변에는 그 콘텐츠의 제안이 붙는다」.
 6. **고객 계산이 필요한 질문이 제도 일반론으로 간다 (DY4).** 「ISA 만기자금 IRP로 넣으면
    세액공제 받아?」에 계획이 `tax_credit` 대신 `fact` 만 불러, 이 고객의 잔여한도 0(현금 축

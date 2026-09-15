@@ -106,7 +106,7 @@ $CADR --versions · --diff v5 v6 · review@v3           # 중간점검본 판 �
 python -m tests.test_engine            # ①~⑤ 결정론 로직
 python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치
 python -m tests.test_strategy_agent    # LLM 산출 검증 · 폴백
-python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드
+python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드 (검사 본문은 tests/consult/)
 python -m tests.test_infra             # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api               # HTTP 진입점 — 플랫폼 I/O 스키마 계약
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
