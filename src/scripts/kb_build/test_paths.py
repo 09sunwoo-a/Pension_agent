@@ -15,7 +15,7 @@ import re
 import sys
 from pathlib import Path
 
-from scripts.kb_build import build_kb, config
+from scripts.kb_build import common, config, docs, market
 
 _fail: list[str] = []
 _ok = 0
@@ -67,12 +67,12 @@ for stem, seed in config.GUIDE_DOCS.items():
         _drift.append(f"{stem} — 레지스트리에 없음")
         continue
     path = config.REPO / fields["path"]
-    origin = build_kb.doc_title(path) if path.exists() else None
+    origin = docs.doc_title(path) if path.exists() else None
     override = seed.get("title_override")
     if override:
         # 원문만으로 문서를 특정 못 해 대체한 것은 허용하되, 왜 다른지는 코드에 남아야 한다.
         if not seed.get("title_override_reason") and origin and \
-                build_kb._norm(origin) not in build_kb._norm(override):
+                docs._norm(origin) not in docs._norm(override):
             _drift.append(f"{stem} — override 가 원문과 다른데 사유 선언 없음")
     elif fields["title"] != origin:
         _drift.append(f"{stem} — 레지스트리 '{fields['title']}' vs 원문 '{origin}'")
@@ -95,7 +95,7 @@ for path in _m_files:
     if path.stem not in config.MARKET_DOCS:
         _m_drift.append(f"{path.name} — config.MARKET_DOCS 에 시드 없음")
         continue
-    fm, _ = build_kb._market_front_matter(path.read_text(encoding="utf-8"))
+    fm, _ = market._market_front_matter(path.read_text(encoding="utf-8"))
     fields = next((f for f in _market_docs.values() if f.get("origin_file") in
                    (fm.get("source_file"), path.name)), None)
     if fields is None:
@@ -108,9 +108,9 @@ check(not _m_drift, f"05 문서 시드·제목 = 원문 ({len(_m_files)}건 대�
 #
 # 시황 수치는 주·월 단위로 낡는다. 경고 문구를 코드가 들고 있으면 README 가 바뀔 때 두 곳이
 # 갈리고, 갈리면 답변이 틀린 안내를 한다(consult §12 지워진 gap 16·18 과 같은 사고).
-_warn = build_kb._market_warn()
+_warn = market._market_warn()
 _readme = (config.MARKET_DIR / "README.md").read_text(encoding="utf-8")
-check(bool(_warn) and build_kb._market_emphasis(_warn) in build_kb._market_emphasis(_readme),
+check(bool(_warn) and market._market_emphasis(_warn) in market._market_emphasis(_readme),
       "05 시효 경고가 README 원문에서 온다", str(_warn)[:40])
 
 
@@ -137,7 +137,7 @@ for _part in re.split(r"\n(?=### F\d)", _facts_src.read_text(encoding="utf-8")):
         continue
     # 절 본문만 본다 — 뒤따르는 `## 확인 필요 목록` 은 그 절의 것이 아니다.
     _body = _part.split("\n## ")[0]
-    _rows = [ln for ln in _body.splitlines() if build_kb._TABLE_LINE.match(ln.strip())]
+    _rows = [ln for ln in _body.splitlines() if market._TABLE_LINE.match(ln.strip())]
     if len(_rows) < 3:
         continue
     _card = _fact_cards.get(_m.group(1))
@@ -159,17 +159,17 @@ check(not _lost, f"팩트 절의 원문 표가 카드에 실린다 ({_checked}�
 # ("'ISA 만기자금 입금'(항목 48)을 선택하면"). 앞에 실제 순번 ①② 가 서 있어서 화살표 뒤의
 # 번호가 그 연장으로 읽힌 것이고, 검증기는 "48" 이 근거에 있으므로 통과시킨다.
 _cards: list[dict] = []
-for _f in sorted((config.KB_DATA if hasattr(config, "KB_DATA") else build_kb.OUT_DIR).glob("kb_*.json")):
+for _f in sorted((config.KB_DATA if hasattr(config, "KB_DATA") else common.OUT_DIR).glob("kb_*.json")):
     _cards += json.loads(_f.read_text(encoding="utf-8")).get("records", [])
 _ids = {c["id"] for c in _cards}
 
 _bare, _arrow, _broken = [], [], []
 for _c in _cards:
     _fields = _c.get("fields") or {}
-    _derived = json.dumps({k: _fields.get(k) for k in build_kb._XREF_FIELDS}, ensure_ascii=False)
-    if build_kb._XREF_WORD.search(_derived):
+    _derived = json.dumps({k: _fields.get(k) for k in common._XREF_FIELDS}, ensure_ascii=False)
+    if common._XREF_WORD.search(_derived):
         _bare.append(_c["id"])
-    if build_kb._XREF_ARROW.search(_derived):
+    if common._XREF_ARROW.search(_derived):
         _arrow.append(_c["id"])
     _broken += [f"{_c['id']}→{r}" for r in _c.get("refs", []) if r not in _ids]
 check(not _bare, "파생 텍스트에 맨 「항목 N」이 없다 (전부 「지식항목 N」)",
@@ -179,15 +179,15 @@ check(not _broken, "refs 가 실재하는 카드를 가리킨다", ", ".join(_br
 
 # **원문은 고치지 않는다**(루트 절대 규칙 1). 06 원문과 카드의 인용 필드에는 「항목 N」이
 # 그대로 남아 있어야 한다 — 파생 텍스트만 바꾼 것이 맞는지 여기서 가른다.
-_src_has = build_kb._XREF_WORD.search(
+_src_has = common._XREF_WORD.search(
     (config.EXTRACT_DIR / "05_업무처리절차.md").read_text(encoding="utf-8"))
 check(_src_has is not None, "06 원문의 「항목 N」 표기는 그대로다 (원문 불변)")
 # 변환기가 손대는 필드에 인용 필드가 섞이면 그때부터 원문이 조용히 고쳐진다. 지금 06 의
 # 「항목 N」은 표 셀·도출문에만 있어 인용에 걸린 것이 없지만, 원문이 바뀌면 걸릴 수 있다 —
 # 막을 자리는 «걸렸는지»가 아니라 **손대는 필드 목록**이다.
-check(not ({"quotes", "source_text"} & set(build_kb._XREF_FIELDS)),
+check(not ({"quotes", "source_text"} & set(common._XREF_FIELDS)),
       "상호참조 표기는 파생 텍스트만 고친다 (인용 필드는 손대지 않는다)",
-      str(build_kb._XREF_FIELDS))
+      str(common._XREF_FIELDS))
 
 # 대표 대조 — 표A 의 그 행이 실제로 두 절차 항목으로 이어졌는가.
 _isa_screen = next((c for c in _cards if c["id"] == "screen.01-12-213"), None)

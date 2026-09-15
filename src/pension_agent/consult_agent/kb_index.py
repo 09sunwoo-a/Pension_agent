@@ -96,7 +96,7 @@ def product_names(kb: KnowledgeBase) -> set[str]:
     '미등록'으로 판정돼 통째로 버려졌다 — 그 자리에 근거 원문이 덤프됐다.
 
     이름을 여기서 **추론하지 않는다.** 카드가 선언한 것만 읽는다 — 어느 칸을 상품명으로
-    볼지는 변환기가 정한다(`build_kb._PRODUCT_COLUMNS`).
+    볼지는 변환기가 정한다(`kb_build/market.py::_PRODUCT_COLUMNS`).
     """
     return {n for c in kb.cards for n in (c.get("product_names") or []) if n}
 
