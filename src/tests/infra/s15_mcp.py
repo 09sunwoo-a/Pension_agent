@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading as _threading
+import time as _time
 
 from tests.infra._common import check
 
@@ -65,9 +67,13 @@ class _FakeSdk:
     def setup_system(client_id, client_secret):
         _FakeSdk.log.append(("setup_system", client_id))
 
+    #: 지금 SDK 전역에 서 있는 사번 — 실제 SDK 처럼 마지막에 세운 값이 남는다.
+    current: str = ""
+
     @staticmethod
     def set_request_context(emp_no, auth_token):
         _FakeSdk.log.append(("context", emp_no, auth_token))
+        _FakeSdk.current = emp_no
 
 
 def _fake_adapter(tools):
@@ -245,6 +251,42 @@ try:
                                  conn_id="conn1")
     check(_with_conn["sybase-mcp-server"]["url"] == "https://h/sybase/tea000:conn1",
           "mcp.servers: 접속 id 가 있으면 경로에 붙는다", str(_with_conn))
+
+    # ── 두 직원이 동시에 보내도 각자 자기 사번으로 나간다 ──
+    # 실제 경로는 스레드마다 새 이벤트 루프다(send_note_sync → asyncio.run). 루프 단위
+    # 잠금이던 때는 A 가 컨텍스트를 세우고 도구 호출을 기다리는 사이 B 가 컨텍스트를 덮어
+    # A 의 쪽지가 B 의 사번으로 나갔다(감사 기록도 B 로). 도구가 «호출 시점의 SDK 전역»을
+    # 기록하게 해서 그 겹침을 그대로 재현한다.
+    class _SlowTool(_FakeTool):
+        seen: list[tuple[str, str]] = []            # (요청한 사번, SDK 에 서 있던 사번)
+
+        async def ainvoke(self, args):
+            mine = args["who"]
+            await asyncio.sleep(0.05)               # 다른 스레드가 끼어들 틈
+            _SlowTool.seen.append((mine, _FakeSdk.current))
+            return await super().ainvoke(args)
+
+    _slow = _SlowTool("send_memo")
+    _use_mcp(tools=[_slow])
+    _errors: list[BaseException] = []
+
+    def _send_as(emp: str) -> None:
+        try:
+            asyncio.run(_mcp.client_for(emp).call("send_memo", {"who": emp}))
+        except BaseException as exc:            # noqa: BLE001 — 스레드 안의 예외를 밖으로
+            _errors.append(exc)
+
+    _threads = [_threading.Thread(target=_send_as, args=(emp,)) for emp in ("3902172", "3902174")]
+    for _t in _threads:
+        _t.start()
+        _time.sleep(0.01)                       # A 가 먼저 컨텍스트를 세우게
+    for _t in _threads:
+        _t.join(timeout=10)
+    check(not _errors and not any(_t.is_alive() for _t in _threads),
+          "mcp: 두 스레드의 발송이 예외·교착 없이 끝난다", str(_errors))
+    check(sorted(_SlowTool.seen) == [("3902172", "3902172"), ("3902174", "3902174")],
+          "mcp: 두 직원이 겹쳐 보내도 각자 자기 사번의 컨텍스트로 나간다 — 프로세스 단위 잠금",
+          str(_SlowTool.seen))
 finally:
     _mcpc.use_backend()
     _mcpc.issue_token = _saved_issue_token

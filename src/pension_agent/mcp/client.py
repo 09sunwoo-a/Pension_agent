@@ -31,9 +31,11 @@ MCP-User-Key 에 사번이 들어가고 행내 감사 기록도 그 사번으로
 **요청 컨텍스트는 프로세스 전역이다.** `mcp_sdk.set_request_context(emp_no, auth_token)`
 는 SDK 안의 전역을 바꾼다 — 한 프로세스가 여러 직원의 요청을 번갈아 처리하면 마지막에
 세운 사람의 컨텍스트가 남는다. 그래서 ① 호출 **직전**에 다시 세우고 ② 세우기와 호출을
-이벤트 루프 단위 잠금으로 묶는다. 이것으로 좁아지는 것은 «같은 루프 안에서의 끼어들기»
-까지다. 워커가 여럿이면 SDK 전역이 프로세스마다 따로라 문제가 없지만, 한 프로세스 안에서
-스레드를 나눠 쓰면 이 잠금이 닿지 않는다 — `docs/PRODUCTION_RISKS.md` 에 적어 둔다.
+**프로세스 단위** 잠금(`_CALL_LOCK`)으로 묶는다. 예전에는 이벤트 루프 단위 잠금이었는데,
+실제 발송 경로는 스레드마다 새 루프(`note.send_note_sync` → `asyncio.run`, main.py 의
+to_thread 안)라 루프 단위 잠금은 아무것도 막지 못했다 — 두 직원이 동시에 «네»라고 하면
+A 의 쪽지가 B 의 사번으로 나갈 수 있었다. 워커 프로세스가 여럿이면 SDK 전역도 프로세스마다
+따로라 그 사이는 문제가 없다.
 
 ━━ 재시도는 «다시 불러도 되는 도구»만 ━━
 발송 호출이 타임아웃으로 실패했다는 것은 «안 나갔다»가 아니라 «나갔는지 모른다»이다.
@@ -58,6 +60,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -66,8 +69,8 @@ import os
 import time
 import urllib.error
 import urllib.request
+import threading
 import uuid
-import weakref
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -259,17 +262,25 @@ def issue_token(cfg: Settings) -> str:
 # 호출 잠금 — 요청 컨텍스트가 프로세스 전역이라 필요하다(머리말)
 # ─────────────────────────────────────────────────────────────
 
-#: 이벤트 루프마다 잠금 하나. `asyncio.Lock` 은 처음 쓰인 루프에 묶이므로 모듈 상수 하나로
-#: 두면 두 번째 루프(동기 경로의 `asyncio.run`)에서 깨진다. 루프가 사라지면 함께 사라진다.
-_LOCKS: "weakref.WeakKeyDictionary[Any, asyncio.Lock]" = weakref.WeakKeyDictionary()
+#: 프로세스에 하나. SDK 전역이 프로세스에 하나이므로 잠금도 그 단위여야 한다 — 스레드마다
+#: 루프가 다른 실제 경로(머리말)에서 `asyncio.Lock` 은 루프마다 따로 생겨 아무것도 막지 못했다.
+_CALL_LOCK = threading.Lock()
 
 
-def _lock() -> asyncio.Lock:
-    loop = asyncio.get_running_loop()
-    lock = _LOCKS.get(loop)
-    if lock is None:
-        lock = _LOCKS[loop] = asyncio.Lock()
-    return lock
+@contextlib.asynccontextmanager
+async def _locked():
+    """«컨텍스트 세우기 + 호출» 한 덩이를 프로세스 전체에서 직렬화한다.
+
+    잡는 것은 스레드로 보낸다(`to_thread`) — 이벤트 루프 안에서 `threading.Lock.acquire()` 를
+    직접 부르면 잠금을 쥔 쪽이 같은 루프에서 await 를 마쳐야 풀리는데 루프가 막혀 있어
+    영원히 못 푼다. 잠금은 await 구간(도구 호출)에 걸쳐 잡혀 있다 — 발송 하나가 끝날 때까지
+    다른 직원의 발송은 기다린다. SDK 컨텍스트가 전역인 동안은 그것이 정확한 비용이다.
+    """
+    await asyncio.to_thread(_CALL_LOCK.acquire)
+    try:
+        yield
+    finally:
+        _CALL_LOCK.release()
 
 
 # ─────────────────────────────────────────────────────────────
@@ -343,10 +354,12 @@ class MCPClient:
         if not endpoints:
             raise MCPUnavailable("붙을 MCP 서버가 없습니다 — MCP_SERVERS 설정을 확인하세요")
         self._context = {"emp_no": self.emp_no, "auth_token": token}
-        # 요청 컨텍스트는 세션을 열기 **전에** 세운다(행내 가이드 STEP 3).
-        self._enter()
-        client = adapter(endpoints)
-        tools = await client.get_tools()
+        # 요청 컨텍스트는 세션을 열기 **전에** 세운다(행내 가이드 STEP 3). 세우기와 열기
+        # 사이에 다른 직원의 요청이 끼어들면 그 사람 컨텍스트로 열리므로 호출과 같은 잠금이다.
+        async with _locked():
+            self._enter()
+            client = adapter(endpoints)
+            tools = await client.get_tools()
         self._client = client
         self._tools = {getattr(t, "name", ""): t for t in tools}
         self._opened = time.monotonic()
@@ -386,7 +399,7 @@ class MCPClient:
                 found = await self.tool(name)
                 # 컨텍스트 세우기와 호출을 한 덩이로 묶는다 — 사이에 다른 직원의 요청이
                 # 끼어들면 그 사람 컨텍스트로 나간다(머리말).
-                async with _lock():
+                async with _locked():
                     self._enter()
                     invoked = True
                     return await found.ainvoke(args)
