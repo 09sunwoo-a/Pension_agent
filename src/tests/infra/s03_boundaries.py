@@ -1,0 +1,82 @@
+"""패키지 임포트 경계 — 두 에이전트를 한 프로세스에서 함께 써도 이름이 겹치지 않는다
+
+`tests/test_infra.py` 가 번호 순서로 임포트해 돌린다 — 이 파일을 따로 돌리지 않는다.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+from tests.infra._common import check
+
+
+# ─────────────────────────────────────────────────────────────
+# 패키지 임포트 경계 — 두 에이전트를 한 프로세스에서 함께 써도 이름이 겹치지 않는다
+#
+# 회귀 대상: 예전에는 두 에이전트가 평평한 스크립트 디렉터리라 `prompts`·`llm` 같은 동명
+# 모듈이 sys.modules 를 놓고 경합했고(먼저 임포트한 쪽이 자리를 차지), 이를 피하려 전용
+# 로더(common/agent_loader.py)가 sys.path 와 짧은 이름을 저장·복원했다. 패키지화로 그
+# 경합 자체가 없어졌다 — 이 테스트가 고정하는 것은 "짧은 이름이 sys.modules 에 등장하지
+# 않는다"는 사실이다. 다시 등장하면 sys.path 조작이 되살아났다는 뜻이다.
+# ─────────────────────────────────────────────────────────────
+
+from pension_agent.consult_agent import prompts as consult_prompts  # noqa: E402
+from pension_agent.strategy_agent import prompts as strategy_prompts  # noqa: E402
+
+check(consult_prompts is not strategy_prompts,
+      "동명 모듈(prompts)이 에이전트별로 각각 적재된다")
+check(consult_prompts.__name__ == "pension_agent.consult_agent.prompts",
+      "완전정규화 이름으로 등록된다", consult_prompts.__name__)
+check(not {"prompts", "llm", "customer", "engine", "kb"} & set(sys.modules),
+      "짧은 이름이 sys.modules 를 오염시키지 않는다",
+      str(sorted({"prompts", "llm", "customer", "engine", "kb"} & set(sys.modules))))
+
+import pension_agent  # noqa: E402
+
+check(not any("sys.path" in (f.read_text(encoding="utf-8"))
+              for f in Path(pension_agent.__file__).parent.rglob("*.py")),
+      "패키지 안에 sys.path 조작이 남아 있지 않다")
+
+# 에이전트 사이의 의존은 한 방향이다 — knowledge ← strategy_agent ← consult_agent (루트 CLAUDE.md
+# 「구조 규칙」). 예전에는 strategy_agent.support 가 consult_agent.kb 를 거꾸로 임포트했고, 그
+# 간선 하나 때문에 공용 모듈에 순환 회피용 지연 임포트가 늘었다. 공용 카드 지식베이스를
+# knowledge/kb.py 로 옮겨 없앤 간선이 다시 생기지 않게 여기서 고정한다.
+_PKG = Path(pension_agent.__file__).parent
+_ONE_WAY = (*_PKG.glob("*.py"), *_PKG.joinpath("knowledge").rglob("*.py"),
+            *_PKG.joinpath("market").rglob("*.py"), *_PKG.joinpath("mcp").rglob("*.py"),
+            *_PKG.joinpath("strategy_agent").rglob("*.py"))
+_back_edges = sorted(
+    str(f.relative_to(_PKG)) for f in _ONE_WAY
+    if any(line.lstrip().startswith(("from pension_agent.consult_agent", "import pension_agent.consult_agent"))
+           for line in f.read_text(encoding="utf-8").splitlines()))
+check(not _back_edges, "strategy_agent·공용 모듈이 consult_agent 를 임포트하지 않는다", str(_back_edges))
+
+# 본문이 같은 함수가 서로 다른 모듈에 있지 않다. 이름이 아니라 본문(독스트링 제외)을 비교한다 —
+# 이름이 같아도 논리가 다른 함수(_norm 셋)는 중복이 아니고, 이름이 달라도 본문이 같으면
+# 중복이다(_parse·_json_obj 가 그랬다 — 2026-09-15 에 llm.json_object 로 합쳤다). 한쪽만
+# 고쳐지는 것이 이 중복의 실제 비용이라, 다시 생기면 여기서 잡는다. 사소한 한 줄짜리는
+# 우연히 같을 수 있어 본문 길이 하한을 둔다.
+import ast as _ast  # noqa: E402
+from collections import defaultdict as _defaultdict  # noqa: E402
+
+def _body_key(fn) -> str | None:
+    body = fn.body
+    if body and isinstance(body[0], _ast.Expr) and isinstance(getattr(body[0], "value", None), _ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        body = body[1:]                       # 독스트링은 본문이 아니다
+    if len(body) == 1 and isinstance(body[0], _ast.Pass):
+        return None
+    key = _ast.dump(_ast.Module(body=body, type_ignores=[]), annotate_fields=False)
+    return key if len(key) >= 60 else None
+
+_same_body: dict[str, list[str]] = _defaultdict(list)
+for _py in sorted((*_PKG.rglob("*.py"), *Path("scripts").rglob("*.py"))):
+    for _node in _ast.walk(_ast.parse(_py.read_text(encoding="utf-8"))):
+        if isinstance(_node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+            _k = _body_key(_node)
+            if _k:
+                _same_body[_k].append(f"{_py}:{_node.lineno} {_node.name}")
+_dupes = [v for v in _same_body.values() if len({x.split(":")[0] for x in v}) > 1]
+check(not _dupes, "본문이 같은 함수가 서로 다른 모듈에 없다 — 소유자 한 곳으로 합친다",
+      "; ".join(" == ".join(v) for v in _dupes))

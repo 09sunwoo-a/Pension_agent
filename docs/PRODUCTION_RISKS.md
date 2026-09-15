@@ -117,7 +117,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 행내 게이트웨이가 몰린 호출에 429 를 내던 문제는 세 겹으로 막아 두었다 — 동시성 상한
 (`LLM_MAX_CONCURRENCY`) · 최소 간격(`LLM_MIN_INTERVAL`) · 429 를 맞으면 프로세스 전체가
-쉬는 적응형 감속. 회귀는 `tests/test_infra.py` 의 「llm — 429 게이트」 절이 잡는다.
+쉬는 적응형 감속. 회귀는 `tests/infra/s10_llm_retry.py` 가 잡는다.
 
 **그런데 세마포어도 감속 시각도 모듈 전역 변수다.** 즉 «전체»의 범위가 한 파이썬
 프로세스다:
@@ -201,7 +201,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 **배선은 끝났다**(2026-09-10): 진입점이 받은 사번이 `AgentState["employee_id"]` 를 거쳐
 발송(`send_memo(as_employee=…)`)과 상담이력까지 같은 값으로 내려간다. 회귀는
 `tests/test_api.py`(진입점 → 에이전트) · `tests/test_consult_agent.py`(받는 사람 ·
-보내는 사람) · `tests/test_infra.py`(인증에 실리는 사번)가 잡는다.
+보내는 사람) · `tests/infra/s15_mcp.py`(인증에 실리는 사번)가 잡는다.
 
 **남은 것은 «x_client_user 가 사번으로 시작한다»는 전제다 — 아직 실물로 확인하지
 못했다.** 플랫폼 규격(`skills/genai-platform-agent-dev/refs/genai-platform.md`)은 이
