@@ -36,11 +36,37 @@ Evidence 또는 None. None 은 "이 도구로는 근거를 못 찾았다"는 뜻
 경로는 두지 않는다.
 
 ━━ 이 폴더에 있는 것 ━━
-도구 함수 모듈(cards·market·briefing·history·pitch·playbook·suitability·outreach·targets·dates·
-tax_credit·answered)과 도구 규약(base), 그리고 도구 **위에서** 도는 둘 — combine(여러 도구의
-근거 결합)·adequacy(고른 근거가 질문에 답이 되는가). 도구가 **쓰는** 것(검색·원장 규약·검사)은
-`evidence/` 에 있고 이 머리말이 그중 몇 이름(pick·ledger_*·source_lines…)을 재노출한다 —
-테스트·디버그 실행기가 `tools.X` 로 갈아끼우는 후크라서다. 새 코드는 소유자에서 직접 가져온다.
+도구 함수는 `_이름` 이고 레지스트리(아래 TOOLS)에 Tool 로 올라간다. [LLM] 은 그 도구가 근거를
+만들면서 LLM 을 부른다는 뜻이다(카드 선택 evidence/select · 슬롯 추출 evidence/pitch_slots ·
+적합성 판정). 도구가 **쓰는** 것(검색·원장 규약·검사)은 `evidence/` 에 있고, 이 머리말이 그중
+몇 이름(pick·ledger_*·source_lines…)을 재노출한다 — 테스트·디버그 실행기가 `tools.X` 로
+갈아끼우는 후크라서다. 새 코드는 소유자에서 직접 가져온다.
+
+    규약
+    base.py         Tool · ToolFailure       도구 선언 · «확인하지 못함» 예외 (Evidence 규약은 evidence/record)
+
+    지식베이스 도구 — 카드를 찾아 근거 블록으로
+    cards.py        fact procedure screen channel segment method fieldtip
+                                             제도·상품 수치 · 업무 절차 · 단말 화면번호 · 비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 현장 관찰 [LLM]
+    market.py       market lineup            시황·투자전략 · 이달의 추천펀드·디폴트옵션·TDF (05_시황_상품) [LLM]
+    pitch.py        pitch                    직원이 전한 고객의 말·반응으로 화법(대사·반론 대응·논거)을 찾는다 [LLM]
+    playbook.py     playbook                 이 고객 상태에 걸린 참고자료 — 화면 ⑥⑦⑧ 과 같은 후보군
+
+    현재 고객 도구 — strategy_agent 가 계산한 것을 그대로 옮긴다
+    briefing.py     customer                 열려 있는 고객의 브리핑 재료 — 잔액·수익률·요건 · 왜 타겟인지
+    suitability.py  suitable                 이 고객 투자성향으로 어디까지 안내할 수 있는지 — 허용 상한·통과 상품·제외 사유
+    outreach.py     outreach                 이 고객에게 안내할 세미나·이벤트와 발송 문구
+    history.py      history transcript       지난 상담(이전 세션) · 이번 상담(진행 중인 세션)의 대화
+
+    고객 화면 없이 쓰는 도구
+    targets.py      targets                  오늘의 타겟 고객 목록
+    dates.py        date                     오늘 날짜 · 연말까지 남은 일수
+    tax_credit.py   tax_credit               «얼마 더 넣으면 얼마 돌려받나» — 검색이 아니라 코드 계산 (ISA 전환 특례 포함)
+    answered.py     last_answer              이번 상담에서 한 답변 원문 — 줄여줘·쉽게·그 중 두 번째는
+
+    도구 위에서 도는 것
+    adequacy.py     fits_question            적합성 게이트 — 고른 근거가 질문에 답이 되는가. 모든 검색 도구가 채택 직전에 거친다 [LLM]
+    combine.py      evidence_from_cards      여러 종류의 카드 묶음 → 원장 항목 하나 (종류별 렌더러·선언을 그대로 쓴다)
 
 **도구가 죽은 것은 «못 찾았다»가 아니다.** 세 번째 결과가 `ToolFailure` 다(`base.py`) —
 확인한 0건과 확인하지 못한 것은 다른 사건이고, 뒤를 앞으로 접으면 지식베이스에 있는 자료를
