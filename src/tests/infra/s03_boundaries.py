@@ -155,3 +155,15 @@ _top_entries = sorted({f"{p.stem}.py" for p in _PKG.glob("*.py") if p.stem != "_
                       | {f"{p.name}/" for p in _PKG.iterdir() if p.is_dir() and (p / "__init__.py").exists()})
 _unmapped = [e for e in _top_entries if e not in _map]
 check(not _unmapped, "pension_agent/__init__.py 지도에 최상단 모듈·패키지가 전부 있다", str(_unmapped))
+
+
+# consult_agent 안의 층 — tools/(근거를 찾는다) 는 nodes/(그래프 노드) 아래다. 2026-09-15 까지
+# nodes/ 에 노드가 아닌 넷(facts_qa·procedure_qa·segment_qa·pitch 슬롯 분해)이 있어 tools/ 가
+# 위 층을 임포트했다. tools/ 로 내렸고, 다시 생기지 않게 여기서 잡는다(지연 임포트도 포함 —
+# 방향이 거꾸로면 지연이어도 거꾸로다).
+_tools_to_nodes = sorted(
+    str(f.relative_to(_PKG)) for f in (_PKG / "consult_agent" / "tools").rglob("*.py")
+    if any(line.lstrip().startswith(("from pension_agent.consult_agent.nodes", "import pension_agent.consult_agent.nodes"))
+           for line in f.read_text(encoding="utf-8").splitlines()))
+check(not _tools_to_nodes, "consult_agent/tools/ 가 nodes/ 를 임포트하지 않는다 — 도구는 노드 아래 층이다",
+      str(_tools_to_nodes))
