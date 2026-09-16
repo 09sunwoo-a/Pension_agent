@@ -204,4 +204,7 @@ def _adopt(state: AgentState, query: str, hits: list[tuple[float, dict]],
     kept = _T.fits_question(state.get("question") or query, hits, kind,
                             history=state.get("history"), query=query, sink=sink)
     record_branches(state, sink)
+    # 후보·채택 수를 같은 노드 안에 남긴다 — `tools.run` 이 도구 로그 줄에 싣고 바로 지운다.
+    # 원장에 싣지 않는 이유는 record_branches 와 같다(근거가 아니라 «어떻게 골랐나»의 기록).
+    state["_gate"] = {"candidates": len(hits), "picked": len(kept), "branches": len(sink)}
     return kept

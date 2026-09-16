@@ -32,58 +32,165 @@ _TRACE_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 _PARENT_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "langfuse_parent_id", default=None)
 
-#: 지금 처리 중인 HTTP 요청의 짧은 id(main.py 가 붙인다). «상태» 로그 줄을 그 요청의 다른
-#: 줄(요청·진행·완료)과 묶는 열쇠다. 트레이스 id 와 달리 Langfuse 가 꺼져 있어도 있다.
+#: 지금 처리 중인 HTTP 요청의 짧은 id(main.py 가 붙인다). «단계» 로그 줄을 그 요청의 다른
+#: 줄(요청·완료)과 묶는 열쇠다. 트레이스 id 와 달리 Langfuse 가 꺼져 있어도 있다.
 _REQUEST_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "observability_request_id", default=None)
 
-#: «상태» 로그 — 코드가 아는 사실 한 줄. 루트 로거로 흘러 stdout(→ Grafana)에 찍힌다.
-_state_log = logging.getLogger("agent")
-#: 상태 로그에 싣는 부가 설명(comment)의 최대 길이 — 로그는 상담 내용의 저장소가 아니다.
-STATE_COMMENT_MAX = 120
+#: 지금 턴(또는 브리핑 한 건)이 시작된 시각(`time.monotonic()`). 단계 줄의 경과초가 여기서
+#: 나온다 — `request_id()`·`trace()` 가 연다. 없으면 경과초 칸은 비운다.
+_STARTED: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "observability_started", default=None)
+
+#: 지금 턴의 LLM 호출 집계 — 호출 수와 입력 글자 수 합계. `turn` 끝 줄이 싣는다. 호출 한 건
+#: 한 건은 DEBUG 줄이라(llm._observe) INFO 로 남는 것은 이 합계뿐이다.
+_LLM_TALLY: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "observability_llm_tally", default=None)
 
 
 @contextlib.contextmanager
 def request_id(rid: str | None) -> Iterator[None]:
-    """이 블록 안의 상태 로그에 요청 id 를 붙인다. main.py 가 ask() 를 부를 때 연다."""
-    token = _REQUEST_ID.set(rid)
+    """이 블록 안의 단계 로그에 요청 id 를 붙이고 경과초 시계·LLM 집계를 연다.
+
+    main.py 가 ask() 를 부를 때 열고, graph.ask 가 같은 id 로 한 번 더 연다 — 그래서
+    경과초는 «턴이 시작된 뒤»다(HTTP 파싱 시간은 안 들어간다).
+    """
+    tokens = (_REQUEST_ID.set(rid), _STARTED.set(time.monotonic()),
+              _LLM_TALLY.set({"calls": 0, "chars": 0}))
     try:
         yield
     finally:
-        _REQUEST_ID.reset(token)
+        _REQUEST_ID.reset(tokens[0])
+        _STARTED.reset(tokens[1])
+        _LLM_TALLY.reset(tokens[2])
 
 
 def current_request_id() -> str | None:
     return _REQUEST_ID.get()
 
 
-#: 연계 실행(action_outcome)에서 «실행됐다»로 치는 status. 나머지는 직원이 승낙한 행위가
-#: 실행되지 않은 것이라 WARNING 이다(not_connected · failed · blocked).
-_ACTION_OK = frozenset({"sent", "stubbed", "ok"})
+def tally_llm(chars: int) -> None:
+    """LLM 호출 한 건을 이번 턴 집계에 더한다(llm._observe 가 부른다). 턴 밖이면 아무것도 안 한다.
+
+    스레드로 갈라진 호출(answer.py 의 compose 병렬 작성)도 같은 dict 객체를 보므로 — 컨텍스트
+    복사는 참조를 복사한다 — 합계에 들어온다.
+    """
+    tally = _LLM_TALLY.get()
+    if tally is not None:
+        tally["calls"] += 1
+        tally["chars"] += chars
 
 
-def _state_level(name: str, value: Any) -> int:
-    """«직원이 받는 답이 실패·축소로 바뀐 사실»만 WARNING. 나머지는 INFO 로 기록한다."""
-    if name == "tool_outcome":
-        return logging.WARNING if value == "failed" else logging.INFO
-    if name == "action_outcome":
-        return logging.INFO if value in _ACTION_OK else logging.WARNING
-    if name == "compose_passed":
-        return logging.INFO if value else logging.WARNING
-    if name == "turn_outcome":
-        return logging.WARNING if value in ("tool_failed", "llm_down") else logging.INFO
-    return logging.INFO
+def llm_tally() -> dict[str, int]:
+    """이번 턴의 LLM 호출 수·입력 글자 수 합계. 턴 밖이면 0."""
+    return dict(_LLM_TALLY.get() or {"calls": 0, "chars": 0})
 
 
-def _log_state(name: str, value: Any, comment: str | None) -> None:
-    """점수 한 건을 로그 한 줄로. Langfuse 가 꺼져 있어도 남는다 — 행내 Grafana 가 보는 자리다."""
+# ─────────────────────────────────────────────────────────────
+# «단계» 로그 — 에이전트가 이 턴에서 무엇을 했나, 한 단계에 한 줄
+#
+# 줄의 꼴은 하나다:   경과초 단계  키=값 키=값 …
+#
+#   INFO:     [agent] [ab12cd34]  2.0s plan        회차=1/4 도구=fact 질의='세액공제 한도'
+#   INFO:     [agent] [ab12cd34]  3.4s tool        fact 결과=성공 후보=3 채택=1 카드=fact.k04.f2(0.37)
+#   WARNING:  [agent] [ab12cd34]  7.0s verify      통과=아니오 시도=1/2 사유="수치 '1,485,000' 이 근거에 없음"
+#
+# 규칙 — 로그가 «LLM 이 쓴 글»로 읽히면 안 된다. 그래서 문장이 아니라 키=값이고, 동사·조사가
+# 없고, 키와 판정 값은 아래 두 표 안의 말만 쓴다(표 밖의 키는 찍히지 않는다 — 테스트가
+# 잡는다). 한글이 자유롭게 들어가는 자리는 둘뿐이다: LLM 이 만든 질의(`query`)와 실패
+# 사유(`reason`). 둘 다 상한이 있다(STEP_TEXT_MAX) — 로그는 상담 내용의 저장소가 아니다.
+#
+# 단계 이름(왼쪽)은 영문 그대로다 — 그래프 노드·LLM 호출 이름과 같은 말이라 코드에서 찾을
+# 수 있어야 한다. 도구·의도·카드 id·화면번호도 같은 이유로 번역하지 않는다.
+#
+# Langfuse 로 나가는 점수(`score()`)는 이 로그와 별개다 — 점수 이름은 대시보드 집계용이라
+# 영문 그대로 두고, 로그는 사람이 읽는 자리라 한글로 간다.
+# ─────────────────────────────────────────────────────────────
+
+#: 단계 로거. 루트 로거로 흘러 stdout(→ Grafana)에 찍힌다. HTTP 경계 줄은 `api` 로거다(main.py).
+_step_log = logging.getLogger("agent")
+
+#: 자유 텍스트 값(질의·사유)의 상한. 넘으면 자르고 … 을 붙인다.
+STEP_TEXT_MAX = 120
+
+#: 키 표 — 호출부가 쓰는 영문 인자 이름 → 로그의 한글 키. 여기 없는 키는 찍히지 않는다.
+STEP_KEYS: dict[str, str] = {
+    # turn
+    "customer": "고객", "history": "맥락", "result": "결과", "evidence": "근거",
+    "failed": "고장", "llm": "LLM",
+    # understand · plan
+    "intent": "의도", "error": "실패", "step": "회차", "tool": "도구", "query": "질의",
+    "done": "종료", "retry": "재계획", "unused": "미사용도구",
+    # tool
+    "candidates": "후보", "picked": "채택", "cards": "카드", "branches": "분기",
+    "requeried": "재검색", "reason": "사유",
+    # compose · clarify · verify
+    "verdict": "판정", "axis": "축", "options": "선택지", "draft": "초안", "answer": "답",
+    "searched": "검색", "discarded": "폐기", "passed": "통과", "attempt": "시도",
+    "fallback": "폴백",
+    # confirm · offer · action
+    "pending": "제안", "reply": "응답", "status": "상태", "screen": "화면",
+    "recipients": "수신", "mode": "모드",
+    # llm
+    "retries": "재시도", "wait": "대기", "source": "출처", "chars": "입력", "elapsed": "소요",
+    # briefing
+    "tier": "등급", "skipped": "건너뜀",
+}
+
+#: 값 표 — 코드가 쓰는 판정 토큰 → 로그의 한글 값. 표에 없는 문자열은 그대로 찍힌다
+#: (도구 이름·의도·카드 id 같은 식별자가 그렇다).
+STEP_VALUES: dict[Any, str] = {
+    True: "예", False: "아니오",
+    # 도구 결과 · 턴 결과
+    "found": "성공", "miss": "없음", "failed": "실패",
+    "answer": "답변", "clarify": "되묻기", "llm_down": "LLM다운", "tool_failed": "도구실패",
+    # 판정 등급(§5)
+    "ask": "되묻기", "assume": "전제", "none": "대상없음", "n/a": "없음",
+    # 연계 상태
+    "sent": "발송", "stubbed": "스텁", "ok": "성공", "blocked": "차단",
+    "not_connected": "미연결", "unknown": "미상",
+    # 승낙 응답
+    "accept": "승낙", "reject": "거절", "unclear": "불명확",
+    # 폴백
+    "raw_evidence": "근거원문",
+}
+
+
+def _show(value: Any) -> str:
+    """값 하나를 로그 글자로. 판정 토큰은 표로 옮기고, 공백이 든 문자열은 따옴표로 감싼다."""
+    if isinstance(value, bool) or (isinstance(value, str) and value in STEP_VALUES):
+        return STEP_VALUES[value]
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    if isinstance(value, (list, tuple)):
+        return ",".join(_show(v) for v in value) or "없음"
+    text = " ".join(str(value).split())
+    if len(text) > STEP_TEXT_MAX:
+        text = text[:STEP_TEXT_MAX] + "…"
+    if " " in text or "=" in text:
+        quote = "'" if "'" not in text else '"'
+        return f"{quote}{text}{quote}"
+    return text
+
+
+def step(stage: str, ident: str | None = None, *, level: int = logging.INFO,
+         **facts: Any) -> None:
+    """단계 한 줄을 남긴다. 값이 None 인 키는 찍지 않는다.
+
+        observability.step("tool", "fact", result="found", candidates=3, picked=1)
+        → INFO: [agent] [ab12cd34]  3.4s tool        fact 결과=성공 후보=3 채택=1
+
+    `level` 은 호출부가 정한다 — 직원이 받는 답이 실패·축소로 바뀐 사실(검증 폐기·도구
+    실패·연계 실패·LLM 다운·원문 폴백)만 WARNING 이다. 기록은 흐름을 막지 않는다.
+    """
     try:
-        shown = ("true" if value else "false") if isinstance(value, bool) else str(value)
-        note = " ".join(str(comment).split()) if comment else ""
-        if len(note) > STATE_COMMENT_MAX:
-            note = note[:STATE_COMMENT_MAX] + "…"
-        _state_log.log(_state_level(name, value), "[%s] 상태 %s=%s%s",
-                       _REQUEST_ID.get() or "-", name, shown, f" · {note}" if note else "")
+        started = _STARTED.get()
+        clock = f"{time.monotonic() - started:5.1f}s" if started is not None else "     -"
+        pairs = " ".join(f"{STEP_KEYS[k]}={_show(v)}" for k, v in facts.items()
+                         if v is not None and k in STEP_KEYS)
+        body = f"{ident} {pairs}".strip() if ident else pairs
+        _step_log.log(level, "[%s] %s %-11s %s",
+                      _REQUEST_ID.get() or "-", clock, stage, body)
     except Exception:                                     # noqa: BLE001 — 기록은 흐름을 막지 않는다
         pass
 
@@ -149,7 +256,9 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
     _emit("trace-create", body)   # 시작 시점에 한 번 — 도중에 프로세스가 죽어도 흔적이 남는다
 
     # 새 트레이스는 최상위에서 시작한다 — 바깥에 열려 있던 span 밑으로 들어가지 않는다.
-    tokens = (_TRACE_ID.set(handle.id), _PARENT_ID.set(None))
+    # 단계 로그의 경과초 시계도 여기서 연다 — 요청 컨텍스트 없이 도는 브리핑 생성이 그렇다.
+    tokens = (_TRACE_ID.set(handle.id), _PARENT_ID.set(None), _STARTED.set(time.monotonic()),
+              _LLM_TALLY.set({"calls": 0, "chars": 0}))
     started = time.time()
     try:
         yield handle
@@ -159,6 +268,8 @@ def trace(name: str, *, input: Any = None, user_id: str | None = None,
     finally:
         _TRACE_ID.reset(tokens[0])
         _PARENT_ID.reset(tokens[1])
+        _STARTED.reset(tokens[2])
+        _LLM_TALLY.reset(tokens[3])
         closing: dict[str, Any] = {"id": handle.id, "name": name, "timestamp": _now()}
         fields, meta = _split_fields(handle, dict(metadata or {}), started)
         for key in ("level", "status_message"):
@@ -301,12 +412,10 @@ def score(name: str, value: bool | int | float | str, *, comment: str | None = N
 
     bool 은 BOOLEAN(1/0), 숫자는 NUMERIC, 문자열은 CATEGORICAL 로 나간다.
 
-    **로그에는 항상 남는다**(`_log_state`) — 이 함수가 «코드가 아는 사실을 기록하는 단일
-    창구»다. 행내 컨테이너에는 Langfuse 키가 없어 대시보드는 꺼져 있고, 그때 같은 사실을
-    보는 자리가 Grafana 로그다. 같은 이름으로 나가므로 나중에 대시보드를 켜도 집계 이름이
-    갈리지 않는다.
+    **로그에는 남지 않는다** — 로그는 `step()` 이 단계 단위로 찍는다. 점수는 대시보드
+    집계용이라 이름을 영문 그대로 두고, 로그는 사람이 읽는 자리라 한글 키=값이다. 같은
+    사실을 두 곳에 남기는 호출부는 둘을 나란히 부른다(plan.compose 의 검증 결과가 그렇다).
     """
-    _log_state(name, value, comment)
     if not enabled():
         return
     try:

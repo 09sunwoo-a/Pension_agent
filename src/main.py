@@ -97,15 +97,29 @@ answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — foll
 ━━ 로그 ━━
 행내 플랫폼은 컨테이너의 stdout 을 모아 Grafana 에 보여준다. uvicorn 은 제 로거만
 설정하고 루트 로거에는 핸들러를 달지 않으므로, 여기서 설정하지 않으면 이 파일과
-pension_agent 의 `log.info` 는 **어디에도 나가지 않는다** — 행내에서 보인 것이 접속 로그
-(`POST /chat 200 OK`) 한 줄뿐이었던 이유다. 그래서 루트 로거를 stdout·INFO 로 잡고,
-요청마다 짧은 id 를 붙여 «받음 → 진행 단계 → 완료 / 실패 / 연결 끊김»을 찍는다.
-진행 단계 문구는 progress.emit 이 코드로 정한 것이라(LLM 문장이 아니다) 로그에도 그대로
-싣는다(화면에는 progress 이벤트로 간다 — «출력 형식»).
-에이전트 안에서 일어난 일(도구 실행 결과 · 연계 실행 결과 · 검증 게이트 · 판정)은 `[agent]`
-로거의 «상태» 줄로 찍힌다 — observability.score() 가 Langfuse 활성 여부와 무관하게 남기고,
-여기서 연 request_id 컨텍스트로 같은 요청 id 가 붙는다. 직원이 받는 답이 실패·축소로 바뀐
-사실만 WARNING 이다(observability._trace._state_level).
+pension_agent 의 로그는 **어디에도 나가지 않는다** — 행내에서 보인 것이 접속 로그
+(`POST /chat 200 OK`) 한 줄뿐이었던 이유다. 그래서 루트 로거를 stdout·INFO 로 잡는다.
+
+로거는 둘이다. 한 요청은 `[api]` 두 줄 사이에 `[agent]` 줄이 단계마다 하나씩 선다:
+
+    INFO:     [api]   [ab12cd34] request     사용자=3902172 사번=3902172 고객=… 세션=s1 맥락=0턴(없음) 질문=14자 '…'
+    INFO:     [agent] [ab12cd34]  0.9s understand  의도=situation
+    INFO:     [agent] [ab12cd34]  2.0s plan        회차=1/4 도구=fact 질의='세액공제 한도'
+    INFO:     [agent] [ab12cd34]  3.4s tool        fact 결과=성공 후보=3 채택=1 카드=fact.k04.f2(0.37)
+    …
+    INFO:     [agent] [ab12cd34]  9.2s turn        결과=답변 근거=1건 LLM=8회
+    INFO:     [api]   [ab12cd34] done        소요=9.3초 응답=sse 답변=632자
+
+  api    이 파일. 요청 경계에서 HTTP 만 아는 것 — 누가 무엇을 보냈나(request) · 거부(reject) ·
+         소요·응답 형식(done) · 연결 끊김(disconnect) · 뒤늦은 실패(error). 이름을 `__name__`
+         이 아니라 고정 문자열로 두는 이유는 실행 방식(uvicorn 임포트 / python -m)에 따라
+         `main`·`__main__` 으로 갈리기 때문이다.
+  agent  에이전트 안에서 일어난 일 — observability.step() 이 단계 하나에 한 줄씩, 요청 id 와
+         턴 시작 뒤 경과초를 붙여 찍는다(observability/_trace.py 「단계 로그」). Langfuse
+         활성 여부와 무관하게 남는다. 직원이 받는 답이 실패·축소로 바뀐 사실만 WARNING 이다.
+
+진행 표시(progress.emit)는 로그에 싣지 않는다 — 화면(progress 이벤트)으로만 가고, 같은
+시점은 `[agent]` 단계 줄이 더 많은 정보로 찍는다.
 """
 
 from __future__ import annotations
@@ -149,7 +163,8 @@ def _setup_logging() -> None:
 
 
 _setup_logging()
-log = logging.getLogger(__name__)
+#: HTTP 경계 로거. 이름은 고정 문자열이다(머리말 «로그»).
+log = logging.getLogger("api")
 
 #: 요청 로그에 싣는 질문 미리보기 길이. 전문은 싣지 않는다 — 로그는 상담 내용의 저장소가 아니다.
 QUESTION_PREVIEW = 60
@@ -164,7 +179,7 @@ async def _lifespan(_: FastAPI):
     mcp.install()
     # 이 컨테이너가 어떤 설정으로 떴는지 한 줄 — /health 와 같은 내용이다. «키를 넣었는데
     # 왜 안 되나 / train URL 을 보고 있나»를 Grafana 에서 로그 첫 줄로 끝내려고 둔다.
-    log.info("기동 · %s", json.dumps(health(), ensure_ascii=False))
+    log.info("[-] startup     설정=%s", json.dumps(health(), ensure_ascii=False))
     yield
 
 
@@ -297,7 +312,7 @@ def _request_shape(request: Request, req: ChatRequest, payload: Optional[dict[st
 
 def _reject(rid: str, detail: str) -> HTTPException:
     """422 — 접속 로그에는 상태코드만 남으므로 무엇이 빠졌는지는 여기서 찍는다."""
-    log.warning("[%s] 요청 거부 422 · %s", rid, detail)
+    log.warning("[%s] reject      상태=422 사유=%r", rid, detail)
     return HTTPException(status_code=422, detail=detail)
 
 
@@ -418,7 +433,7 @@ async def chat(req: ChatRequest, request: Request):
     except HTTPException:
         # 거부된 요청도 모양을 남긴다 — 게이트웨이가 무엇을 보냈는지는 여기서만 보이고,
         # 422 사유 한 줄로는 «왜 JSON 이 아니었나»를 되짚을 수 없다(_request_shape 머리말).
-        log.warning("[%s] 거부된 요청 모양 · %s", rid, _request_shape(request, req, None))
+        log.warning("[%s] reject      모양=%s", rid, _request_shape(request, req, None))
         raise
     started = time.monotonic()
     question = args["question"]
@@ -426,19 +441,18 @@ async def chat(req: ChatRequest, request: Request):
     streaming = _wants_stream(request, req, args["payload"])
     # 대화 맥락 — 호출자가 Turn 형식으로 실어 보낸 것이 우선, 없으면 저장해 둔 것.
     if args["history"] is not None:
-        history, history_from = args["history"], "caller"
+        history, history_from = args["history"], "호출자"
     else:
         history = context_store.get(x_client_user, session_id)
-        history_from = "store" if history else "none"
+        history_from = "저장" if history else "없음"
     log.info(
-        "[%s] 요청 · x_client_user=%s emp_no=%s customer_id=%s session_id=%s "
-        "맥락=%d턴(%s) · 질문(%d자) %r",
+        "[%s] request     사용자=%s 사번=%s 고객=%s 세션=%s 맥락=%d턴(%s) 질문=%d자 %r",
         rid, x_client_user,
         # 이 턴의 쪽지가 누구 앞으로 · 누구 이름으로 나갈지가 여기서 정해진다. 값이 «-»
         # 이면 환경변수 폴백으로 떨어졌다는 뜻이고, 그건 여러 직원이 쓰는 배포에서
         # 남의 이름으로 나가는 상태다(docs/PRODUCTION_RISKS.md 10).
         consult_graph.employee_no(args["employee_id"], x_client_user) or "-",
-        args["customer_id"], session_id,
+        args["customer_id"] or "-", session_id,
         len(history or []), history_from, len(question),
         question[:QUESTION_PREVIEW] + ("…" if len(question) > QUESTION_PREVIEW else ""),
     )
@@ -448,33 +462,29 @@ async def chat(req: ChatRequest, request: Request):
         context_store.put(x_client_user, session_id, result.get("history"))
 
     def _log_done(result: dict[str, Any]) -> None:
-        log.info("[%s] 완료 %.1f초 · intent=%s · 답변 %d자 · 출처 %d건 · 추천질문 %d건%s%s",
-                 rid, time.monotonic() - started, result.get("intent"),
-                 len(result.get("answer", "")), len(result.get("sources") or []),
-                 len(result.get("followups") or []),
-                 " · 연계 제안" if result.get("pending_action") else "",
-                 " · 되묻기" if result.get("clarify") else "")
+        # HTTP 가 아는 것만 — 의도·근거·되묻기·제안은 `[agent]` 의 turn 줄이 이미 말했다.
+        log.info("[%s] done        소요=%.1f초 응답=%s 답변=%d자",
+                 rid, time.monotonic() - started, "sse" if streaming else "json",
+                 len(result.get("answer", "")))
     # 게이트웨이가 무엇을 보내는지는 여기서만 보인다(머리말 «응답 프레이밍») — 모양만 찍는다.
-    log.info("[%s] 요청 모양 · 응답=%s · %s", rid, "sse" if streaming else "json",
+    log.info("[%s] request     응답=%s 모양=%s", rid, "sse" if streaming else "json",
              _request_shape(request, req, args["payload"]))
 
     if not streaming:
         # 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다. JSON 하나의 content 에 같은
         # 이벤트들을 줄바꿈으로 이어 싣는다(진행은 뺀다 — 기다리는 동안 보여줄 수 없다).
         def run_once() -> dict[str, Any]:
-            def on_progress(text: str) -> None:
-                log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
             with observability.request_id(rid):
                 return consult_graph.ask(
                     question, history,
                     customer_id=args["customer_id"], session_id=session_id,
                     x_client_user=x_client_user, employee_id=args["employee_id"],
-                    on_progress=on_progress,
                 )
         try:
             result = await asyncio.to_thread(run_once)
         except Exception as exc:  # noqa: BLE001
-            log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
+            log.exception("[%s] error       시점=처리중 소요=%.1f초 사유=%r",
+                          rid, time.monotonic() - started, f"{type(exc).__name__}: {exc}")
             events = _error_events(exc)
         else:
             _remember(result)
@@ -491,8 +501,7 @@ async def chat(req: ChatRequest, request: Request):
         DONE = object()
 
         def on_progress(text: str) -> None:
-            # 로그에도 — Grafana 에서 «이 요청이 지금 어디까지 갔나»를 보는 자리다.
-            log.info("[%s] 진행 %.1f초 · %s", rid, time.monotonic() - started, text)
+            # 화면으로만 간다 — 로그의 같은 시점은 `[agent]` 단계 줄이 찍는다(머리말 «로그»).
             loop.call_soon_threadsafe(lines.put_nowait, text)
 
         def run() -> dict[str, Any]:
@@ -525,7 +534,8 @@ async def chat(req: ChatRequest, request: Request):
         def _settle(t: "asyncio.Task[dict[str, Any]]") -> None:
             # 호출자가 끊긴 뒤 ask() 가 죽으면 아무도 await 하지 않는다 — 여기서 거둬 남긴다.
             if closed and not t.cancelled() and t.exception() is not None:
-                log.error("[%s] 연결이 끊긴 뒤 ask() 실패: %r", rid, t.exception())
+                log.error("[%s] error       시점=끊긴뒤 사유=%r", rid,
+                          f"{type(t.exception()).__name__}: {t.exception()}")
 
         task.add_done_callback(_settle)
         try:
@@ -539,7 +549,8 @@ async def chat(req: ChatRequest, request: Request):
                 result = await task
             except Exception as exc:  # noqa: BLE001
                 # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다 — 실패도 이벤트로 나간다.
-                log.exception("[%s] ask() 실패 %.1f초", rid, time.monotonic() - started)
+                log.exception("[%s] error       시점=처리중 소요=%.1f초 사유=%r",
+                              rid, time.monotonic() - started, f"{type(exc).__name__}: {exc}")
                 for ev in _error_events(exc):
                     yield _event(ev)
                 finished = True
@@ -553,7 +564,7 @@ async def chat(req: ChatRequest, request: Request):
                 closed = True
                 # 호출자가 다 받기 전에 끊었다(게이트웨이 타임아웃 등). 접속 로그에는
                 # 200 으로만 남아 «답이 비었다»와 구분이 안 되므로 여기서 갈라 찍는다.
-                log.warning("[%s] 응답을 다 보내기 전에 연결이 끊겼다 %.1f초",
+                log.warning("[%s] disconnect  소요=%.1f초 답변전송=아니오",
                             rid, time.monotonic() - started)
 
     return StreamingResponse(generate(), media_type="text/event-stream")

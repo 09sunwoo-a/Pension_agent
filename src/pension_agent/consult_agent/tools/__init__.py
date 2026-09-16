@@ -38,6 +38,8 @@ evidence/record.py. 못 찾으면 None, 죽으면 ToolFailure — tools/base.py.
 
 from __future__ import annotations
 
+import logging
+
 from pension_agent import observability
 from pension_agent.consult_agent import progress
 from pension_agent.consult_agent.evidence.select import llm_pick, pick  # noqa: F401 — 후크(머리말)
@@ -325,6 +327,39 @@ def catalog(state: AgentState | None = None) -> str:
     return "\n".join(f"- {TOOLS[n].name}: {TOOLS[n].desc}" for n in usable(state))
 
 
+#: 도구 호출 하나의 결과 셋. 장부(`state["steps"]`)의 `outcome` 칸과 로그·점수가 같은 값을 쓴다 —
+#: «찾아보고 없음»(MISS)과 «확인하지 못함»(FAILED)은 다른 사건이다(base.ToolFailure 머리말).
+FOUND, MISS, FAILED = "found", "miss", "failed"
+
+#: 로그에 싣는 질의 미리보기 길이 — 질의는 직원의 말이라 전문을 남기지 않는다.
+QUERY_PREVIEW = 40
+
+
+def _preview(query: str) -> str:
+    text = " ".join(query.split())
+    return text[:QUERY_PREVIEW] + "…" if len(text) > QUERY_PREVIEW else text
+
+
+def record(name: str, query: str, outcome: str, *, reason: str = "",
+           found: Evidence | None = None, gate: dict | None = None,
+           requeried: bool = False) -> None:
+    """도구 호출 한 건을 «코드가 아는 사실»로 남긴다 — 단계 로그 한 줄 + Langfuse 점수 한 건.
+
+    장부(`steps`)는 이 턴의 답을 만드는 재료이고, 이것은 나중에 되짚는 기록이다. 고장(FAILED)만
+    WARNING 이다. 후보·채택 수는 적합성 게이트가 돈 도구에만 있다(adequacy._adopt).
+    """
+    cards = [f"{s['id']}({s['score']})" if s.get("score") is not None else str(s["id"])
+             for s in ((found or {}).get("sources") or []) if s.get("id")]
+    observability.step(
+        "tool", name, result=outcome,
+        candidates=(gate or {}).get("candidates"), picked=(gate or {}).get("picked"),
+        cards=cards or None, branches=(gate or {}).get("branches") or None,
+        requeried=requeried or None, reason=reason or None,
+        level=logging.WARNING if outcome == FAILED else logging.INFO)
+    observability.score("tool_outcome", outcome,
+                        comment=f"{name} · 질의 {_preview(query)!r}" + (f" · 사유 {reason}" if reason else ""))
+
+
 def run(name: str, state: AgentState, query: str) -> Evidence | None:
     """도구 하나를 부른다. 근거를 못 찾으면 **직원의 원문 질문으로 한 번 더** 찾는다.
 
@@ -351,6 +386,9 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
     attempts = [query] + ([question] if question and question != query else [])
     # 관측 span — 「어떤 도구를 어떤 질의로 불러 무엇을 얻었나」가 답이 갈리는 자리다.
     # generation 만 보내면 트레이스에는 «LLM 을 다섯 번 불렀다»까지만 남는다.
+    # 적합성 게이트가 이번 호출에서 본 후보·채택 수(adequacy._adopt 가 같은 노드 안에서
+    # 채운다 — record_branches 와 같은 규약). 호출 전에 비워 지난 호출의 값이 남지 않게 한다.
+    state.pop("_gate", None)
     with observability.span(f"tool:{name}", input=query) as sp:
         for i, attempt in enumerate(attempts):
             try:
@@ -363,12 +401,17 @@ def run(name: str, state: AgentState, query: str) -> Evidence | None:
                 # 도구 하나가 죽어도 루프는 다음 도구로 간다 — 다만 그 사실을 **0건과 같은
                 # 값으로 접지 않는다**. 접으면 이 턴의 답이 «찾아봤는데 자료가 없습니다»가
                 # 된다(ToolFailure 머리말). 사유를 실어 올리고 처분은 계획 루프가 한다.
+                reason = f"{type(exc).__name__}: {exc}"
                 sp.update(output=None, found=False, failed=True)
-                raise ToolFailure(name, f"{type(exc).__name__}: {exc}") from exc
+                record(name, query, FAILED, reason=reason)
+                raise ToolFailure(name, reason) from exc
             if found is not None:
                 # 원문 재검색으로 건졌는지도 남긴다 — 계획이 고른 질의가 얼마나 빗나가는지가
                 # 이 한 칸에 쌓인다(재검색이 잦으면 계획 프롬프트를 봐야 한다는 신호다).
                 sp.update(output=found["text"], found=True, retried=bool(i))
+                record(name, query, FOUND, found=found, gate=state.pop("_gate", None),
+                       requeried=bool(i))
                 return found
         sp.update(output=None, found=False)
+        record(name, query, MISS, gate=state.pop("_gate", None), requeried=len(attempts) > 1)
         return None

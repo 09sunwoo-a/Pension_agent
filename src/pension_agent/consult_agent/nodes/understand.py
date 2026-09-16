@@ -14,9 +14,11 @@ CLAUDE.md §11 이다 — 근거가 덜 갖춰진 답변이 정상 답변처럼 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
+from pension_agent import observability
 from pension_agent.consult_agent import progress
 from pension_agent.consult_agent.prompts import ROUTE_PROMPT
 from pension_agent.consult_agent.routing import DEFAULT_INTENT, INTENTS, LLM_DOWN
@@ -35,6 +37,8 @@ def understand(state: AgentState) -> dict[str, Any]:
     except LLMError as exc:
         # 규칙으로 대신 분류하지 않는다 — 분류가 됐다고 답이 되는 것도 아니고(답을 쓰는 것도
         # LLM 이다), 규칙 라우팅이 살아 있으면 "LLM 없이도 절반은 도는" 경로가 굳는다.
+        observability.step("understand", error=f"{type(exc).__name__}: {exc}",
+                           level=logging.WARNING)
         return {"intent": LLM_DOWN, "utterance": state["question"],
                 "llm_error": f"{type(exc).__name__}: {exc}"}
 
@@ -45,9 +49,8 @@ def understand(state: AgentState) -> dict[str, Any]:
         slots = {}  # 분해 실패해도 원문으로 검색은 된다
 
     intent = slots.get("intent")
-    return {
-        # 목록 밖 값은 기본값으로 떨어뜨린다. 기본값이 계획 루프라서, 분류가 어긋나도
-        # 능력이 잘리지 않는다 — 무엇으로 답할지는 어차피 도구 목록이 정한다.
-        "intent": intent if intent in INTENTS else DEFAULT_INTENT,
-        "utterance": slots.get("utterance") or state["question"],
-    }
+    # 목록 밖 값은 기본값으로 떨어뜨린다. 기본값이 계획 루프라서, 분류가 어긋나도
+    # 능력이 잘리지 않는다 — 무엇으로 답할지는 어차피 도구 목록이 정한다.
+    chosen = intent if intent in INTENTS else DEFAULT_INTENT
+    observability.step("understand", intent=chosen)
+    return {"intent": chosen, "utterance": slots.get("utterance") or state["question"]}
