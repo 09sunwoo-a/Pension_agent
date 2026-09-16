@@ -74,7 +74,16 @@ def _propose(state: AgentState) -> dict[str, Any] | None:
     문구를 보내려는 직원은 그렇게 말한다("이 문구로 LMS 보내줘"). 그 요청은 `lms_link` 가
     받아 같은 화면 연계를 제안한다 — 기능이 사라진 것이 아니라, **추측이 아니라 요청으로**
     시작하게 바뀐 것이다.
+
+    **판정이 «직원이 물은 대상이 자료에 없다»(none)로 끝난 턴에는 아무것도 제안하지 않는다.**
+    그 턴의 답은 «없다»이고, 재료로 남은 카드는 대신 보여주는 곁가지다 — 「IRP 해마 등록
+    화면번호」를 물었을 때 게이트가 이름 일부가 겹치는 [06-12-625] 기타정보 등록/변경을 남겼고,
+    답변은 없다고 먼저 말했는데 그 화면을 열어 드릴까요라는 제안이 뒤에 붙었다(2026-09-16
+    실측). 직원이 묻지 않은 화면을 열자는 제안이고, 승낙하면 엉뚱한 화면에서 작업하게 된다.
+    판정값은 코드가 아는 값이다(nodes/clarify.py) — 여기서 답변 문장을 다시 읽어 추측하지 않는다.
     """
+    if state.get("judge_verdict") == "none":
+        return None
     for number in _answer_screens(state):
         return {"kind": "screen", "label": f"{number} 화면 열기", "screen": number,
                 "params": {"customer_id": state.get("customer_id") or ""}}

@@ -881,6 +881,9 @@ def check_graded_judge() -> int:
     hit = ("JSON 배열로 출력" not in text and "JSON 객체 하나" in text
            and "한 후보 안에도 있다" in text and "조건별 값:" in text
            and "단서는 갈래가 아니다" in text
+           # 이름을 콕 집은 질문에 이름 일부만 겹치는 후보를 남기지 않는다(「IRP 해마 등록
+           # 화면번호」에 「기타정보 등록/변경」이 남았다 — 2026-09-16 실측).
+           and "특정 이름을 부르면 그 이름이 있는 후보만 답이다" in text
            and text.index('"axis": "이전 방향"') < text.index("빈 배열로 둔다")
            and first == "직원의 질문과, 그 질문에 답하려고 검색된 근거 후보 목록이다.")
     print(f"{'✓' if hit else '✗'} 게이트 프롬프트 — 객체 규격 하나 · 한 후보 안의 갈래 · 갈래 예시가 먼저 · 첫 줄 유지")
