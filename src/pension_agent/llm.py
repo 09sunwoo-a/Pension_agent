@@ -137,7 +137,9 @@ def _auth_hint() -> str:
         return (f"설정: {where} — **키가 단계와 어긋난다.** {wanted_key_name()} 에 이 단계의 "
                 f"키를 넣으십시오(지금은 접미사 없는 {API_KEY_SRC} 가 실려 나갔습니다).")
     return (f"설정: {where} — 게이트웨이가 키를 거부했습니다. 이 엔드포인트에 발급된 키가 "
-            f"{API_KEY_SRC or 'LLM_API_KEY'} 에 들어 있는지 확인하십시오(만료·다른 단계의 키·공백 포함).")
+            f"{API_KEY_SRC or 'LLM_API_KEY'} 에 들어 있는지 확인하십시오. "
+            f"**한 달 동안 호출이 없으면 구독 키가 폐기된다**(2026-09-16 행내 실측 — 서빙계가 그렇게 끊겼다). "
+            f"오래 안 쓴 단계라면 콘솔에서 재발급받는 것이 먼저입니다. 그 밖의 원인: 다른 단계의 키·앞뒤 공백.")
 
 
 PROVIDER = os.getenv("LLM_PROVIDER") or (
@@ -379,6 +381,10 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {API_KEY}",
+            # 이 게이트웨이(APIM)가 구독 키로 읽는 헤더는 **kb-key 다**(2026-09-16 행내 실측).
+            # 같은 키를 Azure 기본 이름 `Ocp-Apim-Subscription-Key` 로만 보내면 분석계·서빙계
+            # 양쪽 다 401 «missing subscription key» 가 온다 — 헤더를 아예 안 보는 것이다.
+            # 그래서 401 본문이 «invalid» 면 헤더가 아니라 **값**의 문제다(_auth_hint).
             "kb-key": API_KEY,              # 사내 플랫폼 인증
             "x-client-user": x_client_user,  # 호출 주체 식별(감사/쿼터)
         },
