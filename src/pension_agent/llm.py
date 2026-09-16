@@ -89,6 +89,58 @@ env.load()
 STAGE = env.stage()
 BASE_URL = env.staged("LLM_BASE_URL").rstrip("/")
 API_KEY = env.staged("LLM_API_KEY")
+#: URL·키를 **어느 이름에서** 읽었나(값이 아니라 이름 — /health 와 401 안내가 쓴다).
+BASE_URL_SRC = env.source("LLM_BASE_URL")
+API_KEY_SRC = env.source("LLM_API_KEY")
+
+
+def key_stage_mismatch() -> bool:
+    """URL 은 단계별 이름에서 왔는데 키는 접미사 없는 폴백에서 왔나.
+
+    URL 과 키는 `env.staged()` 로 **각자** 폴백한다. 그래서 `LLM_BASE_URL_SERV` 만 채우고
+    `LLM_API_KEY_SERV` 를 비워 두면 서빙계 URL 에 분석계용 `LLM_API_KEY` 가 실린다 —
+    두 단계가 APIM 의 다른 제품이면 게이트웨이가 401 `Access denied due to invalid
+    subscription key` 로 끊는다(2026-09-16 행내 실측 · `…/serv/gemma-4`). 설정은 «다 채웠는데»
+    로 보이고 /health 의 `api_key_set` 도 참이라, 이 짝을 이름으로 드러내지 않으면 401 이
+    나기 전까지 아무 데도 안 보인다.
+    """
+    return _mismatch(BASE_URL_SRC, API_KEY_SRC)
+
+
+def _mismatch(url_src: str, key_src: str) -> bool:
+    """이름 두 개만 보는 판정 — 모듈 상수는 임포트 시각에 굳으므로 테스트가 여기를 부른다."""
+    return bool(_stage_suffix(url_src) and key_src and not _stage_suffix(key_src))
+
+
+def _stage_suffix(src: str) -> str:
+    """출처 이름의 단계 접미(`_TRNN`·`_SERV`). 접미가 없으면 빈 문자열."""
+    for tail in ("_TRNN", "_SERV"):
+        if src.endswith(tail):
+            return tail
+    return ""
+
+
+def wanted_key_name() -> str:
+    """지금 URL 과 같은 단계의 키를 넣어야 할 변수 이름 — 안내 문구가 이것을 부른다.
+
+    **`env.suffix()` 를 다시 부르지 않는다.** 그쪽은 호출 시각의 `ENV_PATH` 를 읽는데
+    URL·키는 임포트 시각에 굳은 값이라, 둘이 갈리면 「_SERV URL 을 쓰면서 _TRNN 키를
+    넣으라」는 안내가 나간다. 채워야 할 이름은 **실제로 읽은 URL 변수**가 말한다.
+    """
+    return f"LLM_API_KEY{_stage_suffix(BASE_URL_SRC)}"
+
+
+def _auth_hint() -> str:
+    """401·403 에 붙일 설정 진단 한 줄. 키 값은 절대 싣지 않는다 — 이름만."""
+    where = f"URL={BASE_URL_SRC or '(없음)'} · 키={API_KEY_SRC or '(없음)'} · 단계={STAGE}"
+    if key_stage_mismatch():
+        return (f"설정: {where} — **키가 단계와 어긋난다.** {wanted_key_name()} 에 이 단계의 "
+                f"키를 넣으십시오(지금은 접미사 없는 {API_KEY_SRC} 가 실려 나갔습니다).")
+    return (f"설정: {where} — 게이트웨이가 키를 거부했습니다. 이 엔드포인트에 발급된 키가 "
+            f"{API_KEY_SRC or 'LLM_API_KEY'} 에 들어 있는지 확인하십시오. "
+            f"**한 달 동안 호출이 없으면 구독 키가 폐기된다**(2026-09-16 행내 실측 — 서빙계가 그렇게 끊겼다). "
+            f"오래 안 쓴 단계라면 콘솔에서 재발급받는 것이 먼저입니다. 그 밖의 원인: 다른 단계의 키·앞뒤 공백.")
+
 
 PROVIDER = os.getenv("LLM_PROVIDER") or (
     "genai" if BASE_URL
@@ -329,12 +381,23 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {API_KEY}",
+            # 이 게이트웨이(APIM)가 구독 키로 읽는 헤더는 **kb-key 다**(2026-09-16 행내 실측).
+            # 같은 키를 Azure 기본 이름 `Ocp-Apim-Subscription-Key` 로만 보내면 분석계·서빙계
+            # 양쪽 다 401 «missing subscription key» 가 온다 — 헤더를 아예 안 보는 것이다.
+            # 그래서 401 본문이 «invalid» 면 헤더가 아니라 **값**의 문제다(_auth_hint).
             "kb-key": API_KEY,              # 사내 플랫폼 인증
             "x-client-user": x_client_user,  # 호출 주체 식별(감사/쿼터)
         },
         method="POST",
     )
-    body = _post_json(req)
+    try:
+        body = _post_json(req)
+    except LLMError as exc:
+        # 401·403 은 «무엇이 잘못됐나»가 전부 설정에 있다. 게이트웨이 본문은 "invalid
+        # subscription key" 까지만 말하고 **어느 변수의 키가 나갔는지**는 말해주지 않는다.
+        if exc.status in (401, 403):
+            raise LLMError(f"{exc}\n{_auth_hint()}", status=exc.status) from exc
+        raise
     usage = body.get("usage") or {}
     return body["choices"][0]["message"]["content"], {
         "model": body.get("model") or MODEL or "(gateway-default)",

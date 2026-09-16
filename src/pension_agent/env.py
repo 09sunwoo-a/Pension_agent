@@ -45,14 +45,33 @@ def staged(name: str, default: str = "") -> str:
     return os.getenv(f"{name}_{suffix()}") or os.getenv(name) or default
 
 
+def source(name: str) -> str:
+    """`staged(name)` 이 **어느 이름에서** 값을 가져왔나. 아무 데도 없으면 빈 문자열.
+
+    값이 아니라 이름만 돌려준다 — 키 값은 로그·/health 어디에도 찍지 않는다.
+    URL 과 키는 각자 폴백하므로 «서빙계 URL + 접미사 없는 키» 같은 짝이 조용히 만들어진다
+    (2026-09-16 행내 실측: `…/serv/gemma-4` 가 APIM 401 `invalid subscription key`).
+    401 이 나야 알 수 있었던 것을 설정 표시에서 먼저 보이게 하려고 둔다.
+    """
+    staged_name = f"{name}_{suffix()}"
+    if os.getenv(staged_name):
+        return staged_name
+    return name if os.getenv(name) else ""
+
+
 if __name__ == "__main__":
     # python -m pension_agent.env — «키를 넣었는데 왜 안 되나»를 한 화면에. 키 값은 찍지 않는다.
     load()
     from pension_agent import llm  # noqa: PLC0415
 
     print(f"설정 파일       {config.DOTENV}  ({'있음' if config.DOTENV.is_file() else '없음 — cp .env.example .env'})")
-    src = f"LLM_BASE_URL_{suffix()}" if os.getenv(f"LLM_BASE_URL_{suffix()}") else "LLM_BASE_URL"
-    print(f"단계(ENV_PATH)  {stage()}  — {'실제 환경변수' if os.getenv('ENV_PATH') else '없음 → 분석계'} · URL 은 {src}")
+    url_src, key_src = source("LLM_BASE_URL"), source("LLM_API_KEY")
+    print(f"단계(ENV_PATH)  {stage()}  — {'실제 환경변수' if os.getenv('ENV_PATH') else '없음 → 분석계'}")
+    print(f"URL · 키 출처   {url_src or '(없음)'} · {key_src or '(없음)'}")
+    if llm.key_stage_mismatch():
+        print(f"  ⚠ 단계가 어긋난다 — URL 은 {url_src}, 키는 접미사 없는 {key_src} 다. "
+              f"게이트웨이가 단계마다 다른 키를 요구하면 401(invalid subscription key) 이 난다. "
+              f"{llm.wanted_key_name()} 에 그 단계의 키를 넣는다.")
     print(f"프로바이더      {llm.PROVIDER}  · 모델 {llm._default_model_label()}")
     print(f"LLM 호출 가능   {'예' if llm.available() else '아니오 — 키·엔드포인트가 비어 있다'}")
     print(f"관측(Langfuse)  {'켜짐' if os.getenv('LANGFUSE_PUBLIC_KEY') else '꺼짐'}")

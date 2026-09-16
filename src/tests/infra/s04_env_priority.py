@@ -23,6 +23,7 @@ import os  # noqa: E402
 import tempfile  # noqa: E402
 
 from pension_agent import env as _env  # noqa: E402
+from pension_agent import llm as _llm  # noqa: E402
 
 _ENV_KEYS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_DOTENV", "PENSION_TEST_MARK", "ENV_PATH",
              "LLM_BASE_URL", "LLM_BASE_URL_TRNN", "LLM_BASE_URL_SERV", "LLM_API_KEY", "LLM_API_KEY_SERV")
@@ -75,6 +76,38 @@ try:
         _clear_env()
         os.environ["LLM_BASE_URL"] = "https://one"
         check(_env.staged("LLM_BASE_URL") == "https://one", "env: 단계별 URL 이 없으면 하나짜리 LLM_BASE_URL(Gateway·사외)")
+
+        # 어느 «이름»에서 읽었나 — 값이 아니라 출처다. /health 와 401 안내가 이것으로 말한다.
+        # 서빙계 URL 에 접미사 없는 키가 실리는 짝(APIM 401 invalid subscription key)이
+        # 설정 화면에서는 «키 있음»으로만 보이던 것을 드러내려고 둔다.
+        _clear_env()
+        os.environ.update({"LLM_BASE_URL_SERV": "https://h/serv/m", "LLM_API_KEY": "k-common",
+                           "ENV_PATH": "serving"})
+        check(_env.source("LLM_BASE_URL") == "LLM_BASE_URL_SERV", "env: URL 출처 이름을 말한다(단계별)")
+        check(_env.source("LLM_API_KEY") == "LLM_API_KEY", "env: 키 출처 이름을 말한다(접미사 없는 폴백)")
+        check(_env.source("LLM_MODEL") == "", "env: 아무 데도 없으면 출처는 빈 문자열")
+        check(_llm._mismatch("LLM_BASE_URL_SERV", "LLM_API_KEY"),
+              "llm: 서빙계 URL + 접미사 없는 키 = 단계 어긋남(401 invalid subscription key)")
+        check(not _llm._mismatch("LLM_BASE_URL_SERV", "LLM_API_KEY_SERV"),
+              "llm: 둘 다 서빙계면 어긋남이 아니다")
+        check(not _llm._mismatch("LLM_BASE_URL", "LLM_API_KEY"),
+              "llm: 단계 구분이 없는 설정(Gateway·사외)은 어긋남이 아니다")
+        check(not _llm._mismatch("LLM_BASE_URL_SERV", ""),
+              "llm: 키가 아예 없으면 어긋남이 아니라 미설정이다(available() 가 잡는다)")
+        # 채우라고 안내할 이름은 **실제로 읽은 URL 변수**가 정한다. env.suffix() 를 다시 부르면
+        # 호출 시각의 ENV_PATH 를 읽어, _SERV URL 을 쓰면서 _TRNN 키를 넣으라는 안내가 나간다.
+        _saved_src = _llm.BASE_URL_SRC
+        try:
+            _llm.BASE_URL_SRC = "LLM_BASE_URL_SERV"
+            os.environ.pop("ENV_PATH", None)          # 지금 프로세스는 분석계로 보인다
+            check(_llm.wanted_key_name() == "LLM_API_KEY_SERV",
+                  "llm: 채울 키 이름은 URL 출처가 정한다(ENV_PATH 를 다시 읽지 않는다)",
+                  _llm.wanted_key_name())
+            _llm.BASE_URL_SRC = "LLM_BASE_URL"
+            check(_llm.wanted_key_name() == "LLM_API_KEY",
+                  "llm: 단계 구분이 없으면 접미사 없는 이름을 안내한다")
+        finally:
+            _llm.BASE_URL_SRC = _saved_src
 finally:
     _clear_env()
     for _k, _v in _saved_profile_env.items():

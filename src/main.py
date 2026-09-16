@@ -180,6 +180,13 @@ async def _lifespan(_: FastAPI):
     # 이 컨테이너가 어떤 설정으로 떴는지 한 줄 — /health 와 같은 내용이다. «키를 넣었는데
     # 왜 안 되나 / train URL 을 보고 있나»를 Grafana 에서 로그 첫 줄로 끝내려고 둔다.
     log.info("[-] startup     설정=%s", json.dumps(health(), ensure_ascii=False))
+    # 단계와 어긋난 키는 첫 호출에서 401 로만 드러난다. 시작 줄에서 먼저 말한다 —
+    # 설정 한 줄 안에 묻히면 «키는 들어 있다»로 읽힌다(llm.key_stage_mismatch 주석).
+    if llm.key_stage_mismatch():
+        log.warning("[-] startup     LLM 키가 단계와 어긋납니다 — URL=%s · 키=%s(접미사 없음) · 단계=%s"
+                    " · %s 에 이 단계의 키를 넣으십시오(지금 상태로는 게이트웨이가"
+                    " 401 invalid subscription key 로 끊습니다)",
+                    llm.BASE_URL_SRC, llm.API_KEY_SRC, llm.STAGE, llm.wanted_key_name())
     yield
 
 
@@ -397,6 +404,13 @@ def health() -> dict[str, Any]:
             "available": llm.available(),
             "base_url_set": bool(llm.BASE_URL),
             "api_key_set": bool(llm.API_KEY),
+            # 값이 아니라 **어느 변수에서 읽었나.** `api_key_set: true` 는 「키가 있다」까지만
+            # 말하고 「그 단계의 키인가」는 말하지 못한다 — URL 과 키가 각자 폴백하므로
+            # 서빙계 URL 에 접미사 없는 분석계 키가 실리는 짝이 조용히 생기고, 그러면
+            # APIM 이 401 invalid subscription key 로 끊는다(llm.key_stage_mismatch 주석).
+            "base_url_from": llm.BASE_URL_SRC or None,
+            "api_key_from": llm.API_KEY_SRC or None,
+            "key_stage_mismatch": llm.key_stage_mismatch(),
             "model": llm.MODEL or "(게이트웨이 기본 라우팅)",
             "timeout_sec": llm.TIMEOUT,
             **_host_check(),

@@ -86,3 +86,17 @@ export ANTHROPIC_API_KEY=sk-ant-...
 cp .env.example .env                 # 하나
 python -m pension_agent.env          # 어느 파일·단계·프로바이더가 잡혔나
 ```
+
+**URL 과 키는 각자 폴백한다** — 단계별 이름(`_TRNN`·`_SERV`)이 없으면 접미사 없는 이름을 읽는다.
+그래서 `LLM_BASE_URL_SERV` 만 채우고 `LLM_API_KEY_SERV` 를 비워 두면 **서빙계 URL 에 분석계 키가
+실린다.** 두 단계가 APIM 의 다른 제품이면 게이트웨이가 이렇게 끊는다:
+
+```
+HTTP 401 Access Denied — https://…/serv/gemma-4/chat/completions
+응답: {"statusCode": 401, "message": "Access denied due to invalid subscription key. …"}
+```
+
+`/health` 의 `api_key_set` 은 이때도 참이다(키가 들어 있기는 하다). 그래서 **어느 변수에서
+읽었는지**를 함께 내보낸다 — `base_url_from` · `api_key_from` · `key_stage_mismatch`. 어긋나 있으면
+기동 로그에도 경고가 한 줄 남고, 401·403 응답에도 같은 진단이 붙는다(`llm.key_stage_mismatch`).
+고치는 법은 하나다 — 그 단계의 키를 `LLM_API_KEY_SERV`(또는 `_TRNN`)에 넣는다.
