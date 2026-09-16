@@ -30,8 +30,11 @@ with _obs.trace("noop") as _null:
     _null.update(output="버려진다")
 check(_obs.current_trace_id() is None, "observability: 꺼져 있으면 트레이스 id 도 없다")
 
-# «상태» 로그 — score() 는 Langfuse 가 꺼져 있어도 로그 한 줄을 남긴다. 행내 컨테이너에는
+# «단계» 로그 — step() 은 Langfuse 가 꺼져 있어도 로그 한 줄을 남긴다. 행내 컨테이너에는
 # 키가 없어 대시보드가 꺼져 있고, 그때 «에이전트가 무엇을 했나»를 보는 자리가 Grafana 다.
+# 줄의 꼴은 하나다:  [요청id] 경과초 단계  키=값 …  — 키·판정 값은 한글 표(STEP_KEYS·
+# STEP_VALUES)로만 나가고, 식별자(도구·의도·카드 id)는 영문 그대로다. score() 는 로그를 남기지
+# 않는다(점수 이름은 대시보드 집계용이라 영문 그대로 둔다).
 import logging as _logging  # noqa: E402
 _state_records: list = []
 
@@ -43,45 +46,69 @@ class _StateCapture(_logging.Handler):
 
 _agent_log = _logging.getLogger("agent")
 _agent_log.addHandler(_StateCapture())
-_agent_log.setLevel(_logging.INFO)
+_agent_log.setLevel(_logging.DEBUG)
 try:
     _obs.score("evidence_count", 7)
-    _obs.score("compose_passed", True)
-    _obs.score("compose_passed", False, comment="수치 '1,485,000' 이 근거에 없음")
-    _obs.score("tool_outcome", "miss", comment="pitch · 질의 '수수료 반론'")
-    _obs.score("tool_outcome", "failed", comment="fact · 사유 FileNotFoundError")
-    _obs.score("action_outcome", "not_connected",
-               comment="send_memo · 받는 사람 1명 · WorkB 클라이언트가 주입되지 않았습니다 — 본문만 생성했습니다")
-    _obs.score("action_outcome", "sent", comment="send_memo · 받는 사람 1명 · 쪽지를 발송했습니다")
-    _obs.score("action_outcome", "blocked", comment="open_lms_screen · 더미")
-    _obs.score("turn_outcome", "answer")
-    _obs.score("turn_outcome", "tool_failed", comment="x")
+    _obs.step("tool", "fact", result="found", candidates=3, picked=1,
+              cards=["fact.k04.f2(0.37)"], requeried=None)
+    _obs.step("tool", "pitch", result="miss", query="수수료 반론")
+    _obs.step("tool", "fact", result="failed", reason="FileNotFoundError: x",
+              level=_logging.WARNING)
+    _obs.step("verify", passed=False, attempt="1/2",
+              reason="수치 '1,485,000' 이 근거에 없음", level=_logging.WARNING)
+    _obs.step("clarify", verdict="ask", options=2, discarded=True)
+    _obs.step("turn", result="llm_down", evidence="0건", llm="1회", level=_logging.WARNING)
     with _obs.request_id("ab12cd34"):
-        _obs.score("judge_verdict", "n/a")
-    _obs.score("compose_passed", False, comment="가" * 300)
+        _obs.step("understand", intent="situation")
+        _obs.step("plan", step="1/4", tool="fact", query="가" * 300, bogus_key="안 찍힘")
+    _obs.step("llm", "consult.plan", chars=2410, level=_logging.DEBUG)
     _msgs = [(r.levelno, r.getMessage()) for r in _state_records]
-    check(len(_msgs) == 12, "observability: score 는 꺼져 있어도 한 건마다 로그 한 줄", str(len(_msgs)))
-    check(_msgs[0] == (_logging.INFO, "[-] 상태 evidence_count=7"),
-          "observability: 상태 줄 형식 — [요청id] 상태 이름=값", str(_msgs[0]))
-    check(_msgs[1][1].endswith("compose_passed=true") and _msgs[1][0] == _logging.INFO,
-          "observability: bool 은 true/false 로 찍힌다", str(_msgs[1]))
-    check(_msgs[2] == (_logging.WARNING, "[-] 상태 compose_passed=false · 수치 '1,485,000' 이 근거에 없음"),
-          "observability: 검증 폐기는 WARNING · comment 가 뒤에 붙는다", str(_msgs[2]))
-    check(_msgs[3][0] == _logging.INFO and _msgs[4][0] == _logging.WARNING,
-          "observability: 도구 miss 는 INFO, failed 는 WARNING", str(_msgs[3:5]))
-    check(_msgs[5][0] == _logging.WARNING and "WorkB 클라이언트가 주입되지 않았습니다" in _msgs[5][1],
-          "observability: 연계 not_connected 는 WARNING 에 detail 이 실린다", str(_msgs[5]))
-    check(_msgs[6][0] == _logging.INFO and _msgs[7][0] == _logging.WARNING,
-          "observability: 연계 sent 는 INFO, blocked 는 WARNING", str(_msgs[6:8]))
-    check(_msgs[8][0] == _logging.INFO and _msgs[9][0] == _logging.WARNING,
-          "observability: turn_outcome answer 는 INFO, tool_failed 는 WARNING", str(_msgs[8:10]))
-    check(_msgs[10][1].startswith("[ab12cd34] 상태 judge_verdict=n/a"),
-          "observability: request_id 컨텍스트 안에서는 요청 id 가 붙는다", str(_msgs[10]))
+    check(len(_msgs) == 9, "observability: step 한 건마다 로그 한 줄 · score 는 로그를 남기지 않는다",
+          str(len(_msgs)))
+    check(_msgs[0] == (_logging.INFO, "[-]      - tool        fact 결과=성공 후보=3 채택=1 카드=fact.k04.f2(0.37)"),
+          "observability: 단계 줄 형식 — [요청id] 경과초 단계 식별자 한글키=값", str(_msgs[0]))
+    check(_msgs[1][1].endswith("tool        pitch 결과=없음 질의='수수료 반론'"),
+          "observability: 공백이 든 값은 따옴표로 감싼다 · miss 는 «없음»", str(_msgs[1]))
+    check(_msgs[2][0] == _logging.WARNING and "결과=실패 사유='FileNotFoundError: x'" in _msgs[2][1],
+          "observability: 도구 실패는 WARNING 에 사유가 실린다", str(_msgs[2]))
+    check(_msgs[3][0] == _logging.WARNING and "통과=아니오 시도=1/2" in _msgs[3][1],
+          "observability: bool 은 예/아니오 로 찍힌다", str(_msgs[3]))
+    check("판정=되묻기 선택지=2 폐기=예" in _msgs[4][1],
+          "observability: 판정 등급은 한글 값으로 나간다", str(_msgs[4]))
+    check(_msgs[5][0] == _logging.WARNING and "결과=LLM다운" in _msgs[5][1],
+          "observability: 턴 결과 LLM 다운은 WARNING", str(_msgs[5]))
+    check(_msgs[6][1].startswith("[ab12cd34]") and "understand  의도=situation" in _msgs[6][1],
+          "observability: request_id 컨텍스트 안에서는 요청 id 와 경과초가 붙는다", str(_msgs[6]))
+    check("bogus_key" not in _msgs[7][1] and "안 찍힘" not in _msgs[7][1],
+          "observability: 키 표 밖의 키는 찍히지 않는다", str(_msgs[7]))
+    check(len(_msgs[7][1]) < 220 and _msgs[7][1].endswith("…"),
+          "observability: 자유 텍스트 값은 STEP_TEXT_MAX 에서 자른다", str(len(_msgs[7][1])))
+    check(_msgs[8][0] == _logging.DEBUG and "consult.plan 입력=2410" in _msgs[8][1],
+          "observability: LLM 호출 한 건의 줄은 DEBUG 다", str(_msgs[8]))
     check(_obs.current_request_id() is None, "observability: 컨텍스트를 나오면 요청 id 가 지워진다")
-    check(len(_msgs[11][1]) < 200 and _msgs[11][1].endswith("…"),
-          "observability: comment 는 STATE_COMMENT_MAX 에서 자른다", str(len(_msgs[11][1])))
+    # 표는 닫혀 있다 — 코드가 step() 에 쓰는 키가 전부 표에 있어야 한다. 표 밖의 키는 조용히
+    # 안 찍히므로(위 검사), 새 키를 붙이고 표에 안 넣으면 그 사실이 로그에서 «빠진 칸»으로만
+    # 보인다. 소스를 훑어 호출부의 키워드 인자를 전부 모아 잰다.
+    import ast as _ast
+    from pathlib import Path as _Path
+    _used: dict[str, set[str]] = {}
+    for _file in [_Path("main.py"), *_Path("pension_agent").rglob("*.py")]:
+        for _node in _ast.walk(_ast.parse(_file.read_text(encoding="utf-8"))):
+            if (isinstance(_node, _ast.Call) and isinstance(_node.func, _ast.Attribute)
+                    and _node.func.attr == "step"
+                    and isinstance(_node.func.value, _ast.Name)
+                    and _node.func.value.id == "observability"):
+                for _kw in _node.keywords:
+                    if _kw.arg and _kw.arg != "level":
+                        _used.setdefault(_kw.arg, set()).add(str(_file))
+    _unknown = {k: sorted(v) for k, v in _used.items() if k not in _obs.STEP_KEYS}
+    check(bool(_used) and not _unknown,
+          "observability: 코드가 step() 에 쓰는 키는 전부 STEP_KEYS 표에 있다", str(_unknown))
+    check(all(isinstance(v, str) and v for v in _obs.STEP_KEYS.values()),
+          "observability: 키 표의 값은 전부 한글 라벨이다")
 finally:
     _agent_log.handlers.clear()
+    _agent_log.setLevel(_logging.NOTSET)
 
 _saved_env = {k: os.environ.get(k) for k in
               ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST",

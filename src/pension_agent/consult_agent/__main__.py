@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 from pension_agent.consult_agent.effects import render
@@ -17,6 +18,12 @@ from pension_agent.session_store import scrub_text
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+# 단계 로그(`[agent]` — observability.step)를 여기서도 보이게 한다. 형식은 main.py 와 같고,
+# 답변(stdout)과 섞이지 않게 stderr 로 보낸다. 바깥이 이미 잡아 두었으면 손대지 않는다.
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO,
+                        format="%(levelname)s:     [%(name)s] %(message)s", stream=sys.stderr)
 
 argv = sys.argv[1:]
 customer_id = None

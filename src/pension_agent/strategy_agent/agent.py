@@ -25,6 +25,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import json
+import logging
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -710,6 +711,13 @@ def propose(p: Profile, *, use_llm: bool = True, top_n: int = engine.TOP_N) -> d
                 observability.score("briefing_source", out["source"])
                 observability.score("sections_skipped", len(skipped),
                                     comment=", ".join(skipped) or None)
+                # 같은 사실을 로그 한 줄로. 브리핑은 요청 컨텍스트 밖(사전 생성·화면)에서도
+                # 돌므로 경과초는 trace() 가 연 시계다. 섹션이 비었으면 화면에 빈칸이 뜬다 — WARNING.
+                tally = observability.llm_tally()
+                observability.step(
+                    "briefing", p.id, tier=out["tier"], source=out["source"],
+                    skipped=list(skipped) or None, llm=f"{tally['calls']}회",
+                    level=logging.WARNING if skipped else logging.INFO)
             # 호출이 죽어서 빈 섹션이 있으면 파일로 남기지 않는다 — 남기면 지문이 같은 한
             # 다음 프로세스가 그 빈 브리핑을 «미리 만들어 둔 것»으로 읽는다(위 주석).
             # 프로세스 캐시에는 넣는다: 같은 프로세스 안에서는 화면과 대화가 같은 것을

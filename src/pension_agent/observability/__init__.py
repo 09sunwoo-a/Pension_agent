@@ -28,6 +28,10 @@ JSON 배치 한 종류라 SDK 없이 부를 수 있다.
 **키가 없으면 통째로 꺼진다.** `enabled()` 가 False 면 `trace()` 는 아무것도 하지 않는
 핸들을 주고 `record_generation()` 은 즉시 돌아온다. 테스트·시연은 키 없이 그대로 돈다.
 
+**로그는 별개다.** 행내 컨테이너에는 Langfuse 키가 없어 대시보드가 꺼져 있고, 그때
+«에이전트가 이 턴에서 무엇을 했나»를 보는 자리는 stdout 로그(→ Grafana)다. 그 줄은
+`step()` 이 단계 하나에 한 줄씩 찍는다 — 키가 있든 없든 남는다(`_trace.py` 「단계 로그」).
+
 ━━ 환경변수 ━━
   LANGFUSE_PUBLIC_KEY   pk-lf-... (없으면 관측 꺼짐)
   LANGFUSE_SECRET_KEY   sk-lf-... (없으면 관측 꺼짐)
@@ -56,6 +60,8 @@ from pension_agent.observability._conf import (  # noqa: F401
 from pension_agent.observability._trace import (  # noqa: F401
     request_id,
     current_request_id,
+    tally_llm,
+    llm_tally,
     Trace,
     trace,
     current_trace_id,
@@ -63,6 +69,10 @@ from pension_agent.observability._trace import (  # noqa: F401
     customer_ref,
     span,
     score,
+    step,
+    STEP_KEYS,
+    STEP_VALUES,
+    STEP_TEXT_MAX,
     record_generation,
 )
 from pension_agent.observability._transport import (  # noqa: F401

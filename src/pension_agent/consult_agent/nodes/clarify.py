@@ -47,9 +47,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
+from pension_agent import observability
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import (
     CLARIFY_PROMPT, COMPOSE_MISSING_BLOCK, COMPOSE_PREMISE_BLOCK, JUDGE_BRANCHES_BLOCK,
@@ -258,6 +260,8 @@ def clarify(state: AgentState) -> dict[str, Any]:
     except LLMError as exc:
         # 판정을 못 돌린 것과 되묻지 않기로 한 것은 다르지만, 결과는 같아야 한다 —
         # 여기서 LLM 이 죽었으면 답을 쓸 LLM 도 죽었다. compose 가 같은 안내로 끝낸다(§11).
+        observability.step("clarify", error=f"{type(exc).__name__}: {exc}",
+                           level=logging.WARNING)
         return {"llm_error": f"{type(exc).__name__}: {exc}"}
 
     m = re.search(r"\{.*\}", raw, re.S)
@@ -266,6 +270,7 @@ def clarify(state: AgentState) -> dict[str, Any]:
     except ValueError:
         parsed = {}
     if not isinstance(parsed, dict):
+        observability.step("clarify", error="판정 응답을 JSON 으로 읽지 못함")
         return {}
 
     verdict = _verdict_of(parsed)
@@ -279,7 +284,10 @@ def clarify(state: AgentState) -> dict[str, Any]:
         if not isinstance(ask, str) or not ask.strip() or len(options) < MIN_OPTIONS:
             # 되묻기로 판정했지만 선택지를 못 세웠다 — 갈래를 보여주지 못하는 되묻기는
             # "무엇을 원하세요?" 와 같아서 하지 않는다(§5). 등급은 남겨 계측에 잡히게 한다.
+            observability.step("clarify", verdict=verdict, options=len(options), discarded=False)
             return graded
+        # 되묻기로 턴이 끝난다 — 동시에 쓰던 답은 버려진다(nodes/answer.py).
+        observability.step("clarify", verdict=verdict, options=len(options), discarded=True)
         asked = {"question": ask.strip(), "options": options}
         # 선택지는 근거 카드에서 나온 것이므로 그 카드를 출처로 싣는다(§3 "모든 답에 출처를
         # 밝힌다"). 비워 두면 화면이 "근거: 없음"이라고 말하는데, 직원 입장에서는 어디서 나온
@@ -287,6 +295,7 @@ def clarify(state: AgentState) -> dict[str, Any]:
         return {**graded, "clarify": asked, "answer": _render(ask.strip(), options),
                 "sources": [{**s, "role": tools.GROUND} for s in tools.ledger_sources(evidence)]}
 
+    observability.step("clarify", verdict=verdict)
     if verdict == ASSUME:
         premise = str(parsed.get("premise") or "").strip()
         # **정해 줄 것이 없으면 «정해졌다»고 말할 수 없다.** assume 은 «대화 맥락이나 열려

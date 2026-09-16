@@ -113,8 +113,8 @@ def _fake_ask(question, history=None, **kw):
     if cb:
         for line in PROGRESS:
             cb(line)
-    # 실물처럼 «상태» 한 건 — 진입점이 연 request_id 컨텍스트가 스레드 안까지 따라오는지 본다.
-    observability.score("evidence_count", 2)
+    # 실물처럼 단계 줄 한 건 — 진입점이 연 request_id 컨텍스트가 스레드 안까지 따라오는지 본다.
+    observability.step("fake", result="answer")
     # 실물처럼: 추천질문은 answer 끝에 블록으로도 붙고 followups 로도 온다(graph.ask).
     out = {"answer": ANSWER + "\n\n" + main.consult_graph.FOLLOWUP_HEADER + "\n"
            + "\n".join(f"· {q}" for q in FOLLOWUPS),
@@ -237,7 +237,7 @@ try:
     # 거부된 요청도 모양을 남긴다 — 행내에서 4턴째에 이 422 가 났을 때 게이트웨이가 무엇을
     # 보냈는지(빈 문자열인지 · 질문 원문인지) 로그로 알 수 없었다.
     rejected = next((rec.getMessage() for rec in reversed(_captured)
-                     if "거부된 요청 모양" in rec.getMessage()), "")
+                     if "] reject " in rec.getMessage() and "모양=" in rec.getMessage()), "")
     check('"input_value_raw"' in rejected and '"len": 13' in rejected
           and "이건 JSON 이 아니다" in rejected and '"headers"' in rejected,
           "422 로 거부된 요청은 헤더와 input_value 원문 앞부분을 WARNING 으로 남긴다", rejected[:300])
@@ -245,7 +245,7 @@ try:
     r = client.post("/chat", json={"input_value": "", "message_hists": None})
     check(r.status_code == 422, "input_value 가 빈 문자열이면 422", str(r.status_code))
     rejected = next((rec.getMessage() for rec in reversed(_captured)
-                     if "거부된 요청 모양" in rec.getMessage()), "")
+                     if "] reject " in rec.getMessage() and "모양=" in rec.getMessage()), "")
     check('"len": 0' in rejected, "빈 input_value 는 길이 0 으로 남는다", rejected[:300])
 
     r = client.post("/chat", json={"input_value": json.dumps(["배열"]), "message_hists": None})
@@ -277,21 +277,24 @@ try:
           "role 로 «근거»와 «주의(지켜야 할 것)»를 가를 수 있다")
     check(_seen.get("on_progress") is not None, "진행 콜백을 넘긴다", str(_seen.get("on_progress")))
     # 행내에서 보인 로그가 접속 로그 한 줄뿐이었다 — 루트 로거에 핸들러가 없어서 log.info
-    # 가 어디에도 안 나갔다. 요청 한 건이 «받음 → 진행 → 완료»로 묶여 찍히는지 본다.
-    _logs = [r for r in _captured if r.name == "main"]
+    # 가 어디에도 안 나갔다. 요청 한 건이 «request → (agent 단계 줄) → done»으로 묶여
+    # 찍히는지 본다. HTTP 경계 줄의 로거는 `api` 다(main.py 머리말 «로그»).
+    _logs = [r for r in _captured if r.name == "api"]
     _rid = next((m.split("]")[0][1:] for m in (r.getMessage() for r in _logs)
-                 if m.startswith("[") and "요청 ·" in m), None)
+                 if m.startswith("[") and "] request " in m), None)
     check(_rid and len(_rid) == 8, "요청 로그에 8자리 요청 id 가 붙는다", str(_rid))
     _mine = [r.getMessage() for r in _logs if _rid and r.getMessage().startswith(f"[{_rid}]")]
-    check(any("요청 ·" in m and "x_client_user=emp-0417" in m and "'IRP 수수료 질문'" in m
+    check(any("] request " in m and "사용자=emp-0417" in m and "'IRP 수수료 질문'" in m
               for m in _mine), "요청 로그에 호출자·질문 미리보기가 실린다", str(_mine[:1]))
-    check([m for m in _mine if "진행" in m and PROGRESS[0] in m],
-          "진행 단계가 로그에도 찍힌다", str(_mine[1:2]))
-    check(any("완료" in m and "출처 2건" in m and "추천질문 2건" in m for m in _mine),
-          "완료 로그에 소요시간·답변 길이·출처·추천질문 건수가 실린다", str(_mine[-1:]))
+    check(not [m for m in _mine if PROGRESS[0] in m],
+          "진행 문구는 로그에 찍히지 않는다(화면 이벤트로만 간다)", str(_mine[1:2]))
+    check(any("] done " in m and "소요=" in m and "답변=" in m and "응답=sse" in m for m in _mine),
+          "done 줄에 소요시간·응답 형식·답변 길이가 실린다", str(_mine[-1:]))
+    check(not any("출처" in m or "intent" in m for m in _mine),
+          "done 줄은 HTTP 가 아는 것만 싣는다 — 근거·의도는 agent 의 turn 줄이 말한다", str(_mine[-1:]))
     _state = [r.getMessage() for r in _captured if r.name == "agent" and _rid and r.getMessage().startswith(f"[{_rid}]")]
-    check(_state == [f"[{_rid}] 상태 evidence_count=2"],
-          "에이전트 안의 «상태» 줄에 같은 요청 id 가 붙는다(워커 스레드까지 컨텍스트가 따라간다)", str(_state))
+    check(_state and all(" fake " in m for m in _state),
+          "에이전트 안의 단계 줄에 같은 요청 id 가 붙는다(워커 스레드까지 컨텍스트가 따라간다)", str(_state))
     check(all(r.levelno == logging.INFO for r in _logs if _rid and r.getMessage().startswith(f"[{_rid}]")),
           "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
     check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",
@@ -328,16 +331,16 @@ try:
           and main.consult_graph.employee_no(None, "pension-agent") is None,
           "사번은 명시한 값이 먼저이고, x_client_user 에서는 앞 7자리를 읽는다")
     def _last_request_log() -> str:
-        return next((m for m in reversed([r.getMessage() for r in _captured if r.name == "main"])
-                     if "요청 ·" in m), "")
+        return next((m for m in reversed([r.getMessage() for r in _captured if r.name == "api"])
+                     if "] request " in m and "사용자=" in m), "")
 
-    check("emp_no=3902172" in _last_request_log(),
+    check("사번=3902172" in _last_request_log(),
           "요청 로그가 이 턴의 사번을 남긴다 — 쪽지가 누구 앞으로 나갈지가 그 값이다",
           _last_request_log())
 
     r = client.post("/chat", json=_body(message="쪽지 보내줘", x_client_user="emp-0417"))
     _events(r)
-    check(_seen.get("employee_id") is None and "emp_no=-" in _last_request_log(),
+    check(_seen.get("employee_id") is None and "사번=-" in _last_request_log(),
           "사번을 못 찾으면 «-» 로 남긴다 — 환경변수 폴백으로 떨어졌다는 뜻이다(위험 10)",
           _last_request_log())
 
@@ -374,7 +377,7 @@ try:
     _events(r)
     check(_seen.get("history") == [{"question": "첫 질문", "tools": []}],
           "같은 (직원, 세션)의 다음 턴은 이전 턴의 history 를 이어받는다", str(_seen.get("history")))
-    check(any("맥락=1턴(store)" in rec.getMessage() for rec in _captured),
+    check(any("맥락=1턴(저장)" in rec.getMessage() for rec in _captured),
           "요청 로그에 맥락이 몇 턴이고 어디서 왔는지 찍힌다",
           str([m for m in (rec.getMessage() for rec in _captured) if "맥락=" in m][-1:]))
     r = client.post("/chat", json=_body(message="다른 세션", x_client_user="emp-7", session_id="S-8"))
@@ -438,8 +441,9 @@ try:
           "비스트림 JSON 의 content 에 같은 이벤트들이 연달아 실린다(진행은 뺀다)", str(_types(ns_events)))
     check(ns_events[0]["text"] == ANSWER and ns_events[1]["items"] == SOURCES,
           "비스트림 이벤트의 내용은 스트림과 같다", str(ns_events[0])[:80])
-    check(_seen.get("on_progress") is not None,
-          "비스트림에서도 진행 콜백(로그용)은 넘긴다", str(_seen.get("on_progress")))
+    check(_seen.get("on_progress") is None,
+          "비스트림에는 진행 콜백을 넘기지 않는다(보여줄 데도 로그에 찍을 일도 없다)",
+          str(_seen.get("on_progress")))
 
     r = client.post("/chat", json={**_body(message="q", x_client_user="emp-1"), "isStream": False})
     check(r.headers["content-type"].startswith("application/json")
@@ -460,7 +464,7 @@ try:
     # 요청 모양 로그 — 게이트웨이가 무엇을 보내는지 보는 유일한 자리. 비밀 헤더 값은 가린다.
     r = client.post("/chat", json={**_body(message="q", x_client_user="emp-1"), "isStream": False},
                     headers={"x-openapi-token": "Bearer SECRET-1", "x-generative-ai-client": "cli"})
-    shape = next(rec.getMessage() for rec in reversed(_captured) if "요청 모양" in rec.getMessage())
+    shape = next(rec.getMessage() for rec in reversed(_captured) if "] request " in rec.getMessage() and "모양=" in rec.getMessage())
     check("SECRET-1" not in shape and '"x-openapi-token": "***"' in shape,
           "요청 모양 로그는 토큰 값을 가린다", shape[:200])
     check('"x-generative-ai-client": "cli"' in shape and '"body_extra": ["isStream"]' in shape
@@ -548,7 +552,7 @@ try:
         time.sleep(0.05)
     check(bool(_kept) and _kept[-1]["question"] == "연계",
           "호출자가 중간에 끊어도 그 턴의 맥락은 남는다 — 다음 «네»가 이어진다", str(_kept))
-    check(any("연결이 끊겼다" in rec.getMessage() for rec in _captured),
+    check(any("] disconnect " in rec.getMessage() for rec in _captured),
           "중간에 끊긴 것은 «연결 끊김» WARNING 으로 갈라 찍힌다",
           str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
     main.consult_graph.ask = _fake_ask
@@ -568,11 +572,11 @@ try:
                     headers={"Accept": "application/json"})
     check(r.status_code == 200 and _types(_events_in(r.json().get("content", ""))) == ["error", "done"],
           "비스트림에서도 실패는 200 + error·done 이벤트다", r.text[:100])
-    check(any(rec.levelno == logging.ERROR and "ask() 실패" in rec.getMessage()
+    check(any(rec.levelno == logging.ERROR and "] error " in rec.getMessage() and "LLMError" in rec.getMessage()
               and rec.exc_info for rec in _captured),
           "실패는 스택과 함께 ERROR 로 남고, «연결 끊김»으로 오인되지 않는다",
           str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
-    check(not any("연결이 끊겼다" in rec.getMessage() for rec in _captured),
+    check(not any("] disconnect " in rec.getMessage() for rec in _captured),
           "정상 완료·실패 응답에는 «연결 끊김» 경고가 찍히지 않는다")
 finally:
     main.consult_graph.ask = _saved_ask

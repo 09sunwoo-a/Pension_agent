@@ -160,7 +160,6 @@ _PACE_LOCK = threading.Lock()
 #: 다음 호출이 나갈 수 있는 가장 이른 시각(time.monotonic 기준). 감속은 이 값을 민다.
 _next_free = 0.0
 
-_log = logging.getLogger(__name__)
 
 
 def _pace() -> None:
@@ -406,9 +405,11 @@ def _post_json(req: urllib.request.Request) -> dict:
             wait, told = _backoff(exc, attempt)
             # 서버가 준 값인지 우리 추측인지를 남긴다 — 「30.0초」가 서버 말인지 상한에 걸린
             # 것인지 로그만 보고 갈려야 상한을 조정할 근거가 생긴다(MAX_RETRY_AFTER 주석).
-            _log.warning("LLM %s — %.1f초 감속 후 재시도 (%d/%d · %s)",
-                         exc.code, wait, attempt + 1, RETRY_ATTEMPTS,
-                         "서버 Retry-After" if told else "추정 백오프")
+            # 단계 로그(`agent` 로거)로 찍는다 — 턴의 다른 줄과 같은 요청 id·경과초가 붙어
+            # «어느 단계에서 기다렸나»가 그 자리에 보인다.
+            observability.step("llm", retries=f"{attempt + 1}/{RETRY_ATTEMPTS}", status=exc.code,
+                               wait=f"{wait:.1f}초", source="서버" if told else "추정",
+                               level=logging.WARNING)
             _slow_down(wait)
     code = last.code if last else 0
     detail = ("속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오." if code == 429
@@ -598,6 +599,12 @@ def _observe(name: str, started: float, prompt: str, system: str | None, max_tok
     system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
     """
     observability.score("prompt_chars", prompt_chars(prompt, system), comment=name)
+    # 호출 한 건의 로그 줄은 DEBUG 다 — 한 턴에 4~8줄이라 INFO 흐름을 가린다. 입력 크기 분포는
+    # 위 점수(Langfuse)로 보고, 로그에서는 턴 끝 합계(graph.ask)만 INFO 로 남는다.
+    observability.tally_llm(prompt_chars(prompt, system))
+    observability.step("llm", name, chars=prompt_chars(prompt, system),
+                       elapsed=f"{time.time() - started:.1f}초", error=error,
+                       level=logging.DEBUG)
     observability.record_generation(
         name,
         model=meta.get("model") or _default_model_label(),

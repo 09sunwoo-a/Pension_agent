@@ -122,5 +122,7 @@ Content-Type: application/json
   게이트웨이 없이 위 이벤트 JSON 이 한 줄씩 그대로 찍힌다. `RAW=2` 면 SSE 줄 자체가 나온다.
 - 게이트웨이를 거친 결과는 `call_agent.py` 의 `ask()` 가 종류별로 모은 dict 로 돌려준다.
   `raw` 에 무엇인가 들어 있으면 게이트웨이가 이벤트가 아닌 텍스트를 보낸 것이다.
-- 에이전트 쪽 로그(Grafana)는 요청마다 8자리 id 로 «요청 → 진행 → 완료» 가 묶여 찍힌다.
-  `맥락=N턴(store)` 이 두 번째 턴부터 보이면 세션이 이어지고 있는 것이다.
+- 에이전트 쪽 로그(Grafana)는 요청마다 8자리 id 로 묶여 찍힌다 — `[api] request` 와
+  `[api] done` 사이에 `[agent]` 단계 줄(understand · plan · tool · compose · verify · turn)이
+  경과초와 함께 선다(`src/main.py` 머리말 «로그»). request 줄의 `맥락=N턴(저장)` 이 두 번째
+  턴부터 보이면 세션이 이어지고 있는 것이다.

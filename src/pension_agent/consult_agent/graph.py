@@ -24,6 +24,7 @@ LLM 프롬프트는 prompts.py.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -120,6 +121,17 @@ def _customer_name(customer_id: str | None) -> str | None:
     return getattr(profile, "nm", None)
 
 
+def _pending_label(history: list[dict] | None) -> str | None:
+    """직전 턴이 걸어둔 제안의 이름(로그용). 없으면 None — 그 키는 찍히지 않는다."""
+    if not history:
+        return None
+    last = history[-1] or {}
+    pending = last.get("pending_action") or {}
+    if pending.get("label"):
+        return pending["label"]
+    return "되묻기" if last.get("pending_clarify") else None
+
+
 def employee_no(explicit: str | None, x_client_user: str | None) -> str | None:
     """이 턴을 부른 직원의 **WorkB 사번**. 없으면 None(환경변수 폴백으로 떨어진다).
 
@@ -197,11 +209,17 @@ def ask(
     # x-client-user 헤더가 되고(감사 기록이자 게이트웨이 쿼터 버킷), 관측 메타데이터에도
     # 같은 값이 실린다. 한 턴이 노드·도구 수십 갈래로 흩어지므로 인자 대신 ContextVar 로
     # 흘린다(llm.client_user 주석).
-    with llm.client_user(x_client_user), observability.trace(
+    # 단계 로그의 요청 id·경과초 시계를 여기서 (다시) 연다 — main.py 가 연 id 는 그대로 잇고
+    # 시계만 턴 시작으로 맞춘다. CLI·화면(app.py)처럼 id 없이 부른 경우도 시계는 생긴다.
+    with observability.request_id(observability.current_request_id()), \
+            llm.client_user(x_client_user), observability.trace(
         "consult.turn", input=question, session_id=session_id,
         user_id=who["user_id"], tags=tags,
         metadata={**who["metadata"], "x_client_user": llm.current_client_user()},
     ) as span:
+        observability.step("turn", customer="열림" if customer_id else "없음",
+                           history=f"{len(history or [])}턴",
+                           pending=(_pending_label(history)))
         with progress.reporting(on_progress):
             out = _AGENT.invoke(
                 {"question": question, "history": history or [], "customer_id": customer_id,
@@ -223,10 +241,10 @@ def ask(
         # 떠 있다 — 고장이 지표에서 사라지는 방향의 실패다. 재료를 얻은 턴의 부분 고장은
         # 여기 안 뜨고 도구 span(`failed`)에만 남는다.
         failed = [s for s in (out.get("steps") or []) if s.get("outcome") == "failed"]
+        outcome = ("llm_down" if out.get("llm_error") else "clarify" if out.get("clarify")
+                   else "tool_failed" if failed and not evidence else "answer")
         observability.score(
-            "turn_outcome",
-            "llm_down" if out.get("llm_error") else "clarify" if out.get("clarify")
-            else "tool_failed" if failed and not evidence else "answer",
+            "turn_outcome", outcome,
             comment=out.get("llm_error")
             or ("; ".join(f.get("reason") or "" for f in failed) if failed else None))
         observability.score("evidence_count", len(evidence))
@@ -235,6 +253,14 @@ def ask(
         # 이 판정을 등급으로 늘린 이유이므로, 그 분포가 대시보드에 잡혀야 한다. 판정을 아예
         # 안 돌린 턴(관문에서 걸린 턴)은 "n/a" 로 갈라 센다.
         observability.score("judge_verdict", out.get("judge_verdict") or "n/a")
+        # 같은 사실을 로그 한 줄로 — 위 점수 셋(결과·근거 수·판정)에 LLM 호출 합계를 더한다.
+        tally = observability.llm_tally()
+        observability.step(
+            "turn", result=outcome, evidence=f"{len(evidence)}건",
+            failed=f"{len(failed)}건" if failed else None,
+            verdict=out.get("judge_verdict"), llm=f"{tally['calls']}회",
+            chars=f"{tally['chars'] / 1000:.1f}k자" if tally["chars"] else None,
+            level=logging.WARNING if outcome in ("llm_down", "tool_failed") else logging.INFO)
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가

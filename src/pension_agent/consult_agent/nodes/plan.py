@@ -19,6 +19,7 @@ compose 는 모든 근거를 한 번에 받아 답변 전체를 쓴다. 화법�
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -80,28 +81,12 @@ TOOL_FAILED = (
 # 리스트를 하나씩 늘리면 «저 호출은 어떻게 됐나»가 서명 문자열을 잘라 맞추는 일이 된다.
 # ─────────────────────────────────────────────────────────────
 
-FOUND, MISS, FAILED = "found", "miss", "failed"
+#: 결과 세 값의 원본은 tools 다 — 도구를 부르는 곳(`tools.run`)이 장부·로그·점수에 같은 값을 쓴다.
+FOUND, MISS, FAILED = tools.FOUND, tools.MISS, tools.FAILED
 
 
 def _steps(state: AgentState) -> list[dict]:
     return list(state.get("steps") or [])
-
-
-#: 상태 로그에 싣는 질의 미리보기 길이 — 질의는 직원의 말이라 전문을 남기지 않는다.
-_QUERY_PREVIEW = 40
-
-
-def _record_tool(name: str, query: str, outcome: str, reason: str = "") -> None:
-    """도구 실행 한 건을 «코드가 아는 사실»로 남긴다(observability.score → Langfuse + 로그).
-
-    장부(`steps`)는 이 턴의 답을 만드는 재료이고, 이것은 나중에 되짚는 기록이다. 고장(failed)만
-    WARNING 으로 찍힌다(observability._trace._state_level).
-    """
-    preview = " ".join(query.split())
-    if len(preview) > _QUERY_PREVIEW:
-        preview = preview[:_QUERY_PREVIEW] + "…"
-    note = f"{name} · 질의 {preview!r}" + (f" · 사유 {reason}" if reason else "")
-    observability.score("tool_outcome", outcome, comment=note)
 
 
 def _step(tool: str, query: str, outcome: str, reason: str = "") -> dict:
@@ -211,7 +196,11 @@ def _wrap_up(state: AgentState, evidence: list, steps: list[dict]) -> dict[str, 
     끝내기는 존중한다: 정직한 '없음' 경로를 막지 않는다.
     """
     if evidence or state.get("plan_retry") or not _untried(state, steps):
+        observability.step("plan", step=f"{len(steps) + 1}/{MAX_STEPS}", done=True,
+                           retry=False if state.get("plan_retry") else None)
         return {"plan_done": True}
+    observability.step("plan", step=f"{len(steps) + 1}/{MAX_STEPS}", done=True, retry=True,
+                       unused=len(_untried(state, steps)))
     return {"plan_retry": True}
 
 
@@ -273,6 +262,8 @@ def plan_step(state: AgentState) -> dict[str, Any]:
         # 여기서 조용히 루프만 끝냈고, 그러면 401·타임아웃·모델명 오류가 전부 "근거가
         # 없습니다"로 둔갑해 원인이 화면에서 사라졌다. 계획이 못 돈 것과 재료가 없는 것은
         # 다른 사건이고, 다르게 말해야 한다.
+        observability.step("plan", step=f"{len(steps) + 1}/{MAX_STEPS}",
+                           error=f"{type(exc).__name__}: {exc}", level=logging.WARNING)
         return {"plan_done": True, "llm_error": f"{type(exc).__name__}: {exc}"}
 
     # 이 호출이 됐다는 것은 LLM 이 살아 있다는 뜻이다. 앞 단계(슬롯 분해)가 일시적으로
@@ -283,6 +274,8 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     action = json_object(raw) or {}
     if not action:
         # 규격 밖 응답(설명문·잘린 JSON). 같은 이유로 조용히 넘기지 않는다.
+        observability.step("plan", step=f"{len(steps) + 1}/{MAX_STEPS}",
+                           error="계획 응답을 JSON 으로 읽지 못함", level=logging.WARNING)
         return {"plan_done": True,
                 "llm_error": f"계획 응답을 JSON 으로 읽지 못함 — {raw.strip()[:120]!r}"}
 
@@ -306,6 +299,10 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     query = action.get("query") or state.get("utterance") or question
     if not isinstance(query, str):
         query = question
+    # 계획이 정한 것을 실행 전에 남긴다 — 도구 줄(tools.record)은 결과만 말하므로, 이 줄이
+    # 없으면 «무엇을 골랐나»가 로그에서 «무엇을 얻었나» 뒤에 숨는다.
+    observability.step("plan", step=f"{len(steps) + 1}/{MAX_STEPS}", tool=name,
+                       query=tools._preview(query), done=True if last else None)
     if _repeated(steps, name, query):
         # 같은 호출을 반복하면 진전이 없다 — 도구를 다시 돌리지는 않되, 근거 0건이면
         # _wrap_up 이 한 번 되돌려 보낸다(빗나간 호출 목록을 보여주며).
@@ -316,19 +313,20 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     except LLMError as exc:
         # 도구 안에서 LLM 이 죽었다(카드 선택·적합성 판정). 이걸 "근거를 못 찾았다"로
         # 접으면 있는 자료를 없다고 답하게 된다 — 계획 실패와 같은 사건으로 다룬다.
+        observability.step("tool", name, error=f"{type(exc).__name__}: {exc}",
+                           level=logging.WARNING)
         return {"plan_done": True, "llm_error": f"{type(exc).__name__}: {exc}"}
     except tools.ToolFailure as exc:
         # 도구가 죽었다. **루프는 끊지 않는다** — LLM 이 죽은 것과 달리 나머지 도구로 답이
         # 나올 수 있고, 죽은 도구는 다음 바퀴의 카탈로그에서 빠진다(tools.usable). 빗나간
         # 호출로 접지 않는 이유는 그쪽의 처방이 «질의의 말을 바꿔라»여서다 — 고장에는
-        # 그 말이 틀렸고, 원장이 끝내 비었을 때 답도 갈린다(compose).
-        _record_tool(name, query, FAILED, exc.reason)
+        # 그 말이 틀렸고, 원장이 끝내 비었을 때 답도 갈린다(compose). 로그·점수는
+        # tools.run 이 이미 남겼다.
         return {**alive, "steps": steps + [_step(name, query, FAILED, exc.reason)]}
 
     # 무슨 일이 있었는지는 한 번만 적는다 — 예전에는 성공·빗나감·고장이 각자 리스트를
     # 갖고 있어서, 결과 종류가 늘 때마다 반환값의 키가 늘었다(state.py 의 `steps` 주석).
     outcome = FOUND if found is not None else MISS
-    _record_tool(name, query, outcome)
     update: dict[str, Any] = {"steps": steps + [_step(name, query, outcome)], **alive}
     # 게이트가 이번 호출에서 표시한 갈래(tools.record_branches 가 state 에 쌓아 둔 것)를
     # **자기 반환값으로** 넘긴다. 그래프 상태 전파를 in-place 변경에 기대지 않는다 —
@@ -681,10 +679,16 @@ def compose(state: AgentState) -> dict[str, Any]:
         failure = state.get("llm_error")
         if failure:
             answer = LLM_FAILED.format(reason=failure)
+            observability.step("compose", evidence="0건", answer="LLM실패안내", error=failure,
+                               level=logging.WARNING)
         elif _of(_steps(state), FAILED):
             answer = _tool_failed(state)
+            observability.step("compose", evidence="0건", answer="도구실패안내",
+                               failed=len(_of(_steps(state), FAILED)), level=logging.WARNING)
         else:
             answer = _no_evidence(state)
+            observability.step("compose", evidence="0건", answer="자료없음",
+                               searched=len([s for s in _steps(state) if s.get("outcome") != FAILED]))
         return {"answer": answer, "sources": []}
 
     # 「하지 말 것」 — 고객 화면이 열려 있으면 **코드가** 그 고객 상태를 읽어 붙인다.
@@ -742,6 +746,7 @@ def compose(state: AgentState) -> dict[str, Any]:
         with observability.span("compose", metadata={"evidence": len(evidence)}) as sp:
             answer = generate(prompt, max_tokens=1500, system=COMPOSE_SYSTEM,
                               name="consult.compose").strip()
+            observability.step("compose", evidence=f"{len(evidence)}건", draft=f"{len(answer)}자")
             faults: list[str] = []
             for attempt in range(COMPOSE_RETRIES + 1):
                 if not answer:
@@ -752,10 +757,20 @@ def compose(state: AgentState) -> dict[str, Any]:
                 faults, appends = _screen(answer, evidence, state["question"], known,
                                           prompt_texts=injected)
                 if not faults:
+                    observability.step("verify", passed=True,
+                                       attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}")
                     break
                 answer = ""
                 if attempt >= COMPOSE_RETRIES:
+                    # 재작성 상한 — 근거 원문이 답이 된다(아래 폴백). 말투가 바뀌는 사건이라 WARNING.
+                    observability.step("verify", passed=False,
+                                       attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}",
+                                       fallback="raw_evidence", reason="; ".join(faults[:2]),
+                                       level=logging.WARNING)
                     break
+                observability.step("verify", passed=False,
+                                   attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}",
+                                   reason="; ".join(faults[:2]), level=logging.WARNING)
                 # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
                 progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
                 retry = prompt + COMPOSE_RETRY_BLOCK.format(
@@ -775,6 +790,8 @@ def compose(state: AgentState) -> dict[str, Any]:
         # 실패 원인을 상태에도 남긴다 — plan_step 이 앞 단계의 원인을 지우고 들어오므로
         # (`alive`), 여기서 안 남기면 «LLM 이 죽은 턴»이 상태만 보면 정상 턴과 구별되지
         # 않는다. 뒤에 붙는 것들(추천질문 등)이 실패 안내를 정상 답변으로 오인한다.
+        observability.step("compose", evidence=f"{len(evidence)}건", answer="LLM실패안내",
+                           error=f"{type(exc).__name__}: {exc}", level=logging.WARNING)
         return {"answer": LLM_FAILED.format(reason=f"{type(exc).__name__}: {exc}"),
                 "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}

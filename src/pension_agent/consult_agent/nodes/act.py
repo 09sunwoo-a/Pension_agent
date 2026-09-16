@@ -21,6 +21,7 @@ LMS 발송 화면), 그 화면으로 바로 갈 수 있게 **연계를 제안**�
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -342,12 +343,17 @@ def offer(state: AgentState) -> dict[str, Any]:
     붙이면 직원이 무엇에 «네»라고 답하는지 갈리지 않는다.
     """
     if state.get("pending_action"):
+        observability.step("offer", pending=state["pending_action"].get("label"))
         return {}
     if _wants_memo(state):
-        return _memo_offer(state)
+        out = _memo_offer(state)
+        observability.step("offer", pending=(out.get("pending_action") or {}).get("label") or "없음")
+        return out
     action = _propose(state)
     if not action:
+        observability.step("offer", pending="없음")
         return {}
+    observability.step("offer", pending=action.get("label"))
     # 끝의 「(네 / 아니오)」는 공통이다(transcript 재료가 기록에서 이 줄을 떼는 표지 —
     # tools._OFFER_TRAILER).
     ask = action.get("prompt") or f"{action['label']}, 연계해드릴까요? (네 / 아니오)"
@@ -373,18 +379,22 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
     """
     pending = _pending(state.get("history"))
     if not pending:
+        observability.step("confirm", pending="없음")
         return {"answer": "직전에 제안드린 작업이 없어요. 무엇을 도와드릴까요?",
                 "sources": [], "pending_action": None}
 
     text = (state.get("question") or "").strip().lower()
     said_no = any(k in text for k in _NO) and not any(text.startswith(k) for k in _YES)
     if said_no:
+        observability.step("confirm", pending=pending.get("label"), reply="reject")
         return {"answer": f"{pending['label']}을 취소했어요.", "sources": [], "pending_action": None}
     if not any(k in text for k in _YES):
         # 애매한 답을 승낙으로 해석하지 않는다 — 제안을 유지한 채 다시 묻는다(§10).
+        observability.step("confirm", pending=pending.get("label"), reply="unclear")
         return {"answer": f"{pending['label']}을 진행할까요? '네' 또는 '아니오'로 답해 주세요.",
                 "sources": [], "pending_action": pending}
 
+    observability.step("confirm", pending=pending.get("label"), reply="accept")
     kind = pending.get("kind")
     if kind == "pitch":
         return _show_playbook(pending)
@@ -420,8 +430,12 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
         title=title, recipients=ids, to=to,
         as_employee=note.employee_id(state.get("employee_id")))
     # 되돌릴 수 없는 행위의 결과는 반드시 기록에 남긴다 — 제목·본문·사번은 싣지 않는다.
-    observability.score("action_outcome", result.get("status") or "unknown",
+    status = result.get("status") or "unknown"
+    observability.score("action_outcome", status,
                         comment=f"send_memo · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
+    observability.step("action", "send_memo", status=status, recipients=f"{len(ids)}명",
+                       reason=None if status in ("sent", "stubbed") else result.get("detail"),
+                       level=logging.INFO if status in ("sent", "stubbed") else logging.WARNING)
     if result.get("status") not in ("sent", "stubbed"):
         return {"answer": f"쪽지를 보내지 못했어요. {result.get('detail') or ''}".strip(),
                 "sources": [], "pending_action": None}
@@ -482,6 +496,8 @@ def _link(pending: dict) -> dict[str, Any]:
         if gate["status"] == "blocked":
             observability.score("action_outcome", "blocked",
                                 comment=f"open_lms_screen · {gate.get('detail') or ''}")
+            observability.step("action", "open_lms_screen", status="blocked",
+                               reason=gate.get("detail"), level=logging.WARNING)
             return {"answer": f"연계하지 않았어요. {gate['detail']}",
                     "sources": [], "pending_action": None}
 
@@ -491,11 +507,14 @@ def _link(pending: dict) -> dict[str, Any]:
         # 화면번호가 규격에 맞지 않으면 연계 대신 화면번호만 안내한다(§10).
         observability.score("action_outcome", "failed",
                             comment=f"link · 화면번호 {screen or '미상'} 이 규격에 맞지 않음")
+        observability.step("action", "link", status="failed", screen=screen or "미상",
+                           reason="화면번호가 규격에 맞지 않음", level=logging.WARNING)
         return {"answer": f"화면 연계를 만들지 못했어요. 화면번호 {screen or '미상'} "
                           "로 직접 이동해 주세요.",
                 "sources": [], "pending_action": None}
     observability.score("action_outcome", "ok",
                         comment=f"link · {pending.get('kind') or 'screen'} · 화면 {screen}")
+    observability.step("action", "link", status="ok", screen=screen, mode=screens.MODE)
 
     answer = f"{pending['label']} — {url}"
     if pending.get("kind") == "lms" and message:
