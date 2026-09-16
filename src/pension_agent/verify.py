@@ -100,6 +100,25 @@ _DATE_MD = re.compile(r"(?<!\d)(?<!\d\s)(\d{1,2})\s*월\s*(\d{1,2})\s*일")
 _DATE_DOT = re.compile(
     r"(?<![\d.,])((?:19|20)\d{2})\.(\d{1,2})(?:\.(\d{1,2}))?(?!\d|[십백천만억원%])")
 
+#: 슬래시 표기(12/30 · 11/16) — **원장 쪽에서만** 날짜로 읽는다(`_WIDE`).
+#:
+#: ⑨ 안내 콘텐츠의 일정은 코드가 이 표기로 만드는데(strategy_agent/support/outreach.py::
+#: schedule_text) 답변은 사람 말로 "12월 30일" 이라 쓴다. 그 정규형이 원장에 없어 **맞는
+#: 답변이 잘렸다** — 2026-09-16 실측에서 `cases` [11] 이 «날짜 '12월 30일'» 로 재작성 1회를
+#: 치렀다. 재작성이 원장 표기를 베껴 쓸 때까지 매번 치르는 비용이고, 표기가 판정을 뒤집는
+#: 이 파일의 여섯 번째 자리다(_canon·_NUM·_measures·_CHUNK·_RANGES 주석의 다섯과 같은 부류).
+#:
+#: **좁히는 쪽(`_CHUNK`)에는 넣지 않는다.** 답변의 "1/2"·"3/4" 는 분수이지 날짜가 아닌데,
+#: 좁히는 쪽에 넣으면 그 문장이 «원장에 없는 날짜»로 통째로 버려진다 — `_DATE_KO` 주석이
+#: 적어 둔 원칙 그대로다(좁히는 쪽에 애매한 것을 넣지 않는다). 넓히는 쪽은 그 위험이 없다:
+#: 허용 형태가 하나 더 늘 뿐이다. 그래서 답변이 "12/30" 이라 쓰는 것은 지금처럼 맨숫자
+#: `12`·`30` 으로 남는다 — 그쪽을 날짜로 좁히려면 분수까지 날짜로 읽어야 한다.
+#:
+#: 뒤따르는 말을 함께 본다. 분수·비율("90/10 원칙" · "1/2 씩")을 날짜로 읽지 않기 위해서다.
+#: 여기 적은 셋이 `schedule_text` 가 내는 표기 전부다 — "12/30까지" · "11/16부터 …" ·
+#: "11/3(화) 17시". 그쪽 표기를 고치면 이 자리도 함께 본다(그 함수 머리말이 짝을 적어 둔다).
+_DATE_SLASH = re.compile(r"(?<![\d./])(\d{1,2})/(\d{1,2})(?=\s*(?:부터|까지|\())")
+
 #: 답변에서 «날짜 한 덩이»로 끊을 표기. 순서가 곧 우선순위다(긴 것 먼저 — _chunk_dates).
 #:
 #: 점 표기(2026.03)도 넣는다. 넣지 않으면 그 표기는 흩어진 토큰 "2026.03" + "31" 로 읽혀,
@@ -107,6 +126,10 @@ _DATE_DOT = re.compile(
 #: 이 파일의 네 번째 사고다(_canon·_NUM·_measures 주석의 셋과 같은 부류. 원장 날짜
 #: 127종을 여섯 표기로 바꿔 대조하니 105건이 그렇게 걸렸다).
 _CHUNK = (_DATE_KO, _DATE_ISO, _DATE_DOT, _DATE_MD)
+
+#: 원장 쪽에서만 더 보는 표기(`_date_forms` 전용). 좁히는 쪽(`_chunk_dates`)은 `_CHUNK` 그대로다 —
+#: 두 튜플이 갈려 있는 것이 «넓히는 쪽과 좁히는 쪽은 같은 표기 목록을 쓰지 않는다»는 뜻이다.
+_WIDE = _CHUNK + (_DATE_SLASH,)
 
 #: 기간 표기 — 원장의 «2026.03~04» 와 답변의 «2026년 3~4월»·«2026년 3월~4월».
 #:
@@ -163,7 +186,7 @@ def _ranges(text: str) -> list[tuple[re.Match, str, str, str]]:
 
 def _date_parts(m: re.Match, pattern: re.Pattern) -> tuple[str | None, str, str | None]:
     """정규식 매치 → (연, 월, 일). 패턴마다 그룹 배치가 달라 여기서 한 꼴로 맞춘다."""
-    if pattern is _DATE_MD:
+    if pattern is _DATE_MD or pattern is _DATE_SLASH:
         return None, m.group(1), m.group(2)
     return m.group(1), m.group(2), m.group(3)
 
@@ -200,6 +223,10 @@ def _date_forms(text: str, this_year: int) -> set[str]:
     담지 않는다 — 그건 답변이 재료보다 많이 주장한 것이라 걸러야 한다.
 
     연도를 뺀 형태("9월 10일")는 **오늘 언저리의 날짜에서만** 낸다(위 BARE_YEAR_SPAN).
+
+    보는 표기는 `_WIDE` 다 — 좁히는 쪽(`_chunk_dates`)보다 하나 많은 슬래시 표기까지 읽는다
+    (`_DATE_SLASH` 주석). 원장이 "12/30까지" 라 적었으면 답변이 "12월 30일" 이라 말하는 것도
+    참이기 때문이고, 넓히는 쪽이라 표기를 더 받아도 오답이 통과하지 않는다.
     """
     out: set[str] = set()
     # 기간은 범위형과 **끝점 둘을 함께** 낸다. 답변이 «2026년 3월» 하나만 말하는 것도
@@ -209,7 +236,7 @@ def _date_forms(text: str, this_year: int) -> set[str]:
         out.add(_rform(year, first, last))
         out.add(_dform(year, first))
         out.add(_dform(year, last))
-    for pattern in _CHUNK:
+    for pattern in _WIDE:
         for m in pattern.finditer(text):
             year, month, day = _date_parts(m, pattern)
             if not _valid(year, month, day):

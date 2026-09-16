@@ -58,23 +58,38 @@ OPT_OUT = "무료수신거부 080-XXX-XXXX"
 _WEEKDAY = "월화수목금토일"
 
 
-def schedule_text(a: dict) -> str:
-    """일정을 사람이 읽는 표기로. 세미나는 개최 일시, 이벤트는 종료일이다.
+def schedule_text(a: dict, today: date | None = None) -> str:
+    """일정을 사람이 읽는 표기로. 세미나는 개최 일시, 이벤트는 기간이다.
+
+    ━━ 아직 시작하지 않은 이벤트는 **시작일도 함께** 낸다 ━━
+    선정 규칙은 `end_date >= today` 라 **두 달 뒤에 시작하는 이벤트도 후보로 온다** — 그게
+    맞다(미래 일정을 미리 안내하는 것이 요건이다. `next_event_and_seminar` 머리말). 그런데
+    표기가 종료일 하나뿐이면 그 사실이 문구에서 사라져 «지금 열려 있는 것»으로 읽힌다:
+    2026-09-16 실측에서 EVT-004(11/16~12/30)의 발송 문구가 "12/30까지 … 이벤트가
+    진행됩니다 … 확인해 보세요" 로 나갔다. 그 문자를 받은 고객이 오늘 스타뱅킹에 들어가면
+    아무것도 없다. 세미나는 `start_date` 를 쓰므로 원래 이 문제가 없다.
+
+    기준은 원장 스냅샷(AS_OF)이 아니라 **오늘**이다 — 선정이 그렇게 보므로(`_open_assets`)
+    표기도 같은 날짜를 봐야 «시작 전»의 뜻이 갈리지 않는다.
 
     표기를 코드가 만드는 이유는 **검증 때문**이기도 하다. `verify` 는 날짜를 통짜 정규형으로
     대조하는데(pension_agent/verify.py) "9/8" 은 날짜 꼴로 읽히지 않아 `9`·`8` 두 토큰이
     된다. 원장에 `2026-09-08` 만 있으면 그 토큰들은 «재료 밖 수치»가 되어 **맞는 문구가
-    통째로 버려진다**. 이 표기를 재료에 함께 실어 그 자리를 막는다.
+    통째로 버려진다**. 이 표기를 재료에 함께 실어 그 자리를 막는다. 반대쪽(답변이 이 표기를
+    "12월 30일" 이라 풀어 쓰는 것)은 `verify._DATE_SLASH` 가 받는다 — 여기서 내는 표기
+    셋("12/30까지"·"11/16부터"·"11/3(화)")이 그쪽 패턴의 전제다.
     """
-    d = date.fromisoformat(a["start_date"] if a.get("content_type") == "세미나" else a["end_date"])
-    head = f"{d.month}/{d.day}"
-    if a.get("content_type") != "세미나":
-        return f"{head}까지"
-    head += f"({_WEEKDAY[d.weekday()]})"
-    if not a.get("start_time"):
-        return head
-    hh, _, mm = a["start_time"].partition(":")
-    return f"{head} {int(hh)}시" + (f" {int(mm)}분" if mm and int(mm) else "")
+    if a.get("content_type") == "세미나":
+        d = date.fromisoformat(a["start_date"])
+        head = f"{d.month}/{d.day}({_WEEKDAY[d.weekday()]})"
+        if not a.get("start_time"):
+            return head
+        hh, _, mm = a["start_time"].partition(":")
+        return f"{head} {int(hh)}시" + (f" {int(mm)}분" if mm and int(mm) else "")
+    start, end = date.fromisoformat(a["start_date"]), date.fromisoformat(a["end_date"])
+    if start > (today or _today()):
+        return f"{start.month}/{start.day}부터 {end.month}/{end.day}까지"
+    return f"{end.month}/{end.day}까지"
 
 
 def lms_frame(name: str, body: str, url: str) -> str:
@@ -90,7 +105,7 @@ def lms_frame(name: str, body: str, url: str) -> str:
                       f"▶ {url}", OPT_OUT])
 
 
-def rule_body(a: dict) -> str:
+def rule_body(a: dict, today: date | None = None) -> str:
     """LLM 이 본문을 쓰지 못했을 때 남는 규칙 본문. DB 값을 잇기만 하고 문장을 만들지 않는다.
 
     ⑤ 추천처럼 섹션을 통째로 비우지 않는 이유는, ⑨ 는 «무엇이 열려 있나»만으로도 직원에게
@@ -98,7 +113,7 @@ def rule_body(a: dict) -> str:
     남아 화면이 밝힌다(REQUIREMENTS.md 「LLM 미생성 표시」).
     """
     kind = "온라인 세미나" if a.get("content_type") == "세미나" else "이벤트"
-    return f"{schedule_text(a)} '{a['name']}' {kind}를 안내드려요."
+    return f"{schedule_text(a, today)} '{a['name']}' {kind}를 안내드려요."
 
 
 def conds_of(a: dict) -> list[str]:
@@ -111,11 +126,11 @@ def conds_of(a: dict) -> list[str]:
     return out
 
 
-def _outreach_row(a: dict, name: str = "고객") -> dict:
+def _outreach_row(a: dict, name: str = "고객", today: date | None = None) -> dict:
     row = {
         "id": a["id"], "name": a["name"], "content_type": a.get("content_type"),
         "organizer": a.get("organizer"), "start_date": a["start_date"], "end_date": a["end_date"],
-        "schedule": schedule_text(a), "description": a.get("description"), "url": a.get("url"),
+        "schedule": schedule_text(a, today), "description": a.get("description"), "url": a.get("url"),
         "channel": a.get("channel"), "keywords": list(a.get("keywords") or []),
         "conds": conds_of(a),
         # 실제 콘텐츠 캘린더가 아니라 데모용으로 지어낸 일정인지. 지금 9건은 연금사업부가
@@ -125,7 +140,7 @@ def _outreach_row(a: dict, name: str = "고객") -> dict:
     # 문구는 골격 + 본문이다. 본문은 평시에 LLM 이 다시 쓰고(agent._write_lms_messages),
     # 못 쓰면 이 규칙 본문이 남는다. 문구를 여기서 만들어 두는 이유는 화면·대화·발송 화면
     # 연계가 **같은 한 문구**를 보게 하기 위해서다(생성 경로를 둘로 만들지 않는다).
-    row["lms_message"] = lms_frame(name, rule_body(a), a.get("url") or "")
+    row["lms_message"] = lms_frame(name, rule_body(a, today), a.get("url") or "")
     return row
 
 
@@ -171,7 +186,8 @@ def outreach_candidates(situations: list[dict] | None = None,
     # 찍혔든 오늘 안내할 수 없다.
     today = today or _today()
     order = _outreach_order(situations)
-    return {key: [_outreach_row(a, name) for a in sorted(_open_assets(content_type, today), key=order)]
+    return {key: [_outreach_row(a, name, today)
+                  for a in sorted(_open_assets(content_type, today), key=order)]
             for content_type, key in (("이벤트", "event"), ("세미나", "seminar"))}
 
 
@@ -208,6 +224,6 @@ def next_event_and_seminar(situations: list[dict] | None = None,
 
     def _pick(content_type: str) -> dict | None:
         candidates = _open_assets(content_type, today)
-        return _outreach_row(min(candidates, key=order), name) if candidates else None
+        return _outreach_row(min(candidates, key=order), name, today) if candidates else None
 
     return {"event": _pick("이벤트"), "seminar": _pick("세미나")}

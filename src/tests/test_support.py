@@ -297,6 +297,29 @@ past = support.outreach_candidates(today=_date(2026, 12, 31))
 check(all(r["end_date"] >= "2026-12-31" for r in past["event"]),
       "⑨ today 인자로 다른 기준일의 후보를 확인할 수 있다", str(len(past["event"])))
 
+# 아직 시작하지 않은 이벤트는 **시작일도 함께** 말한다.
+#
+# 선정은 `end_date >= today` 라 두 달 뒤에 시작하는 이벤트도 후보로 온다(그게 요건이다 —
+# 미래 일정을 미리 안내한다). 그런데 표기가 종료일 하나뿐이면 그 사실이 문구에서 사라져
+# «지금 열려 있는 것»으로 읽힌다: 2026-09-16 실측에서 EVT-004(11/16~12/30)의 발송 문구가
+# "12/30까지 … 이벤트가 진행됩니다 … 확인해 보세요" 로 나갔다. 그 문자를 받은 고객이 오늘
+# 스타뱅킹에 들어가면 아무것도 없다.
+_evt = next(a for a in support.ASSETS if a["id"] == "EVT-004")
+_before = support.schedule_text(_evt, _date(2026, 9, 16))       # 시작 두 달 전
+_during = support.schedule_text(_evt, _date(2026, 11, 20))      # 진행 중
+check(_before.startswith(f"{_date.fromisoformat(_evt['start_date']).month}/"
+                         f"{_date.fromisoformat(_evt['start_date']).day}부터"),
+      "⑨ 시작 전 이벤트는 시작일부터 말한다", _before)
+check("부터" not in _during and _during.endswith("까지"),
+      "⑨ 진행 중 이벤트는 종료일만 말한다(표기가 늘어지지 않는다)", _during)
+check(_before in support.rule_body(_evt, _date(2026, 9, 16)),
+      "⑨ 규칙 폴백 문구도 같은 표기를 쓴다", support.rule_body(_evt, _date(2026, 9, 16)))
+# 세미나는 start_date 를 쓰므로 원래 이 문제가 없다 — 고치면서 건드리지 않았는지 함께 본다.
+_sem = next(a for a in support.ASSETS if a.get("content_type") == "세미나" and a.get("start_time"))
+check(support.schedule_text(_sem, _date(2026, 9, 16)).endswith("시")
+      and "(" in support.schedule_text(_sem, _date(2026, 9, 16)),
+      "⑨ 세미나 표기는 그대로다 — 개최일(요일) 시각", support.schedule_text(_sem, _date(2026, 9, 16)))
+
 
 # ─────────────────────────────────────────────────────────────
 # 3. 화법 카드의 시효성 수치 — 금리 슬롯 · 주장 성립 조건
