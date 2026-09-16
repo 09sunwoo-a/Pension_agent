@@ -43,6 +43,7 @@ from pension_agent.consult_agent.nodes.answer import answer
 from pension_agent.consult_agent.nodes.correction import correction
 from pension_agent.consult_agent.nodes.lms import lms_link
 from pension_agent.consult_agent.nodes.meta import agent_help
+from pension_agent.consult_agent.nodes import plan
 from pension_agent.consult_agent.nodes.plan import llm_down, plan_step
 from pension_agent.consult_agent.nodes.understand import understand
 from pension_agent.consult_agent.routing import (
@@ -259,8 +260,11 @@ def ask(
         # 답변 원문 — 다음 턴의 「좀 더 짧게 줄여줘」가 다시 쓸 재료다(`last_answer` 도구).
         # 프롬프트의 대화 맥락에는 안 실린다(state.Turn). 되묻기·LLM 장애 턴은 «답변»이
         # 아니라 비운다 — 되물은 문장을 줄여 달라는 요청은 성립하지 않고, 실패 안내를
-        # 재료로 다시 쓰면 실패 안내가 답변처럼 나간다.
+        # 재료로 다시 쓰면 실패 안내가 답변처럼 나간다. **근거 0건·도구 고장 안내도 같다** —
+        # 그 둘은 상태 키가 없어 문장으로 가린다(plan.is_failure_notice). 안 가리면 「찾지
+        # 못했다」가 다음 턴의 «이전 답변»이 되어 있는 자료를 없다고 답한다(케이스 12c).
         "answer": (None if out.get("clarify") or out.get("llm_error")
+                   or plan.is_failure_notice(out.get("answer"))
                    else (out.get("answer") or "")[:ANSWER_KEEP] or None),
         "sources": list(out.get("sources") or []),
         "marks": tools.ledger_marks(evidence),

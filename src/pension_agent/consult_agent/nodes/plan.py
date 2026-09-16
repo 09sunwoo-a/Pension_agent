@@ -171,6 +171,26 @@ LLM_FAILED = (
 )
 
 
+#: 답변 자리에 나가지만 **답변이 아닌** 안내문의 머리말 셋 — 찾아봤는데 없음(NO_EVIDENCE) ·
+#: 도구 고장(TOOL_FAILED) · LLM 장애(LLM_FAILED). 서식 자리(`{what}`·`{reason}`) 앞까지가
+#: 고정 문구라 그 앞부분으로 가린다.
+_NOTICE_HEADS = tuple(t.split("{", 1)[0] for t in (NO_EVIDENCE, TOOL_FAILED, LLM_FAILED))
+
+
+def is_failure_notice(answer: str | None) -> bool:
+    """이 답변이 위 안내문 중 하나인가.
+
+    진입점이 턴 기록의 `answer` 를 채울지 정할 때 쓴다(graph.ask). 되묻기·LLM 장애는 상태
+    키(`clarify`·`llm_error`)로 갈리지만 **근거 0건 안내와 도구 고장 안내는 상태에 표지가
+    없다** — 문장으로만 남는다. 그래서 그 둘이 «답변»으로 저장됐고, 다음 턴의 `last_answer`
+    가 그것을 다시 쓰는 재료로 실었다(2026-09-15 리허설 케이스 12c — 「근거를 찾지 못했다」는
+    안내문이 «이전 답변»이 되어, 지식베이스에 있는 ETF 화법 2장을 두고 "자료가 없어요"로
+    답했다). 안내문은 재료가 아니다 — 다시 쓰면 실패 안내가 답변처럼 나간다.
+    """
+    text = (answer or "").lstrip()
+    return bool(text) and text.startswith(_NOTICE_HEADS)
+
+
 # ─────────────────────────────────────────────────────────────
 # Node. plan_step — 다음 도구 하나를 고르고 실행해 원장에 쌓는다
 # ─────────────────────────────────────────────────────────────
@@ -267,7 +287,15 @@ def plan_step(state: AgentState) -> dict[str, Any]:
                 "llm_error": f"계획 응답을 JSON 으로 읽지 못함 — {raw.strip()[:120]!r}"}
 
     name = action.get("tool")
-    if action.get("done") or not isinstance(name, str) or name not in tools.TOOLS:
+    # 판정은 **이번 턴 카탈로그**(tools.usable)로 한다 — 등록 여부(tools.TOOLS)가 아니다.
+    # 카탈로그에서 뺀 도구는 이번 턴에 재료가 없는 도구다(고객 화면이 닫혀 있을 때의 고객
+    # 도구 · 다시 쓸 답변이 없을 때의 last_answer · 이번 턴에 죽은 도구). 그런데 계획
+    # 프롬프트 본문이 도구 이름을 규칙 안에 적고 있어(PLAN_PROMPT 「직원이 이전 답변을
+    # 가리키면 last_answer 를 부른다」) LLM 은 카탈로그에 없는 이름도 고른다. 등록 여부로만
+    # 거르면 그 호출이 실행돼 빈손으로 돌아오고, 같은 이름이 반복 차단에 걸릴 때까지 바퀴를
+    # 버린 뒤 «찾아본 곳: last_answer:[1]» 이 직원 화면에 나갔다(2026-09-15 케이스 12b).
+    # 카탈로그 밖 이름은 없는 도구와 같은 처분이다 — 실행하지 않고 재계획으로 넘긴다.
+    if action.get("done") or not isinstance(name, str) or name not in tools.usable(state):
         return {**alive, **_wrap_up(state, evidence, steps)}
 
     # 이 도구가 마지막이라고 말했으면 한 바퀴를 아낀다 — 재료 하나로 끝나는 질문

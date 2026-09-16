@@ -245,6 +245,25 @@ def check_guard() -> int:
     cases.append((any("현금성자산" in g["text"] for g in dep),
                   "dep: 용어 주의(고유계정대→현금성자산)도 지식베이스에서"))
 
+    # 미운용 현금성자산(idl)·판매중단 보유(hlt)·성향 불일치(mis)에도 지식베이스에 caution 이
+    # 있다(m.1-1·m.006 · m.023 · m.005). 2026-09-15 리허설에서 송도윤(dor·hlt·idl·nod·isa)에게
+    # 가드가 한 번도 안 붙었다 — 재료는 있는데 요건 코드와 이어져 있지 않았다.
+    idl = GD.cautions_for(gkb, ["idl:미운용 현금성자산"])
+    cases.append((any("현금성자산" in g["text"] for g in idl)
+                  and any("사용계획" in g["text"] for g in idl),
+                  "idl: 사용계획 자금 선별·용어 주의가 지식베이스에서 나온다"))
+    hlt = GD.cautions_for(gkb, ["hlt:판매중단·환매추천 펀드 보유"])
+    cases.append((any(g["card"] == "m.023" and "약속하지 않는다" in g["text"] for g in hlt),
+                  "hlt: '갈아탄 상품이 더 좋다고 약속하지 않는다'가 지식베이스에서 나온다"))
+    mis = GD.cautions_for(gkb, ["mis:투자성향 불일치"])
+    cases.append((any(g["card"] == "m.005" for g in mis),
+                  "mis: 이중 접촉 방지 주의가 지식베이스에서 나온다"))
+    dy = GD.cautions_for(gkb, ["dor:장기 미접촉", "hlt:판매중단·환매추천 펀드 보유",
+                               "idl:미운용 현금성자산", "nod:디폴트옵션 미설정",
+                               "isa:ISA 만기자금 보유"])
+    cases.append((bool(dy) and {g["cond"] for g in dy} <= {"hlt", "idl"},
+                  "송도윤 요건 묶음에 가드가 붙고, 재료 없는 요건(dor·nod·isa)은 비어 있다"))
+
     cases.append((GD.cautions_for(gkb, []) == [], "요건이 없으면 가드도 없다"))
     cases.append((GD.cautions_for(gkb, ["zzz:없는요건"]) == [],
                   "모르는 요건에 가드를 지어내지 않는다"))
@@ -252,7 +271,7 @@ def check_guard() -> int:
 
     # procedure.cautions 는 전부 "필자 해석 / 확인 필요" 같은 문서 검증 메모다.
     # 상담 경고로 새면 진짜 경고가 그 사이에 묻힌다.
-    every = [g for c in ("low", "dor", "dep", "nod", "mat") for g in GD.cautions_for(gkb, [c])]
+    every = [g for c in GD.TRIGGERS for g in GD.cautions_for(gkb, [c])]
     cases.append((not any(m in g["text"] for g in every
                           for m in ("필자", "팀 논의", "확인 필요")),
                   "저자 검증 메모가 상담 경고로 새지 않는다"))

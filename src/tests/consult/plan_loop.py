@@ -503,6 +503,24 @@ def check_tool_loop() -> int:
         print(f"{'✓' if hit else '✗'} 미등록 도구 이름 차단")
         ok += hit
 
+        # ⑥-2 등록은 돼 있지만 **이번 턴 카탈로그에 없는** 도구도 실행하지 않는다 — 다시 쓸
+        #     답변이 없을 때의 last_answer · 고객 화면이 닫혔을 때의 customer · 이번 턴에
+        #     죽은 도구. 계획 프롬프트가 규칙 안에 도구 이름을 적고 있어 LLM 은 카탈로그
+        #     밖 이름도 고른다(케이스 12b — last_answer 가 빈손으로 세 바퀴를 돌았다).
+        hidden = []
+        for name, st_in in (("last_answer", {"question": "짧게 줄여줘", "history": []}),
+                            ("customer", {"question": "이 고객 왜 관리 대상이야?"}),
+                            ("screen", {"question": "화면번호",
+                                        "steps": [{"tool": "screen", "query": "x",
+                                                   "outcome": "failed", "reason": "KeyError"}]})):
+            plan.generate = lambda prompt, _n=name, **kw: f'{{"tool": "{_n}", "query": "[1]"}}'
+            out = plan.plan_step(st_in)
+            ran = any(s.get("tool") == name for s in out.get("steps") or [])
+            hidden.append(name in tools.TOOLS and not ran and "evidence" not in out)
+        hit = all(hidden)
+        print(f"{'✓' if hit else '✗'} 카탈로그 밖 도구(등록은 됨)를 부르면 실행하지 않는다")
+        ok += hit
+
         # ⑦ 근거를 못 모으면 지어내지 않고 없다고 답한다.
         hit = plan.compose({"question": "질문"})["answer"] == plan.NO_EVIDENCE
         print(f"{'✓' if hit else '✗'} 원장 0건 → 정직한 '근거 없음'")

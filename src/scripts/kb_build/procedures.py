@@ -41,6 +41,38 @@ CHANNEL_DOC = SCREEN_DOC
 #: 신뢰도 표기 → 읽을 수 있는 말. 표 머리말이 정의한 그대로다(교차확인 N건 / 단일 자료).
 _CONFIDENCE = {"○": "여러 자료에서 교차확인", "△": "단일 자료에만 등장"}
 
+#: 표A «주요 기능» 칸에 붙는 항목 참조("→ 관련 지식항목 1·3"). 검색 예시에서는 뗀다 —
+#: 직원이 그 말로 묻지 않는다.
+_ITEM_REF = re.compile(r"\s*→\s*(?:관련 지식)?항목[^,;.]*")
+
+#: 검색 예시 한 줄의 길이 상한(낱말 경계에서 자른다).
+_SUMMARY_TRIGGER_CHARS = 60
+
+
+def _screen_triggers(title: str, summary: str) -> list[str]:
+    """screen 카드의 검색 예시 — 화면명 + **표A «주요 기능» 칸**.
+
+    예전에는 화면명으로만 두 줄(「{화면명} 화면번호」·「{화면명} 어느 화면」)을 만들었다. 그러면
+    화면명에 없는 말로는 닿지 못한다 — 「IRP 계좌 해지는 몇 번 화면에서 하지?」에 [02-12-220]
+    퇴직연금 지급(주요 기능: «해지, 계좌이체, 미지급금 출금, 지연보상금 지급»)이 원문 표에
+    있는데 «해지»가 화면명에 없어 screen 도구가 0건이었다(2026-09-15 리허설 케이스 2 — 계획이
+    screen → procedure 를 거쳐 channel 로 물러나 고객 앱 경로를 답했다).
+
+    «주요 기능» 칸은 표A 원문의 절이라 입구로 쓸 수 있는 재료다(knowledge/CLAUDE.md 「입구를
+    늘리는 재료는 원문 본문의 절로 한정」). 항목 참조만 떼고 옮긴다 — 문장을 새로 만들지 않는다.
+    둘째 칸에 두는 이유는 LLM 카드 목록 한 줄이 예상질문을 앞에서 2개만 싣기 때문이다
+    (`consult_agent/evidence/kb_index.py::_card_line`) — 뒤에 붙이면 LLM 은 못 본다.
+    """
+    out = [f"{title} 화면번호"]
+    text = " ".join(_ITEM_REF.sub("", summary or "").split()).strip(" .")
+    if len(text) > _SUMMARY_TRIGGER_CHARS:
+        cut = text.rfind(" ", _SUMMARY_TRIGGER_CHARS // 2, _SUMMARY_TRIGGER_CHARS + 1)
+        text = text[:cut if cut > 0 else _SUMMARY_TRIGGER_CHARS].rstrip(" ,:;(·")
+    if len(text) >= 4 and text != title:
+        out.append(text)
+    out.append(f"{title} 어느 화면")
+    return out
+
 
 def build_screens(resolver: DocResolver) -> list[dict]:
     """표A 를 화면 레지스트리로 옮긴다. 표의 값을 그대로 싣고 새로 만들지 않는다."""
@@ -104,7 +136,7 @@ def build_screens(resolver: DocResolver) -> list[dict]:
              "status": "확인 필요" if stale else None,
              "volatile": (warn if stale else None),
              "tags": {"topics": [group]},
-             "trigger_examples": [f"{title} 화면번호", f"{title} 어느 화면"]},
+             "trigger_examples": _screen_triggers(title, summary)},
             # 표A 의 원천은 화면번호 안내 문서다 — 06/05 는 그것을 업무 그룹별로 재배열한
             # 정리본이라, 출처는 원천 문서를 가리켜야 한다(§3 사내 파일명은 출처가 아니다).
             # 표 밖에서 온 번호는 비고가 "수록 범위 밖"이라고 적어두므로 거기서 갈린다.

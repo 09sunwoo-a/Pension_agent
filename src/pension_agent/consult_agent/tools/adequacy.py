@@ -31,15 +31,47 @@ from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크�
 # 정직하게 '없음'으로 답한다 — 틀린 답을 주느니 없다고 하는 편이 낫다(§5).
 # ─────────────────────────────────────────────────────────────
 
+#: 후보 한 줄에 싣는 조건별 값(`tiers`)의 조건 수·길이 상한. 게이트가 «이 카드의 답이 무엇으로
+#: 갈리나»를 볼 만큼이면 되고, 값 자체는 싣지 않는다 — 값은 원장이 갖고 게이트는 고르기만 한다.
+_TIER_WHENS = 4
+_TIER_CHARS = 90
+
+
+def _tiers_line(card: dict) -> str:
+    """카드가 선언한 조건별 값(`tiers`)의 **조건**만 한 줄로. 선언이 없으면 빈 문자열.
+
+    갈래가 후보 한 장 안에 있는 경우(구간별 표 · 대면/비대면으로 갈리는 값)를 게이트가 볼 수
+    있게 한다(ADEQUACY_PROMPT 머리말 ②). 조건은 데이터가 선언한 것을 옮길 뿐 여기서 새로
+    만들지 않는다 — 선언이 없는 카드에는 아무것도 붙지 않는다.
+    """
+    whens: list[str] = []
+    for t in card.get("tiers") or []:
+        when = " ".join(str((t or {}).get("when") or "").split())
+        if when and when not in whens:
+            whens.append(when)
+    if not whens:
+        return ""
+    line = " / ".join(whens[:_TIER_WHENS])
+    if len(whens) > _TIER_WHENS:
+        line += " / …"
+    return line[:_TIER_CHARS]
+
+
 def _headline(card: dict) -> str:
-    """후보 한 줄. 종류마다 필드 이름이 다르므로 있는 것 중 앞에서부터 고른다."""
+    """후보 한 줄. 종류마다 필드 이름이 다르므로 있는 것 중 앞에서부터 고른다.
+
+    카드가 조건별 값(`tiers`)을 선언했으면 그 조건을 «조건별 값:» 칸으로 덧붙인다 — 한 장
+    안에서 답이 갈리는 카드를 게이트가 갈래로 볼 수 있어야 한다(`_tiers_line`).
+    """
     title = card.get("title") or card.get("label") or card.get("id")
     detail = next((str(card[k]) for k in
                    ("value", "condition_text", "summary", "situation", "action", "content")
                    if card.get(k)), "")
     points = "; ".join(card.get("key_points") or [])[:80]
     tail = (detail or points).replace("\n", " ")[:80]
-    return f"- [{card.get('id')}] {title}" + (f" · {tail}" if tail else "")
+    tiers = _tiers_line(card)
+    return (f"- [{card.get('id')}] {title}" + (f" · {tail}" if tail else "")
+            + (f" · 조건별 값: {tiers}" if tiers else ""))
 
 
 #: 적합성 판정 응답의 토큰 상한. keep 배열 + 갈래 한 축이 들어가는 JSON 객체 한 줄.
