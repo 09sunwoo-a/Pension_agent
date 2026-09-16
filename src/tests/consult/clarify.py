@@ -224,8 +224,20 @@ def check_adequacy_and_shape() -> int:
 
     # 후보 한 줄이 종류를 가리지 않고 만들어지는가(팩트는 title 이 없고 label 을 쓴다).
     head = tools._headline({"id": "f.1", "label": "세액공제 한도", "value": "연 900만원"})
-    hit = "세액공제 한도" in head and "연 900만원" in head
+    hit = "세액공제 한도" in head and "연 900만원" in head and "조건별 값" not in head
     print(f"{'✓' if hit else '✗'} 후보 요약이 종류마다 다른 필드 이름을 흡수한다")
+    ok += hit
+
+    # 카드가 조건별 값(tiers)을 선언했으면 후보 한 줄에 그 **조건**이 실린다 — 한 장 안에서
+    # 답이 갈리는 카드(대면/비대면 면제)를 게이트가 갈래로 볼 수 있어야 한다(케이스 8).
+    # 값은 싣지 않는다 — 게이트는 고르기만 하고 값은 원장이 갖는다.
+    tiered = tools._headline({"id": "f.53", "label": "수수료 면제", "value": "면제된다",
+                              "tiers": [{"when": "퇴직금 5천만원 이상 · 비대면 계좌", "value": "면제"},
+                                        {"when": "퇴직금 5천만원 이상 · 대면 계좌", "value": "면제 아님"},
+                                        {"when": "퇴직금 5천만원 이상 · 대면 계좌", "value": "중복"}]})
+    hit = ("조건별 값: 퇴직금 5천만원 이상 · 비대면 계좌 / 퇴직금 5천만원 이상 · 대면 계좌" in tiered
+           and tiered.count("대면 계좌") == 2 and "면제 아님" not in tiered)
+    print(f"{'✓' if hit else '✗'} 조건별 값을 선언한 카드는 후보 줄에 조건이 실린다(값은 아니다)")
     ok += hit
 
     # 게이트는 **카드 하나씩** 판정한다 — 옆 후보가 빗나갔다고 맞는 카드까지 버리지 않는다.
@@ -859,6 +871,19 @@ def check_graded_judge() -> int:
     text = ADEQUACY_PROMPT
     hit = "남긴 후보 중에" in text and "빼려는 후보들이" not in text
     print(f"{'✓' if hit else '✗'} 게이트는 갈래를 «남긴 후보» 위에서 찾는다(뺄 때만이 아니다)")
+    ok += hit
+
+    # ⑫ 그래도 케이스 8 에서 안 찍혔다(2026-09-15). 원인 셋 — 둘째 줄이 「JSON 배열로 출력」
+    #    이라 끝의 객체 규격과 모순(배열로 오면 파서가 갈래를 못 읽는다) · 갈래를 «후보 사이»
+    #    에서만 찾게 해 한 장 안의 구간별 표(f50)·조건별 값(f53)이 갈래로 안 보임 · 출력 예시가
+    #    빈 배열부터. 셋을 재고, 트레이스가 호출을 가르는 첫 줄은 그대로인지도 잰다.
+    first = text.split("{")[0].strip().splitlines()[0]
+    hit = ("JSON 배열로 출력" not in text and "JSON 객체 하나" in text
+           and "한 후보 안에도 있다" in text and "조건별 값:" in text
+           and "단서는 갈래가 아니다" in text
+           and text.index('"axis": "이전 방향"') < text.index("빈 배열로 둔다")
+           and first == "직원의 질문과, 그 질문에 답하려고 검색된 근거 후보 목록이다.")
+    print(f"{'✓' if hit else '✗'} 게이트 프롬프트 — 객체 규격 하나 · 한 후보 안의 갈래 · 갈래 예시가 먼저 · 첫 줄 유지")
     ok += hit
 
     return ok
