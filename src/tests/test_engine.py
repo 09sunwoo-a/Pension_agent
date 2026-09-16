@@ -238,7 +238,7 @@ _EXPECTED_CONDS = {
     "최서윤": ["dor", "hlt"],                          # 8개월 미접촉 + 판매중단 펀드 보유
     "정민석": ["dor", "mis", "dep", "nch"],            # 공격투자형 + 원리금보장 100%
     "한지우": ["isa", "tax", "add"],                   # ISA 만기 D-12 + 세액공제 잔여 300만원
-    "오세훈": ["mat", "pen"],                          # 만기 D-25 + 연금개시 요건충족·미개시
+    "오세훈": ["pen"],                                 # 연금개시 요건충족·미개시. 만기 10/9 는 8/24 기준 D-46 이라 창(30일) 밖 — 시연일 9/29 에 서게 옮겼다(2026-09-16)
     "윤가영": ["out", "nod"],                          # 고유대 52% + 최근 1개월 1.7억 유입
     "송도윤": ["dor", "hlt", "idl", "nod", "isa", "nch"],  # 3개 복합 케이스
 }
@@ -373,16 +373,19 @@ for p_ in PERSONAS:
     check(p_.matAmt == sum(m["amount"] for m in p_.maturities if m["date"] == p_.matDate),
           f"{p_.nm}: matAmt 는 그 날짜 도래분 합", str(p_.matAmt))
 # 재예치 전략은 가장 가까운 만기분만 대상으로 한다(먼 만기를 지금 끌어오지 않는다).
-_ose = next((i for i in FACTS["오세훈"]["items"] if i["id"] == "st.mat_reprice"), None)
-check(_ose is not None and _ose["amount"] == engine.won(BY_NAME["오세훈"].matAmt),
+# 오세훈의 예금 만기(10/9)는 고정 날짜(8/24)에서 D-46 이라 창 밖이므로, 만기 요건이 서는
+# 잔여일수(D-10 — 시연일 9/29 기준값)로 옮긴 사본으로 본다. 재는 것은 대상액이 GIC 를 빼느냐다.
+from dataclasses import replace as _replace_p  # noqa: E402
+_ose_p = _replace_p(BY_NAME["오세훈"], matDD=10)
+_ose = next((i for i in engine.prepare(_ose_p, top_n=_WIDE)["items"] if i["id"] == "st.mat_reprice"), None)
+check(_ose is not None and _ose["amount"] == engine.won(_ose_p.matAmt),
       "오세훈: 재예치 대상액은 가까운 예금 만기분만(먼 GIC 제외)",
       str(_ose and _ose["amount"]))
 
-# 만기 요건 — D-17(이준호)·D-25(오세훈)는 성립, 창 밖은 위 합성 케이스가 고정.
-check("mat" in conditions(BY_NAME["이준호"]) and "mat" in conditions(BY_NAME["오세훈"]),
-      "이준호 D-17 · 오세훈 D-25 만기 요건 성립")
-for nm in ("이준호", "오세훈"):
-    check(any(i["id"] == "st.mat_reprice" for i in FACTS[nm]["items"]), f"{nm}: 만기 재예치 전략 소집")
+# 만기 요건 — D-17(이준호)는 성립, D-46(오세훈 · 만기 10/9)은 창 밖, 나머지 창 밖은 위 합성 케이스가 고정.
+check("mat" in conditions(BY_NAME["이준호"]) and "mat" not in conditions(BY_NAME["오세훈"]),
+      "이준호 D-17 만기 요건 성립 · 오세훈 D-46 은 창 밖")
+check(any(i["id"] == "st.mat_reprice" for i in FACTS["이준호"]["items"]), "이준호: 만기 재예치 전략 소집")
 
 # 결함 7 재현 — 예금 편중 해소가 기준선 이하 상품을 권하지 않는다 (김현수).
 _dep = next((i for i in FACTS["김현수"]["items"] if i["id"] == "st.dep_shift"), None)
