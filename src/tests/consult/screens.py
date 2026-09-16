@@ -401,6 +401,19 @@ def check_screen_registry() -> int:
     print(f"{'✓' if hit else '✗'} screen 도구가 그 화면번호를 근거로 돌려준다")
     ok += hit
 
+    # 화면명에 없는 말로도 닿아야 한다 — 표A «주요 기능» 칸이 검색 입구다(2026-09-16).
+    # 「IRP 계좌 해지는 몇 번 화면에서 하지?」에 [02-12-220] 퇴직연금 지급(주요 기능: 해지,
+    # 계좌이체, …)이 원문 표에 있는데 예시가 화면명뿐이라 screen 도구가 0건이었다(리허설
+    # 케이스 2). LLM 이 보는 카드 목록 한 줄은 예상질문을 앞에서 2개만 싣으므로, 그 칸이
+    # **둘째** 자리에 있어야 LLM 카드 선택이 그 말을 본다(kb_index._card_line).
+    from pension_agent.consult_agent.evidence.kb_index import _card_line
+    pay = by_screen.get("[02-12-220]")
+    line = _card_line(pay, 2) if pay else ""
+    hit = (bool(pay) and "해지" in line
+           and (pay.get("trigger_examples") or [""] * 2)[1].startswith("해지, 계좌이체"))
+    print(f"{'✓' if hit else '✗'} 표A 「주요 기능」 칸이 둘째 검색 예시로 실려 화면명에 없는 말(해지)로도 닿는다")
+    ok += hit
+
     # 화면번호는 한 글자만 틀려도 없는 화면이라 원문 그대로 요구한다.
     hit = bool(found) and all(a.startswith("[") for a in found["atomic"])
     print(f"{'✓' if hit else '✗'} 화면번호는 원문 표기 그대로 요구한다(atomic)")
