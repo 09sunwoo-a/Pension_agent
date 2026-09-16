@@ -104,7 +104,7 @@ def check_outreach() -> int:
     event = ev["meta"]["lms"].get("event")
     seminar = ev["meta"]["lms"].get("seminar")
     _stem = event["name"].removesuffix("이벤트").strip() if event else ""
-    both = f"{_stem} (9/30까지)를 안내해보세요. 세미나는 «{seminar['name']}» 가 있어요." \
+    both = f"{_stem} (11/25까지)를 안내해보세요. 세미나는 «{seminar['name']}» 가 있어요." \
         if event and seminar else ""
     pending = act.offer({**state, "evidence": [ev], "answer": both}).get("pending_action") \
         if both else None
