@@ -30,11 +30,8 @@ TEST_BODY = "퇴직연금 사후관리 에이전트에서 보낸 연결 확인 �
 
 
 def _packages() -> str:
-    try:
-        client.backend()
-    except client.MCPUnavailable as exc:
-        return f"없음 · {exc}"
-    return "있음"
+    reason = client.unavailable()
+    return f"없음 · {reason}" if reason else "있음"
 
 
 async def _connect(emp_no: str) -> None:

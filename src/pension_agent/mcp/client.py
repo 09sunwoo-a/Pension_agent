@@ -170,6 +170,10 @@ _ADAPTER: Any = None
 #: 갈아끼우고 다시 부를 때 옛 자격증명이 남아 있으면 무엇을 재고 있는지 알 수 없다.
 _SYSTEM: tuple[str, str] | None = None
 
+#: 패키지가 없다는 «사실»을 기억해 둔다. 실패한 임포트는 `sys.modules` 에 남지 않아서,
+#: 기억해 두지 않으면 `/health` 를 부를 때마다 모듈 검색 경로를 처음부터 다시 걷는다.
+_MISSING: str | None = None
+
 
 def use_backend(*, sdk: Any = None, adapter: Any = None) -> None:
     """행내 패키지를 직접 넣는다(테스트·특수 배포용).
@@ -178,8 +182,8 @@ def use_backend(*, sdk: Any = None, adapter: Any = None) -> None:
 
     둘 다 None 으로 부르면 되돌린다(다음 접속 때 다시 임포트한다).
     """
-    global _SDK, _ADAPTER, _SYSTEM
-    _SDK, _ADAPTER, _SYSTEM = sdk, adapter, None
+    global _SDK, _ADAPTER, _SYSTEM, _MISSING
+    _SDK, _ADAPTER, _SYSTEM, _MISSING = sdk, adapter, None, None
 
 
 def backend() -> tuple[Any, Any]:
@@ -201,6 +205,26 @@ def backend() -> tuple[Any, Any]:
             ) from exc
         _ADAPTER = MultiServerMCPClient
     return _SDK, _ADAPTER
+
+
+def unavailable() -> str:
+    """행내 패키지가 없으면 그 사유, 있으면 빈 문자열. **붙지는 않는다** — 깔렸나만 본다.
+
+    `Settings.missing()` 과 짝이다: 저쪽은 설정이 비었나, 이쪽은 패키지가 없나. 둘 다
+    통과해야 쪽지가 나간다 — 어느 한쪽만으로 판단하면 «설정은 있는데 패키지가 없는»
+    배포에서 등록은 성공하고 발송 시점에 죽는다(2026-09-17 pod 사고).
+    """
+    global _MISSING
+    if _SDK is not None and _ADAPTER is not None:
+        return ""
+    if _MISSING is None:
+        try:
+            backend()
+        except MCPUnavailable as exc:
+            _MISSING = str(exc)
+        else:
+            _MISSING = ""
+    return _MISSING
 
 
 def _setup_system(sdk: Any, cfg: Settings) -> None:
@@ -456,11 +480,15 @@ def stats() -> dict[str, Any]:
 
     **키·토큰은 내보내지 않는다.** 설정 «여부»와 어디를 보고 있는지까지다(`/health` 의
     llm 칸과 같은 규약).
+
+    `configured` 와 `packages` 를 나란히 싣는다 — 붙지 않는 이유가 설정인지 패키지인지
+    갈려야 처방이 갈린다(`.env` 를 채우나, 이미지를 다시 마나).
     """
     cfg = settings()
     return {
         "configured": cfg.configured,
         "missing": cfg.missing(),
+        "packages": not unavailable(),
         "base_url_set": bool(cfg.base_url),
         "servers": list(cfg.servers),
         "clients": len(_CLIENTS),

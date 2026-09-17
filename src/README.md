@@ -19,6 +19,14 @@ pip install -r requirements.txt      # 행내 배포 이미지와 같은 목록 
 pip install streamlit pandas anthropic openpyxl   # 개발용 — Streamlit 화면 · 사외 프로바이더 · xlsx 변환기
 ```
 
+**사외 PC 에서는 MCP 세 줄을 빼고 설치한다.** `python-mcp-sdk` 는 행내 Nexus 에만 있어
+공개 PyPI 에서는 받을 수 없다(나머지 둘은 그 짝이라 함께 뺀다). 빼도 전부 그대로 돌아간다 —
+쪽지는 «미연결»로 답하고 테스트는 가짜를 끼운다(§MCP).
+
+```bash
+grep -v -E '^(python-mcp-sdk|langchain-mcp-adapters|mcp)==' requirements.txt | pip install -r /dev/stdin
+```
+
 개발용 패키지 목록과 외부망 Dockerfile 은 저장소에 넣지 않는다(`requirements-dev.txt` ·
 `Dockerfile.local` — `.gitignore`). 각자 로컬에 둔다.
 
@@ -216,6 +224,16 @@ curl -s localhost:8000/health | jq .mcp
 - 설정이 하나라도 비면 **보내지 않고 «미연결»이라고 답한다**(본문은 그대로 만든다).
   행내 패키지(`mcp_sdk`·`langchain-mcp-adapters`)가 없는 환경도 같다 — 그래서 사외 개발
   PC 와 테스트는 이 설정 없이 그대로 돈다(`requirements.txt` 의 주석 참고).
+- **설정과 패키지는 따로 빈다** — `/health` 의 `mcp` 칸이 `configured` · `packages` 로
+  나눠 답한다. 처방이 다르기 때문이다: 전자는 `.env` 를 채우고, 후자는 이미지를 다시 만다.
+
+      "mcp": {"configured": true, "packages": false, ...}   # ← 이미지에 패키지가 없다
+
+  예전에는 `install()` 이 설정만 보고 등록해서, 이 조합에서만 기동도 등록도 조용히
+  지나가고 **실제로 보낼 때** 죽었다(`MCPUnavailable: 행내 mcp_sdk 패키지가 없습니다`).
+  `.env` 를 담은 이미지를 requirements 에서 MCP 줄이 빠진 채로 말면 정확히 그 상태가
+  된다 — 2026-09-17 pod 배포에서 실제로 났다. 지금은 둘 다 보고 «미연결»로 떨어지며,
+  사유는 기동 로그에 남는다.
 - 받는 사람은 로그인 사번이고, 없으면 `WORKB_EMP_NO`, 그것도 없으면 발송을 제안하지
   않는다. 다른 직원에게 보내는 것은 직원이 **사번을 적었을 때만**이다.
 - **로그인 사번은 호출이 넘겨준다.** `x_client_user` 가 **사번 7자리로 시작하고** 그

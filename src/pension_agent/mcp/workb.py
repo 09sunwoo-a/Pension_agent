@@ -82,10 +82,25 @@ def install() -> bool:
     설정이 없으면 **등록하지 않고 거짓을 돌려준다** — 등록해 두면 발송 시도가 예외로
     끝나는데, 등록하지 않으면 위층이 «미연결»로 답하고 본문만 만든다. 둘의 차이는 화면에
     뜨는 문구이고, 아직 붙이지 않은 환경(사외 개발 PC·테스트)에서는 뒤엣것이 맞다.
+
+    **설정과 패키지를 둘 다 본다.** 예전에는 설정만 봤고, 그래서 «설정은 있는데 패키지가
+    없는» 배포에서만 등록이 성공하고 **실제로 보낼 때** `MCPUnavailable` 로 죽었다 —
+    `.env` 를 담은 이미지를 requirements 에서 MCP 줄이 빠진 채로 말면 정확히 그 상태다
+    (2026-09-17 pod). 기동도 등록도 조용히 지나가므로 발송을 눌러 보기 전에는 아무 신호가
+    없다. 여기서 함께 보면 그 조합도 «미연결»로 떨어지고, 사유는 기동 로그에 남는다.
+
+    패키지 확인을 설정 확인 **뒤에** 두는 이유: `unavailable()` 이 행내 패키지를 임포트해
+    보므로, 붙일 생각이 없는 환경(사외 개발 PC·테스트)은 그 비용도 지지 않는다.
     """
     if not mcp_client.configured():
         log.info("MCP 미설정 — 쪽지 발송을 붙이지 않습니다(본문만 생성): %s",
                  ", ".join(mcp_client.settings().missing()))
+        return False
+    reason = mcp_client.unavailable()
+    if reason:
+        log.warning("MCP 설정은 갖춰졌는데 행내 패키지가 없습니다 — 쪽지 발송을 붙이지 "
+                    "않습니다(본문만 생성): %s. 배포 이미지라면 requirements.txt 의 "
+                    "python-mcp-sdk · langchain-mcp-adapters 가 설치됐는지 봅니다", reason)
         return False
     note.use_sender(send_memo)
     log.info("MCP 쪽지 발송을 붙였습니다 — 도구 %s", TOOL)

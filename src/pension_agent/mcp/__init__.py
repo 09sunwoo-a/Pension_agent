@@ -25,6 +25,11 @@
 붙지 않은 것을 조용히 성공처럼 끝내는 경로는 두지 않는다(루트 CLAUDE.md 규칙 5).
 행내 패키지(`mcp_sdk`·`langchain_mcp_adapters`)도 저장소 밖이라 임포트 시점에 들여오지
 않는다 — 테스트는 그 패키지 없이 그대로 돈다.
+
+**설정과 패키지는 따로 빈다.** `install()` 은 둘 다 보고, `stats()` 는 둘을 `configured` ·
+`packages` 로 나란히 싣는다 — 처방이 갈리기 때문이다(`.env` 를 채우나, 이미지를 다시 마나).
+둘 중 하나만 보던 때는 «설정은 있는데 패키지가 없는» 배포에서 등록이 성공하고 발송
+시점에 죽었다(2026-09-17 pod · `workb.install()` 주석).
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from pension_agent.mcp.client import (  # noqa: F401 — 공개 표면
     reset,
     settings,
     stats,
+    unavailable,
     use_backend,
 )
 
@@ -49,7 +55,8 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "MCPCallError", "MCPClient", "MCPError", "MCPUnavailable", "Settings",
-    "client_for", "configured", "install", "reset", "settings", "stats", "use_backend",
+    "client_for", "configured", "install", "reset", "settings", "stats", "unavailable",
+    "use_backend",
 ]
 
 
