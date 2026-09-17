@@ -141,6 +141,7 @@ from pension_agent.consult_agent.tools.playbook import (  # noqa: F401
     cited_cards,
     playbook_evidence,
     playbook_hits,
+    playbook_ranked,
 )
 from pension_agent.consult_agent.tools.outreach import (  # noqa: F401
     _outreach,

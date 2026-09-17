@@ -361,9 +361,23 @@ def check_playbook_material() -> int:
     print(f"{'✓' if hit else '✗'} 화법 턴 + 고객 열림 + 남은 카드 → 제안이 붙는다")
     ok += hit
 
-    # 무엇에 걸렸는지 밝힌다 — 열어보지 않고도 왜 떴는지 알 수 있어야 한다.
-    hit = bool(action) and any(n in action["label"] for n in SC.CONDS.values())
-    print(f"{'✓' if hit else '✗'} 제안 문구가 걸린 요건 이름을 밝힌다 — {action and action['label']}")
+    # 무엇에 걸렸는지 밝힌다 — 열어보지 않고도 왜 떴는지 알 수 있어야 한다. 대는 이름은
+    # **그 카드를 세운 문제상황**이지 고객의 요건 목록이 아니다. 요건으로 대던 동안 제목과
+    # 내용이 어긋났다(2026-09-17 실측, 박정호 — 요건 둘을 끊어 쓴 제목의 절반이 밑의 두
+    # 카드와 아무 관계가 없었다). 요건 이름을 찾던 예전 검사는 그 어긋남을 통과시켰다.
+    ranked = tools.playbook_ranked({"answer": "a", "customer_id": SONG,
+                                    "evidence": pitch_ev}, lanes=("pitch",))
+    matched = {ACT.situation_name(sit) for _s, _c, sit in ranked} - {""}
+    label = (action or {}).get("label") or ""
+    hit = bool(action) and bool(matched) and any(t in label for t in matched)
+    print(f"{'✓' if hit else '✗'} 제안 문구가 «그 카드를 세운 문제상황»을 밝힌다 — {label}")
+    ok += hit
+
+    # 카드를 하나도 내지 않은 사유는 제목에 세우지 않는다 — 제목이 내용보다 넓으면 거짓말이다.
+    stray = [n for n in SC.CONDS.values() if n in label and n not in matched]
+    hit = bool(action) and not stray
+    print(f"{'✓' if hit else '✗'} 카드를 내지 않은 요건 이름은 제안 문구에 서지 않는다"
+          + (f" — {stray}" if stray else ""))
     ok += hit
 
     # 이미 이번 턴 원장에 실린 카드는 다시 제안하지 않는다.

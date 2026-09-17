@@ -215,7 +215,7 @@ def _propose_lms(state: AgentState) -> dict[str, Any] | None:
     어차피 만드는 값이고, 대화가 따로 생성하면 화면에 뜬 것과 다른 문자가 나간다(§10).
     발송 여부는 여전히 직원이 그 화면에서 정하고, 더미 게이트도 `_link` 에 그대로 남는다.
     """
-    if not state.get("customer_id") or not _playbook_reason(state):
+    if not state.get("customer_id") or not _managed_reason(state):
         return None
     answer = state.get("answer") or ""
     for ev in state.get("evidence") or []:
@@ -319,16 +319,17 @@ def _propose_playbook(state: AgentState) -> dict[str, Any] | None:
     lanes = tuple(lane for lane in tools.PLAYBOOK_LANES if lane in used)
     if not lanes:
         return None
-    hits = tools.playbook_hits(state, lanes=lanes, exclude=tools.cited_cards(state))
-    if not hits:
+    ranked = tools.playbook_ranked(state, lanes=lanes, exclude=tools.cited_cards(state))
+    if not ranked:
         return None
-    reason = _playbook_reason(state)
+    hits = [(score, card) for score, card, _sit in ranked]
     what = "·".join(dict.fromkeys(_LANE_WORDS[c["_kind"]] for _s, c in hits))
     # «상태에 걸린»은 코드 안의 말이다 — 요건에 걸렸다(매칭됐다)는 뜻이지 직원이 쓰는
     # 업무 표현이 아니고, 화면에 그대로 세우면 기계가 지어낸 문장으로 읽힌다(2026-09-17
     # 시연 지적). 밝혀야 하는 것은 **왜 떴는가**이지 매칭의 이름이 아니므로, 같은 사실을
     # 「이 상태의 고객에게 쓰는 화법」으로 말한다.
-    label = (f"«{reason}» 고객에게 쓰는 {what} {len(hits)}건" if reason
+    reason = _offer_reason(ranked)
+    label = (f"«{reason}»에게 쓰는 {what} {len(hits)}건" if reason
              else f"이 고객에게 쓰는 {what} {len(hits)}건")
     # 관련도까지 남긴다 — 승낙 턴은 카드를 다시 고르지 않고 이때 고른 것을 그대로 싣는다(§10).
     return {"kind": "pitch", "label": label,
@@ -336,9 +337,43 @@ def _propose_playbook(state: AgentState) -> dict[str, Any] | None:
             "params": {"customer_id": state.get("customer_id") or ""}}
 
 
-def _playbook_reason(state: AgentState) -> str:
-    """제안 문구에 밝히는 «무엇에 걸렸는가». 요건 이름은 코드가 이미 아는 값이라 지어내지
-    않는다 — 무엇 때문에 이 제안이 붙었는지 모르면 직원은 매번 열어봐야 한다."""
+#: 문제상황 제목의 꼬리 — 정의를 덧붙인 부분이다(「… 고객 — 적립금 1천만원 & …」·
+#: 「… 고객 (이탈 고위험)」). 제안 한 줄에는 대상만 필요하므로 여기서 자른다.
+_SIT_TAIL = re.compile(r"\s*(?:—|\(|-\s).*$")
+
+#: 제안 문구에 이름을 대는 문제상황의 최대 개수. 후보가 2건이라(PLAYBOOK_TOP_K) 둘까지다.
+_REASON_MAX = 2
+
+
+def situation_name(sit: dict | None) -> str:
+    """문제상황 하나의 «대상» 이름 — 제목에서 정의 꼬리를 뗀 것. 제안 문구와, 제안이 그
+    이름을 제대로 대는지 보는 검사가 같은 함수를 쓴다."""
+    return _SIT_TAIL.sub("", str((sit or {}).get("title") or "")).strip()
+
+
+def _offer_reason(ranked: list[tuple[float, dict, dict]]) -> str:
+    """제안 문구에 밝히는 «왜 떴는가» — **고른 카드를 실제로 세운 문제상황**의 이름.
+
+    고객의 성립 요건 목록에서 앞 두 개를 끊어 쓰던 자리다. 요건은 카드를 고르지 않는다 —
+    카드를 고르는 것은 문제상황(세그먼트)이고, 한 고객에게 요건이 넷이면 그중 카드를 낸
+    것은 하나뿐일 수 있다. 그래서 제목이 「원리금보장상품 편중 · 연금개시 요건충족 후
+    미개시」인데 밑의 두 카드는 전부 원리금보장 쪽이고 연금개시 화법은 한 장도 없는 일이
+    실제로 났다(2026-09-17 실측, 박정호). **제목과 내용이 어긋나면 제목이 거짓말이다.**
+    """
+    names: list[str] = []
+    for _score, _card, sit in ranked:
+        title = situation_name(sit)
+        if title and title not in names:
+            names.append(title)
+    return ", ".join(names[:_REASON_MAX])
+
+
+def _managed_reason(state: AgentState) -> str:
+    """이 고객에게 성립한 관리 요건의 이름 — 발송 화면 제안의 **게이트**다(`_propose_lms`
+    조건 ①). 관리 사유가 없는 고객에게는 안내 콘텐츠를 보내자고 제안하지 않는다.
+
+    화법 제안의 «왜 떴는가»는 여기가 아니라 `_offer_reason` 이 답한다 — 요건은 카드를
+    고르지 않기 때문이다(그 함수 머리말)."""
     try:
         from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
         profile = strategy_customer.get_profile(state.get("customer_id") or "")

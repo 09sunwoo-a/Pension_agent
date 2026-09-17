@@ -31,7 +31,25 @@ _PLAYBOOK_TYPES = ("proposal", "objection", "guide")
 def playbook_hits(state: AgentState, *, lanes: tuple[str, ...] | None = None,
                    exclude: set[str] | None = None,
                    top_k: int = PLAYBOOK_TOP_K) -> list[tuple[float, dict]]:
-    """이 고객의 문제상황에 걸린 화법 후보. 도구(`_situation`)와 제안 판정(`act`)이 함께 쓴다.
+    """`playbook_ranked` 에서 문제상황을 뗀 것 — 원장에 싣는 쪽은 그것을 쓰지 않는다."""
+    return [(score, card) for score, card, _sit in
+            playbook_ranked(state, lanes=lanes, exclude=exclude, top_k=top_k)]
+
+
+def playbook_ranked(state: AgentState, *, lanes: tuple[str, ...] | None = None,
+                    exclude: set[str] | None = None,
+                    top_k: int = PLAYBOOK_TOP_K) -> list[tuple[float, dict, dict]]:
+    """이 고객의 문제상황에 걸린 화법 후보 — (관련도, 카드, **그 카드를 고른 문제상황**).
+
+    **문제상황을 함께 돌려주는 이유는 제안 문구가 그것을 말해야 하기 때문이다.** 제안이
+    밝히는 «왜 떴는가»를 고객의 성립 요건 목록 앞에서 두 개 끊어 쓰던 동안, 제목과 내용이
+    어긋났다 — 박정호 고객(2026-09-17 실측)은 요건이 넷이라 「원리금보장상품 편중 · 연금개시
+    요건충족 후 미개시」가 제목에 섰는데, 실제로 걸린 카드 둘은 **전부** 「원리금보장상품
+    100% 운용 고객」(seg.04)에서 나왔고 연금개시 쪽에서 나온 카드는 하나도 없었다. 제목이
+    말한 사유의 절반이 그 카드들과 아무 관계가 없었던 것이다.
+
+    카드를 고른 것은 요건이 아니라 **문제상황(세그먼트)**이다. 그래서 그것을 그대로 들려
+    보낸다 — 제안 노드가 요건 목록을 다시 읽으면 같은 어긋남이 되돌아온다.
 
     **매칭을 여기서 만들지 않는다.** 고객 상태 → 화법 연결은 strategy_agent 가 화면 ⑥⑦⑧
     을 위해 이미 갖고 있고(3단: 카드의 `segments` → 세그먼트·화법 그룹 매핑 → n-gram,
@@ -94,8 +112,8 @@ def playbook_hits(state: AgentState, *, lanes: tuple[str, ...] | None = None,
 
     by_id = {c["id"]: c for c in KB.cards}
     skip = set(exclude or ())
-    best: dict[str, tuple[float, dict]] = {}
-    for score, card, _seg in scored:
+    best: dict[str, tuple[float, dict, dict]] = {}
+    for score, card, seg in scored:
         local = by_id.get(card["id"])
         if local is None or local["id"] in skip:
             continue
@@ -104,8 +122,10 @@ def playbook_hits(state: AgentState, *, lanes: tuple[str, ...] | None = None,
         if local["_kind"] == "pitch" and not KBMOD.matches_scope(
                 local, customer_type=slots.get("customer_type"), stage=slots.get("stage")):
             continue
+        # 같은 카드가 여러 문제상황에서 나오면 **점수가 가장 높은 쪽**을 남긴다 — 그것이
+        # 그 카드를 이 고객에게 세운 상황이다.
         if local["id"] not in best or score > best[local["id"]][0]:
-            best[local["id"]] = (score, local)
+            best[local["id"]] = (score, local, seg or {})
     return sorted(best.values(), key=lambda x: (-x[0], x[1]["id"]))[:top_k]
 
 
