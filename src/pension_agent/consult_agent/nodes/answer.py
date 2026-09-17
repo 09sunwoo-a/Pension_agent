@@ -70,9 +70,13 @@ def answer(state: AgentState) -> dict[str, Any]:
     if note and written.get("answer") and not written.get("llm_error"):
         progress.emit("판정한 형태에 맞춰 답변을 다시 쓰고 있어요")
         again = compose({**state, "judge_note": note})
-        # 다시 쓴 것이 게이트에 걸려 근거 원문 폴백으로 떨어졌는지는 여기서 알 수 없다 —
-        # 볼 수 있는 것은 «답이 있나 · LLM 이 죽었나»다. 그 둘만 보고 바꾼다.
-        if again.get("answer") and not again.get("llm_error"):
+        # **다시 쓴 것이 게이트에 걸렸으면 처음 것을 낸다.** 폴백도 `answer` 가 채워져
+        # 나오므로 «답이 있나»만 보면 둘이 구분되지 않는다 — 그 동안 이 자리는 검증을
+        # 통과한 답을 버리고 근거 원문 덤프를 내보냈다(2026-09-17 실측: 첫 생성문 1141자가
+        # `verify 통과=예` 였는데, 판정=전제로 다시 쓴 786자가 표 오짝에 걸려 폴백으로
+        # 떨어졌고 직원 화면에는 4,442자짜리 표 덤프가 떴다). 지금은 `fallback` 이 그
+        # 사실을 말한다(`plan.compose`). 처음 것도 폴백이면 바꿀 이유가 없으니 그대로 둔다.
+        if again.get("answer") and not again.get("llm_error") and not again.get("fallback"):
             written = again
 
     # 되묻지 않는다. 판정이 남긴 것(등급·장애 원인)에 작성 결과를 얹는다 — 직렬로 두 노드를

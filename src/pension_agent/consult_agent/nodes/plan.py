@@ -811,4 +811,10 @@ def compose(state: AgentState) -> dict[str, Any]:
 
     return {"answer": "\n\n".join(parts) or _no_evidence(state),
             "sources": _sources(evidence, guards, alts),
+            # **생성문이 나갔는지 근거 원문이 나갔는지**를 상태에 남긴다. 폴백도 `answer` 가
+            # 채워져 나가므로 호출부가 답의 유무만 보면 둘을 구분할 수 없고, 실제로
+            # `nodes/answer.py` 가 그래서 **검증을 통과한 답을 손에 쥐고도 원문 덤프를
+            # 내보냈다**(2026-09-17 실측 — 판정=전제로 다시 쓴 것이 게이트에 걸린 턴).
+            # 그 파일 머리말은 「게이트에 걸려 폐기되면 처음 것을 낸다」고 적어 두고 있었다.
+            "fallback": "" if answer else "raw_evidence",
             "guards": guards, "guard_alternatives": alts}
