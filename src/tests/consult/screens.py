@@ -203,10 +203,15 @@ def check_screen_link() -> int:
     회귀 대상:
     ① LMS 를 **발송까지 수행**하는 스텁이었고, 화면 URL·파라미터라는 개념이 없었다.
        에이전트는 화면을 열어줄 뿐 작업을 대신 수행하지 않는다.
-    ② 절차 안내로 화면번호를 알려준 답변에는 연계 제안이 붙지 않았다.
+    ② 절차 안내로 화면번호를 알려준 답변에는 화면으로 갈 길이 아예 없었다.
     ③ 확인 응답이 대화 이력에서 **가장 최근의** 제안을 찾아 실행했다 — 사이에 다른 질문이
        오간 뒤의 "네"도 몇 턴 전 제안을 실행할 수 있었다. 직원이 잊은 제안이 뒤늦게
        실행되는 것은 승낙이 아니다.
+
+    ②의 답은 2026-09-17 에 «제안 버튼»에서 «본문 링크»로 바뀌었다(§10 개정). 조회 화면은
+    딥링크가 하는 일과 버튼이 하는 일이 같아서, 승낙해도 같은 링크 하나가 돌아왔다.
+    지금 버튼이 뜨는 것은 링크가 대체할 수 없는 연계뿐이다 — LMS 는 **발송 문구**를,
+    플레이북은 **카드 내용**을 함께 건넨다.
     """
     from pension_agent.consult_agent.effects import screens
     from pension_agent.consult_agent.nodes import act
@@ -216,21 +221,36 @@ def check_screen_link() -> int:
     ok = 0
     talk = '이렇게 말해보세요. "고객님, 남은 세액공제 한도가 264만원 있어요. 연말이 지나면 사라집니다."'
 
-    # ② 답변이 짚은 화면번호로 연계를 제안한다 — 단, **근거 카드에 있는 번호만**.
+    # ② 답변이 짚은 화면번호가 딥링크로 나간다 — 단, **근거 카드에 있는 번호만**.
     proc = {"tool": "procedure", "query": "q", "text": "블록", "atomic": ["[75-08-110]"],
             "notices": [], "notice_scopes": [], "allow": ["블록"], "marks": [],
             "sources": [], "meta": {}}
-    offered = act.offer({"answer": "[75-08-110] 화면에서 처리하시면 돼요.",
-                         "evidence": [proc], "customer_id": "TEST_ACT"})
-    pending = offered.get("pending_action")
-    hit = bool(pending) and pending["screen"] == "75-08-110" and "연계해드릴까요" in offered["answer"]
-    print(f"{'✓' if hit else '✗'} 절차 화면번호가 실린 답변에 연계를 제안한다")
+    answer_text = "[75-08-110] 화면에서 처리하시면 돼요."
+    links = screens.links_in(answer_text, screens.declared([proc]), screens.names(KB))
+    hit = (len(links) == 1 and links[0]["screen"] == "75-08-110"
+           and links[0]["url"] == screens.link("75-08-110")
+           # `screen` 은 본문에 그대로 있는 문자열이어야 한다 — 프론트가 그것을 찾아 감싼다.
+           and links[0]["screen"] in answer_text)
+    print(f"{'✓' if hit else '✗'} 절차 화면번호가 실린 답변에 딥링크가 붙는다")
+    ok += hit
+
+    # 조회 화면에는 «네/아니오» 버튼을 세우지 않는다 — 링크와 하는 일이 같다(§10 개정).
+    hit = not act.offer({"answer": answer_text, "evidence": [proc],
+                         "customer_id": "TEST_ACT"}).get("pending_action")
+    print(f"{'✓' if hit else '✗'} 조회 화면은 링크로 끝낸다(승낙 버튼을 세우지 않는다)")
     ok += hit
 
     # 답변이 지어낸 번호로는 링크를 만들지 않는다 — 직원이 엉뚱한 화면에서 작업하게 된다.
-    hit = not act.offer({"answer": "[99-99-999] 화면에서 처리하세요.",
-                         "evidence": [proc], "customer_id": "TEST_ACT"}).get("pending_action")
-    print(f"{'✓' if hit else '✗'} 근거에 없는 화면번호로는 연계를 만들지 않는다")
+    hit = not screens.links_in("[99-99-999] 화면에서 처리하세요.",
+                               screens.declared([proc]), screens.names(KB))
+    print(f"{'✓' if hit else '✗'} 근거에 없는 화면번호로는 링크를 만들지 않는다")
+    ok += hit
+
+    # 대괄호 없이 쓴 번호도 같은 화면이다 — 표기 차이로 링크를 빠뜨리지 않는다.
+    hit = [x["screen"] for x in screens.links_in(
+        "75-08-110 개인고객용메시지발송등록 에서 보냅니다.",
+        screens.declared([proc]), screens.names(KB))] == ["75-08-110"]
+    print(f"{'✓' if hit else '✗'} 대괄호 없이 인용한 화면번호도 링크가 된다")
     ok += hit
 
     # ① 답변에 따옴표 친 대사가 있다는 이유로 발송 화면을 제안하지 않는다.
@@ -270,9 +290,14 @@ def check_screen_link() -> int:
     history = [{"question": "...", "pending_action": lms_pending}]
     yes = act.confirm_action({"question": "네 열어주세요", "history": history,
                               "customer_id": "TEST_ACT"})
-    hit = (screens.SCHEME in yes["answer"] and "264만원" in yes["answer"]
+    # URL 은 본문이 아니라 `links` 로 나간다 — 본문에 박아 두면 화면이 정규식으로 긁어야
+    # 하고, 그러면 「화면번호 → URL」 규칙이 프론트에도 하나 생긴다.
+    yes_links = yes.get("links") or []
+    hit = (len(yes_links) == 1 and yes_links[0]["url"].startswith(screens.SCHEME)
+           and screens.SCHEME not in yes["answer"]
+           and "264만원" in yes["answer"]
            and "customer_id" not in yes["answer"] and yes["pending_action"] is None)
-    print(f"{'✓' if hit else '✗'} '네' 면 화면 URL 을 주고, 링크가 못 싣는 문구는 따로 알린다")
+    print(f"{'✓' if hit else '✗'} '네' 면 화면 링크를 주고, 링크가 못 싣는 문구는 본문으로 알린다")
     ok += hit
 
     logged = session_store.list_sessions("TEST_ACT")

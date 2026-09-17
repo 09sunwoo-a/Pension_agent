@@ -268,6 +268,10 @@ try:
           "answer.text 는 본문만이다 — 추천질문 블록은 떼어낸다 · intent 가 실린다", repr(answer["text"][-60:]))
     check(main.consult_graph.FOLLOWUP_HEADER not in answer["text"],
           "answer.text 에 추천질문 헤더가 남지 않는다")
+    # 링크는 **항상** 실린다 — 키가 있을 때와 없을 때를 프론트가 갈라 처리하지 않게
+    # (`sources`·`followups` 가 0건에도 빈 목록을 보내는 것과 같은 규약).
+    check("links" in answer and isinstance(answer["links"], list),
+          "answer 에 links 가 항상 있다 — 링크가 없으면 빈 목록", str(answer.get("links")))
     check(next(e for e in evs if e["type"] == "followups")["items"] == FOLLOWUPS,
           "추천질문은 followups.items 로 따로 간다", str(evs[-2]))
     src = next(e for e in evs if e["type"] == "sources")
@@ -491,6 +495,9 @@ try:
     check(not _missing, "client/README.md 가 모든 이벤트 type 을 설명한다", str(_missing))
     _keys = ["message", "x_client_user", "customer_id", "session_id"]
     check(all(f"`{k}`" in _readme for k in _keys), "client/README.md 가 요청 키 4개를 설명한다")
+    # 이벤트 type 만으로는 안 잡히는 자리 — `links` 는 새 type 이 아니라 answer 의 필드다.
+    check("`links`" in _readme and "mystar-link://" in _readme,
+          "client/README.md 가 answer.links 와 딥링크 스킴을 설명한다")
 
     # ── 호출자가 중간에 끊어도 맥락은 남는다 ─────────────────
     # 게이트웨이 타임아웃으로 답을 다 받기 전에 끊기면 generate 는 멈추지만 ask() 스레드는

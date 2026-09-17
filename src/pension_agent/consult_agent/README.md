@@ -69,7 +69,7 @@ flowchart TD
     correction["correction — 브리핑 수정<br/>화면의 AI 작성 문구를 고친다"]
     llm_down["llm_down — 장애 안내<br/>LLM 연결이 안 되면 답 대신 상태를 알린다"]
     confirm_action["confirm_action — 제안 실행<br/>직전 턴에 제안한 화면 연계를 승낙받아 실행한다"]
-    offer["offer — 화면 연계 제안<br/>답변과 이어지는 업무 화면을 열지 묻는다"]
+    offer["offer — 연계 제안<br/>화면과 함께 건넬 것이 있으면 묻는다(발송 문구·카드)"]
     __end__([END])
     __start__ --> understand
     compose -.-> __end__

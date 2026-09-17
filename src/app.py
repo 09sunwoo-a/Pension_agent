@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import csv
 import os
-import re
 from datetime import date, datetime
 
 # ── «오늘»을 프로세스 시작 시점에 못박는다. **pension_agent 임포트보다 먼저** 해야 한다.
@@ -28,7 +27,6 @@ from pension_agent import clock
 from pension_agent import llm
 from pension_agent import mcp
 from pension_agent.consult_agent import graph as consult_graph
-from pension_agent.consult_agent.effects import screens
 from pension_agent.consult_agent.effects import suggest
 
 st.set_page_config(page_title="IRP 에이전트 평가 룸", layout="wide")
@@ -417,8 +415,6 @@ with tab2:
 with tab_chat:
     st.subheader("💬 대화형 에이전트 테스트 (consult_agent)")
 
-    #: 답변에 실린 단말 화면 딥링크 — consult_agent/effects/screens.py 가 만드는 형식.
-    SCREEN_LINK = re.compile(re.escape(screens.SCHEME) + r"\S+")
     st.caption(
         "화법 코칭뿐 아니라 브리핑/고객정보 질의·화면 연계·브리핑 수정 요청까지 "
         "한 채팅창에서 테스트합니다. 아래에서 고객을 선택하면 브리핑질의·화면 연계·수정 "
@@ -562,16 +558,21 @@ with tab_chat:
             return st.popover(label)
         return st.expander(label)
 
-    def render_answer(text: str) -> None:
-        """답변을 그리고, 화면 연계 URL 이 있으면 바로 누를 수 있는 링크로도 띄운다.
+    def render_answer(text: str, links: list | None = None) -> None:
+        """답변을 그리고, 답변이 가리킨 단말 화면을 누를 수 있는 버튼으로 띄운다.
+
+        **링크는 `ask()` 가 준다**(`links` — `{screen, url, label}`). 예전에는 본문에 박힌
+        URL 문자열을 정규식으로 긁었는데, 그러면 「화면번호 → URL」 규칙이 화면 쪽에도
+        하나 생긴다. 지금은 본문에 URL 이 없고 화면번호만 있다.
 
         `mystar-link://` 는 커스텀 스킴이라 마크다운 링크로 적으면 Streamlit 이 href 를
-        지운다. 그래서 본문(URL 문자열 포함)은 그대로 두고 버튼을 따로 붙인다 — 단말이
-        깔려 있지 않은 개발 PC 에서는 눌러도 열리지 않으므로 URL 자체가 남아 있어야 한다.
+        지운다 — 그래서 본문 안을 감싸지 않고 버튼을 따로 붙인다. 단말이 깔려 있지 않은
+        개발 PC 에서는 눌러도 열리지 않으므로 URL 자체를 캡션으로 남긴다.
         """
         st.markdown(text)
-        for url in dict.fromkeys(SCREEN_LINK.findall(text)):
-            st.link_button("🔗 단말 화면 열기", url)
+        for item in links or []:
+            st.link_button(f"🔗 {item.get('label') or item.get('screen')} 열기", item["url"])
+            st.caption(item["url"])
 
     def render_sources(sources: list) -> None:
         """근거는 원문 문서명으로 읽어준다(카드 id 는 역추적용으로 뒤에).
@@ -629,7 +630,7 @@ with tab_chat:
     def render_assistant(msg: dict, idx: int) -> None:
         """답변 한 건 — 본문 · 출처 · 추천질문 · 트레이스 · 신고. 새 답과 지난 답이
         같은 함수를 지나야 화면이 갈리지 않는다."""
-        render_answer(msg["text"])
+        render_answer(msg["text"], msg.get("links") or [])
         render_sources(msg.get("sources") or [])
 
         # 되묻기로 끝난 턴이면 선택지를 버튼으로도 세운다. 본문에도 같은 선택지가
@@ -728,6 +729,7 @@ with tab_chat:
             "question": question,
             "customer": chat_customer,
             "sources": result.get("sources") or [],
+            "links": result.get("links") or [],
             "followups": result.get("followups") or [],
             "clarify": result.get("clarify"),
             "intent": result.get("intent"),
