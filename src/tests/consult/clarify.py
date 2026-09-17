@@ -886,4 +886,45 @@ def check_graded_judge() -> int:
     print(f"{'✓' if hit else '✗'} 게이트 프롬프트 — 객체 규격 하나 · 한 후보 안의 갈래 · 갈래 예시가 먼저 · 첫 줄 유지")
     ok += hit
 
+    # ⑬ **다시 쓴 답이 게이트에 걸리면 처음 답을 낸다.** `answer.py` 머리말이 그렇게 적어
+    #    두고도 코드는 구분하지 못했다 — 근거 원문 폴백도 `answer` 가 채워져 나오니
+    #    «답이 있다»로 읽혀 검증을 통과한 답을 버렸다. 실측(2026-09-17): 첫 생성문 1141자가
+    #    `verify 통과=예` 였는데 판정=전제로 다시 쓴 786자가 표 오짝에 걸렸고, 직원 화면에는
+    #    4,442자 표 덤프가 떴다. 판정을 도우려던 장치가 답을 없앤 자리다.
+    calls: list[str] = []
+    first = {"answer": "전제 없이 쓴 검증된 답", "sources": [], "fallback": ""}
+    dumped = {"answer": "■ 카드 제목\n| 표 | 덤프 |", "sources": [], "fallback": "raw_evidence"}
+
+    def _compose(state, _seq=[0]):  # noqa: B006 — 호출 순서를 세는 자리다
+        calls.append(state.get("judge_note") or "")
+        _seq[0] += 1
+        return first if _seq[0] == 1 else dumped
+
+    orig_compose, orig_clarify, orig_applicable = ANS.compose, ANS.clarify, ANS.applicable
+    ANS.compose, ANS.applicable = _compose, lambda s: True
+    ANS.clarify = lambda s: {"judge_note": "<전제> 타행→당행으로 보고 답한다", "judge_verdict": "assume"}
+    try:
+        out = ANS.answer({"question": "실물이전 절차 알려줘", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify, ANS.applicable = orig_compose, orig_clarify, orig_applicable
+    hit = out["answer"] == first["answer"] and len(calls) == 2 and bool(calls[1])
+    print(f"{'✓' if hit else '✗'} 다시 쓴 답이 근거 원문 폴백이면 처음의 검증된 답을 낸다"
+          f" (다시 쓰기는 실제로 돌았다: {len(calls)}회)")
+    ok += hit
+
+    # 반대쪽 — 다시 쓴 것이 멀쩡하면 그것을 낸다(장치가 죽어 있으면 안 된다).
+    def _compose_ok(state, _seq=[0]):  # noqa: B006
+        _seq[0] += 1
+        return first if _seq[0] == 1 else {"answer": "전제를 밝힌 답", "sources": [], "fallback": ""}
+
+    ANS.compose, ANS.applicable = _compose_ok, lambda s: True
+    ANS.clarify = lambda s: {"judge_note": "<전제> …", "judge_verdict": "assume"}
+    try:
+        out = ANS.answer({"question": "q", "evidence": [ev()]})
+    finally:
+        ANS.compose, ANS.clarify, ANS.applicable = orig_compose, orig_clarify, orig_applicable
+    hit = out["answer"] == "전제를 밝힌 답"
+    print(f"{'✓' if hit else '✗'} 다시 쓴 답이 게이트를 통과하면 그것이 나간다")
+    ok += hit
+
     return ok

@@ -163,6 +163,11 @@ class AgentState(TypedDict, total=False):
     # 것과 찾아보지도 못한 것을 같은 문장으로 말하면 있는 자료를 없다고 말하게 된다.
     llm_error: str
     answer: str                      # [출력] 최종 화법
+    # [출력] 그 답이 **생성문인가 근거 원문 덤프인가**. 폴백도 `answer` 가 채워져 나가므로
+    # 답의 유무만으로는 둘이 구분되지 않는다 — 구분이 필요한 곳이 있다(`nodes/answer.py` 가
+    # 다시 쓴 답을 채택할지 정할 때. 없던 동안 검증을 통과한 답을 버리고 덤프를 내보냈다).
+    # 값은 `"raw_evidence"` 또는 빈 문자열이다.
+    fallback: str
     sources: list[dict]              # [출력] 근거 카드 (역추적용)
     pending_action: dict | None      # [출력] 확인을 기다리는 도구 실행 제안 (act.offer 가 채움)
     # [출력] 답변이 가리킨 단말 화면의 딥링크 — `{screen, url, label}` 목록. 화면이 본문의
