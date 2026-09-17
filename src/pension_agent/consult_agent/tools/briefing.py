@@ -69,6 +69,7 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     # 값은 facts 를 **그대로** 옮긴다. 여기서 다시 고르면 그것이 두 번째 선정 경로가 되고,
     # 화면과 다시 갈린다. 고르는 것은 strategy_agent 몫이다.
     card_sources: list[dict] = []
+    card_keys: dict[str, list[str]] = {}
     card_lines: list[str] = []
     for label, items, keys in (("이렇게 말해보세요", facts.get("talking_points"), ("title", "talk")),
                                ("예상 반론", facts.get("objections"), ("objection", "response")),
@@ -93,6 +94,12 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                                      "doc": meta.get("doc") or item.get("source") or "출처 미상",
                                      "url": meta.get("url"),
                                      "score": None, "page": None})
+                # 이 카드를 답변이 실제로 썼는지 가릴 스팬(record.Evidence.source_keys).
+                # 머리글과 본문은 카드마다 다르므로, 둘 중 어느 것도 답변에 없으면 이 답은
+                # 그 카드로 쓰인 것이 아니다. 검색 결과가 아니라 **브리핑 묶음에 딸려 온**
+                # 재료라 이 판정을 붙인다 — 「디폴트옵션 등록됐어?」에 원장 한 줄로 답하고도
+                # 화법 다섯 장이 근거로 따라 섰다(2026-09-17 실측, 박정호).
+                card_keys.setdefault(item["card_id"], []).extend([head, body])
     lines += card_lines
     # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
     # 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 산문이므로 원문 스팬은 아니다.
@@ -128,6 +135,7 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                  "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}, *deduped],
+               source_keys=card_keys,
                allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)],
                cards=[{"id": f"customer.{customer_id}", "labeled": labeled,
                        # 재료 전문 — 항목 이름이 다른 자리(문제상황 제목·⑥⑦⑧ 카드 문구

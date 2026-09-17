@@ -48,6 +48,13 @@ class Evidence(TypedDict):
     # 하나를 물었는데 답변이 쓰지도 않은 다른 절차의 주의사항이 따라 붙던 자리다.
     # 항목: {"label": 카드 제목, "keys": 그 카드의 값 스팬, "notices": 그 카드의 표시}
     notice_scopes: list[dict]
+    # 출처 한 건이 «답변이 실제로 썼는지» 가릴 스팬. 카드 id → 그 카드에서만 나오는 문구.
+    # **선언한 출처만 가려낸다** — 선언이 없는 출처는 판정 대상이 아니라 늘 남는다.
+    # 검색으로 찾아온 재료는 선언하지 않는다(그 질문에 답하려고 부른 것이라 전부 근거다).
+    # 선언하는 것은 **묶음으로 따라온** 재료다 — `customer` 도구는 원장 값과 함께 화면
+    # ⑥⑦⑧ 이 이 고객에게 고른 카드를 싣는데, 「디폴트옵션 등록됐어?」처럼 원장 한 줄로
+    # 끝나는 답에도 그 카드 다섯 장이 «근거»로 따라 섰다(2026-09-17 실측, 박정호).
+    source_keys: dict[str, list[str]]
     allow: list[str]     # 수치 집합 검사에 허용할 텍스트 — 화면에 안 보이는 재료도 포함
     # 관계 선언을 가진 카드들(knowledge/CLAUDE.md §1·§2). compose 가 답변을 이것과 대조해
     # 값–조건 오짝·알려진 오답을 잡는다(relations.py). 선언이 없는 카드는 여기 없다.
@@ -72,7 +79,8 @@ def _scope(label: str, keys: list[str] | None, notices: list[str] | None) -> dic
 def _ev(tool: str, query: str, text: str, sources: list[dict],
         atomic: list[str] | None = None, notices: list[str] | None = None,
         allow: list[str] | None = None, meta: dict | None = None,
-        scopes: list[dict] | None = None, cards: list[dict] | None = None) -> Evidence | None:
+        scopes: list[dict] | None = None, cards: list[dict] | None = None,
+        source_keys: dict[str, list[str]] | None = None) -> Evidence | None:
     if not text.strip():
         return None
     atomic, notices = _clean(atomic), _clean(notices)
@@ -84,5 +92,6 @@ def _ev(tool: str, query: str, text: str, sources: list[dict],
             "notice_scopes": scopes if scopes is not None else (
                 [_scope(sources[0].get("title") or tool if sources else tool, atomic, notices)]
                 if notices else []),
+            "source_keys": {k: _clean(v) for k, v in (source_keys or {}).items() if _clean(v)},
             "allow": allow if allow is not None else [text], "sources": sources,
             "meta": meta or {}}

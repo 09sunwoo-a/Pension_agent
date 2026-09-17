@@ -486,7 +486,55 @@ def _span_verdict(found: tools.Evidence, answer: str,
 GROUND, CAUTION = tools.GROUND, tools.CAUTION
 
 
-def _sources(evidence: list[tools.Evidence], guards: list, alts: list) -> list[dict]:
+#: 답변이 이 카드를 썼다고 보기 위해 스팬이 답변에 남아야 하는 길이. 짧은 조각은 다른
+#: 문장에도 우연히 들어 있어서(「디폴트옵션」 한 낱말) 판정이 되지 않는다.
+_KEY_MIN = 8
+
+
+def _cited(answer: str, keys: list[str]) -> bool:
+    """답변이 이 출처의 스팬을 실제로 담고 있는가. 잴 수 있는 스팬이 없으면 참(늘 남긴다)."""
+    long = [k for k in keys if len(k.strip()) >= _KEY_MIN]
+    if not long:
+        return True
+    return any(k.strip() in answer for k in long)
+
+
+def _cite_filter(evidence: list[tools.Evidence], answer: str) -> set[str]:
+    """답변이 쓰지 않은 것이 **분간되는** 출처 id — 이것만 근거 목록에서 뺀다.
+
+    ━━ 왜 빼는가 ━━
+    「이 고객 디폴트옵션 등록됐어?」에 "네, 설정되어 있어요" 한 줄로 답하고도 근거가 여섯
+    건 섰다(2026-09-17 실측, 박정호). `customer` 도구가 원장 값과 함께 화면 ⑥⑦⑧ 이 이
+    고객에게 고른 화법·방법론 카드를 묶어 싣기 때문이다 — 그 다섯 장은 답에 한 글자도
+    쓰이지 않았는데 「이 답의 근거」로 나란히 섰고, 그러면 근거 표시가 무엇을 뜻하는지
+    직원이 읽지 않게 된다.
+
+    ━━ 왜 검색 결과는 안 빼는가 ━━
+    §3 은 「답변에 영향을 준 재료는 전부 출처에 싣는다」이고 그것을 무르지 않는다. 검색으로
+    찾아온 재료는 **그 질문에 답하려고 부른 것**이라 전부 근거이고, 답변이 화법 카드를
+    의역해 쓰는 것은 정상이라 글자 대조로는 «안 썼다»가 판정되지 않는다 — 거기까지 빼면
+    실제로 쓴 근거가 사라진다. 빼는 것은 **묶음으로 따라온** 재료뿐이고, 그것은 도구가
+    스팬을 선언한 출처(`source_keys`)로 한정된다.
+
+    ━━ 좁히는 것은 «선언» 하나다 ━━
+    ⚠ 표시를 카드 단위로 가릴 때는 「하나도 못 가리면 전부 유지」를 둔다(`_screen` 의
+    `selective`) — 거기서는 가릴 수 있는 것이 **한 도구가 돌려준 한 블록 안의 카드들**이라
+    그 예외가 유일한 안전장치다. 여기서는 그 예외를 두지 않는다. 한 번 뒀더니 정작 지적된
+    턴에서 아무것도 빠지지 않았다 — 원장 한 줄로 답한 턴은 딸려 온 다섯 장을 **하나도** 안
+    쓰는 것이 정상이고, 그때가 바로 빼야 하는 때다. 안전장치는 선언 쪽에 이미 있다:
+    스팬을 선언한 출처만 후보이고, 선언하는 도구는 지금 `customer` 하나다.
+
+    남는 위험은 하나다 — 딸려 온 화법을 답변이 **한 글자도 겹치지 않게** 의역해 쓰면 그
+    카드가 근거에서 빠진다. 작성 규칙이 고객 대사를 지식베이스 원문으로 쓰게 하므로
+    (`prompts.COMPOSE_SYSTEM` 6번) 화법을 쓴 답변에는 그 카드의 문구가 남는다.
+    """
+    declared = {sid: keys for e in evidence
+                for sid, keys in (e.get("source_keys") or {}).items()}
+    return {sid for sid, keys in declared.items() if not _cited(answer, keys)}
+
+
+def _sources(evidence: list[tools.Evidence], guards: list, alts: list,
+             answer: str = "") -> list[dict]:
     """이번 답변에 영향을 준 재료 전부 — 원장(근거) + 「하지 말 것」 가드와 대안 화법(주의).
 
     가드·대안이 빠져 있었다. 둘 다 지식베이스 카드에서 나오고 프롬프트로 답변의 **내용을
@@ -503,7 +551,9 @@ def _sources(evidence: list[tools.Evidence], guards: list, alts: list) -> list[d
     `score` 는 검색 관련도라 검색으로 온 재료에만 있다. 없는 것은 없는 대로 두고, 화면이
     그 자리에 `None` 을 찍지 않는다 — 관련도 0 과 관련도를 잴 수 없는 재료는 다르다.
     """
-    out = [{**s, "role": GROUND} for s in tools.ledger_sources(evidence)]
+    dropped = _cite_filter(evidence, answer) if answer else set()
+    out = [{**s, "role": GROUND} for s in tools.ledger_sources(evidence)
+           if s["id"] not in dropped]
     seen = {s["id"] for s in out}
     for item in list(guards) + list(alts):
         card = item.get("card")
@@ -809,8 +859,12 @@ def compose(state: AgentState) -> dict[str, Any]:
     if seen:
         parts.append(MATERIAL_MARKS + "\n" + "\n".join(f"· {m}" for m in seen))
 
-    return {"answer": "\n\n".join(parts) or _no_evidence(state),
-            "sources": _sources(evidence, guards, alts),
+    body_out = "\n\n".join(parts)
+    return {"answer": body_out or _no_evidence(state),
+            # 답변을 함께 넘긴다 — 묶음으로 따라온 카드 중 답변이 쓰지 않은 것을 가리려면
+            # 답변이 있어야 한다. 생성문을 못 써 근거 원문을 그대로 내보낸 턴(`fallback`)은
+            # 그 원문이 곧 답변이라 전부 «쓴 것»으로 잡힌다 — 그것이 맞다.
+            "sources": _sources(evidence, guards, alts, body_out),
             # **생성문이 나갔는지 근거 원문이 나갔는지**를 상태에 남긴다. 폴백도 `answer` 가
             # 채워져 나가므로 호출부가 답의 유무만 보면 둘을 구분할 수 없고, 실제로
             # `nodes/answer.py` 가 그래서 **검증을 통과한 답을 손에 쥐고도 원문 덤프를

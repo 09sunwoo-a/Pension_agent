@@ -260,6 +260,39 @@ def check_customer_material() -> int:
         P.generate = orig_gen
     print(f"{'✓' if hit else '✗'} 원장에 고객 재료가 없어도 가드가 붙는다(고객 화면이 열려 있으면)")
     ok += hit
+
+    # ③ 묶음으로 따라온 카드는 **답변이 쓴 것만** 근거로 나간다.
+    #
+    # 「이 고객 디폴트옵션 등록됐어?」에 "네, 설정되어 있어요" 한 줄로 답하고도 근거가 여섯
+    # 건 섰다(2026-09-17 실측, 박정호). customer 도구가 원장 값과 함께 화면 ⑥⑦⑧ 카드를
+    # 묶어 싣기 때문인데, 그 다섯 장은 답에 한 글자도 쓰이지 않았다.
+    from pension_agent.consult_agent.tools.briefing import _customer
+    ev = _customer({"customer_id": "198734-1205842"}, "디폴트옵션 등록 여부")
+    hit = bool(ev) and bool(ev.get("source_keys"))
+    print(f"{'✓' if hit else '✗'} customer 도구가 딸려 보낸 카드마다 «답변이 썼는지» 가릴 스팬을 선언한다")
+    ok += hit
+
+    if ev:
+        # 원장 한 줄 답 — 딸려 온 카드는 전부 빠지고 원장 출처만 남는다.
+        lean = P._sources([ev], [], [], "네, 디폴트옵션이 설정되어 있어요.")
+        hit = len(lean) == 1 and lean[0]["id"].startswith("customer.")
+        print(f"{'✓' if hit else '✗'} 원장 한 줄로 답한 턴에는 딸려 온 화법 카드가 근거로 서지 않는다"
+              f" ({len(ev['sources'])}건 → {len(lean)}건)")
+        ok += hit
+
+        # 그 카드를 실제로 쓴 답 — 그 카드는 남는다(잡음을 줄이자고 근거를 잃지 않는다).
+        cid, keys = next(iter(ev["source_keys"].items()))
+        span = next(k for k in keys if len(k.strip()) >= P._KEY_MIN)
+        used = P._sources([ev], [], [], f"이렇게 말해 보세요. {span}")
+        hit = cid in {x["id"] for x in used}
+        print(f"{'✓' if hit else '✗'} 답변이 그 카드의 문구를 쓰면 근거에 그대로 남는다 ({cid})")
+        ok += hit
+
+        # 검색으로 찾아온 재료는 이 판정의 대상이 아니다 — 전부 근거다(§3).
+        searched = dict(ev, source_keys={})
+        hit = len(P._sources([searched], [], [], "관계없는 답변")) == len(ev["sources"])
+        print(f"{'✓' if hit else '✗'} 스팬을 선언하지 않은 출처(검색 결과)는 하나도 빠지지 않는다")
+        ok += hit
     return ok
 
 
