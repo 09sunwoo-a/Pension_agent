@@ -34,12 +34,26 @@ langgraph==0.4.8
 
 # 행내 MCP 연동(WorkB 쪽지 발송 — pension_agent/mcp/).
 #
-# ⚠ 아래 둘은 **행내에서만 설치할 수 있는 패키지**라 버전을 고정하지 못했다. 쪽지 발송을
-#   실제로 붙이는 배포에서 주석을 풀고, 행내 Nexus 에 있는 버전으로 고정한다.
-#   빼 둬도 기동은 정상이다 — 설정(MCP_*)이 없거나 패키지가 없으면 쪽지를 보내지 않고
-#   «미연결»로 답한다(본문은 그대로 만든다). 그래서 이 저장소의 테스트는 둘 없이 돈다.
+# ⚠ 아래 셋은 **행내 Nexus 에만 있는 패키지**다(공개 PyPI 에 없다). 버전은 분석계
+#   워크스페이스(azureml_py38 · Python 3.10)에서 실제로 쪽지가 나갔던 조합 그대로다
+#   — 2026-09-17 실측.
+#
+#   이 셋이 빠진 이미지로 배포하면 **기동은 정상이고 발송 시점에 죽는다** —
+#   설정(MCP_*)이 .env 에 있으면 workb.install() 이 발송 함수를 등록해 버리고
+#   (설정만 보고 패키지는 보지 않는다), 실제로 보낼 때 client.backend() 가
+#   `MCPUnavailable: 행내 mcp_sdk 패키지가 없습니다` 를 낸다. 패키지도 설정도 없는
+#   사외 개발 PC 는 «미연결»로 곱게 빠지므로 이 조합만 다르다.
+#
+# 배포명과 import 이름이 다르다 — pip 는 python-mcp-sdk, 코드는 `import mcp_sdk`.
+# 공개 PyPI 의 `mcp`(공식 MCP SDK)는 이름이 비슷하지만 다른 물건이다. 그쪽에는
+# install() · setup_system() · set_request_context() 가 없어서, 잘못 깔면 임포트는
+# 통과하고 _setup_system() 에서 AttributeError 로 더 늦게 죽는다.
 #
 # 토큰 발급은 표준 라이브러리(urllib)로 한다 — requests 를 더 깔지 않기 위해서다
 # (mcp/client.py 머리말. LLM 호출이 urllib 인 것과 같은 이유).
-# mcp_sdk==<행내 Nexus 버전>              # 행내 인증 SDK (install · setup_system · set_request_context)
-# langchain-mcp-adapters==<행내 Nexus 버전>  # MultiServerMCPClient (SSE 세션 · 도구 로드)
+python-mcp-sdk==0.6.0          # 행내 인증 SDK (install · setup_system · set_request_context)
+langchain-mcp-adapters==0.2.2  # MultiServerMCPClient (SSE 세션 · 도구 로드)
+mcp==1.27.0                    # 위 어댑터의 전이 의존. 워크스페이스에 깔려 있던 버전으로
+                               # 고정한다 — 풀어 두면 재빌드마다 Nexus 최신이 들어와서
+                               # 어제 뜬 이미지와 오늘 뜬 이미지가 달라진다(starlette 와
+                               # 같은 이유).
