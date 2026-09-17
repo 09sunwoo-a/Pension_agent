@@ -36,6 +36,41 @@ _YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해
         "ok", "yes")
 _NO = ("아니", "괜찮", "나중", "취소", "안 열", "안열", "하지마", "no")
 
+#: 제안 갈래마다 다른 동사 — **묻는 문장은 그 갈래가 실제로 하는 일을 말한다.** 「연계」는
+#: 단말 화면을 여는 갈래의 말이다. 화법 갈래는 여는 화면이 없고 카드 내용을 그 자리에
+#: 보여줄 뿐이라, 「연계해드릴까요」로 물으면 직원은 승낙하고 나서 화면이 열리기를 기다린다.
+#: 갈래에 없는 kind 는 화면을 여는 쪽이므로 기본값을 쓴다.
+_VERBS = {"pitch": "보여드릴까요", "memo": "보내드릴까요"}
+_DEFAULT_VERB = "연계해드릴까요"
+
+
+def offer_prompt(action: dict[str, Any]) -> str:
+    """제안 하나를 직원에게 묻는 문장. **한 제안에 이 문장은 하나뿐이다** — 답변 본문의
+    마지막 줄 · 버튼 위 문구(`main._turn_events`) · 애매한 답에 다시 묻는 문장이 전부
+    이것이다. 갈래가 스스로 문장을 들고 있으면(`prompt` — 쪽지) 그것을 쓴다."""
+    return (action.get("prompt")
+            or f"{action.get('label')}, {_verb(action)}? (네 / 아니오)")
+
+
+def _verb(action: dict[str, Any]) -> str:
+    return _VERBS.get(action.get("kind") or "") or _DEFAULT_VERB
+
+
+def _eul(label: str) -> str:
+    """앞말에 맞는 목적격 조사 «을/를».
+
+    조사가 어긋난 문장(「06-12-501 화면 열기**을** 취소했어요」)은 읽는 순간 기계가 쓴
+    문장으로 읽힌다 — 제안 이름은 갈래마다 끝 글자가 다르므로(«…2건» · «…열기» ·
+    «…나에게)») 한쪽으로 박아 둘 수 없다. 괄호 같은 꼬리는 건너뛰고 마지막 **한글** 글자의
+    받침으로 고르고, 한글이 하나도 없으면 «을» 로 둔다.
+    """
+    for ch in reversed(label or ""):
+        if "가" <= ch <= "힣":
+            return "을" if (ord(ch) - 0xAC00) % 28 else "를"
+        if ch.isalnum():
+            break
+    return "을"
+
 
 def _propose(state: AgentState) -> dict[str, Any] | None:
     """이번 답변에 붙일 연계 제안 하나. 조건이 아니면 None.
@@ -289,8 +324,12 @@ def _propose_playbook(state: AgentState) -> dict[str, Any] | None:
         return None
     reason = _playbook_reason(state)
     what = "·".join(dict.fromkeys(_LANE_WORDS[c["_kind"]] for _s, c in hits))
-    label = (f"이 고객 «{reason}» 상태에 걸린 {what} {len(hits)}건" if reason
-             else f"이 고객 상태에 걸린 {what} {len(hits)}건")
+    # «상태에 걸린»은 코드 안의 말이다 — 요건에 걸렸다(매칭됐다)는 뜻이지 직원이 쓰는
+    # 업무 표현이 아니고, 화면에 그대로 세우면 기계가 지어낸 문장으로 읽힌다(2026-09-17
+    # 시연 지적). 밝혀야 하는 것은 **왜 떴는가**이지 매칭의 이름이 아니므로, 같은 사실을
+    # 「이 상태의 고객에게 쓰는 화법」으로 말한다.
+    label = (f"«{reason}» 고객에게 쓰는 {what} {len(hits)}건" if reason
+             else f"이 고객에게 쓰는 {what} {len(hits)}건")
     # 관련도까지 남긴다 — 승낙 턴은 카드를 다시 고르지 않고 이때 고른 것을 그대로 싣는다(§10).
     return {"kind": "pitch", "label": label,
             "cards": [{"id": c["id"], "score": round(score, 3)} for score, c in hits],
@@ -332,7 +371,11 @@ def offer(state: AgentState) -> dict[str, Any]:
     observability.step("offer", pending=action.get("label"))
     # 끝의 「(네 / 아니오)」는 공통이다(transcript 재료가 기록에서 이 줄을 떼는 표지 —
     # tools._OFFER_TRAILER).
-    ask = action.get("prompt") or f"{action['label']}, 연계해드릴까요? (네 / 아니오)"
+    ask = offer_prompt(action)
+    # 조립한 문장을 제안에 남긴다 — 본문 끝 줄 · 버튼 위 문구(`main._turn_events`) ·
+    # 애매한 답에 다시 묻는 문장이 **같은 문장**이어야 한다. 폴백을 세 곳에 두면 갈래가
+    # 하나 늘 때마다 세 곳이 어긋난다.
+    action["prompt"] = ask
     return {"answer": state["answer"] + f"\n\n— {ask}", "pending_action": action}
 
 
@@ -361,13 +404,17 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
 
     text = (state.get("question") or "").strip().lower()
     said_no = any(k in text for k in _NO) and not any(text.startswith(k) for k in _YES)
+    label = pending["label"]
     if said_no:
-        observability.step("confirm", pending=pending.get("label"), reply="reject")
-        return {"answer": f"{pending['label']}을 취소했어요.", "sources": [], "pending_action": None}
+        observability.step("confirm", pending=label, reply="reject")
+        return {"answer": f"{label}{_eul(label)} 취소했어요.", "sources": [], "pending_action": None}
     if not any(k in text for k in _YES):
         # 애매한 답을 승낙으로 해석하지 않는다 — 제안을 유지한 채 다시 묻는다(§10).
-        observability.step("confirm", pending=pending.get("label"), reply="unclear")
-        return {"answer": f"{pending['label']}을 진행할까요? '네' 또는 '아니오'로 답해 주세요.",
+        # 다시 묻는 문장은 제안한 턴이 쓴 문장 그대로다 — 「진행할까요」로 바꿔 물으면
+        # 직원이 방금 읽은 제안과 다른 것을 묻는 것으로 읽힌다.
+        observability.step("confirm", pending=label, reply="unclear")
+        again = offer_prompt(pending).removesuffix("(네 / 아니오)").strip()
+        return {"answer": f"{again} '네' 또는 '아니오'로 답해 주세요.",
                 "sources": [], "pending_action": pending}
 
     observability.step("confirm", pending=pending.get("label"), reply="accept")
@@ -439,7 +486,7 @@ def _show_playbook(pending: dict) -> dict[str, Any]:
                 "sources": [], "pending_action": None}
     # 종류별 렌더러·선언은 공용 빌더가 안다 — 여기서 화법 렌더러에 절차를 태우면 저작 메모가
     # 새고 화면번호 강제가 빠진다(tools.playbook_evidence 주석).
-    ev = tools.playbook_evidence(pending.get("label") or "고객 상태에 걸린 재료", hits)
+    ev = tools.playbook_evidence(pending.get("label") or "이 고객에게 쓰는 재료", hits)
     if ev is None:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 물어봐 주세요.",
                 "sources": [], "pending_action": None}
@@ -451,7 +498,7 @@ def _show_playbook(pending: dict) -> dict[str, Any]:
     # 여기서 답변 문장을 만들지 않는 것과 같은 규약이다 — 코드는 «무엇을 보여줄지»만 정하고
     # 문장은 compose 가 쓴다.
     return {"evidence": [ev], "pending_action": None,
-            "accepted": pending.get("label") or "고객 상태에 걸린 재료"}
+            "accepted": pending.get("label") or "이 고객에게 쓰는 재료"}
 
 
 def _link(pending: dict) -> dict[str, Any]:

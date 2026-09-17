@@ -68,8 +68,10 @@ answer.links 는 **본문이 인용한 단말 화면의 딥링크**다(`mystar-l
 href 를 지울 수 있다 — 스킴을 허용 목록에 넣어야 한다.
 
 answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — followups 로만 간다. 연계 제안
-문장(«… 연계해드릴까요? (네 / 아니오)»)은 답변의 마지막 문장으로 남긴다 — 직원이 「네」로 답하는
-대화 경로가 그 문장을 전제로 한다. 프론트는 action 이벤트로 버튼만 그린다.
+문장(«… 보여드릴까요? / 연계해드릴까요? (네 / 아니오)»)은 답변의 마지막 문장으로 남긴다 — 직원이
+「네」로 답하는 대화 경로가 그 문장을 전제로 한다. 프론트는 action 이벤트로 버튼만 그린다.
+그 버튼과 문구는 **답변 본문 바로 아래**에 서야 한다 — 출처 블록 안에 들어가면 직원에게 하는
+질문이 근거 표시의 일부로 읽힌다(client/README.md 「제안은 근거가 아니다」).
 진행(progress)은 항상 흘린다 — 별도 type 이라 답변과 섞일 일이 없다.
 프론트 파서는 content 하나에 JSON 객체가 연달아 있어도 읽어야 한다(게이트웨이가 이벤트를 합쳐
 보내지 않는다는 확인이 아직 없다) — client/call_agent.py 의 `_events_in` 이 참조 구현이다.
@@ -151,6 +153,7 @@ from pydantic import BaseModel, ConfigDict
 from pension_agent import config, llm, mcp, observability
 from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
+from pension_agent.consult_agent.nodes import act as consult_act
 from pension_agent.strategy_agent import briefing_store
 
 
@@ -259,8 +262,10 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
     action = result.get("pending_action")
     if action:
         ev = {k: action[k] for k in _ACTION_KEYS if action.get(k) is not None}
-        # act.py 와 같은 폴백 — 본문에 붙는 문장과 버튼 위 문장이 같아야 한다.
-        ev.setdefault("prompt", f"{action.get('label')}, 연계해드릴까요? (네 / 아니오)")
+        # 본문에 붙는 문장과 버튼 위 문장은 **같은 함수가 만든 같은 문장**이다. 여기에
+        # 폴백 문자열을 따로 적어 두면 제안 갈래가 하나 늘 때 두 곳이 어긋난다 — 버튼
+        # 위에는 「연계해드릴까요」, 본문에는 「보여드릴까요」가 서는 식이다.
+        ev.setdefault("prompt", consult_act.offer_prompt(action))
         events.append({"type": "action", **ev})
     clarify = result.get("clarify")
     if clarify:
