@@ -237,6 +237,38 @@ try:
     check("s3cret" not in _js.dumps(_mcp.stats(), ensure_ascii=False)
           and _mcp.stats()["configured"] is True,
           "mcp.stats: 설정 «여부»만 내보내고 키 값은 내보내지 않는다", str(_mcp.stats()))
+    check(_mcp.stats()["packages"] is True and _mcp.unavailable() == "",
+          "mcp.stats: 패키지가 있으면 packages 참", str(_mcp.stats()))
+
+    # ── 설정은 갖춰졌는데 행내 패키지가 없는 조합 ──
+    # 이 조합만 예전에 갈리지 않았다. 설정만 보고 등록해 버려서 기동도 등록도 조용히
+    # 지나가고 **발송을 누를 때** MCPUnavailable 로 죽었다(2026-09-17 pod — .env 는 담고
+    # requirements 에서 MCP 줄이 빠진 이미지). 진짜 패키지가 깔린 환경(행내 워크스페이스)
+    # 에서도 같은 값을 재야 하므로 임포트 결과에 기대지 않고 backend() 를 바꿔 끼운다.
+    _real_backend = _mcpc.backend
+    _backend_calls = []
+
+    def _no_packages():
+        _backend_calls.append(1)
+        raise _mcp.MCPUnavailable("행내 mcp_sdk 패키지가 없습니다 — 시험용")
+
+    try:
+        _mcpc.use_backend()                     # 주입을 되돌린다 — 임포트를 시도하는 상태
+        _mcpc.backend = _no_packages
+        note.use_sender(None)
+        check(_mcp.install() is False and note.SENDER is None,
+              "mcp.install: 설정이 갖춰져도 행내 패키지가 없으면 붙이지 않는다 — "
+              "발송 시점이 아니라 기동 때 갈린다")
+        _s = _mcp.stats()
+        check(_s["configured"] is True and _s["packages"] is False and _s["missing"] == [],
+              "mcp.stats: 설정과 패키지를 따로 싣는다 — 붙지 않는 이유가 갈린다", str(_s))
+        _mcp.unavailable()
+        check(len(_backend_calls) == 1,
+              "mcp.unavailable: 없다는 사실을 기억한다 — /health 마다 임포트를 다시 시도하지 않는다",
+              str(len(_backend_calls)))
+    finally:
+        _mcpc.backend = _real_backend
+        _mcpc.use_backend()
 
     # ── 서버 카탈로그 — 새 기능을 붙일 때 고치는 자리 ──
     check(_mcps.parse("") == _mcps.DEFAULT == ("workb",),
