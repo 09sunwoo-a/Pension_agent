@@ -51,6 +51,10 @@ def _print_source(s: dict) -> None:
 
 def _print_answer(r: dict) -> None:
     print(r["answer"])
+    # 답변이 가리킨 단말 화면의 딥링크(§10) — 화면이 본문의 번호를 감쌀 재료다.
+    # 터미널에는 감쌀 자리가 없으므로 목록으로 세운다(`consult_agent/__main__` 과 같다).
+    for item in r.get("links") or []:
+        print(f"  [화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
     sources = r["sources"]
     ground = [s for s in sources if s.get("role", "근거") == "근거"]
     caution = [s for s in sources if s.get("role") == "주의"]

@@ -113,6 +113,10 @@ for line in sys.stdin:
             print(f'  ⋯ {ev.get(\"text\")}', file=sys.stderr, flush=True)
         elif t == 'answer':
             print(ev.get('text', ''), flush=True)
+            # 본문이 가리킨 단말 화면 — 프론트는 본문 안의 screen 문자열을 이 url 로 감싼다.
+            for it in ev.get('links') or []:
+                print(f'  [화면] {it.get(\"screen\")} {it.get(\"label\") or \"\"} → {it.get(\"url\")}',
+                      flush=True)
         elif t == 'action':
             print(f'  [연계 제안 · {ev.get(\"label\")}] — 다음 턴에 «네» 또는 «아니오»로 답한다', flush=True)
         elif t == 'clarify':

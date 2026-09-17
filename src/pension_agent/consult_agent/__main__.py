@@ -44,6 +44,11 @@ def _progress(text: str) -> None:
 def _print_answer(r: dict) -> None:
     # 출처 표기는 render 가 정한다 — CLI 와 행내 API 가 같은 글자를 내야 한다(render 주석).
     print(r["answer"])
+    # 답변이 가리킨 단말 화면의 딥링크(§10). 화면은 본문의 번호를 이 url 로 감싸는데
+    # 터미널에는 감쌀 자리가 없으므로 목록으로 세운다 — 안 찍으면 여기서는 «링크가 붙었나»를
+    # 확인할 방법이 아예 없다(수동 확인 경로가 이것이다 — bin/cli.sh).
+    for item in r.get("links") or []:
+        print(f"  [화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
     print(render.sources_block(r["sources"]))
 
 if len(argv) > 1:
