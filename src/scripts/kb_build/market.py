@@ -362,13 +362,43 @@ def _market_product_names(text: str) -> list[str]:
     return out
 
 
+#: 백분율 열의 셀에서 값으로 읽는 꼴 — 마크다운 강조와 `%` 를 걷어낸 순수 수치.
+#: 「**100**」·「3.40」·「-9.01」·「30%」가 전부 같은 자리의 값이다.
+_PCT_CELL = re.compile(r"^\**\s*(-?\d+(?:\.\d+)?)\s*%?\s*\**$")
+
+
+def _percent_values(columns: list[str], cells: list[str]) -> list[str]:
+    """이 행에서 **백분율 열에 적힌 값**들(단위 없는 순수 수치).
+
+    단위가 열 머리말에만 있는 표를 위한 것이다(`config.PERCENT_COLUMNS` 머리말). 어느 열이
+    백분율인지는 **데이터가 선언**하고 여기서는 그 선언을 적용만 한다 — 선언에 없는 열은
+    아무것도 하지 않는다.
+
+    열 인덱스로 읽는다. `values` 는 빈 칸을 걸러낸 목록이라 열과 어긋나 있어서, 거기서
+    되짚으면 「설정일」의 날짜가 비중 값이 되는 자리가 생긴다.
+    """
+    out: list[str] = []
+    for i, col in enumerate(columns):
+        if col.strip() not in config.PERCENT_COLUMNS or i >= len(cells):
+            continue
+        m = _PCT_CELL.match(cells[i].strip())
+        if m and m.group(1) not in out:
+            out.append(m.group(1))
+    return out
+
+
 def _market_tables(text: str) -> list[dict]:
-    """마크다운 표 → `{"columns", "rows":[{"keys", "cells"}]}`.
+    """마크다운 표 → `{"columns", "units", "rows":[{"keys", "cells", "values", "percents"}]}`.
 
     빈 이름 칸은 **바로 위 행에서 이어받는다**. 원문이 병합 셀로 적은 자리라
     (디폴트옵션 표의 `| | | **포트폴리오** | … | **100** |` 합계 행), 이어받지 않으면 그
     행이 어느 상품의 것인지 잃는다 — 그러면 「알파드림 포트폴리오 수익률 4.23」이라는
     **맞는 답변**이 남의 값으로 몰려 막힌다.
+
+    `units` 는 이 표에서 **백분율로 선언된 열**이고, `percents` 는 그 열에 적힌 행의 값이다
+    (`config.PERCENT_COLUMNS`). 단위가 열 머리말에만 있어서 셀의 `35` 를 답변이 `35%` 라
+    쓰는 순간 «자료에 없는 수치»가 되던 자리를 위한 것이다 — 소비는 대화형이 한다
+    (`consult_agent/tools/market.py::market_evidence`). 원문(content)은 바뀌지 않는다.
     """
     out: list[dict] = []
     for columns, body in _markdown_tables(text):
@@ -381,6 +411,7 @@ def _market_tables(text: str) -> list[dict]:
 
         filled = _carry_keys(body, ncol)
         ident = _identifying(filled, ncol)
+        units = [c for c in columns if c.strip() in config.PERCENT_COLUMNS]
         rows: list[dict] = []
         for cells, row_keys in zip(body, filled):
             keys: list[str] = []
@@ -392,10 +423,17 @@ def _market_tables(text: str) -> list[dict]:
             rest = [c.strip() for c in cells[ncol:] if c.strip()]
             if not keys or not rest:
                 continue
-            rows.append({"keys": keys, "cells": rest,
-                         "values": [c for c in rest if len(c) <= _VALUE_CELL_MAX]})
+            row = {"keys": keys, "cells": rest,
+                   "values": [c for c in rest if len(c) <= _VALUE_CELL_MAX]}
+            pct = _percent_values(columns, cells)
+            if pct:
+                row["percents"] = pct
+            rows.append(row)
         if rows:
-            out.append({"columns": columns, "rows": rows})
+            table = {"columns": columns, "rows": rows}
+            if units:
+                table["units"] = {c: "%" for c in units}
+            out.append(table)
     return out
 
 
@@ -549,4 +587,17 @@ def build_market() -> tuple[list[dict], dict[str, list[dict]]]:
             }, source={"doc": doc_id, "locator": f"{rel} § {sec_title}"}))
         if nn == 0:
             note(f"[05 절없음] {path.name} — 절 카드가 0장이다(개요 카드만 적재됨)")
+
+    # 백분율 열 선언이 하나도 안 붙은 표를 센다. **새 회차의 안전장치다** — 컬럼 표기가
+    # 바뀌면(`1년` → `1개월`) `config.PERCENT_COLUMNS` 가 그 열을 못 알아보고, 그러면
+    # 「비중 35%」 라고 쓴 맞는 답변이 다시 폐기돼 근거 원문이 덤프된다(그 사고가 이
+    # 선언이 생긴 이유다). 동작은 안전한 쪽으로 실패하므로 — 선언이 없으면 지금과 같은
+    # «% 허용 안 함» 이다 — 막지 않고 리포트에만 세운다. 백분율 열이 아예 없는 표
+    # (일정표·구성 목록)도 여기 걸리는데, 그건 사람이 보고 판단할 일이다.
+    for card in (c for group in cards.values() for c in group):
+        for table in card["fields"].get("tables") or []:
+            if table.get("units"):
+                continue
+            note(f"[05 백분율열없음] {card['id']} — 열 {' · '.join(table['columns'])}"
+                 f" 중 config.PERCENT_COLUMNS 에 걸린 것이 없다(값에 % 를 붙인 답변은 폐기된다)")
     return docs, cards

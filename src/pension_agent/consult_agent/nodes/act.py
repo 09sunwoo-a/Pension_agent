@@ -32,53 +32,29 @@ from pension_agent.consult_agent.effects import memo, screens
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent.effects.actions import ACTIONS, MEMO_DEFAULT_TO
 
-#: 근거 카드의 화면번호 표기. 답변이 이 표기를 그대로 인용했을 때만 그 화면을 가리킨 것으로 본다.
-_SCREEN_IN_ANSWER = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
-
 _YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "보내",
         "ok", "yes")
 _NO = ("아니", "괜찮", "나중", "취소", "안 열", "안열", "하지마", "no")
 
 
-def _answer_screens(state: AgentState) -> list[str]:
-    """답변이 실제로 인용한 화면번호 — **근거 카드에 있는 것만**(§10).
-
-    답변 텍스트에서 화면번호 꼴을 찾은 뒤 원장의 값과 대조한다. 답변에서만 찾으면 LLM 이
-    지어낸 번호로 링크를 만들게 되고, 원장에서만 찾으면 답변이 언급하지도 않은 다른
-    절차의 화면을 열자고 제안하게 된다.
-    """
-    answer = state.get("answer") or ""
-    known = {screens.normalize(s)
-             for e in (state.get("evidence") or []) for s in e["atomic"]
-             if _SCREEN_IN_ANSWER.fullmatch(s.strip())}
-    seen: list[str] = []
-    for m in _SCREEN_IN_ANSWER.finditer(answer):
-        number = screens.normalize(m.group())
-        if number in known and number not in seen:
-            seen.append(number)
-    return seen
-
-
 def _propose(state: AgentState) -> dict[str, Any] | None:
-    """이번 답변에 붙일 화면 연계 제안 하나. 조건이 아니면 None.
+    """이번 답변에 붙일 연계 제안 하나. 조건이 아니면 None.
 
-    **답변이 화면번호를 인용했을 때만이다.** 그것이 §10 의 "답변이 실제로 화면을 가리킨다"에
-    해당하는 유일하게 확인 가능한 신호다 — 직원이 그 번호를 읽고 있다는 뜻이고, 열 화면도
-    파라미터도 근거에서 나온다.
+    **버튼이 뜨는 것은 «문구까지 건네주는» 연계뿐이다**(§10, 2026-09-17 개정). 한때 첫
+    갈래가 «답변이 인용한 화면번호를 그냥 열어주는 것»(`kind: "screen"`)이었는데, 답변의
+    화면번호가 딥링크로 나가면서(`graph.ask` 의 `links`) 그 버튼은 본문 링크와 **하는 일이
+    같아졌다** — 승낙해도 돌아오는 것이 같은 링크 하나여서, 직원은 턴 하나를 더 쓰고 같은
+    자리에 도착했다. 매 턴 붙는데 누를 이유가 없는 제안은 §10 이 경계한 바로 그 상태다.
 
-    한때 여기에 두 번째 갈래가 있었다: 답변 안에 따옴표로 감싼 15자 이상의 문장이 있으면
-    LMS 발송 화면을 제안했다. 그 조건은 **화법 코칭 답변이면 거의 항상 참**이다 — 고객에게
-    할 말을 큰따옴표로 쓰라고 작성 프롬프트가 지시하기 때문이다. 그래서 사후관리 방법을
-    물었을 뿐인 턴에도 "발송 화면 열까요?"가 붙었고, 그러면 §10 이 경계한 바로 그 상태가
-    된다 — 매 턴 붙는 제안은 직원이 읽지 않게 되고 확인 절차가 의미를 잃는다.
+    그래서 남은 둘은 링크가 대체할 수 없는 것들이다: LMS 는 화면과 **함께 발송 문구**를
+    건네고(그 문구에 더미 게이트가 걸린다 — `_link`), 플레이북은 **카드 내용**을 보여준다.
 
-    문구를 보내려는 직원은 그렇게 말한다("이 문구로 LMS 보내줘"). 그 요청은 `lms_link` 가
-    받아 같은 화면 연계를 제안한다 — 기능이 사라진 것이 아니라, **추측이 아니라 요청으로**
-    시작하게 바뀐 것이다.
+    한때 또 하나 있었다: 답변 안에 따옴표로 감싼 15자 이상의 문장이 있으면 LMS 발송 화면을
+    제안했다. 그 조건은 **화법 코칭 답변이면 거의 항상 참**이다 — 고객에게 할 말을 큰따옴표로
+    쓰라고 작성 프롬프트가 지시하기 때문이다. 그래서 사후관리 방법을 물었을 뿐인 턴에도
+    "발송 화면 열까요?"가 붙었다. 문구를 보내려는 직원은 그렇게 말하고("이 문구로 LMS
+    보내줘"), 그 요청은 `lms_link` 가 받아 같은 화면 연계를 제안한다.
     """
-    for number in _answer_screens(state):
-        return {"kind": "screen", "label": f"{number} 화면 열기", "screen": number,
-                "params": {"customer_id": state.get("customer_id") or ""}}
     return _propose_lms(state) or _propose_playbook(state)
 
 
@@ -485,6 +461,13 @@ def _link(pending: dict) -> dict[str, Any]:
     식별자도 문구도 URL 로 넘어가지 않는다 — 직원이 열린 화면에서 입력한다. 그러니 여기서
     "무엇을 채웠다"고 말하지 않는다. 채우지 않은 값을 채웠다고 말하는 답변이 링크가 없는
     것보다 나쁘다.
+
+    **URL 문자열은 답변 본문에 넣지 않는다**(2026-09-17). 링크는 `links` 로 나가고 화면이
+    그것을 누를 수 있는 링크로 그린다 — 본문에 URL 을 박아 두던 것은 화면이 정규식으로
+    긁어낼 수밖에 없던 시절의 잔재다(`app.py` 의 `SCREEN_LINK`). 본문에는 `label` 이 남고
+    그 안에 화면번호가 있으므로, 상담이력에는 «무엇을 열었나»가 그대로 기록된다.
+    이 턴의 링크는 여기서 확정해 넘긴다 — 승낙 턴은 원장이 비어 있어(`sources: []`)
+    답변 본문만으로는 «원장이 아는 화면»을 다시 대조할 수 없다(`graph.ask`).
     """
     message = pending.get("message") or ""
     if pending.get("kind") == "lms":
@@ -499,7 +482,7 @@ def _link(pending: dict) -> dict[str, Any]:
             observability.step("action", "open_lms_screen", status="blocked",
                                reason=gate.get("detail"), level=logging.WARNING)
             return {"answer": f"연계하지 않았어요. {gate['detail']}",
-                    "sources": [], "pending_action": None}
+                    "sources": [], "pending_action": None, "links": []}
 
     screen = pending.get("screen") or ""
     url = screens.link(screen)
@@ -511,13 +494,16 @@ def _link(pending: dict) -> dict[str, Any]:
                            reason="화면번호가 규격에 맞지 않음", level=logging.WARNING)
         return {"answer": f"화면 연계를 만들지 못했어요. 화면번호 {screen or '미상'} "
                           "로 직접 이동해 주세요.",
-                "sources": [], "pending_action": None}
+                "sources": [], "pending_action": None, "links": []}
     observability.score("action_outcome", "ok",
                         comment=f"link · {pending.get('kind') or 'screen'} · 화면 {screen}")
     observability.step("action", "link", status="ok", screen=screen, mode=screens.MODE)
 
-    answer = f"{pending['label']} — {url}"
+    answer = str(pending["label"])
     if pending.get("kind") == "lms" and message:
         # 문구는 링크로 넘어가지 않으므로 직원이 화면에서 붙여넣도록 여기서 다시 준다.
         answer += f'\n화면이 열리면 이 문구를 넣어 주세요 — "{message}"'
-    return {"answer": answer, "sources": [], "pending_action": None}
+    link = {"screen": screens.normalize(screen), "url": url,
+            "label": screens.names(KB).get(screens.normalize(screen))
+                     or screens.normalize(screen)}
+    return {"answer": answer, "sources": [], "pending_action": None, "links": [link]}

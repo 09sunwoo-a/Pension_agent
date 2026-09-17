@@ -37,7 +37,7 @@ from pension_agent.strategy_agent import customer as CUST
 
 from pension_agent.consult_agent import progress, tools
 from pension_agent.consult_agent.evidence import guard
-from pension_agent.consult_agent.effects import suggest
+from pension_agent.consult_agent.effects import screens, suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -50,7 +50,7 @@ from pension_agent.consult_agent.nodes.understand import understand
 from pension_agent.consult_agent.routing import (
     LLM_DOWN, route_answer, route_confirm, route_correction, route_intent, route_plan,
 )
-from pension_agent.consult_agent.state import ANSWER_KEEP, HISTORY_LIMIT, AgentState
+from pension_agent.consult_agent.state import ANSWER_KEEP, HISTORY_LIMIT, KB, AgentState
 
 #: 답변 끝 추천질문 블록의 머리말. `plan.MISSING_NOTICES`·`MATERIAL_MARKS` 와 같은 꼴로,
 #: **프론트가 이 블록만 떼어낼 수 있게** 고정 문자열로 둔다(반환값의 "followups" 를 쓰면
@@ -268,6 +268,16 @@ def ask(
     followups = suggest.followup_questions(out)
     if followups:
         answer += "\n\n" + FOLLOWUP_HEADER + "\n" + "\n".join(f"· {q}" for q in followups)
+    # 답변이 가리킨 단말 화면의 딥링크(§10). **모든 intent 가 지나는 여기 한 곳**에서
+    # 만든다 — 추천질문·상담이력 기록과 같은 이유이고, 화면(app.py)과 API(main.py)가
+    # 같은 `ask()` 를 부르므로 한쪽에만 넣으면 두 경로가 갈린다(main.py 머리말).
+    # 재료는 **추천질문을 붙이기 전의 답변**이다: 추천질문은 화면 장치이지 답이 아니라
+    # 거기 섞인 번호로 링크를 만들 이유가 없다. 승낙 턴만 노드가 이미 채워 두었고
+    # (`nodes/act._link` — 그 턴은 원장이 비어 대조할 근거가 없다) 그때는 그것을 쓴다.
+    links = out.get("links")
+    if links is None:
+        links = screens.links_in(out.get("answer") or "",
+                                 screens.declared(evidence), screens.names(KB))
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),
@@ -313,6 +323,10 @@ def ask(
 
     return {
         "answer": answer, "sources": out.get("sources", []), "history": new_history,
+        # 답변이 가리킨 단말 화면의 딥링크. 화면은 본문의 `screen` 문자열을 찾아 눌러서
+        # 열 수 있는 링크로 감싼다 — 없으면 빈 목록이다(키가 있을 때와 없을 때를 프론트가
+        # 갈라 처리하지 않게. `sources`·`followups` 와 같은 규약).
+        "links": list(links or []),
         # 추천질문만 따로 쓰고 싶은 프론트를 위해 리스트로도 준다 — answer 끝의 블록과
         # 같은 내용이다(프론트가 붙이면 answer 쪽 블록은 떼면 된다).
         "followups": followups,

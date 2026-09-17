@@ -771,6 +771,76 @@ def check_relations() -> int:
         P.generate = orig_gen
     print(f"{'✓' if hit else '✗'} compose 가 관계를 어긴 생성문을 내보내지 않는다")
     ok += hit
+    return ok + check_percent_unit()
+
+
+def check_percent_unit() -> int:
+    """표의 백분율 열 — 단위가 헤더에만 있는 값을 % 붙여 말해도 통과하는가 (§6 · §9).
+
+    회귀 대상(2026-09-17 실측): 추천펀드·디폴트옵션 표는 단위를 열 머리말에 두고 셀에는
+    `35`·`3.40`·`2.13` 만 적는다. 직원에게 답하는 문장은 「비중 35%」라고 쓰는데
+    `verify._canon()` 이 «%-유무는 다른 주장»으로 보존해(15% ≠ 15) 그 답변이 폐기됐다.
+    「디폴트옵션 포트폴리오는 어떻게 구성돼 있어?」가 두 번 다 이 사유로 걸려 근거 원문이
+    덤프됐다 — `verify 통과=아니오 … 사유="수치 '35%'; 수치 '2.13%'; 수치 '4.23%'"`.
+
+    **두 가지를 함께 잰다.** 인용 허용만 넓히면 오짝 검사가 조용히 꺼진다 — 「지켜드림의
+    금리는 3.27%」(알파드림 행의 값)가 앞단을 통과하고 `table_mispaired` 도 토큰이 안 맞아
+    지나간다. 거짓 양성을 고치면서 거짓 음성을 만들지 않는 것이 이 검사의 핵심이다.
+    """
+    from pension_agent.consult_agent.evidence import relations as R
+    from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.tools import market as M
+    from pension_agent.consult_agent.state import KB
+
+    ok = 0
+    card = next((c for c in KB.cards if c["id"] == "lnp.퇴직연금_추천펀드_2026-08.01"), None)
+    if not card:
+        print("✗ 디폴트옵션 표 카드를 찾지 못했다 — 05 상품 자료가 적재되지 않았다")
+        return ok
+
+    # ① 데이터가 «이 열은 백분율»이라고 선언한다(scripts/kb_build/config.PERCENT_COLUMNS).
+    table = (card.get("tables") or [{}])[0]
+    units = set(table.get("units") or {})
+    hit = {"비중", "금리"} <= units and "설정일" not in units
+    print(f"{'✓' if hit else '✗'} 표가 백분율 열을 선언한다 — 비중·금리는 들어가고 설정일은 빠진다"
+          f" ({' · '.join(sorted(units))})")
+    ok += hit
+
+    ev = M.market_evidence("lineup", "디폴트옵션 구성", [(1.0, card)])
+    known = P._known_products()
+
+    # ② 단위를 붙인 맞는 답변이 통과한다 — 이게 폴백을 만들던 자리다.
+    faults, _ = P._screen("초저위험 지켜드림은 신한은행 정기예금 비중 35% 로 담고 "
+                          "금리는 3.40% 예요.", [ev], "디폴트옵션 구성", known)
+    print(f"{'✓' if not faults else '✗'} 표의 값에 % 를 붙여 말한 맞는 답변이 통과한다 {faults[:1]}")
+    ok += not faults
+
+    # 반대 방향도 막히지 않는다(표마다 셀 표기가 갈린다 — 투자성향별 표는 「30%」로 적는다).
+    faults, _ = P._screen("초저위험 지켜드림의 금리는 3.40 이에요.", [ev], "디폴트옵션 구성", known)
+    print(f"{'✓' if not faults else '✗'} % 없이 말한 답변도 그대로 통과한다 {faults[:1]}")
+    ok += not faults
+
+    # ③ 경계는 그대로다 — 반올림·지어낸 수치는 여전히 폐기된다.
+    faults, _ = P._screen("지켜드림의 1년 수익률은 약 2.1% 수준이에요.",
+                          [ev], "디폴트옵션 구성", known)
+    print(f"{'✓' if faults else '✗'} 반올림한 수치는 여전히 폐기된다(원장에 2.13 만 있다)")
+    ok += bool(faults)
+
+    faults, _ = P._screen("지켜드림의 금리는 9.99% 예요.", [ev], "디폴트옵션 구성", known)
+    print(f"{'✓' if faults else '✗'} 지어낸 수치는 여전히 폐기된다")
+    ok += bool(faults)
+
+    # ④ 오짝 검사가 % 표기로 꺼지지 않는다. 3.27 은 알파드림(수협은행) 행의 금리다.
+    tables = card.get("tables") or []
+    bare = R.table_mispaired("초저위험 지켜드림의 금리는 3.27 이에요.", tables)
+    suffixed = R.table_mispaired("초저위험 지켜드림의 금리는 3.27% 예요.", tables)
+    hit = bool(bare) and bool(suffixed)
+    print(f"{'✓' if hit else '✗'} 남의 행 값을 갖다 붙인 답변은 % 를 붙여도 잡힌다")
+    ok += hit
+
+    hit = not R.table_mispaired("초저위험 지켜드림의 금리는 3.40% · 3.25% · 3.32% 예요.", tables)
+    print(f"{'✓' if hit else '✗'} 제 행 값을 % 붙여 말한 답변은 막지 않는다")
+    ok += hit
     return ok
 
 

@@ -50,7 +50,8 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
 JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 순서:
 
     {"type": "progress",  "text": "질문 내용을 파악하고 있어요"}            0개 이상 · 답변 전에
-    {"type": "answer",    "text": "<본문>", "intent": "situation"}        1개
+    {"type": "answer",    "text": "<본문>", "intent": "situation",
+                          "links": [{"screen","url","label"}]}             1개 · links 는 항상(없으면 [])
     {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용.
                                                                           본문 끝의 제안 문장은 그대로 둔다
     {"type": "clarify",   "question": "...", "options": ["..."]}           되묻기 턴에만 — 선택지 버튼용
@@ -59,6 +60,12 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
     {"type": "followups", "items": ["..."]}                                항상 · 없으면 []
     {"type": "done"}                                                       항상 마지막
     {"type": "error",     "text": "LLMError: ..."}                         실패 시 answer 대신 · 그 뒤 done
+
+answer.links 는 **본문이 인용한 단말 화면의 딥링크**다(`mystar-link://scnNo=…&mode=…`).
+프론트는 본문에서 `screen` 문자열(「04-12-642」)을 찾아 `url` 로 누를 수 있게 감싼다 — URL 을
+프론트가 조립하지 않는 이유는 `mode`(운영·개발)와 `scnNo` 자릿수 판정이 백엔드에만 있어야
+하기 때문이다(consult_agent/effects/screens.py). 커스텀 스킴이라 프론트의 링크 sanitizer 가
+href 를 지울 수 있다 — 스킴을 허용 목록에 넣어야 한다.
 
 answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — followups 로만 간다. 연계 제안
 문장(«… 연계해드릴까요? (네 / 아니오)»)은 답변의 마지막 문장으로 남긴다 — 직원이 「네」로 답하는
@@ -243,6 +250,11 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
         "type": "answer",
         "text": _strip_followups(result.get("answer", "")),
         "intent": result.get("intent"),
+        # 본문이 가리킨 단말 화면의 딥링크. **별도 이벤트가 아니라 answer 의 필드다** —
+        # 다른 type 들은 화면의 독립된 블록(버튼·출처·추천질문)인데 이것은 본문 문단 안의
+        # 화면번호를 감싸는 재료라, 본문 없이는 그릴 수 없고 본문과 함께 도착해야 한다.
+        # 없으면 빈 목록을 보낸다(sources·followups 와 같은 규약).
+        "links": list(result.get("links") or []),
     }]
     action = result.get("pending_action")
     if action:

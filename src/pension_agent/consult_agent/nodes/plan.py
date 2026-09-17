@@ -393,12 +393,13 @@ def _known_products() -> set[str]:
 
 #: 근거 카드의 화면번호 스팬 꼴(`[04-12-646]`). 다른 `atomic` 스팬과 갈라 판정하기 위한 것이라
 #: 대괄호까지 포함해 본다 — 도구가 그 꼴로 선언한다(`tools._procedure_decls`).
-_SCREEN_SPAN = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
-
-#: 답변에서 화면번호를 찾는 꼴. **대괄호를 요구하지 않는다** — 직원이 읽는 문장에서는
+#: 답변에서 찾는 꼴(`_SCREEN_IN_TEXT`)은 대괄호를 요구하지 않는다 — 직원이 읽는 문장에서는
 #: 「04-12-646 지급/해지조회」처럼 괄호 없이 쓰는 것이 정상이고, 표기 차이로 옳은 답변을
 #: 버리지 않는다(§6 「이름 표기도 같다」와 같은 자리).
-_SCREEN_IN_TEXT = re.compile(r"(?<![0-9A-Za-z-])[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}(?![0-9A-Za-z-])")
+#: **둘 다 `screens` 가 갖는다** — 같은 판정을 화면 링크(`screens.links_in`)도 하므로, 여기
+#: 따로 적으면 「화면번호란 무엇인가」의 출처가 둘이 되고 한쪽만 고쳐지는 날이 온다.
+_SCREEN_SPAN = screens.SPAN
+_SCREEN_IN_TEXT = screens.IN_TEXT
 
 
 def _ledger_screens(evidence: Iterable[tools.Evidence]) -> set[str]:
@@ -410,8 +411,7 @@ def _ledger_screens(evidence: Iterable[tools.Evidence]) -> set[str]:
     있었고, 답변이 절차 본문의 [06-12-622] 를 인용하자 **화면 카드 근거를 재는 차례에서**
     «이 근거에 없는 화면»으로 답이 통째로 버려졌다. 절차 근거 차례에서는 통과한 번호다.
     """
-    return {screens.normalize(s) for e in evidence for s in e["atomic"]
-            if _SCREEN_SPAN.fullmatch(s.strip())}
+    return screens.declared(evidence)
 
 
 def _span_verdict(found: tools.Evidence, answer: str,

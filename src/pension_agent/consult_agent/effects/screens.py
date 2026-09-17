@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable, Mapping
 from urllib.parse import quote
 
 #: 단말 화면 딥링크의 커스텀 스킴. 뒤에 `키=값` 이 `&` 로 이어진다.
@@ -51,6 +52,16 @@ SCN_NO_LENGTHS = (7, 11)
 #: 절차 카드가 갖고 있다. 제목에서만 찾는 이유는, 본문에 화면 이야기가 스치듯 나오는
 #: 카드(예: "모바일브랜치 링크로 안내한다")까지 걸리면 엉뚱한 화면을 열게 되기 때문이다.
 LMS_TITLE_WORDS = ("발송 화면",)
+
+#: 근거 카드가 화면번호를 **선언하는** 꼴(`[75-08-110]`). 도구가 `atomic` 스팬에 이 꼴
+#: 그대로 싣는다 — 원장이 아는 화면을 걷을 때 다른 값 스팬과 가르는 기준이 이것이다.
+SPAN = re.compile(r"\[\s*[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}\s*\]")
+
+#: 답변 본문에서 화면번호를 **찾는** 꼴. **대괄호를 요구하지 않는다** — 직원이 읽는
+#: 문장에서는 「04-12-646 지급/해지조회」처럼 괄호 없이 쓰는 것이 정상이고, 표기 차이로
+#: 링크를 빠뜨리거나 옳은 답변을 버리지 않는다(기준서 §6 「이름 표기도 같다」와 같은 자리).
+IN_TEXT = re.compile(
+    r"(?<![0-9A-Za-z-])[0-9A-Za-z]{2}-[0-9A-Za-z]{2}-[0-9A-Za-z]{3}(?![0-9A-Za-z-])")
 
 
 def normalize(screen: str) -> str:
@@ -79,6 +90,72 @@ def link(screen: str) -> str | None:
         return None
     pairs = [("scnNo", number), ("mode", MODE)]
     return SCHEME + "&".join(f"{k}={quote(v, safe='')}" for k, v in pairs)
+
+
+def declared(evidence: Iterable[Mapping]) -> set[str]:
+    """이번 턴 원장이 아는 화면번호(정규형) — 도구가 `atomic` 으로 선언한 것.
+
+    근거 한 건이 아니라 **원장 전체의 합집합**이다. 근거 한 건씩 재면 다른 근거가 아는
+    화면이 «없는 화면»이 된다 — 절차 카드의 번호를 인용한 답변이 화면 카드 차례에서
+    통째로 폐기된 실측이 있다(`nodes/plan.py::_ledger_screens` 머리말).
+    """
+    return {normalize(s) for e in evidence for s in (e.get("atomic") or [])
+            if SPAN.fullmatch(str(s).strip())}
+
+
+def cited(answer: str, known: Iterable[str]) -> list[str]:
+    """답변이 가리킨 화면번호 — **원장이 아는 것만**, 답변에 나온 순서로.
+
+    답변에서만 찾으면 LLM 이 지어낸 번호로 링크를 만들게 되고, 원장에서만 찾으면 답변이
+    언급하지도 않은 화면의 링크가 붙는다(§10 「없는 화면번호로 링크를 만들지 않는다」).
+    답변이 화면에 나갈 때 이 대조는 이미 한 번 끝나 있다 — `plan._span_verdict` 가 원장
+    밖 화면을 가리킨 생성문을 폐기하므로, 여기 걸리는 번호는 전부 근거 카드의 것이다.
+    """
+    allowed = {normalize(k) for k in known}
+    seen: list[str] = []
+    for m in IN_TEXT.finditer(answer or ""):
+        number = normalize(m.group())
+        if number in allowed and number not in seen:
+            seen.append(number)
+    return seen
+
+
+def names(kb) -> dict[str, str]:
+    """화면번호 → 화면명. **이 파일은 번호도 이름도 갖지 않는다** — 지식베이스가 준다.
+
+    같은 번호를 여러 카드가 말하면 먼저 걸린 것을 쓴다(카드 id 순). 이름을 못 찾은
+    번호는 비워 두고, 링크의 표시 이름은 호출부가 번호로 떨어뜨린다.
+    """
+    out: dict[str, str] = {}
+    for card in sorted((c for c in kb.cards if c.get("_kind") == "screen"),
+                       key=lambda c: c["id"]):
+        number = normalize(str(card.get("screen") or ""))
+        title = str(card.get("title") or "").strip()
+        if number and title:
+            out.setdefault(number, title)
+    return out
+
+
+def links_in(answer: str, known: Iterable[str],
+             names_by_screen: Mapping[str, str] | None = None) -> list[dict]:
+    """답변이 가리킨 화면들의 딥링크 — 프론트가 본문의 번호를 링크로 감싸는 재료.
+
+    **URL 을 백엔드가 완성해 준다.** 프론트가 조립하면 `mode`(운영·개발 구분)와 `scnNo`
+    자릿수 판정이 두 곳에 생기고, 운영 전환 때 한쪽만 고쳐지면 운영 단말에서 개발 화면을
+    여는 링크가 나간다(루트 CLAUDE.md 규칙 4 가 기록한 사고와 같은 종류다).
+
+    항목은 `{"screen", "url", "label"}` 이고 `screen` 은 **답변 본문에 그대로 있는 문자열**
+    이다 — 프론트는 그것을 찾아 감싸기만 한다. 자릿수가 규격에 맞지 않는 번호는 링크를
+    만들지 않으므로 목록에서 빠진다(§10).
+    """
+    out: list[dict] = []
+    for number in cited(answer, known):
+        url = link(number)
+        if not url:
+            continue
+        out.append({"screen": number, "url": url,
+                    "label": (names_by_screen or {}).get(number) or number})
+    return out
 
 
 def lms_screen(kb) -> tuple[str, str] | None:

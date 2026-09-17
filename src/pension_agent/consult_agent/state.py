@@ -165,6 +165,11 @@ class AgentState(TypedDict, total=False):
     answer: str                      # [출력] 최종 화법
     sources: list[dict]              # [출력] 근거 카드 (역추적용)
     pending_action: dict | None      # [출력] 확인을 기다리는 도구 실행 제안 (act.offer 가 채움)
+    # [출력] 답변이 가리킨 단말 화면의 딥링크 — `{screen, url, label}` 목록. 화면이 본문의
+    # 화면번호를 눌러서 열 수 있는 링크로 그리는 재료다(`effects/screens.links_in`).
+    # 보통은 `graph.ask` 가 답변 본문에서 만들고, **승낙 턴만 노드가 직접 채운다**
+    # (`nodes/act._link` — 그 턴은 원장이 비어 있어 본문만으로 대조할 수 없다).
+    links: list[dict]
     # [출력] 「하지 말 것」 — 코드가 붙이는 경고와 대안 화법. 프롬프트 지시만으로는 LLM 이
     # 무시해도 아무도 모르므로(verify 는 톤을 보지 않는다) 화면이 함께 띄워야 하는 값이다.
     # 선언이 없으면 LangGraph 가 노드 반환값에서 조용히 버린다 — 그래서 여기 있어야 한다.

@@ -70,7 +70,7 @@ Content-Type: application/json
 | type | 필드 | 화면 |
 |---|---|---|
 | `progress` | `text` | 답변을 기다리는 동안의 상태 문구. 여러 번 온다. 답변보다 먼저 |
-| `answer` | `text`, `intent` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다 |
+| `answer` | `text`, `intent`, `links[]` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다. `links` 는 아래 |
 | `action` | `kind`, `label`, `prompt` (+ 쪽지면 `title`, `text`, `to`) | 연계 제안 턴에만, `answer` 다음. 본문 아래 **네 / 아니오 버튼**을 그린다. 누르면 다음 턴 `message` 로 `"네"` 또는 `"아니오"` 를 보낸다 |
 | `clarify` | `question`, `options[]` | 되묻기 턴에만, `answer` 다음. 선택지 버튼. 누른 값을 다음 턴 `message` 로 보낸다 |
 | `sources` | `items[]` — `id`, `doc`, `title`, `url`, `score`, `page`, `role` | 근거. **항상** 온다. `role` 은 `"근거"` 와 `"주의"`(이 고객 상담에서 지켜야 할 것) 두 종류라 두 블록으로 나눠 그린다. `score` 는 있을 때만 관련도로 표기. `items` 가 비면 «근거 없음»을 **표시한다**(빼지 않는다) |
@@ -81,12 +81,32 @@ Content-Type: application/json
 `answer.text` 에 추천질문 블록은 없다(`followups` 로만 온다). 답변 본문은 검증을 거친 뒤 한 번에
 오고 토큰 단위로 흐르지 않는다 — 진행 문구가 그 시간을 채운다.
 
+### `answer.links` — 단말 화면 딥링크
+
+답변 본문이 가리킨 **단말 화면**의 링크다. 항목은 `screen` · `url` · `label` 이고, **없으면 빈
+목록으로 항상 온다**(키가 있을 때와 없을 때를 가르지 않아도 된다).
+
+```json
+{"type": "answer", "text": "MyStar 단말 [04-12-642] 적립금 및 수익률 조회 화면에서 …", "intent": "procedure",
+ "links": [{"screen": "04-12-642", "url": "mystar-link://scnNo=0412642&mode=D", "label": "적립금및수익률조회"}]}
+```
+
+- `screen` 은 **본문에 그대로 들어 있는 문자열**이다. 프론트는 본문에서 그것을 찾아 `url` 로
+  누를 수 있게 감싼다(대괄호 표기 `[04-12-642]` 안에서도 그대로 찾힌다).
+- **URL 을 프론트가 조립하지 않는다.** `mode`(운영 `O` · 스테이징 `S` · 개발 `D`)는 서버 설정이고
+  `scnNo` 는 자릿수 판정을 거친 값이라, 프론트가 만들면 운영 전환 때 두 곳이 어긋난다.
+- `mystar-link://` 는 **커스텀 스킴**이다. 마크다운 렌더러·HTML sanitizer 의 기본 설정은 이런
+  href 를 지우므로 스킴을 허용 목록에 넣어야 한다(`react-markdown` 의 `urlTransform`,
+  `DOMPurify` 의 `ALLOWED_URI_REGEXP`). 단말이 없는 PC 에서는 눌러도 열리지 않는다.
+- 여기 실리는 번호는 전부 근거 카드에 있는 실재 화면이다 — 답변이 근거 밖 화면을 가리키면
+  서버가 그 답변을 폐기한다.
+
 ### 실제 출력 예
 
 ```
 {"type": "progress", "text": "질문 내용을 파악하고 있어요"}
 {"type": "progress", "text": "고객 브리핑 자료를 찾고 있어요"}
-{"type": "answer", "text": "이준호 고객님은 만기 예금을 보유하고 있어 자산 재배분이 필요한 시점이기 때문에 타겟이에요.\n\n구체적으로는 …", "intent": "situation"}
+{"type": "answer", "text": "이준호 고객님은 만기 예금을 보유하고 있어 자산 재배분이 필요한 시점이기 때문에 타겟이에요.\n\n구체적으로는 …", "intent": "situation", "links": []}
 {"type": "sources", "items": [
   {"id": "customer.198734-1205842", "doc": "고객 정보 — 계좌 원장 조회값", "title": "이준호 고객 계좌 현황", "url": null, "score": null, "page": null, "role": "근거"},
   {"id": "pitch.k03.024", "doc": "연금사업부(상품) 오늘의할일 스크립트", "title": "만기 임박 + 디폴트옵션 미등록 고객에게 …", "url": null, "score": 2.0, "page": null, "role": "근거"}
