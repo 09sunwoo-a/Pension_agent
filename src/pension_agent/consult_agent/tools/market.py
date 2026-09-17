@@ -96,6 +96,43 @@ def _market_like(kind: str, label: str) -> Callable[[AgentState, str], Evidence 
     return run
 
 
+#: 단위를 복원한 값을 싣는 줄의 머리말. 원장을 눈으로 볼 때(트레이스) 이 줄이 재료가
+#: 아니라 **인용 허용을 넓힌 자리**임이 보여야 한다.
+PERCENT_ALLOW = "[단위 복원] 표의 백분율 열 값 — 본문에는 단위가 열 머리말에만 있다:"
+
+
+def _percent_allow(cards: list[dict]) -> str:
+    """백분율 열 값의 **두 표기를 다 인용 허용**에 싣는 줄. 없으면 빈 문자열.
+
+    표는 단위를 열 머리말에 두고 셀에는 숫자만 적는다(`비중 | 금리 | 1M`, 셀은 `35`·`3.40`).
+    직원에게 답하는 문장은 「비중 35%」라고 쓰는데, `verify._canon()` 은 «%-유무는 다른
+    주장»으로 보존하므로(15% ≠ 15) 그 순간 답변이 «자료에 없는 수치»로 통째로 폐기되고
+    근거 원문이 덤프된다(2026-09-17 실측 — `사유="수치 '35%'; 수치 '2.13%'; 수치 '4.23%'"`).
+
+    **verify 의 전역 판정은 건드리지 않는다.** 거기서 % 를 무시하면 원장의 `3`(건수)을
+    답변이 「수익률 3%」라고 써도 통과한다. 여기서 넓히는 것은 **그 열이 백분율이라고
+    데이터가 선언한 값**뿐이다(`scripts/kb_build/config.py::PERCENT_COLUMNS` →
+    `tables[].rows[].percents`). 선언이 없는 표는 아무것도 넓히지 않는다.
+
+    두 표기를 다 싣는 이유는 표마다 셀의 표기가 갈리기 때문이다 — 추천펀드 표는 `35`,
+    투자성향별 포트폴리오 표는 `30%` 라고 적는다. 한쪽만 실으면 반대 방향(원장이 `30%`
+    인데 답변이 `30`)에서 같은 폐기가 난다.
+
+    **본문(`text`)에는 넣지 않는다.** 이 값들은 이미 원문 표에 다 있어서 재료로는 중복이고,
+    작성 프롬프트에 실리는 재료는 이미 7천 자가 넘는다. `allow` 는 «화면에 안 보이는 재료도
+    포함»이라고 선언된 자리다(`evidence/record.py`).
+    """
+    seen: list[str] = []
+    for card in cards:
+        for table in card.get("tables") or []:
+            for row in table.get("rows") or []:
+                for value in row.get("percents") or []:
+                    for form in (value, f"{value}%"):
+                        if form not in seen:
+                            seen.append(form)
+    return f"{PERCENT_ALLOW} {' '.join(seen)}" if seen else ""
+
+
 def market_evidence(kind: str, query: str, hits: list[tuple[float, dict]],
                     tool: str | None = None) -> Evidence | None:
     """시황·상품 카드 → 원장 항목. 검색 도구와 «카드 id 로 되싣기»가 함께 쓴다 —
@@ -110,6 +147,9 @@ def market_evidence(kind: str, query: str, hits: list[tuple[float, dict]],
             continue
         notices += [m for m in marks if m not in notices]
         scopes.append(_scope(c["title"], [], marks))
-    return _ev(tool or kind, query, "\n\n".join(_render_market(c) for _, c in hits),
+    cards = [c for _s, c in hits]
+    text = "\n\n".join(_render_market(c) for c in cards)
+    pct = _percent_allow(cards)
+    return _ev(tool or kind, query, text,
                kb_index.sources_of(KB, hits), notices=notices, scopes=scopes,
-               cards=[c for _s, c in hits])
+               allow=[text, pct] if pct else None, cards=cards)

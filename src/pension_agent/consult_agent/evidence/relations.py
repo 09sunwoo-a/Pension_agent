@@ -203,6 +203,23 @@ def _said_rows(answer: str, rows: list[dict]) -> list[dict]:
     return said
 
 
+def _bare(nums: set[str]) -> set[str]:
+    """`%` 표기를 지운 형태. **이 검사에서만 지운다.**
+
+    `verify._canon()` 은 «%-유무는 다른 주장»으로 보존한다(15% ≠ 15). 그 판정은 전역이라
+    옳다 — 원장의 `3`(건수)을 답변이 「3%」라고 쓰는 것을 막는다. 그런데 **여기는 같은 표의
+    셀끼리 비교하는 자리**라 단위가 같고, 표는 단위를 열 머리말에 두고 셀에는 숫자만 적는다
+    (`비중 | 금리`, 셀은 `35`·`3.40`). 답변은 「35%」라고 쓴다.
+
+    그래서 표기를 안 지우면 **오짝 검사가 조용히 꺼진다**: 「지켜드림의 금리는 3.27」(알파드림
+    행의 값)은 잡히는데 「지켜드림의 금리는 3.27%」는 통과한다. 지금까지 이게 안 드러난 것은
+    `%` 붙은 답변이 앞단의 수치 집합 검사에서 먼저 폐기됐기 때문이고, 그 폐기가 «맞는 답을
+    버리는» 사고라 인용 허용을 넓히면서(`tools/market.py::_percent_allow`) 이 자리가 열린다.
+    거짓 양성을 고치면서 거짓 음성을 만들지 않으려면 둘을 함께 고쳐야 한다.
+    """
+    return {n.rstrip("%") for n in nums}
+
+
 def table_mispaired(answer: str, tables: list[dict]) -> list[str]:
     """답변이 다른 행의 값을 갖다 붙인 자리. 판정할 수 없으면 빈 목록."""
     bad: list[str] = []
@@ -213,14 +230,14 @@ def table_mispaired(answer: str, tables: list[dict]) -> list[str]:
             continue                      # 어느 행인지 못 가린다 → 판정 불가
         allowed: set[str] = set()
         for row in said:
-            allowed |= _nums(row.get("cells"))
+            allowed |= _bare(_nums(row.get("cells")))
         others: set[str] = set()
         for row in rows:
             if row not in said:
-                others |= _nums(row.get("values"))
+                others |= _bare(_nums(row.get("values")))
         foreign = {n for n in others - allowed
-                   if len(n.rstrip("%").lstrip("-")) >= MIN_VALUE_CHARS}
-        for n in sorted(numbers(answer) & foreign):
+                   if len(n.lstrip("-")) >= MIN_VALUE_CHARS}
+        for n in sorted(_bare(numbers(answer)) & foreign):
             label = " / ".join(said[0].get("keys") or [])
             bad.append(f"{label} 의 값이 아닌 {n} — 같은 표의 다른 행 값이다")
     return bad
