@@ -205,6 +205,44 @@ def check_miss_recovery() -> int:
     return ok
 
 
+def check_no_material_tone() -> int:
+    """**재료가 없는 턴도 말투가 공손한가**(§5 「없다고 답하는 턴도 말투는 그대로 공손하다」).
+
+    회귀 대상: 지식베이스에 없는 예측 질문(「이 고객 재취업 할 것 같아?」)에 「그 자료는
+    없어요.」 한 줄이 나갔다 — 사실은 맞고 말투가 틀린 답이다. 재료가 없는 턴에만 문장이
+    딱딱해지면 직원에게는 «못 찾을 때만 에이전트가 무례해지는» 것으로 읽힌다.
+
+    재는 자리가 둘인 이유는 «없다»가 두 곳에서 나오기 때문이다 — 원장이 끝내 빈 턴에 코드가
+    내보내는 안내문(`NO_EVIDENCE`)과, 재료는 있는데 질문의 핵심 대상만 없는 턴에 LLM 이 쓰는
+    문장이다. 뒤엣것은 **프롬프트의 예시 문구가 그대로 베껴져** 나온 것이라, 문구를 고쳤는지가
+    아니라 그 예시가 지워졌는지를 재야 한다 — 코드 쪽만 고치고 프롬프트를 두면 증상이 남는다.
+
+    바꾸지 않은 것도 함께 잰다: 없다고 말하면서 **무엇을 갖고 있는지** 알려주는 것은 §5 의
+    요건이라, 공손하게 고치다가 안내가 짧아지면 그것도 회귀다.
+    """
+    from pension_agent.consult_agent.prompts import COMPOSE_MISSING_BLOCK, COMPOSE_SYSTEM
+
+    ok = 0
+    hit = "죄송" in plan.NO_EVIDENCE and plan.NO_EVIDENCE.rstrip().endswith("어요.")
+    print(f"{'✓' if hit else '✗'} '근거 없음' 안내문이 답변과 같은 공손한 해요체다")
+    ok += hit
+
+    hit = "제가 가진 자료는" in plan.NO_EVIDENCE and "브리핑 화면" in plan.NO_EVIDENCE
+    print(f"{'✓' if hit else '✗'} 그러면서 무엇을 갖고 있는지는 그대로 알려준다")
+    ok += hit
+
+    # 옛 예시 문구가 «이렇게 답하라»로 서 있으면 LLM 이 그대로 베낀다. 금지 예시로
+    # 인용하는 것은 남아 있어도 된다 — 재는 것은 지시문 쪽이다.
+    hit = '"그 자료는 없어요"라고 답한다' not in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 프롬프트가 「그 자료는 없어요」를 답변 예시로 들지 않는다")
+    ok += hit
+
+    hit = "공손" in COMPOSE_SYSTEM and "공손" in COMPOSE_MISSING_BLOCK
+    print(f"{'✓' if hit else '✗'} 자료가 없는 턴의 말투를 작성 프롬프트가 지시한다(둘 다)")
+    ok += hit
+    return ok
+
+
 def check_replan_on_empty() -> int:
     """근거 0건인 채 계획이 끝나려 하면 **한 번은 다시 계획하는가**(§5).
 
