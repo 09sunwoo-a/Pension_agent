@@ -51,8 +51,31 @@ def check_tax_credit_calc() -> int:
     print(f"{'✓' if hit else '✗'} 단위 없는 맨숫자는 금액으로 읽지 않는다(잔여한도로 떨어진다)")
     ok += hit
 
-    # ② 구간 미확인이면 두 경우를 다 낸다.
-    hit = all(f"{r * 100:.1f}%" in ev["text"] for r in CUST.TAX_CREDIT_RATE.values())
+    # ② 구간이 원장에 있으면 **그 하나만**, 없으면 두 경우를 다 낸다.
+    #    2026-09-18 에 총급여를 원장에 넣었는데 이 도구가 따라오지 않아, 구간이 확정된
+    #    고객에게도 두 값을 다 내고 「원장에 없어 두 경우를 다 실었다」고 적었다 — 브리핑은
+    #    그 구간으로 계산하는데 계산기만 갈래로 두고 있던 것이다(실측). 양쪽을 다 잰다:
+    #    실데이터에는 이 컬럼이 없을 수 있고, 그때 하나로 좁히면 틀린 금액이 나간다.
+    mine = CUST.TAX_CREDIT_RATE[room.income_bracket]
+    other = next(r for k, r in CUST.TAX_CREDIT_RATE.items() if k != room.income_bracket)
+    hit = (bool(room.income_bracket)
+           and f"{mine * 100:.1f}%" in ev["text"] and f"{other * 100:.1f}%" not in ev["text"]
+           and "원장에 없어" not in ev["text"])
+    print(f"{'✓' if hit else '✗'} 원장이 총급여 구간을 알면 그 공제율 하나만 싣는다")
+    ok += hit
+
+    import dataclasses  # noqa: PLC0415
+    blind = dataclasses.replace(room, income_bracket=None)
+    _orig = CUST.get_profile
+    CUST.get_profile = lambda cid: blind if cid == room.id else _orig(cid)
+    try:
+        ev2 = tools.TOOLS["tax_credit"].run(
+            {"customer_id": room.id, "question": "300만원 더 넣으면 얼마 받아?"}, "q")
+    finally:
+        CUST.get_profile = _orig
+    hit = (ev2 is not None
+           and all(f"{r * 100:.1f}%" in ev2["text"] for r in CUST.TAX_CREDIT_RATE.values())
+           and "원장에 없어" in ev2["text"])
     print(f"{'✓' if hit else '✗'} 총급여 구간 미확인이면 두 공제율을 다 싣는다")
     ok += hit
 
