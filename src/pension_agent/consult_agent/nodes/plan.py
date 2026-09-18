@@ -156,6 +156,20 @@ LLM_FAILED = (
 )
 
 
+#: 화면에 실을 원인의 길이 상한(자). 진단이 화면에서 끝나게 하려고 원인을 싣지만,
+#: **프로바이더가 준 응답 본문을 통째로 싣는 것은 다른 일이다** — 429 한 번에 쿼터 지표
+#: 이름·문서 URL·환경변수 이름(LLM_MAX_CONCURRENCY …)이 직원 화면에 그대로 떴다(실측
+#: 2026-09-18). 상담 화면에 설정값 이름이 뜨면 읽는 사람이 할 수 있는 일이 없고, 답변
+#: 칸이 스택트레이스 자리가 된다. 전문은 트레이스·로그에 그대로 남는다.
+REASON_MAX = 120
+
+
+def short_reason(reason: str | None) -> str:
+    """화면에 실을 한 줄짜리 원인. 첫 줄만, 상한까지."""
+    head = (reason or "원인 미상").strip().split("\n", 1)[0].strip()
+    return head if len(head) <= REASON_MAX else head[:REASON_MAX].rstrip() + "…"
+
+
 #: 답변 자리에 나가지만 **답변이 아닌** 안내문의 머리말 셋 — 찾아봤는데 없음(NO_EVIDENCE) ·
 #: 도구 고장(TOOL_FAILED) · LLM 장애(LLM_FAILED). 서식 자리(`{what}`·`{reason}`) 앞까지가
 #: 고정 문구라 그 앞부분으로 가린다.
@@ -360,7 +374,7 @@ def llm_down(state: AgentState) -> dict[str, Any]:
     같은 LLM_FAILED 를 낸다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 그 자체가
     진단을 어렵게 한다.
     """
-    return {"answer": LLM_FAILED.format(reason=state.get("llm_error") or "원인 미상"),
+    return {"answer": LLM_FAILED.format(reason=short_reason(state.get("llm_error"))),
             "sources": []}
 
 
@@ -728,7 +742,7 @@ def compose(state: AgentState) -> dict[str, Any]:
         # 말하면 있는 자료를 없다고 답하게 된다 — 셋을 갈라 답한다.
         failure = state.get("llm_error")
         if failure:
-            answer = LLM_FAILED.format(reason=failure)
+            answer = LLM_FAILED.format(reason=short_reason(failure))
             observability.step("compose", evidence="0건", answer="LLM실패안내", error=failure,
                                level=logging.WARNING)
         elif _of(_steps(state), FAILED):
@@ -842,7 +856,7 @@ def compose(state: AgentState) -> dict[str, Any]:
         # 않는다. 뒤에 붙는 것들(추천질문 등)이 실패 안내를 정상 답변으로 오인한다.
         observability.step("compose", evidence=f"{len(evidence)}건", answer="LLM실패안내",
                            error=f"{type(exc).__name__}: {exc}", level=logging.WARNING)
-        return {"answer": LLM_FAILED.format(reason=f"{type(exc).__name__}: {exc}"),
+        return {"answer": LLM_FAILED.format(reason=short_reason(f"{type(exc).__name__}: {exc}")),
                 "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}
 
