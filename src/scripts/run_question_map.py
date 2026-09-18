@@ -8,6 +8,8 @@
     python -m scripts.run_question_map --new --dry-run         # 무엇을 돌릴지만 본다
     python -m scripts.run_question_map                         # 아직 안 채운 행 전부
     python -m scripts.run_question_map --retry-failed          # 실패로 끝난 칸만 다시
+    python -m scripts.run_question_map --auto                  # 답이 대조로 갈리는 항목만
+    python -m scripts.run_question_map --manual                # 사람이 읽어야 하는 항목만
 
 **기록하는 것은 답변 본문뿐이다.** 진행 표시(「제도·상품 수치 찾는 중…」)와 근거 목록·
 화면 딥링크는 화면에만 찍고 칸에는 안 넣는다 — 셀 하나가 근거 덤프로 길어지면 표를
@@ -86,6 +88,22 @@ def _load():
     return wb, ws, idx
 
 
+def _filled(ws, col: int) -> dict[int, str]:
+    """세로 병합된 칸을 앞 값으로 이어 읽는다 — {엑셀 행: 값}.
+
+    병합 칸은 **묶음의 첫 행에만** 값이 있고 나머지는 None 이다. 「항목」은 처음부터
+    병합이었고 「질문」은 갈래 행을 합치면서 병합됐다. 그냥 읽으면 둘째 행부터 항목이
+    빈 문자열이라 `--item` 이 조용히 그 행들을 버리고, 질문은 빈 채로 에이전트에 들어간다.
+    """
+    out, cur = {}, ""
+    for r in range(2, ws.max_row + 1):
+        v = ws.cell(r, col).value
+        if v not in (None, ""):
+            cur = str(v)
+        out[r] = cur
+    return out
+
+
 def _pins(cell: str) -> list[str]:
     """「대상 고객」 칸에서 kb-pin 을 뽑는다. 여러 개면 대조 행이라 전부 돈다."""
     import re
@@ -95,11 +113,11 @@ def _pins(cell: str) -> list[str]:
 def _select(ws, idx, args) -> list[int]:
     """돌릴 행 번호(엑셀 행 인덱스)를 고른다."""
     want_rows = {int(x) for x in args.rows.split(",")} if args.rows else None
+    items = _filled(ws, idx["항목"])          # 둘 다 세로 병합이다 — _filled 머리말
     picked = []
     for r in range(2, ws.max_row + 1):
         num = ws.cell(r, idx["번호"]).value
-        item = str(ws.cell(r, idx["항목"]).value or "")
-        q = str(ws.cell(r, idx["질문"]).value or "")
+        item = items[r]
         demo = str(ws.cell(r, idx["시연"]).value or "")
         pre_cell = str(ws.cell(r, idx["선행 질문"]).value or "")
         done = ws.cell(r, idx["실측 답변"]).value
@@ -111,6 +129,10 @@ def _select(ws, idx, args) -> list[int]:
         if args.new and "안 해본 질문" not in demo:
             continue
         if args.item and args.item not in item:
+            continue
+        if args.auto and not QM.is_auto(item):
+            continue
+        if args.manual and QM.is_auto(item):
             continue
         if pre_cell.startswith("["):        # 실행 대상이 아닌 행(상황 표기·장애)
             continue
@@ -129,9 +151,27 @@ def _select(ws, idx, args) -> list[int]:
     return picked
 
 
+def _body(res: dict) -> str:
+    """답변 본문 — 화면 장치를 뗀 글.
+
+    `res["answer"]` 에는 답변 뒤에 **화면 장치**가 붙어 있다: 「── 참고한 자료」 표시
+    블록 · 「── 이어서 물어보실 수 있어요」 추천질문 · 「… (네 / 아니오)」 제안 문구.
+    셀에 그대로 넣으면 표가 안 읽히고, 근거는 어차피 트레이스에서 본다(머리말).
+
+    떼는 규칙을 여기에 다시 쓰지 않는다 — 에이전트 안에 이미 같은 일을 하는 자리가
+    있고(`tools/answered._body`, 「지난 답변 다시 써줘」가 쓰는 것), 규칙을 복사하면
+    한쪽만 고쳐지는 자리가 생긴다. 추천질문은 `graph.ask` 가 **기록에 넣기 전에** 떼므로
+    히스토리 마지막 턴의 답변을 집으면 그 단계까지 같이 해결된다.
+    """
+    from pension_agent.consult_agent.tools.answered import _body as strip_devices
+    turns = res.get("history") or []
+    stored = (turns[-1] or {}).get("answer") if turns else None
+    return strip_devices(stored or res.get("answer") or "")
+
+
 def _answer_text(res: dict, args) -> str:
     """칸에 넣을 글. 기본은 답변 본문만 — 그게 이 스크립트의 요점이다."""
-    parts = [res["answer"].strip()]
+    parts = [_body(res)]
     if args.full or args.links:
         for item in res.get("links") or []:
             parts.append(f"[화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
@@ -152,6 +192,10 @@ def main(argv: list[str]) -> int:
     pick.add_argument("--grade", choices=["◎", "○", "–"], help="등급으로")
     pick.add_argument("--new", action="store_true", help="아직 안 해본 질문만")
     pick.add_argument("--item", help="항목 이름 일부 (예: 세액공제)")
+    pick.add_argument("--auto", action="store_true",
+                      help="답이 대조로 갈리는 항목만 (question_map.AUTO_ITEMS)")
+    pick.add_argument("--manual", action="store_true",
+                      help="사람이 읽어야 판정되는 항목만 (--auto 의 나머지)")
     pick.add_argument("--limit", type=int, help="앞에서 N개만")
     pick.add_argument("--redo", action="store_true",
                       help="이미 채워진 칸도 다시 돌려 덮어쓴다 (기본은 건너뛴다)")
@@ -168,7 +212,14 @@ def main(argv: list[str]) -> int:
     run.add_argument("--quiet", action="store_true", help="진행 표시를 안 찍는다")
     args = ap.parse_args(argv)
 
+    # .env 를 먼저 읽는다 — 그러지 않으면 아래 머리말이 PENSION_TODAY 를 «고정 안 됨»으로
+    # 찍는다(실행 자체는 에이전트가 import 될 때 읽으므로 맞게 돌았다 — 머리말만 거짓말을
+    # 했다). 날짜가 틀렸는지를 이 한 줄로 보고 판단하므로 거짓말하면 안 되는 자리다.
+    from pension_agent import env as _env
+    _env.load()
+
     wb, ws, idx = _load()
+    qs = _filled(ws, idx["질문"])             # 갈래 행은 질문 칸이 세로 병합이다
     picked = _select(ws, idx, args)
     if not picked:
         print("돌릴 행이 없다. 조건을 넓히거나 --redo 를 붙인다.")
@@ -181,7 +232,7 @@ def main(argv: list[str]) -> int:
     if args.dry_run:
         for r in picked:
             n = ws.cell(r, idx["번호"]).value
-            q = ws.cell(r, idx["질문"]).value
+            q = qs[r]
             who = ws.cell(r, idx["대상 고객"]).value or ""
             pre = ws.cell(r, idx["선행 질문"]).value or ""
             print(f"  {n:>4} [{', '.join(_pins(who)) or '고객 없이'}] {q}"
@@ -193,7 +244,7 @@ def main(argv: list[str]) -> int:
     filled = failed = 0
     for i, r in enumerate(picked, 1):
         num = ws.cell(r, idx["번호"]).value
-        q = str(ws.cell(r, idx["질문"]).value)
+        q = qs[r]
         who = str(ws.cell(r, idx["대상 고객"]).value or "")
         pre = [x.strip() for x in str(ws.cell(r, idx["선행 질문"]).value or "").split("→") if x.strip()]
         pins = _pins(who) or [None]
