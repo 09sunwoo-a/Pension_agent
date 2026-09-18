@@ -364,9 +364,29 @@ def check_clarify_settled() -> int:
         prompt = seen[-1] if seen else ""
         settled = prompt.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in prompt else ""
         hit = ("만기예금 보유" in settled and "디폴트옵션 설정" in settled
-               and "거래채널 대면" in settled and "소득구간" not in settled)
-        print(f"{'✓' if hit else '✗'} 판정 프롬프트에 성립 요건·계좌 상태·거래채널이 «정해진 것»으로 실린다"
-              " — 모르는 값(소득구간)은 싣지 않는다")
+               and "거래채널 대면" in settled and "소득구간" in settled)
+        print(f"{'✓' if hit else '✗'} 판정 프롬프트에 성립 요건·계좌 상태·거래채널·소득구간이"
+              " «정해진 것»으로 실린다")
+        ok += hit
+
+        # 소득구간은 **양쪽을 다 재야 한다.** 원장에 총급여가 없던 동안(2026-09-18 부여 전)은
+        # 전원 미확인이라 「안 실린다」만 재면 됐는데, 지금은 전원 확인이라 그 검사가 통째로
+        # 사라질 뻔했다. 실데이터에는 이 컬럼이 없을 수 있고, 그때 「미확인」이 정해진 것으로
+        # 실리면 판정이 그 축까지 정해진 줄 알고 되묻지 않는다(2026-09-05 리허설 K3).
+        import dataclasses  # noqa: PLC0415
+        from pension_agent.strategy_agent import customer as _SC  # noqa: PLC0415
+        _orig_get = _SC.get_profile
+        _SC.get_profile = lambda c: dataclasses.replace(_orig_get(c), income_bracket=None)
+        try:
+            seen.clear()
+            CL.clarify({"question": "이 고객 세액공제 얼마나 더 받아?", "customer_id": cid,
+                        "evidence": fact})
+            p2 = seen[-1] if seen else ""
+            s2 = p2.split("<이미 정해진 것>")[-1].split("</이미 정해진 것>")[0] if "<이미 정해진 것>" in p2 else ""
+        finally:
+            _SC.get_profile = _orig_get
+        hit = bool(s2) and "소득구간" not in s2
+        print(f"{'✓' if hit else '✗'} 소득구간이 미확인이면 «정해진 것»에 싣지 않는다(갈래로 남긴다)")
         ok += hit
         hit = bool(settled) and "만기예금 보유" not in prompt.split("<근거>")[-1].split("</근거>")[0]
         print(f"{'✓' if hit else '✗'} 정해진 것은 <근거>(갈래 후보) 밖에 실린다")

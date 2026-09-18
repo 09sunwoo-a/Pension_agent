@@ -476,8 +476,13 @@ def days_to_year_end(base: date | None = None) -> int:
 #     부분집합이라는 기존 규약 그대로다.
 #   · grade(고객 위험등급)는 원본에 없다 → PREF[투자성향] 으로 **보수적으로 파생**한다.
 #     실데이터 전환 시 실제 고객 위험등급 컬럼으로 교체한다(docs/DEMO_STATUS.md §4).
-#   · retPct·balPct·income_bracket·customer_type 은 원본에 모수·컬럼이 없다 → None 으로
-#     둔다(각각 그레이스풀 생략·보수적 공제율 경로가 이미 있다).
+#   · retPct·balPct·customer_type 은 원본에 모수·컬럼이 없다 → None 으로 둔다(그레이스풀
+#     생략 경로가 이미 있다).
+#   · income_bracket 은 `05_TAX_ISA.총급여` 에서 구간으로 접는다(_income_bracket).
+#     **원본 9Cases 에는 없던 컬럼이고 2026-09-18 에 우리가 넣었다** — 기획자 확인 전이다
+#     (09_데이터사전에 그렇게 적어 두었다). 그 전에는 전원 None 이라 공제율이 언제나
+#     13.2% 로 떨어졌고, 대화형은 세액공제 질문마다 총급여를 되물었다. 16.5% 경로가
+#     통째로 안 돌던 자리다.
 #   · matDD/matAmt 는 만기일 있는 보유상품(예금·GIC) 중 최근접 만기의 잔여일수·평가금액 합.
 #
 # ── 접지 않은 원장 컬럼 (2026-09-07 전수 대조) ────────────────────────────────
@@ -492,6 +497,10 @@ def days_to_year_end(base: date | None = None) -> int:
 #   summary 의 비중 컬럼  `_assets()` 가 원장 소수값을 그대로 옮긴다(접는 대상이 아니다).
 #   tax_isa.세액공제기준한도  같은 값이 TAX_CREDIT_CAP_WON(fact.k04.f2)에 있다. 원장에서도
 #                        읽으면 세법 개정 때 한쪽만 고쳐져 화면과 답변이 갈린다.
+#   tax_isa.총급여        **금액은 접지 않고 구간만 접는다**(income_bracket). 공제율 판정에
+#                        쓰는 것은 구간이고, 금액을 화면·답변에 세울 요건이 지식베이스에
+#                        없다 — 실으면 «총급여 얼마야»에 LLM 이 답하기 시작한다(루트
+#                        CLAUDE.md "없는 기준은 만들지 않는다"). 요건이 생기면 그때 접는다.
 #   basic.관리점          읽는 곳이 없다. 화면 상단 요건(REQUIREMENTS.md §3.1)에도 없다.
 #   basic.투자성향분석일   유효기간 규칙이 지식베이스에 없다. 날짜만 실으면 «언제까지 유효한가»를
 #                        LLM 이 지어낸다(루트 CLAUDE.md "없는 기준은 만들지 않는다").
@@ -650,6 +659,21 @@ def _paid_ytd_total(tax_isa: dict) -> int:
     return irp + sav
 
 
+#: 총급여 구간 경계(원). 세법은 「총급여액 5,500만원 **이하**」라 경계값은 낮은 구간에
+#: 든다 — 박지민이 정확히 이 값이라, 부등호를 `<` 로 쓰면 그 한 명이 조용히 13.2% 로
+#: 넘어간다(원장은 그대로인데 환급액만 25% 작아진다).
+INCOME_BRACKET_EDGE_WON = 55_000_000
+
+
+def _income_bracket(tax_isa: dict) -> str | None:
+    """총급여(원) → 세액공제율 구간. 컬럼이 없으면 None 이고, 그때는 `tax_credit_rate`
+    가 낮은 쪽으로 떨어진다(과대 산출을 피하는 방향 — 그 프로퍼티 주석)."""
+    salary = tax_isa.get("총급여")
+    if salary is None:
+        return None
+    return "5500이하" if salary <= INCOME_BRACKET_EDGE_WON else "5500초과"
+
+
 def _to_profile(rec: dict) -> Profile:
     basic, sm, act = rec["basic"], rec["summary"], rec["activity"]
     port, cash_pct = _port(rec)
@@ -671,6 +695,7 @@ def _to_profile(rec: dict) -> Profile:
         retPct=None, balPct=None,
         dopt="설정" if sm["디폴트옵션등록여부"] == "Y" else "미설정",
         room=rec["tax_isa"]["세액공제잔여한도"] // 10_000,
+        income_bracket=_income_bracket(rec["tax_isa"]),
         dorm=_days_since(basic.get("최근상담일")),
         nchM=round((_days_since(act["최근운용지시일"]) or 0) / 30.44, 1),
         matDD=mat_dd, matDate=nearest, matAmt=mat_amt, maturities=mats, assets=assets, isa=isa, paid_by_year=_paid_by_year(rec),

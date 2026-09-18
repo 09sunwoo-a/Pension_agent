@@ -50,6 +50,9 @@ def session(*, customer_id: str | None = None,
     tr = TR.Trace()
     # 우리가 만든 id 인지 기억한다 — 나갈 때 걷어낼지가 여기서 갈린다(아래).
     ours = session_id is None
+    # **첫 턴이 돌기 전에** 재 둔다. 아래 finally 에서 재면 그때는 이미 우리가 쓴 뒤라
+    # 언제나 «있었다»가 된다.
+    existed = bool(customer_id) and session_store._path(customer_id).is_file()
     session_id = session_id or f"debug-{uuid.uuid4().hex[:8]}"
     outer = script.installed(scenario) if scenario else nullcontext()
     try:
@@ -75,9 +78,16 @@ def session(*, customer_id: str | None = None,
         # **호출자가 준 id 는 건드리지 않는다.** 그건 그쪽이 이어 가는 상담이라 우리 것이
         # 아니다. 정리가 실패해도 리허설 결과를 죽이지 않는다 — 잔여물은 손으로 지울 수
         # 있지만 결과는 다시 돌려야 나온다.
+        # 기록이 아예 없던 고객이면 **파일째** 걷는다. drop_session 은 세션 하나를 빼고
+        # 문서를 다시 쓰므로, 우리가 만든 파일이 `{"sessions": []}` 만 남아 추적되지 않는
+        # 파일로 남는다 — 리허설을 돌 때마다 `git status src/session_data/` 가 더러워지고,
+        # 그건 «걷어낸다»는 이 블록의 약속이 지켜지지 않은 것이다(기록 없는 고객 3명이
+        # 매번 그랬다). 있던 파일은 건드리지 않는다 — 시연용 시드가 거기 들어 있다.
         if ours and customer_id:
             try:
                 session_store.drop_session(customer_id, session_id)
+                if not existed:
+                    session_store._path(customer_id).unlink(missing_ok=True)
             except Exception:  # noqa: BLE001 — 정리 실패가 리허설을 죽이지 않는다
                 pass
 
