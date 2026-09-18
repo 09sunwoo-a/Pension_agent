@@ -126,11 +126,18 @@ def _failed_label(name: str) -> str:
 
 def _tool_failed(state: AgentState) -> str:
     """도구가 죽어 재료를 못 읽은 턴의 답. 무엇이 왜 실패했는지를 함께 남긴다 —
-    진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유)."""
+    진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유).
+
+    **사유는 한 줄로 자른다**(`short_reason` — 아래에 있다). 사유는 `str(예외)` 그대로라
+    길이도 줄 수도 예외가 정한다 — 파서·HTTP 응답을 실어 오는 예외 하나가 답변 칸을
+    스택트레이스 자리로 만든다(LLM 장애 안내가 프로바이더 본문으로 그렇게 됐다). 여기는
+    **도구마다 한 줄**로 자른다: 통째로 이어 붙인 뒤 자르면 뒤쪽 도구의 사유가 통째로
+    사라져 «무엇이 왜»의 절반을 잃는다. 전문은 로그·트레이스에 남는다.
+    """
     failed = [s for s in _of(_steps(state), FAILED) if s.get("tool")]
     return TOOL_FAILED.format(
         what=" · ".join(dict.fromkeys(_failed_label(s["tool"]) for s in failed)),
-        reasons="; ".join(s.get("reason") or "원인 미상" for s in failed))
+        reasons="; ".join(short_reason(s.get("reason")) for s in failed))
 
 
 def _no_evidence(state: AgentState) -> str:
@@ -196,8 +203,11 @@ RAW_EVIDENCE = (
 )
 
 
-def _fault_kinds(faults: list[str]) -> str:
-    """폴백 머리말에 적을 «무엇에 걸렸나» — 걸린 **종류**만이고 값은 떼어낸다.
+def fault_kinds(faults: list[str]) -> str:
+    """직원 화면에 적을 «무엇에 걸렸나» — 걸린 **종류**만이고 값은 떼어낸다.
+
+    폴백 머리말(아래)과 쪽지 미발송 안내(`effects/memo.py`)가 함께 쓴다. `screen()` 이
+    두 곳에서 같은 검사를 하므로 그 결과를 사람이 읽는 말로 바꾸는 자리도 하나다.
 
     사유 문자열은 「종류: 걸린 자리」 꼴인데(`_screen`), 뒷부분에는 **버려진 값이 그대로
     들어 있다**("자료에 없는 수치·상품명: 수치 '1,234,567'"). 그것을 화면에 실으면 §6 이
@@ -908,7 +918,7 @@ def compose(state: AgentState) -> dict[str, Any]:
         parts = [answer] + ([MISSING_NOTICES, *appends] if appends else [])
     else:
         # 생성문을 못 쓰면 근거 원문이 답이다 — 다만 그것이 **답변이 아님을 밝힌다**.
-        parts = [RAW_EVIDENCE.format(reason=_fault_kinds(faults))]
+        parts = [RAW_EVIDENCE.format(reason=fault_kinds(faults))]
         parts += [e["text"] for e in evidence]
 
     # 재료 성격 표시 — 신뢰 등급 · 내부용 주의(§7). 답변이 이미 같은 말을 했으면 겹쳐

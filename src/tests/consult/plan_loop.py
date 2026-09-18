@@ -850,6 +850,21 @@ def check_plan_failure() -> int:
         print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
         ok += hit
 
+        # 사유는 `str(예외)` 그대로라 길이도 줄 수도 예외가 정한다 — 파서·HTTP 응답을 실어
+        # 오는 예외 하나가 답변 칸을 스택트레이스 자리로 만든다(LLM 장애 안내가 프로바이더
+        # 응답 본문으로 그렇게 됐고, 그쪽만 고쳐져 있었다). 도구마다 한 줄로 자른다.
+        long_reason = "JSONDecodeError: " + "x" * 400 + "\n  File \"tools/market.py\", line 91"
+        notice = plan.compose({"question": "q", "evidence": [], "steps": [
+            {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": long_reason},
+            {"tool": "fact", "query": "수수료", "outcome": "failed", "reason": "KeyError: 'as_of'"},
+        ]})["answer"]
+        hit = ("x" * 400 not in notice and "JSONDecodeError" in notice
+               and "tools/market.py" not in notice      # 둘째 줄은 화면에 싣지 않는다
+               and "KeyError: 'as_of'" in notice        # 뒤쪽 도구의 사유는 살아 있다
+               and len(notice) < 400)
+        print(f"{'✓' if hit else '✗'} 도구 고장 사유도 한 줄로 자른다(도구마다 · {len(notice)}자)")
+        ok += hit
+
         # 답이 갈리는 것은 **원장이 끝내 비었을 때**다. LLM 실패 안내와 같은 꼴로 끝나야
         # 한다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 그 자체가 진단을 어렵게 한다.
         notice = plan.compose({"question": "q", "evidence": [], "steps": [

@@ -72,6 +72,10 @@ KEY_INFO_HEADER = "[고객 주요 정보]"
 #: 다시 부탁해야 하는지 다르게 물어야 하는지 알 수 없다.
 NO_MATERIAL = "이번 턴에 쪽지로 옮길 근거가 없어요. 먼저 무엇을 정리할지 물어봐 주세요."
 LLM_DOWN = "쪽지 본문을 쓰지 못했어요 — {reason}."
+#: 여기는 걸린 **자리**를 값까지 적는다 — 화면 답변의 폴백 머리말(`plan.fault_kinds` 는 종류만
+#: 적는다)과 갈리는 지점이고, 그쪽은 뒤에 근거 원문이 따라붙어 사유 줄이 부차적인 반면 이쪽은
+#: 이 한 줄이 전부다. 직원이 다시 부탁할지 다르게 물을지 정하는 근거가 그 값이다
+#: (`tests/consult/memo.py` 가 「1,234」로 못박는다). 바꾸려면 그 결정부터 바꾼다.
 SCREENED = ("쪽지 본문이 근거를 벗어나서 보내지 않았어요. 걸린 자리: {faults}. "
             "한 번 더 부탁하시면 다시 써볼게요.")
 TOO_LONG = "쪽지 본문이 길이 상한({limit:,}자)을 넘어서 보내지 않았어요."
@@ -305,7 +309,9 @@ def draft(state: AgentState, *, recipients: list[str], to: str,
                 prompt + COMPOSE_RETRY_BLOCK.format(faults="\n".join(f"- {f}" for f in faults[:8])),
                 "consult.memo.retry")
     except LLMError as exc:
-        return None, LLM_DOWN.format(reason=f"{type(exc).__name__}: {exc}")
+        # 프로바이더 응답 본문이 통째로 안내에 실리지 않게 한 줄로 자른다(plan.short_reason
+        # 머리말 — 화면 답변 쪽과 같은 규칙이고, 전문은 로그·트레이스에 남는다).
+        return None, LLM_DOWN.format(reason=plan.short_reason(f"{type(exc).__name__}: {exc}"))
 
     parts = [to_html(body)]
     if table:
