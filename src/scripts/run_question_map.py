@@ -110,6 +110,28 @@ def _pins(cell: str) -> list[str]:
     return re.findall(r"\d{6}-\d{7}", cell or "")
 
 
+#: kb-pin → 이름. 대조 행의 답 묶음에 붙이는 이름표가 여기서 나온다. 예전에는 칸의 첫
+#: 낱말(`who.split()[0]`)을 썼는데, 그건 **고객이 몇 명이든 언제나 첫 고객 이름**이라
+#: 세 사람의 답이 전부 「● 송도윤」으로 적혔다(실측). 답 내용은 맞았고 이름표만 틀려서,
+#: 표만 보면 같은 고객에게 세 번 물은 것처럼 읽힌다.
+_NAME_OF = {pin: name for name, pin in QM.PIN.items()}
+
+
+def _llm_down(tr) -> bool:
+    """이번 턴이 **LLM 이 죽어서** 끝났나 (tests/debug/reps.py 와 같은 판정).
+
+    LLM 장애는 그래프 안에서 잡혀 「지금은 답변을 만들 수 없어요」라는 **정상 답변**으로
+    나온다 — 예외가 안 올라오니 실행기는 성공으로 세고, 그 칸은 채워진 것이 되어 다시는
+    안 돌아간다(429 로 죽은 100번이 그렇게 남아 있었다). 답변 글자로 재면 문구가 바뀔 때
+    조용히 놓치므로 트레이스로 잰다.
+    """
+    from tests.debug import trace as TR
+    turn = tr.turns[-1] if getattr(tr, "turns", None) else None
+    if turn is None:
+        return False
+    return any(n.delta.get("llm_error") or n.name == TR.LLM_DOWN_NODE for n in turn.nodes)
+
+
 def _select(ws, idx, args) -> list[int]:
     """돌릴 행 번호(엑셀 행 인덱스)를 고른다."""
     want_rows = {int(x) for x in args.rows.split(",")} if args.rows else None
@@ -251,23 +273,32 @@ def main(argv: list[str]) -> int:
 
         chunks = []
         for cid in pins:
-            label = who.split()[0] if cid and len(pins) > 1 else ""
+            label = _NAME_OF.get(cid, cid or "") if cid and len(pins) > 1 else ""
             tag = f"[{i}/{len(picked)}] {num} {q[:40]}" + (f" ({label})" if label else "")
             print(f"\n▶ {tag}")
             on_progress = None if args.quiet else (lambda line: print(f"    · {line}"))
             try:
-                with session(customer_id=cid, on_progress=on_progress) as (ask, _tr):
+                with session(customer_id=cid, on_progress=on_progress) as (ask, tr):
                     for p in pre:                      # 앞 턴들 — 답은 버린다
                         print(f"    (앞 턴) {p[:40]}")
                         ask(p)
                     res = ask(q)
+                    down = _llm_down(tr)
                 text = _answer_text(res, args)
             except Exception as e:                     # noqa: BLE001 — 한 행이 죽어도 계속
                 failed += 1
                 text = f"{FAILED} {type(e).__name__}: {e}"
                 print(f"    ✗ {text}")
             else:
-                print(f"    ✓ {len(text)}자")
+                # LLM 이 죽은 턴은 **답이 아니다.** 그래프가 예외를 삼키고 안내 문장으로
+                # 돌려주므로 위 except 로는 안 걸린다 — 그대로 두면 채워진 칸이 되어
+                # 다시는 안 돌아간다(429 로 죽은 100번이 그렇게 남아 있었다).
+                if down:
+                    failed += 1
+                    text = f"{FAILED} LLM 다운 — {text}"
+                    print(f"    ✗ LLM 다운으로 끝난 턴 ({len(text)}자)")
+                else:
+                    print(f"    ✓ {len(text)}자")
             chunks.append(f"● {label}\n{text}" if label else text)
             if args.pause:
                 time.sleep(args.pause)
