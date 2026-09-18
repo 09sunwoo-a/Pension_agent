@@ -6,6 +6,8 @@
     python -m scripts.run_question_map --rows 17,54,62         # 번호로 골라서
     python -m scripts.run_question_map --item 세액공제 --full   # 항목으로 · 근거까지 기록
     python -m scripts.run_question_map --new --dry-run         # 무엇을 돌릴지만 본다
+    python -m scripts.run_question_map                         # 아직 안 채운 행 전부
+    python -m scripts.run_question_map --retry-failed          # 실패로 끝난 칸만 다시
 
 **기록하는 것은 답변 본문뿐이다.** 진행 표시(「제도·상품 수치 찾는 중…」)와 근거 목록·
 화면 딥링크는 화면에만 찍고 칸에는 안 넣는다 — 셀 하나가 근거 덤프로 길어지면 표를
@@ -53,6 +55,10 @@ XLSX = QM.XLSX
 #: 표에서 읽는 열. 없으면 그 자리에서 멈춘다 — 열 이름이 바뀐 것을 조용히 넘기면
 #: 엉뚱한 칸에 답을 쓴다.
 COLS = ("항목", "번호", "질문", "실측 답변", "시연", "대상 고객", "선행 질문")
+
+#: 실행이 죽은 칸의 머리말. 이 글로 시작하는 칸은 «채워진 것»으로 세지 않는다 — 그래야
+#: 다음 실행에서 다시 집히고(`--retry-failed`), 성공한 답을 덮어쓰지 않는다.
+FAILED = "[실행 실패]"
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -108,7 +114,14 @@ def _select(ws, idx, args) -> list[int]:
             continue
         if pre_cell.startswith("["):        # 실행 대상이 아닌 행(상황 표기·장애)
             continue
-        if done and not args.redo:
+        # 실패로 끝난 칸은 «채워진» 것이 아니다 — 그냥 두면 건너뛰어져 영영 안 돌고,
+        # `--redo` 로 돌리면 멀쩡한 답까지 다시 친다(429 를 부르는 쪽이다).
+        # 부분 실패도 실패다 — 대조 행은 고객 여럿을 한 칸에 적으므로 한 명만 죽으면
+        # 머리가 아니라 중간에 이 글이 박힌다. startswith 로 재면 그 칸을 영영 못 잡는다.
+        broken = isinstance(done, str) and FAILED in done
+        if args.retry_failed and not broken:
+            continue
+        if done and not broken and not args.redo:
             continue
         picked.append(r)
         if args.limit and len(picked) >= args.limit:
@@ -142,6 +155,8 @@ def main(argv: list[str]) -> int:
     pick.add_argument("--limit", type=int, help="앞에서 N개만")
     pick.add_argument("--redo", action="store_true",
                       help="이미 채워진 칸도 다시 돌려 덮어쓴다 (기본은 건너뛴다)")
+    pick.add_argument("--retry-failed", action="store_true",
+                      help="[실행 실패] 로 끝난 칸만 다시 돌린다")
     rec = ap.add_argument_group("무엇을 칸에 적나 (기본: 답변 본문만)")
     rec.add_argument("--sources", action="store_true", help="근거 목록도 함께")
     rec.add_argument("--links", action="store_true", help="화면 딥링크도 함께")
@@ -198,7 +213,7 @@ def main(argv: list[str]) -> int:
                 text = _answer_text(res, args)
             except Exception as e:                     # noqa: BLE001 — 한 행이 죽어도 계속
                 failed += 1
-                text = f"[실행 실패] {type(e).__name__}: {e}"
+                text = f"{FAILED} {type(e).__name__}: {e}"
                 print(f"    ✗ {text}")
             else:
                 print(f"    ✓ {len(text)}자")
