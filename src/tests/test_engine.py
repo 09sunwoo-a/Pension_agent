@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import re
 import sys
 
@@ -328,8 +329,17 @@ if _tax:
 check(not any(("assets.json" in n or "customer_facing" in n)
               for p in PERSONAS for n in FACTS[p.nm]["needs_confirm"]),
       "확인 필요 목록에 저작자용 문장(assets.json·customer_facing)이 없다")
-check(any("총급여 구간 미확인" in n for n in FACTS["한지우"]["needs_confirm"]),
-      "한지우: 소득 구간 미확인이 확인 항목으로 노출")
+# 소득 구간은 **양쪽을 다 재야 한다.** 예전에는 12명 전원이 미확인이라(원본 xlsx 에 총급여
+# 컬럼이 없었다) 한 명을 집어 «노출된다»만 재면 됐는데, 2026-09-18 에 총급여를 부여하면서
+# 전원이 확인 상태가 됐다. 그 한 줄만 고치면 «미확인일 때 노출된다»는 검사가 통째로
+# 사라진다 — 실데이터에는 이 컬럼이 없을 수 있고, 그때 조용히 안 띄우면 직원은 공제율이
+# 13.2% 로 떨어진 줄 모른다. 그래서 확인된 고객으로 «안 띄운다»를, 지운 고객으로
+# «띄운다»를 각각 잰다.
+check(not any("총급여 구간 미확인" in n for n in FACTS["한지우"]["needs_confirm"]),
+      "한지우: 소득 구간이 확인되면 확인 항목에 안 올린다")
+_no_income = dataclasses.replace(BY_NAME["한지우"], income_bracket=None)
+check(any("총급여 구간 미확인" in n for n in engine.prepare(_no_income)["needs_confirm"]),
+      "소득 구간이 미확인이면 확인 항목으로 노출된다")
 
 # 결함 5 재현 — 위험자산 70% 한도 (박지민 실적배당 75%).
 check("lim" in conditions(BY_NAME["박지민"]), "박지민: 위험자산 한도 초과 판정(75%)")
