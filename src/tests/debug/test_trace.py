@@ -36,6 +36,9 @@ from tests.debug import script, trace as TR
 from tests.debug.__main__ import main
 from tests.debug.runner import run
 
+#: 폴백 머리말의 고정 문구 앞부분 — 문구를 테스트에 베껴 적으면 한쪽만 고쳐진다.
+_RAW_HEAD = P.RAW_EVIDENCE.split("{", 1)[0]
+
 #: 계측 전 원본. 검사 8(복원)이 이것과 대조한다 — import 시점에 잡아둬야 의미가 있다.
 _ORIGINALS = {"answer": G.answer, "verify_texts": P.verify_texts,
               "relations": P.relations, "span": P._span_verdict,
@@ -94,9 +97,16 @@ check("span" not in gates,
       "asserts_wrong: 앞에서 끊겨 원문 스팬 검사는 실행조차 되지 않는다", str(sorted(gates)))
 
 draft = tr.draft()
-check(r["answer"].startswith("■") and draft and draft not in r["answer"],
+# 폴백은 «답변이 아님»을 한 줄로 밝히고 그 뒤에 근거 원문을 세운다(plan.RAW_EVIDENCE) —
+# 그 머리말이 없으면 직원은 카드 덤프를 답변으로 읽는다.
+check(r["answer"].startswith(_RAW_HEAD) and "■" in r["answer"]
+      and draft and draft not in r["answer"],
       "asserts_wrong: 화면에 나간 것은 생성문이 아니라 근거 원문이다(말투가 달라지는 자리)",
       r["answer"][:40])
+_head = r["answer"].split("\n\n", 1)[0]
+check("틀린 표현" in _head and "5,500만원 이상 13.2%" not in _head,
+      "asserts_wrong: 폴백이 걸린 «종류»는 밝히고 버려진 값은 화면에 싣지 않는다",
+      _head)
 check((tr.node(TR.ANSWER_NODE) or types.SimpleNamespace(note="")).note.startswith("폴백"),
       "asserts_wrong: 처분이 '폴백' 으로 기록된다")
 
@@ -129,7 +139,8 @@ gates3 = tr3.gates()
 check(tr3.blocked_by() == "verify_texts" and "relations" not in gates3,
       "out_of_ledger: 원장 밖 수치에서 끊기고 relations 는 실행되지 않는다",
       str(sorted(gates3)))
-check(r3["answer"].startswith("■"), "out_of_ledger: 역시 근거 원문 폴백", r3["answer"][:30])
+check(r3["answer"].startswith(_RAW_HEAD) and "■" in r3["answer"],
+      "out_of_ledger: 역시 근거 원문 폴백", r3["answer"][:30])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -141,14 +152,14 @@ check(r3["answer"].startswith("■"), "out_of_ledger: 역시 근거 원문 폴�
 # 읽게 되면서 통과한다. **표기는 통과시키되 값은 여전히 따진다**는 것까지 함께 고정한다.
 
 r5, tr5 = _run("korean_units")
-check(tr5.blocked_by() is None and not r5["answer"].startswith("■"),
+check(tr5.blocked_by() is None and not r5["answer"].startswith(_RAW_HEAD),
       "korean_units: 만·천으로 끊어 쓴 금액이 더는 '원장 밖 수치' 로 걸리지 않는다",
       str(tr5.gates().get("verify_texts")))
 check("148만 5천원" in r5["answer"] and "2026년 6월" in r5["answer"],
       "korean_units: 직원이 말하는 표기 그대로 화면에 나간다", r5["answer"][:40])
 
 r6, tr6 = _run("korean_units_wrong")
-check(tr6.blocked_by() == "verify_texts" and r6["answer"].startswith("■"),
+check(tr6.blocked_by() == "verify_texts" and r6["answer"].startswith(_RAW_HEAD),
       "korean_units_wrong: 같은 표기라도 값이 틀리면 여전히 폐기된다",
       str(tr6.gates().get("verify_texts")))
 
@@ -168,7 +179,8 @@ check({"1485000", "148.5", "1188000", V._dform("2026", "06")} <= V.numbers(_ledg
 # ─────────────────────────────────────────────────────────────
 
 r4, tr4 = _run("llm_dead")
-check(r4["answer"].startswith("지금은 답변을 만들 수 없어요") and not r4["answer"].startswith("■"),
+check(r4["answer"].startswith(P.LLM_FAILED.split("{", 1)[0])
+      and not r4["answer"].startswith(_RAW_HEAD) and "■" not in r4["answer"],
       "llm_dead: 근거 원문을 대신 내보내지 않고 실패를 실패라고 답한다", r4["answer"][:40])
 check(tr4.gates() == {}, "llm_dead: 게이트는 하나도 실행되지 않는다", str(tr4.gates()))
 

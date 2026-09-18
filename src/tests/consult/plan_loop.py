@@ -496,8 +496,14 @@ def check_tool_loop() -> int:
         blocks = [e["text"] for e in state["evidence"]]
         plan.generate = lambda prompt, **kw: "한도는 1,234,567원이에요."
         out_bad = plan.compose(state)
-        hit = "1,234,567" not in out_bad["answer"] and all(b in out_bad["answer"] for b in blocks)
-        print(f"{'✓' if hit else '✗'} 원장 밖 수치 → 생성문 폐기 · 근거 원문으로 답변")
+        hit = ("1,234,567" not in out_bad["answer"]
+               and all(b in out_bad["answer"] for b in blocks)
+               # 폴백은 «내가 쓴 문장이 아니다»를 먼저 밝히고 걸린 사유를 함께 남긴다 —
+               # 밝히지 않으면 직원은 카드 덤프를 답변으로 읽는다(§6 이 재생성을 첫 수로
+               # 만든 이유가 그것이고, 재생성 뒤에 남는 폴백에는 그대로였다).
+               and out_bad["answer"].startswith(plan.RAW_EVIDENCE.split("{", 1)[0])
+               and "수치" in out_bad["answer"].split("\n\n", 1)[0])
+        print(f"{'✓' if hit else '✗'} 원장 밖 수치 → 생성문 폐기 · 근거 원문으로 답변(사유 표기 포함)")
         ok += hit
 
         # ④ 상한은 코드가 정한다 — LLM 이 계속 도구를 불러도 MAX_STEPS 에서 끊긴다.
@@ -997,7 +1003,8 @@ def check_compose_retry() -> int:
     finally:
         plan.generate = orig
     hit = (len(tries) == plan.COMPOSE_RETRIES + 1
-           and answer.startswith(evidence[0]["text"]) and "1,234" not in answer)
+           and answer.startswith(plan.RAW_EVIDENCE.split("{", 1)[0])
+           and evidence[0]["text"] in answer and "1,234만" not in answer)
     print(f"{'✓' if hit else '✗'} 계속 걸리면 상한에서 멈추고 근거 원문이 답이다({len(tries)}회)")
     ok += hit
 

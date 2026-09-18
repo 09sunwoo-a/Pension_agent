@@ -225,6 +225,34 @@ def check_product_advice() -> int:
     print(f"{'✓' if hit else '✗'} 등록 상품이어도 이번 턴 원장에 없으면 못 쓴다")
     ok += hit
 
+    # **원장이 등록부보다 짧게 적는 자리 — 표의 행 라벨.** TDF 매트릭스는 시리즈를
+    # 「| KB 온국민 | 36.6% | … |」로 적고 등록부는 「KB 온국민 TDF 시리즈」로 갖고 있다.
+    # 통째 포함만 보던 동안 그 표를 근거로 쓴 답변은 **등록된 이름을 정확히 말해도** 폐기됐고
+    # (허용 집합이 비어 「게이트 미통과」로 찍힌다), compose 가 근거 원문을 덤프했다
+    # (2026-09-18 실측 — 「키움키워드림적격TDF 자세히 설명」이 표 원문 1,700자로 답해졌다).
+    row_ledger = ["■ TDF 포트폴리오",
+                  "| 출생연도 | 1960년 | 1970년 |",
+                  "| **T D F** | 2020 | 2030 |",
+                  "| KB 온국민 | 36.6% | 54.1% |"]
+    hit = _PROD.findall(row_ledger[-1]) == ["KB 온국민"]
+    print(f"{'✓' if hit else '✗'} 표 칸 구분자에서 이름이 끊긴다(행 라벨이 값까지 삼키지 않는다)")
+    ok += hit
+
+    hit = verify_texts("KB 온국민 TDF 시리즈는 표에 실려 있어요.", row_ledger,
+                       known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 원장이 행 라벨로만 적은 시리즈를 등록명으로 말해도 통과한다")
+    ok += hit
+
+    hit = verify_texts("KB 온국민 TDF2030 은 54.1% 예요.", row_ledger, known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 그 시리즈의 빈티지 표기도 통과한다(§6 이름 표기 접두 대조)")
+    ok += hit
+
+    # 넓힌 폭은 «등록부와 접두로 맞는 원장 표기» 하나다 — 원장에 있다고 다 되는 것이 아니다.
+    hit = not verify_texts("KB 무지개 안심펀드도 표에 있어요.", row_ledger,
+                           known_products=known)[0]
+    print(f"{'✓' if hit else '✗'} 등록부 밖 이름은 원장 표에 있어도 거부된다")
+    ok += hit
+
     # 괄호 표기가 판정을 뒤집으면 안 된다 — 등록명이 "KB 정기예금(1년)"인데 `_PROD` 가
     # 괄호에서 이름을 끊으므로 LLM 은 "KB 정기예금 1년"으로 풀어 쓸 수밖에 없다. 공백만
     # 지우던 동안 두 표기가 다른 키가 되어, suitable 재료의 8종을 정확히 옮긴 답변이
