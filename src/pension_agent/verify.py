@@ -39,7 +39,10 @@ _NUM = re.compile(r"\d(?:[\d,]*\d)?(?:\.\d+)?%?")
 #
 # `KB` 뒤의 공백은 그대로 요구한다. 없애면 "KB국민은행"·"KB자산운용" 같은 기관명이
 # 상품명 후보가 되고, 그건 맞는 문장을 거부하는 쪽의 사고다.
-_PROD_STOP = r"[^\s,·()\[\]{}<>*`\"'“”‘’\n]"
+# 표 칸 구분자(`|`)도 경계다. 원장의 표는 행 라벨을 「| KB 온국민 | 36.6% | …」로 적어서,
+# 경계에 없으면 이름이 「KB 온국민 | 36.6% | 38.2%」로 잡히고 그 키는 등록부의 어느 이름과도
+# 맞지 않는다 — 원장이 말한 상품을 «원장이 말하지 않았다»고 읽는다(`_cited`).
+_PROD_STOP = r"[^\s,·()\[\]{}<>*`|\"'“”‘’\n]"
 _PROD = re.compile(rf"KB\s{_PROD_STOP}+(?:\s{_PROD_STOP}+){{0,3}}")
 
 #: 상품명 대조용 정규형. **표기의 공백이 판정을 뒤집으면 안 된다** — 지식베이스는
@@ -499,9 +502,41 @@ def verify_texts(
     nums, _ = allowed_from_texts(texts)
     for text in echoable:
         nums |= numbers(text)
-    blob = _prod_key("\n".join(texts))      # 상품명의 재료는 원장뿐이다(위 머리말)
+    return _judge(sentence, nums, _cited(texts, known_products), known_products)
+
+
+def _cited(texts: Iterable[str], known_products: set[str]) -> set[str]:
+    """이번 턴 원장이 **말한** 등록 상품 — 답변이 이름을 써도 되는 집합.
+
+    기본은 통째 포함이다(등록명이 원장에 그대로 실린다). 그런데 **원장이 등록부보다 짧게
+    적는 자리가 있다 — 표의 행 라벨**이다. TDF 매트릭스는 시리즈를 「KB 온국민」·
+    「KB 다이나믹」으로 적고, 등록부는 같은 것을 「KB 온국민 TDF 시리즈」·
+    「KB다이나믹적격TDF2030」으로 갖고 있다. 통째 포함만 보면 그 표를 근거로 쓴 답변은
+    **등록된 이름을 정확히 말해도** 허용 집합이 비어 있어 폐기되고(사유는 «게이트 미통과»로
+    찍힌다), compose 는 근거 원문을 덤프한다 — 2026-09-18 실측: 「키움키워드림적격TDF 자세히
+    설명」이 TDF 표 원문 1,700자로 답해졌다. §6 「이름 표기가 판정을 뒤집으면 안 된다」를
+    답변 쪽에서 접두 대조로 지키고 있었는데, **원장 쪽에 같은 장치가 없었다.**
+
+    그래서 원장에서 긁은 「KB ○○」 후보 중 **등록부와 접두로 맞는 것**을 허용 집합에 더한다.
+    넓히는 폭은 그 하나다:
+
+    · 등록부 밖 이름은 그대로 막힌다 — 지어낸 이름이 원장에 있다고 통과하지 않는다
+      (위 머리말의 순환을 되살리지 않는 것이 이 조건이다).
+    · 대가는 **같은 시리즈의 다른 빈티지**다. 원장이 「KB 온국민」이라 적으면 등록부의
+      「KB온국민적격TDF2055(UH)」도 접두로 맞아 답변이 그 이름을 쓸 수 있다. 시리즈를
+      가리킨 원장이 그 시리즈 상품을 언급할 자리를 연 것이고, 그 상품에 대한 **주장**은
+      여전히 수치 검사가 원장에 대고 잰다. 옳은 답변을 거부하는 쪽으로 실패하지 않는 것이
+      더 중요하다(§6).
+    """
+    ledger = "\n".join(texts)
+    blob = _prod_key(ledger)                # 상품명의 재료는 원장뿐이다(위 머리말)
     cited = {p for p in known_products if p and _prod_key(p) in blob}
-    return _judge(sentence, nums, cited, known_products)
+    keys = [_prod_key(p) for p in known_products if p]
+    for cand in (m.strip().rstrip(".!?。") for m in _PROD.findall(ledger)):
+        key = _prod_key(cand)
+        if key and any(k.startswith(key) or key.startswith(k) for k in keys):
+            cited.add(cand)
+    return cited
 
 
 def _judge(

@@ -205,6 +205,44 @@ def check_miss_recovery() -> int:
     return ok
 
 
+def check_no_material_tone() -> int:
+    """**재료가 없는 턴도 말투가 공손한가**(§5 「없다고 답하는 턴도 말투는 그대로 공손하다」).
+
+    회귀 대상: 지식베이스에 없는 예측 질문(「이 고객 재취업 할 것 같아?」)에 「그 자료는
+    없어요.」 한 줄이 나갔다 — 사실은 맞고 말투가 틀린 답이다. 재료가 없는 턴에만 문장이
+    딱딱해지면 직원에게는 «못 찾을 때만 에이전트가 무례해지는» 것으로 읽힌다.
+
+    재는 자리가 둘인 이유는 «없다»가 두 곳에서 나오기 때문이다 — 원장이 끝내 빈 턴에 코드가
+    내보내는 안내문(`NO_EVIDENCE`)과, 재료는 있는데 질문의 핵심 대상만 없는 턴에 LLM 이 쓰는
+    문장이다. 뒤엣것은 **프롬프트의 예시 문구가 그대로 베껴져** 나온 것이라, 문구를 고쳤는지가
+    아니라 그 예시가 지워졌는지를 재야 한다 — 코드 쪽만 고치고 프롬프트를 두면 증상이 남는다.
+
+    바꾸지 않은 것도 함께 잰다: 없다고 말하면서 **무엇을 갖고 있는지** 알려주는 것은 §5 의
+    요건이라, 공손하게 고치다가 안내가 짧아지면 그것도 회귀다.
+    """
+    from pension_agent.consult_agent.prompts import COMPOSE_MISSING_BLOCK, COMPOSE_SYSTEM
+
+    ok = 0
+    hit = "죄송" in plan.NO_EVIDENCE and plan.NO_EVIDENCE.rstrip().endswith("어요.")
+    print(f"{'✓' if hit else '✗'} '근거 없음' 안내문이 답변과 같은 공손한 해요체다")
+    ok += hit
+
+    hit = "제가 가진 자료는" in plan.NO_EVIDENCE and "브리핑 화면" in plan.NO_EVIDENCE
+    print(f"{'✓' if hit else '✗'} 그러면서 무엇을 갖고 있는지는 그대로 알려준다")
+    ok += hit
+
+    # 옛 예시 문구가 «이렇게 답하라»로 서 있으면 LLM 이 그대로 베낀다. 금지 예시로
+    # 인용하는 것은 남아 있어도 된다 — 재는 것은 지시문 쪽이다.
+    hit = '"그 자료는 없어요"라고 답한다' not in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 프롬프트가 「그 자료는 없어요」를 답변 예시로 들지 않는다")
+    ok += hit
+
+    hit = "공손" in COMPOSE_SYSTEM and "공손" in COMPOSE_MISSING_BLOCK
+    print(f"{'✓' if hit else '✗'} 자료가 없는 턴의 말투를 작성 프롬프트가 지시한다(둘 다)")
+    ok += hit
+    return ok
+
+
 def check_replan_on_empty() -> int:
     """근거 0건인 채 계획이 끝나려 하면 **한 번은 다시 계획하는가**(§5).
 
@@ -458,8 +496,14 @@ def check_tool_loop() -> int:
         blocks = [e["text"] for e in state["evidence"]]
         plan.generate = lambda prompt, **kw: "한도는 1,234,567원이에요."
         out_bad = plan.compose(state)
-        hit = "1,234,567" not in out_bad["answer"] and all(b in out_bad["answer"] for b in blocks)
-        print(f"{'✓' if hit else '✗'} 원장 밖 수치 → 생성문 폐기 · 근거 원문으로 답변")
+        hit = ("1,234,567" not in out_bad["answer"]
+               and all(b in out_bad["answer"] for b in blocks)
+               # 폴백은 «내가 쓴 문장이 아니다»를 먼저 밝히고 걸린 사유를 함께 남긴다 —
+               # 밝히지 않으면 직원은 카드 덤프를 답변으로 읽는다(§6 이 재생성을 첫 수로
+               # 만든 이유가 그것이고, 재생성 뒤에 남는 폴백에는 그대로였다).
+               and out_bad["answer"].startswith(plan.RAW_EVIDENCE.split("{", 1)[0])
+               and "수치" in out_bad["answer"].split("\n\n", 1)[0])
+        print(f"{'✓' if hit else '✗'} 원장 밖 수치 → 생성문 폐기 · 근거 원문으로 답변(사유 표기 포함)")
         ok += hit
 
         # ④ 상한은 코드가 정한다 — LLM 이 계속 도구를 불러도 MAX_STEPS 에서 끊긴다.
@@ -806,6 +850,21 @@ def check_plan_failure() -> int:
         print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
         ok += hit
 
+        # 사유는 `str(예외)` 그대로라 길이도 줄 수도 예외가 정한다 — 파서·HTTP 응답을 실어
+        # 오는 예외 하나가 답변 칸을 스택트레이스 자리로 만든다(LLM 장애 안내가 프로바이더
+        # 응답 본문으로 그렇게 됐고, 그쪽만 고쳐져 있었다). 도구마다 한 줄로 자른다.
+        long_reason = "JSONDecodeError: " + "x" * 400 + "\n  File \"tools/market.py\", line 91"
+        notice = plan.compose({"question": "q", "evidence": [], "steps": [
+            {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": long_reason},
+            {"tool": "fact", "query": "수수료", "outcome": "failed", "reason": "KeyError: 'as_of'"},
+        ]})["answer"]
+        hit = ("x" * 400 not in notice and "JSONDecodeError" in notice
+               and "tools/market.py" not in notice      # 둘째 줄은 화면에 싣지 않는다
+               and "KeyError: 'as_of'" in notice        # 뒤쪽 도구의 사유는 살아 있다
+               and len(notice) < 400)
+        print(f"{'✓' if hit else '✗'} 도구 고장 사유도 한 줄로 자른다(도구마다 · {len(notice)}자)")
+        ok += hit
+
         # 답이 갈리는 것은 **원장이 끝내 비었을 때**다. LLM 실패 안내와 같은 꼴로 끝나야
         # 한다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 그 자체가 진단을 어렵게 한다.
         notice = plan.compose({"question": "q", "evidence": [], "steps": [
@@ -959,7 +1018,8 @@ def check_compose_retry() -> int:
     finally:
         plan.generate = orig
     hit = (len(tries) == plan.COMPOSE_RETRIES + 1
-           and answer.startswith(evidence[0]["text"]) and "1,234" not in answer)
+           and answer.startswith(plan.RAW_EVIDENCE.split("{", 1)[0])
+           and evidence[0]["text"] in answer and "1,234만" not in answer)
     print(f"{'✓' if hit else '✗'} 계속 걸리면 상한에서 멈추고 근거 원문이 답이다({len(tries)}회)")
     ok += hit
 
