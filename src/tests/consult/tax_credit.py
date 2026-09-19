@@ -79,6 +79,28 @@ def check_tax_credit_calc() -> int:
     print(f"{'✓' if hit else '✗'} 총급여 구간 미확인이면 두 공제율을 다 싣는다")
     ok += hit
 
+    # 직원이 이번 턴에 말한 구간이 **원장을 이긴다.** 원장 구간만 싣도록 고친 직후 실측에서
+    # 깨졌다 — 원장이 5500이하인 고객에게 「초과야」라고 답하자 13.2% 가 재료에 없어
+    # 「그 구간의 공제율 자료는 준비된 자료가 없어요」로 끝났다(§5).
+    other_key = next(k for k in CUST.TAX_CREDIT_RATE if k != room.income_bracket)
+    word = "초과야" if other_key == "5500초과" else "5,500 이하야"
+    ev3 = tools.TOOLS["tax_credit"].run(
+        {"customer_id": room.id, "question": f"(총급여 구간 되묻기 뒤) {word}",
+         "history": [{"pending_clarify": True}]}, "q")
+    hit = (ev3 is not None
+           and f"{CUST.TAX_CREDIT_RATE[other_key] * 100:.1f}%" in ev3["text"]
+           and f"{mine * 100:.1f}%" not in ev3["text"])
+    print(f"{'✓' if hit else '✗'} 직원이 말한 구간이 원장 구간을 이긴다")
+    ok += hit
+
+    # 다만 **되묻기 뒤가 아닌 턴**에서 낱말만으로 읽지는 않는다 — 「위험자산 한도 초과」가
+    # 총급여 구간으로 읽히면 엉뚱한 공제율이 나간다.
+    ev4 = tools.TOOLS["tax_credit"].run(
+        {"customer_id": room.id, "question": "위험자산 한도 초과라는데 300만원 더 넣으면?"}, "q")
+    hit = ev4 is not None and f"{mine * 100:.1f}%" in ev4["text"]
+    print(f"{'✓' if hit else '✗'} 되묻기 뒤가 아니면 「초과」를 구간으로 읽지 않는다")
+    ok += hit
+
     # ③ 한도를 채운 고객은 다른 갈래로 가고, 그 갈래에는 결정세액 단서가 없다.
     done = tools.TOOLS["tax_credit"].run(
         {"customer_id": full.id, "question": "500만원 더 넣으면 얼마 받아?"}, "q")

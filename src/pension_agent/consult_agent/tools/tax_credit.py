@@ -34,6 +34,11 @@ from pension_agent.consult_agent.evidence.record import Evidence, _ev, _scope
 # 원장이 아는 값을 모른다고 적는 것은 §3 의 「같은 판정을 두 번 구현하지 않는다」가
 # 경계하는 자리다 — 브리핑은 그 구간으로 계산하는데 계산기만 갈래로 두고 있었다.
 # 값이 있으면 그 값이 답이고, 없으면 예전처럼 둘 다 싣는다(실데이터에는 없을 수 있다).
+# **직원이 이번 턴에 말했으면 그것이 원장을 이긴다**(`_said_bracket`) — 원장은 어제 내려받은
+# 스냅샷이고 직원은 지금 단말을 보고 있다. 원장 구간만 싣도록 고친 직후 실측에서 그게
+# 났다: 원장이 5500이하인 고객에게 직원이 「초과야」라고 답하자 13.2% 가 재료에 없어
+# 「그 구간의 공제율 자료는 준비된 자료가 없어요」로 끝났다(§5 「원래 질문과 고른 갈래를
+# 합쳐 답한다」가 재료 쪽에서 깨진 것이다).
 #
 # ━━ «어디에 넣는 금액인가»를 재료가 적는다 ━━
 # "300만원 더 넣으면 얼마 돌려받아?" 의 300만원은 어느 계좌에 넣는 돈인지가 **질문에**
@@ -167,18 +172,19 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
     else:
         lines.append(f"· 공제 대상 {_won(min(paid, cap))} → {_won(min(target, cap))} "
                      f"(잔여한도 {_won(room)}까지)")
-        rates = _rates(p)
+        rates = _rates(p, state)
         for when, rate in rates:
             now, after = CUST.tax_credit(paid, rate), CUST.tax_credit(target, rate)
             lines.append(f"· {when}({rate * 100:.1f}%): 환급 예상 {now:,}원 → {after:,}원 "
                          f"(늘어나는 금액 {after - now:,}원)")
-        lines.append("· 공제율은 **원장의 총급여 구간**에서 나온 값이다 — 되물을 것이 없다"
+        src = "직원이 이번 턴에 말한" if _said_bracket(state) else "원장의"
+        lines.append(f"· 공제율은 **{src} 총급여 구간**에서 나온 값이다 — 되물을 것이 없다"
                      if len(rates) == 1 else
                      "· 이 고객의 총급여 구간은 원장에 없어 두 경우를 다 실었다 — "
                      "어느 구간인지 확인하면 하나로 좁혀진다")
 
     if isa_used:
-        lines += _isa_rollover_lines(p, said)
+        lines += _isa_rollover_lines(p, said, state)
         cards.append(isa_card)
     if gain > 0 or isa_used:
         # 환급 «금액»을 단정하는 갈래에만 붙는다(§7). 두 축이 다 나와도 단서는 하나다 —
@@ -207,16 +213,44 @@ def _isa_convertible(isa: dict) -> bool:
 _BRACKET_LABEL = {"5500이하": "총급여 5,500만원 이하", "5500초과": "총급여 5,500만원 초과"}
 
 
-def _rates(p) -> list[tuple[str, float]]:
-    """이 고객에게 실을 (구간 라벨, 공제율). 원장이 구간을 알면 **하나만** 낸다(머리말)."""
+def _said_bracket(state: AgentState) -> str | None:
+    """직원이 **이번 턴에 말한** 총급여 구간. 원장보다 이것이 이긴다.
+
+    원장 값은 어제 내려받은 스냅샷이고 직원은 지금 단말을 보고 있다 — 「초과야」라고
+    말했는데 원장 구간으로 답하면 직원의 말을 무시하는 것이다(§5 「원래 질문과 고른
+    갈래를 합쳐 답한다」). 구간을 원장에서 읽게 고친 뒤 실측에서 그게 났다: 원장이
+    5500이하인 고객에게 직원이 「초과야」라고 답하자 13.2% 가 재료에 없어 「총급여
+    5,500만원 초과 구간의 공제율 자료는 준비된 자료가 없어요」로 끝났다.
+
+    **되묻기 다음 턴에서만 낱말로 읽는다.** 평소 턴에서 「초과」·「이하」를 주워 읽으면
+    「위험자산 한도 초과라는데」 같은 다른 축의 말이 구간으로 읽힌다 — 직전 턴이
+    되묻기였는지는 코드가 아는 값이다(`pending_clarify`, `_extra_paid` 와 같은 신호).
+    그 턴이 아니면 총급여·소득이라는 말이 함께 있을 때만 읽는다.
+    """
+    q = state.get("question") or ""
+    history = state.get("history") or []
+    after_clarify = bool(history and (history[-1] or {}).get("pending_clarify"))
+    if not (after_clarify or any(w in q for w in ("총급여", "소득"))):
+        return None
+    if "초과" in q:
+        return "5500초과"
+    if "이하" in q or "미만" in q:
+        return "5500이하"
+    return None
+
+
+def _rates(p, state: AgentState | None = None) -> list[tuple[str, float]]:
+    """이 고객에게 실을 (구간 라벨, 공제율). 직원이 말했으면 그것, 아니면 원장, 둘 다
+    없으면 두 구간을 다 낸다(머리말)."""
     from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
 
-    if p.income_bracket in _BRACKET_LABEL:
-        return [(_BRACKET_LABEL[p.income_bracket], CUST.TAX_CREDIT_RATE[p.income_bracket])]
+    key = (_said_bracket(state) if state is not None else None) or p.income_bracket
+    if key in _BRACKET_LABEL:
+        return [(_BRACKET_LABEL[key], CUST.TAX_CREDIT_RATE[key])]
     return [(lab, CUST.TAX_CREDIT_RATE[k]) for k, lab in _BRACKET_LABEL.items()]
 
 
-def _isa_rollover_lines(p, said: tuple | None) -> list[str]:
+def _isa_rollover_lines(p, said: tuple | None, state: AgentState) -> list[str]:
     """ISA 만기자금 전환 축의 재료. 위 계산과 **더해지는** 몫이라 블록을 갈라 싣는다."""
     from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
 
@@ -263,7 +297,7 @@ def _isa_rollover_lines(p, said: tuple | None) -> list[str]:
     add_room = CUST.isa_rollover_credit(conv)
     lines.append(f"· 계산에 쓴 전환액 {_won(conv)} → 추가 공제 대상 {_won(add_room)}"
                  + ("" if said else " (질문에 금액이 없어 만기금액 전부로 계산했다)"))
-    for label, rate in _rates(p):
+    for label, rate in _rates(p, state):
         lines.append(f"· {label}({rate * 100:.1f}%): 이 전환으로 늘어나는 환급 "
                      f"{CUST.tax_credit(add_room, rate):,}원")
     lines.append("· 이 금액은 위의 «현금을 더 납입하는 경우»와 별개로 더해지는 몫이다 — "
