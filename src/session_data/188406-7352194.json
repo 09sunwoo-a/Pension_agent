@@ -41,6 +41,52 @@
         }
       ],
       "outcome": null
+    },
+    {
+      "session_id": "correction-log",
+      "started_at": "2026-09-20T07:16:10.398582+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "role": "correction",
+          "text": "평가금액은 시스템이 계산한 값이므로 대화로 변경할 수 없습니다.",
+          "tool_calls": [
+            {
+              "name": "correction",
+              "args": {
+                "field_path": "not_editable",
+                "before": null,
+                "after": null,
+                "status": "rejected_not_editable"
+              },
+              "result": {
+                "status": "rejected_not_editable"
+              }
+            }
+          ],
+          "ts": "2026-09-20T07:16:10.398582+00:00"
+        },
+        {
+          "role": "correction",
+          "text": "요청하신 문구에 '적극적으로'라는 표현은 현재 AI 브리핑 화면의 문장에 포함되어 있지 않아 수정할 수 없습니다.",
+          "tool_calls": [
+            {
+              "name": "correction",
+              "args": {
+                "field_path": "not_editable",
+                "before": null,
+                "after": null,
+                "status": "rejected_not_editable"
+              },
+              "result": {
+                "status": "rejected_not_editable"
+              }
+            }
+          ],
+          "ts": "2026-09-20T07:16:19.356119+00:00"
+        }
+      ],
+      "outcome": null
     }
   ]
 }
