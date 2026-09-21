@@ -192,15 +192,16 @@ def check_miss_recovery() -> int:
     print(f"{'✓' if hit else '✗'} 질의가 원문과 같으면 헛되이 두 번 부르지 않는다")
     ok += hit
 
-    # ③ '없다'가 무엇을 찾아봤는지 말한다.
+    # ③ '없다'는 없다고만 말한다 — 찾아본 내역(계획 LLM 이 만든 질의)을 화면에 싣지 않는다
+    #    (2026-09-21 행내 실측, 질문 리스트 13번). 그 기록은 steps·트레이스에 남는다.
     answer = P._no_evidence({"steps": [{"tool": "procedure",
                                     "query": "운용현황 조회 화면번호", "outcome": "miss"}]})
-    hit = "찾아본 곳" in answer and "운용현황 조회 화면번호" in answer
-    print(f"{'✓' if hit else '✗'} '근거 없음'이 무엇을 어떤 말로 찾아봤는지 밝힌다")
+    hit = answer == P.NO_EVIDENCE and "운용현황 조회 화면번호" not in answer
+    print(f"{'✓' if hit else '✗'} '근거 없음'이 찾아본 질의를 화면에 싣지 않는다")
     ok += hit
 
     hit = P._no_evidence({}) == P.NO_EVIDENCE
-    print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴에는 빈 '찾아본 곳'을 붙이지 않는다")
+    print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴도 같은 한 문장이다")
     ok += hit
     return ok
 
@@ -217,18 +218,21 @@ def check_no_material_tone() -> int:
     문장이다. 뒤엣것은 **프롬프트의 예시 문구가 그대로 베껴져** 나온 것이라, 문구를 고쳤는지가
     아니라 그 예시가 지워졌는지를 재야 한다 — 코드 쪽만 고치고 프롬프트를 두면 증상이 남는다.
 
-    바꾸지 않은 것도 함께 잰다: 없다고 말하면서 **무엇을 갖고 있는지** 알려주는 것은 §5 의
-    요건이라, 공손하게 고치다가 안내가 짧아지면 그것도 회귀다.
+    안내문의 **내용은 «없다» 하나다**(2026-09-21 — §5 「못 찾았으면 없다고만 말한다」). 그 전에는
+    가진 재료 종류를 나열하고 «지식베이스»라는 말을 썼는데, 행내 실측(질문 리스트 13번)에서
+    직원에게 생소한 개발 용어이고 물은 것과 무관한 나열이라는 지적을 받았다. 되살아나지
+    않게 함께 잰다.
     """
     from pension_agent.consult_agent.prompts import COMPOSE_MISSING_BLOCK, COMPOSE_SYSTEM
 
     ok = 0
-    hit = "죄송" in plan.NO_EVIDENCE and plan.NO_EVIDENCE.rstrip().endswith("어요.")
+    hit = "죄송" in plan.NO_EVIDENCE and plan.NO_EVIDENCE.rstrip().endswith("요.")
     print(f"{'✓' if hit else '✗'} '근거 없음' 안내문이 답변과 같은 공손한 해요체다")
     ok += hit
 
-    hit = "제가 가진 자료는" in plan.NO_EVIDENCE and "브리핑 화면" in plan.NO_EVIDENCE
-    print(f"{'✓' if hit else '✗'} 그러면서 무엇을 갖고 있는지는 그대로 알려준다")
+    hit = (plan.NO_EVIDENCE.count(".") == 1
+           and not any(w in plan.NO_EVIDENCE for w in ("지식베이스", "화법·", "찾아본 곳", "다시 물어")))
+    print(f"{'✓' if hit else '✗'} 안내문은 한 문장이고 개발 용어·재료 나열·찾아본 곳·되묻기 안내가 없다")
     ok += hit
 
     # 옛 예시 문구가 «이렇게 답하라»로 서 있으면 LLM 이 그대로 베낀다. 금지 예시로
@@ -841,25 +845,19 @@ def check_plan_failure() -> int:
         print(f"{'✓' if hit else '✗'} 죽은 도구는 이번 턴 카탈로그에서 빠진다")
         ok += hit
 
-        # 죽은 호출은 '찾아본 곳'에도 서지 않는다 — 지식베이스를 보지도 못했으므로
-        # 거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
+        # 근거 0건 안내문에는 호출 내역이 아예 없다 — 죽은 호출도 빗나간 호출도, 도구 이름도
+        # 질의도 화면에 서지 않는다(2026-09-21, 질문 리스트 13번 — 「찾아본 곳: fact:고유계정대
+        # …」가 직원 화면에 그대로 떴던 자리. 도구 이름을 재료 이름으로 바꾸는 것으로는 부족했고
+        # 줄 자체가 직원에게 읽을 이유가 없는 것이었다).
         tried = plan._no_evidence({"steps": [
             {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "KeyError"},
             {"tool": "fact", "query": "수수료", "outcome": "miss"}]})
-        hit = "수수료" in tried and "운용현황" not in tried
-        print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
+        hit = (tried == plan.NO_EVIDENCE
+               and not any(w in tried for w in ("수수료", "운용현황", "fact", "screen", "찾아본 곳")))
+        print(f"{'✓' if hit else '✗'} 근거 0건 안내문에 호출 내역(도구 이름·질의)이 서지 않는다")
         ok += hit
 
-        # «찾아본 곳» 은 도구 이름이 아니라 **직원이 읽는 재료 이름**으로 쓴다(§5 — 재료에
-        # 개발 용어를 쓰지 않는다). 「찾아본 곳: fact:고유계정대 …」가 직원 화면에 그대로
-        # 뜬 자리다(2026-09-21 실측, 질문 리스트 13번). 계획 프롬프트의 서명(`_label`)은
-        # 도구 이름 그대로여야 하므로 그쪽과 갈라 둔다.
-        hit = ("제도·상품 수치" in tried and "fact" not in tried
-               and "screen" not in tried and "playbook" not in tried)
-        print(f"{'✓' if hit else '✗'} '찾아본 곳'이 도구 이름이 아니라 재료 이름을 쓴다")
-        ok += hit
-
-        # 반대쪽도 고정한다 — 계획 프롬프트에 실리는 서명은 **도구 이름 그대로**여야 한다.
+        # 계획 프롬프트에 실리는 서명은 **도구 이름 그대로**여야 한다.
         # 그건 LLM 이 같은 호출을 다시 고르지 않게 하는 좌표라, 한국어 재료 이름으로 바꾸면
         # 계획이 자기가 뭘 불러봤는지 짚을 수 없다(지워진 gap 23 이 만든 경로다).
         sig = plan._label({"tool": "fact", "query": "수수료"})
