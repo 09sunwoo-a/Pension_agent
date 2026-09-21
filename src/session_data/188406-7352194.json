@@ -15,6 +15,26 @@
         }
       ],
       "outcome": null
+    },
+    {
+      "session_id": "debug-c8dafa39",
+      "started_at": "2026-09-21T04:47:04.307595+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "role": "user",
+          "text": "이 고객 왜 관리 대상으로 떴어?",
+          "intent": "llm_down",
+          "ts": "2026-09-21T04:47:04.307595+00:00"
+        },
+        {
+          "role": "agent",
+          "text": "지금은 답변을 만들 수 없어요 — LLM 호출이 실패했습니다. 지식베이스에 자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n(LLMError: HTTP 429 — 6회 시도 후에도 실패. 속도 제한. 호출 간격을 두거나 쿼터를 확인하십시오. (동시 1 · 간격 12.0초 — LLM_MAX_CONCURRENCY 를 낮추거나 LLM_MIN_I…)",
+          "intent": "llm_down",
+          "ts": "2026-09-21T04:47:04.307916+00:00"
+        }
+      ],
+      "outcome": null
     }
   ]
 }
