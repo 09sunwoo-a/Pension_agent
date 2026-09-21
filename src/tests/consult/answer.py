@@ -566,7 +566,7 @@ def check_last_answer() -> int:
         # 근거 0건·도구 고장 안내는 상태 키가 없다 — 문장으로 가려야 한다(케이스 12c: 「찾지
         # 못했다」가 «이전 답변»이 되어 있는 자료를 없다고 답했다).
         G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
-            "answer": plan.NO_EVIDENCE + plan.TRIED.format(calls="last_answer:[1]"), "sources": [],
+            "answer": plan.NO_EVIDENCE, "sources": [],
             "steps": [{"tool": "last_answer", "query": "[1]", "outcome": "miss"}]})})
         empty = G.ask("q")["history"][-1]
         G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {

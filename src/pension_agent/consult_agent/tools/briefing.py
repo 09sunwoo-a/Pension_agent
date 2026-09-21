@@ -84,7 +84,12 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
             head, body = (str(item.get(k) or "").strip() for k in keys)
             if not head and not body:
                 continue
-            mark = " · ".join(x for x in (item.get("card_id"), item.get("situation")) if x)
+            # 줄 꼬리에는 «어느 문제상황에서 나온 카드인가»만 붙인다. 카드 id 는 붙이지 않는다 —
+            # 재료에 있는 말은 답변에 그대로 나온다(§5 「재료에 개발 용어를 쓰지 않는다」).
+            # 화법 렌더러가 머리줄에 id 를 싣던 동안 답변이 「[pitch.k03.020] 자료를 활용해
+            # 보세요」라고 썼고(2026-09-21 행내 실측), 이 줄도 같은 꼴(`[pitch.k03.020 · 상황]`)
+            # 이었다. id 는 아래 출처(card_sources)에 남는다 — 그것이 화면의 역추적 자리다.
+            mark = item.get("situation")
             card_lines.append(f"· {label}: {head} — {body}" + (f" [{mark}]" if mark else ""))
             # 이 줄들의 출처는 **지식 카드**다(고객 원장이 아니다). 답에 영향을 준 재료는
             # 전부 출처에 실린다(§3) — 안 실으면 직원은 화법이 어디서 나왔는지 모른 채
