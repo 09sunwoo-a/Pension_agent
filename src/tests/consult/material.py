@@ -1573,6 +1573,24 @@ def check_market_material() -> int:
     print(f"{'✓' if hit else '✗'} 카드 한 장이면 합친 표시가 낱장 표시와 같다")
     ok += hit
 
+    # TDF 매트릭스의 둘째 줄 「T D F | 2020 | … | 2055」는 값이 아니라 열의 빈티지다. 데이터
+    # 행으로 선언돼 있던 동안 「1975년생은 TDF 2035, KB 온국민 59.5%」라는 맞는 답이 «KB 온국민
+    # 행의 값이 아닌 2035»로 두 번 폐기되고 원문이 덤프됐다(2026-09-29 행내 실측, 질문 리스트
+    # 91번). 변환기가 그 행을 열 머리말에 접는다(`config.TABLE_HEADER_ROWS`).
+    from pension_agent.consult_agent.evidence import relations as _REL
+    tdf = next(c for c in cards if c["id"] == "lnp.퇴직연금펀드_포트폴리오_2026-08.01")
+    table = tdf["tables"][0]
+    hit = ("1975년 (TDF 2035)" in table["columns"]
+           and not any("TDF" in k.replace(" ", "") for r in table["rows"] for k in r["keys"]))
+    print(f"{'✓' if hit else '✗'} TDF 표의 빈티지 행이 열 머리말로 접히고 데이터 행에서 빠진다")
+    ok += hit
+
+    right = "1975년생이면 TDF 2035 예요. 위험자산 비중은 KB 온국민 59.5%, 신한 58.6% 예요(2026.08 기준)."
+    wrong = "1975년생이면 TDF 2035 예요. KB 온국민 위험자산 비중은 65.8% 예요."
+    hit = not _REL.check(right, [tdf]) and bool(_REL.check(wrong, [tdf]))
+    print(f"{'✓' if hit else '✗'} 빈티지를 말한 맞는 답은 통과하고, 남의 행 비중을 붙인 답은 잡힌다")
+    ok += hit
+
     # 행내한 자료는 고객에게 그대로 못 준다 — 원문 confidentiality 선언에서 온다.
     internal = [c for c in cards if c.get("customer_facing") is False]
     facing = [c for c in cards if c.get("customer_facing") is True]
@@ -1651,8 +1669,10 @@ def check_market_material() -> int:
 
     # 표에서 나온 검색 입구 — 열 머리말(1975년)과 행 이름(알파드림 III)이 둘 다 있어야 한다.
     tdf = next((c for c in cards if c["title"] == "TDF 포트폴리오"), None)
-    hit = bool(tdf) and "1975년" in (tdf.get("trigger_examples") or [])
-    print(f"{'✓' if hit else '✗'} 표의 열 머리말이 검색 입구가 된다 — 1975년")
+    # 빈티지 행을 머리말에 접은 뒤(config.TABLE_HEADER_ROWS) 입구는 「1975년 (TDF 2035)」다 —
+    # 출생연도와 빈티지를 한 입구가 함께 든다.
+    hit = bool(tdf) and any("1975년" in t and "TDF 2035" in t for t in tdf.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 표의 열 머리말이 검색 입구가 된다 — 1975년 (TDF 2035)")
     ok += hit
 
     hit = bool(deck) and "알파드림 III" in (deck.get("trigger_examples") or [])

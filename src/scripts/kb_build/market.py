@@ -387,6 +387,32 @@ def _percent_values(columns: list[str], cells: list[str]) -> list[str]:
     return out
 
 
+def _header_row_name(cell: str) -> str:
+    """둘째 머리말 행의 이름 대조용 표기 — 굵게 표기·공백을 뺀다(「**T D F**」 → 「TDF」)."""
+    return re.sub(r"[*\s]", "", cell or "")
+
+
+def _fold_header_rows(columns: list[str], body: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    """`config.TABLE_HEADER_ROWS` 에 적힌 행을 열 머리말에 접고 본문에서 뺀다.
+
+    TDF 매트릭스의 「T D F | 2020 | … | 2055」는 값이 아니라 각 열의 빈티지다. 데이터 행으로
+    두면 오짝 검사가 2035 를 그 행의 값으로 알고, 「1975년생은 TDF 2035」라는 맞는 답을
+    남의 값으로 폐기한다(config 주석의 실측). 접은 뒤 열 이름은 「1975년 (TDF 2035)」다 —
+    원문 표기는 그대로이고 선언(tables)만 달라진다.
+    """
+    kept: list[list[str]] = []
+    cols = list(columns)
+    for cells in body:
+        head = _header_row_name(cells[0]) if cells else ""
+        if head and head in config.TABLE_HEADER_ROWS:
+            for i, cell in enumerate(cells):
+                if i and i < len(cols) and cell.strip():
+                    cols[i] = f"{cols[i]} ({head} {cell.strip()})"
+            continue
+        kept.append(cells)
+    return cols, kept
+
+
 def _market_tables(text: str) -> list[dict]:
     """마크다운 표 → `{"columns", "units", "rows":[{"keys", "cells", "values", "percents"}]}`.
 
@@ -402,6 +428,7 @@ def _market_tables(text: str) -> list[dict]:
     """
     out: list[dict] = []
     for columns, body in _markdown_tables(text):
+        columns, body = _fold_header_rows(columns, body)
         ncol = _key_columns(body)
         # 이름 열과 값 열이 둘 다 있어야 «어느 행의 값인가»를 말할 수 있다. 한쪽뿐인 표
         # (달력·일정표)는 선언하지 않는다 — 판정할 수 없는 것을 선언해두면 검사가 그것을
