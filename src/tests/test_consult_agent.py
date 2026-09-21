@@ -56,6 +56,7 @@ from tests.consult.plan_loop import (
     check_compose_retry,
     check_llm_down,
     check_miss_recovery,
+    check_no_material_tone,
     check_notice_scope,
     check_order_flipped,
     check_plan_failure,
@@ -140,6 +141,7 @@ def main() -> int:
         check_relations()
         check_turn_cost()
         check_miss_recovery()
+        check_no_material_tone()
         check_clarify_golden()
         check_clarify_settled()
         check_answer_parallel()

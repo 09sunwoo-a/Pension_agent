@@ -287,14 +287,16 @@ def _plan_note(state: dict, delta: dict) -> str:
 def _compose_note(state: dict, delta: dict) -> str:
     """최종 답이 생성문인지 폴백인지. **말투가 달라지는 자리가 여기다.**
 
-    판정은 답변이 근거 원문으로 시작하는지로 한다(plan.compose 의 폴백이
-    `parts = [e["text"] for e in evidence]` 라 첫 근거 블록이 그대로 앞에 온다).
+    판정은 폴백이 앞에 세우는 머리말(`plan.RAW_EVIDENCE`)로 한다 — 그 뒤에 근거 원문이
+    붙는다. 예전에는 «답변이 근거 원문으로 시작하는가»로 쟀는데, 폴백이 자기가 폴백이라고
+    밝히게 된 뒤로는 그 판정이 조용히 «생성문 그대로»로 뒤집혔다(문구를 두 곳에 두면
+    한쪽만 고쳐진다 — 아래 LLM 안내 머리말도 같은 이유로 plan 에서 가져온다).
     """
     answer = delta.get("answer") or ""
     evidence = state.get("evidence") or []
-    if evidence and answer.startswith(evidence[0]["text"]):
+    if answer.startswith(P.RAW_EVIDENCE.split("{", 1)[0]):
         return f"폴백 — 근거 원문 {len(evidence)}건을 그대로 출력 (문체가 달라지는 자리)"
-    if delta.get("llm_error") or answer.startswith("지금은 답변을 만들 수 없어요"):
+    if delta.get("llm_error") or answer.startswith(P.LLM_FAILED.split("{", 1)[0]):
         return "LLM 실패 안내 (§11 — 근거 원문을 대신 내보내지 않는다)"
     if not evidence:
         return "자료 0건 — 없다고 답함"

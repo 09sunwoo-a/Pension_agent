@@ -79,8 +79,19 @@ def _suitable(state: AgentState, query: str) -> Evidence | None:
     for pf in pool["portfolios"]:
         lines.append(f"· [포트폴리오] {pf['name']} — {pf.get('description') or ''}".rstrip())
     if blocked:
-        lines += ["", f"── 안내할 수 없는 상품 {len(blocked)}종 (왜 목록에 없는지)"]
-        lines += [f"· {r['name']} — {why}" for r, why in blocked]
+        # 게이트가 돌려주는 사유는 「상품 위험등급 X > 허용 상한 Y」 꼴이라 **Y 가 줄마다
+        # 반복된다.** 상한은 이 재료의 머리말에 이미 한 번 적혀 있는데, 그 줄을 그대로 옮긴
+        # 답변은 제외 상품 여섯 줄이 전부 «> 허용 상한 낮은위험»으로 끝났다(2026-09-18 실측,
+        # 박정호) — 줄마다 다른 것은 그 상품의 등급 하나뿐이니 읽는 사람에게 나머지는 잡음이다.
+        #
+        # **판정을 다시 하지 않는다.** 위험등급 초과인지 비대면 불가인지는 게이트가 정한
+        # 것이고(`engine.gate_static`), 여기서는 그 문장에서 **이 도구가 방금 머리말에 쓴
+        # 상한 문구만** 떼어낸다. 게이트 쪽 문장이 바뀌면 이 떼기가 아무 일도 하지 않고 사유가
+        # 통째로 남는다 — 지금까지의 출력과 같으므로 틀린 쪽으로 실패하지 않는다.
+        cap_tail = f" > 허용 상한 {cap}"
+        lines += ["", f"── 안내할 수 없는 상품 {len(blocked)}종 (왜 목록에 없는지 — "
+                      f"등급만 적힌 줄은 허용 상한 {cap}을 넘는다는 뜻이다)"]
+        lines += [f"· {r['name']} — {why.replace(cap_tail, '')}" for r, why in blocked]
     else:
         # **0건일 때 침묵하지 않는다.** 재료가 아무 말도 안 하면 답변 형태가 요구하는
         # 「안내할 수 없는 상품」을 LLM 이 통과 목록에서 만들어 채운다(실측: 정민석 —

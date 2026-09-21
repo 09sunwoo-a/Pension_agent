@@ -1,7 +1,25 @@
-# 비밀 설정 — 사내 게이트웨이 URL·API 키. *.example 만 추적한다(채워야 할 항목의 규격).
+# 비밀 설정 — 절대 커밋 금지 (사내 게이트웨이 URL·API 키 포함).
+# *.example 만 추적한다(채워야 할 항목의 규격).
 .env
 .env.*
 !.env.example
+
+# strategy_agent 평가 대시보드 로그
+**/feedback_log.csv
+
+# 대화형 에이전트 평가 신고 로그 (app.py 💬 탭)
+**/chat_feedback.csv
+
+# 미리 만들어 둔 브리핑 (scripts/prebuild_briefings.py → config.BRIEFING_CACHE_DIR)
+**/briefing_cache/*
+!**/briefing_cache/.gitkeep
+
+# 외부망 전용 — 저장소에 넣지 않는다 (CLAUDE.md «행내 배포»)
+Dockerfile.local
+requirements-dev.txt
+
+# 원문 반입 폴더 (저장소 루트)
+/sources
 
 # 로컬 개인 설정
 **/.claude/settings.local.json
@@ -10,6 +28,7 @@
 .idea/
 .vscode/
 .Rhistory
+.omc/
 
 # 파이썬
 __pycache__/
@@ -26,3 +45,6 @@ venv/
 Thumbs.db
 .DS_Store
 ~$*
+
+# 반입용으로 묶은 압축 파일
+*.zip
