@@ -118,6 +118,23 @@ def _failed_label(name: str) -> str:
     return (tool.progress if tool and tool.progress else name)
 
 
+def _tried_label(step: dict) -> str:
+    """«찾아본 곳» 한 칸 — 직원이 읽는 재료 이름 + 찾아본 말.
+
+    **`_label` 과 갈라 둔다.** 그쪽은 계획 프롬프트에 실리는 서명이라 도구 **이름**이어야
+    하고(LLM 이 같은 호출을 다시 고르지 않게 하는 좌표다), 이쪽은 화면에 나가는 문장이다.
+    한 함수로 쓰던 동안 「찾아본 곳: fact:고유계정대 최근 한 달 증가액」이 직원 화면에
+    그대로 떴다(2026-09-21 실측, 13번) — `fact` 는 코드 안의 이름이지 업무 표현이 아니고,
+    §5 「재료에 개발 용어를 쓰지 않는다」가 막는 바로 그것이다. 죽은 도구를 `_failed_label`
+    이 이미 같은 방식으로 옮기고 있었는데 이 줄만 빠져 있었다.
+
+    재료 이름은 도구 선언에서 온다 — 여기서 표를 새로 만들지 않는다(진행 표시·고장 안내와
+    같은 문구를 쓴다. 표가 둘이면 한쪽만 고쳐진다). 찾아본 말(`query`)은 계획 LLM 이 쓴
+    한국어라 그대로 싣는다 — 그게 «어떤 말로 찾아봤는지»이고, 직원이 다시 물을 때의 단서다.
+    """
+    return f"{_failed_label(str(step.get('tool') or ''))} 「{step.get('query')}」"
+
+
 def _tool_failed(state: AgentState) -> str:
     """도구가 죽어 재료를 못 읽은 턴의 답. 무엇이 왜 실패했는지를 함께 남긴다 —
     진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유)."""
@@ -134,7 +151,7 @@ def _no_evidence(state: AgentState) -> str:
     거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다. 장부가 하나가 된 뒤로는
     그 판정이 `outcome` 한 칸이다(예전에는 서명을 잘라 죽은 도구 목록과 맞춰 봤다).
     """
-    calls = [_label(s) for s in _steps(state) if s.get("outcome") != FAILED]
+    calls = [_tried_label(s) for s in _steps(state) if s.get("outcome") != FAILED]
     if not calls:
         return NO_EVIDENCE
     return NO_EVIDENCE + TRIED.format(calls=" · ".join(calls))

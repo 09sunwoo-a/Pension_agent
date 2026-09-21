@@ -35,7 +35,7 @@ from pension_agent.strategy_agent import engine
 from pension_agent import llm, observability
 from pension_agent.strategy_agent import sections
 from pension_agent.strategy_agent import support
-from pension_agent.strategy_agent.customer import PERSONAS, Profile
+from pension_agent.strategy_agent.customer import PERSONAS, Profile, tenure_text
 # 요건 판정 — 관측 태그에 그대로 옮긴다. 이름이 흔해 별칭을 붙인다
 # (`facts["conditions"]` 는 사람이 읽는 문구이고 이쪽은 코드다).
 from pension_agent.strategy_agent.customer import conditions as target_conditions
@@ -246,13 +246,29 @@ def _write_coaching(facts: dict) -> None:
     facts["coaching"] = {"headline": headline, "detail": detail}
 
 
+def _tenure(p: Profile) -> str:
+    """스냅샷의 「투자기간」 — 「3년」·「2년 10개월」. 반올림한 수를 문장에 그대로 싣지 않는다.
+
+    `invest_period_years` 는 소수 한 자리 실수라(적합성·상품추천의 입력) 문자열로 옮기면
+    「3.0년」이 되고, 그 스냅샷은 프롬프트에 실려 답변 문장으로 그대로 나온다. 가입일에서
+    바로 세는 것이 `customer.tenure_text` 이고, 가입일이 없는 합성 프로파일만 그 수로
+    물러선다(`:g` 로 꼬리 0 은 떨군다).
+    """
+    text = tenure_text(p.joined)
+    if text:
+        return text
+    if p.invest_period_years is None:
+        return "미확인"
+    return f"{p.invest_period_years:g}년"
+
+
 def _customer_state(p: Profile) -> dict:
     """LLM 에 넘기는 고객 상태 스냅샷(REQUIREMENTS.md §9). 선별·생성 프롬프트가 공유한다."""
     return {
         "투자성향": p.rk, "연령": p.ag, "평가금액": engine.won(p.bal),
         "포트폴리오": dict(zip(engine.PORT_LABELS, p.port, strict=True)),
         "수익률": engine._return_label(p, long=True),
-        "투자기간": f"{p.invest_period_years}년" if p.invest_period_years is not None else "미확인",
+        "투자기간": _tenure(p),
         "연금수령여부": "수령 중" if p.pension_started else "미개시",
         "운용이력": f"최종 운용변경 이후 {p.nchM}개월 경과",
     }
@@ -511,7 +527,7 @@ def _recommend(p: Profile, facts: dict) -> dict | None:
         "투자성향": p.rk, "연령": p.ag, "평가금액": engine.won(p.bal),
         "포트폴리오": dict(zip(engine.PORT_LABELS, p.port, strict=True)),
         "수익률": engine._return_label(p, long=True),
-        "투자기간": f"{p.invest_period_years}년" if p.invest_period_years is not None else "미확인",
+        "투자기간": _tenure(p),
         "연금수령여부": "수령 중" if p.pension_started else "미개시",
         "운용이력": f"최종 운용변경 이후 {p.nchM}개월 경과",
     }

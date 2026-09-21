@@ -1056,6 +1056,33 @@ def check_account_state() -> int:
     print(f"{'✓' if hit else '✗'} 가입일이 경과연수가 아니라 날짜로 실린다")
     ok += hit
 
+    # 경과는 **사람이 말하는 꼴**로 — 「3.0년」이 아니라 「3년」·「2년 10개월」이다.
+    # `invest_period_years` 는 소수 한 자리로 반올림한 수(적합성·상품추천의 입력)라 문장에
+    # 그대로 실으면 직원 화면에 「가입 후 3.0년이 지났어요」가 나간다(2026-09-21 실측,
+    # 질문 리스트 25번). 게다가 반올림 때문에 2년 11개월이 「3.0년」으로 보였다.
+    import re as _re
+    from pension_agent.strategy_agent.engine import render as RENDER
+    bad = [p.id for p in CUST.PERSONAS
+           if _re.search(r"가입 후 \d+\.\d", str(RENDER._account_state(p).get("IRP_가입일") or ""))]
+    hit = not bad
+    print(f"{'✓' if hit else '✗'} 가입 후 경과에 소수점 연수를 쓰지 않는다"
+          + ("" if hit else f" — {bad[:3]}"))
+    ok += hit
+
+    hit = (CUST.tenure_text("2023-10-02") is not None
+           and "." not in (CUST.tenure_text("2023-10-02") or "")
+           and CUST.tenure_text(None) is None)
+    print(f"{'✓' if hit else '✗'} tenure_text 는 「n년」·「n년 m개월」만 만든다 "
+          f"({CUST.tenure_text('2023-10-02')})")
+    ok += hit
+
+    # 상품추천 LLM 스냅샷도 같은 표기를 쓴다 — 프롬프트에 실린 말이 답변에 그대로 나온다.
+    from pension_agent.strategy_agent import agent as _SA
+    hit = all(_re.fullmatch(r"(\d+년( \d+개월)?|\d+개월|미확인)", _SA._tenure(p))
+              for p in CUST.PERSONAS)
+    print(f"{'✓' if hit else '✗'} 상품추천 스냅샷의 「투자기간」도 소수점을 쓰지 않는다")
+    ok += hit
+
     # 실린 값은 인용할 수 있고, 안 실린 날짜는 여전히 막힌다(경계는 넓어지지 않았다).
     from datetime import date, timedelta
     allow = (ev or {}).get("allow") or []

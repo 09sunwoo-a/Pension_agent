@@ -802,8 +802,25 @@ def check_plan_failure() -> int:
         tried = plan._no_evidence({"steps": [
             {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "KeyError"},
             {"tool": "fact", "query": "수수료", "outcome": "miss"}]})
-        hit = "fact:수수료" in tried and "screen:운용현황" not in tried
+        hit = "수수료" in tried and "운용현황" not in tried
         print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
+        ok += hit
+
+        # «찾아본 곳» 은 도구 이름이 아니라 **직원이 읽는 재료 이름**으로 쓴다(§5 — 재료에
+        # 개발 용어를 쓰지 않는다). 「찾아본 곳: fact:고유계정대 …」가 직원 화면에 그대로
+        # 뜬 자리다(2026-09-21 실측, 질문 리스트 13번). 계획 프롬프트의 서명(`_label`)은
+        # 도구 이름 그대로여야 하므로 그쪽과 갈라 둔다.
+        hit = ("제도·상품 수치" in tried and "fact" not in tried
+               and "screen" not in tried and "playbook" not in tried)
+        print(f"{'✓' if hit else '✗'} '찾아본 곳'이 도구 이름이 아니라 재료 이름을 쓴다")
+        ok += hit
+
+        # 반대쪽도 고정한다 — 계획 프롬프트에 실리는 서명은 **도구 이름 그대로**여야 한다.
+        # 그건 LLM 이 같은 호출을 다시 고르지 않게 하는 좌표라, 한국어 재료 이름으로 바꾸면
+        # 계획이 자기가 뭘 불러봤는지 짚을 수 없다(지워진 gap 23 이 만든 경로다).
+        sig = plan._label({"tool": "fact", "query": "수수료"})
+        hit = sig == "fact:수수료"
+        print(f"{'✓' if hit else '✗'} 계획 프롬프트의 서명은 도구 이름을 그대로 쓴다 ({sig})")
         ok += hit
 
         # 답이 갈리는 것은 **원장이 끝내 비었을 때**다. LLM 실패 안내와 같은 꼴로 끝나야

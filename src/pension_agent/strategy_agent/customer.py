@@ -526,6 +526,36 @@ def _days_since(iso: str | None) -> int | None:
     return (today() - date.fromisoformat(iso)).days if iso else None
 
 
+def tenure_text(iso: str | None) -> str | None:
+    """그 날짜 이후 오늘까지를 **사람이 말하는 꼴**로 — 「3년」·「2년 10개월」·「7개월」.
+
+    `invest_period_years` 는 소수 한 자리로 반올림한 수라(적합성·상품추천의 입력) 그대로
+    문장에 실으면 「가입 후 3.0년이 지났어요」가 된다 — 직원도 고객도 그렇게 말하지 않고,
+    반올림 때문에 3년 1개월과 2년 11개월이 같은 「3.0년」으로 보인다(2026-09-21 실측,
+    질문 리스트 25번).
+
+    **수를 고치지 않고 표기를 만든다.** 그 필드는 계산의 입력이라 꼴을 바꾸면 쓰는 쪽이
+    깨지고, 반대로 반올림한 수에서 개월을 되짚으면 없는 정밀도를 지어내는 것이다 —
+    그래서 날짜에서 바로 센다. 기준은 `_days_since` 와 같은 «오늘»이다.
+
+    0개월이면 년만, 1년 미만이면 개월만 적는다. 「0년 7개월」·「3년 0개월」은 둘 다
+    사람이 쓰지 않는 말이다.
+    """
+    if not iso:
+        return None
+    start, now = date.fromisoformat(iso), today()
+    if now < start:
+        return None
+    months = (now.year - start.year) * 12 + (now.month - start.month)
+    if now.day < start.day:
+        months -= 1
+    months = max(months, 0)
+    y, m = divmod(months, 12)
+    if not y:
+        return f"{m}개월"
+    return f"{y}년" if not m else f"{y}년 {m}개월"
+
+
 def _port(rec: dict) -> tuple[list[int], int]:
     """원본 5분류 → port 4분류(%)와 cash_idle_pct. 정수 반올림 후 합 100 을 보정한다."""
     sm, bal = rec["summary"], rec["summary"]["전체평가금액"]

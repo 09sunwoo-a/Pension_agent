@@ -17,6 +17,7 @@ from pension_agent.strategy_agent.customer import (
     churn,
     days_to_year_end,
     tax_credit,
+    tenure_text,
 )
 from pension_agent.strategy_agent.engine.catalog import (
     ASSETS,
@@ -229,8 +230,11 @@ def _account_state(p: Profile) -> dict[str, Any]:
     # 가입일은 날짜로 싣는다. 경과연수만 주면 LLM 이 오늘에서 빼서 날짜를 «만들어» 말한다
     # (matDate 가 이미 같은 이유로 있다).
     if p.joined:
-        years = f" (가입 후 {p.invest_period_years}년)" if p.invest_period_years else ""
-        state["IRP_가입일"] = f"{p.joined}{years}"
+        # 경과는 「3.0년」이 아니라 「3년」·「2년 10개월」로 적는다 — 반올림한 수를 문장에
+        # 그대로 실으면 사람이 쓰지 않는 말이 되고, 3년 1개월과 2년 11개월이 같은 값으로
+        # 보인다(customer.tenure_text 머리말).
+        tenure = tenure_text(p.joined)
+        state["IRP_가입일"] = f"{p.joined}" + (f" (가입 후 {tenure})" if tenure else "")
     return state
 
 
