@@ -2,7 +2,7 @@
 """질문 리스트를 실 LLM 으로 돌려 xlsx 의 「실측 답변」 칸을 채운다.
 
     cd src
-    python -m scripts.run_question_map --new --grade ◎        # 아직 안 해본 1순위 전부
+    python -m scripts.run_question_map --new --grade ◎        # 기존 대본에 없던 1순위 전부
     python -m scripts.run_question_map --rows 17,54,62         # 번호로 골라서
     python -m scripts.run_question_map --item 세액공제 --full   # 항목으로 · 근거까지 기록
     python -m scripts.run_question_map --new --dry-run         # 무엇을 돌릴지만 본다
@@ -148,7 +148,7 @@ def _select(ws, idx, args) -> list[int]:
             continue
         if args.grade and not demo.startswith(args.grade):
             continue
-        if args.new and "안 해본 질문" not in demo:
+        if args.new and "신규" not in demo:
             continue
         if args.item and args.item not in item:
             continue
@@ -212,7 +212,8 @@ def main(argv: list[str]) -> int:
     pick = ap.add_argument_group("돌릴 행 고르기")
     pick.add_argument("--rows", help="번호 목록 (예: 17,54,62)")
     pick.add_argument("--grade", choices=["◎", "○", "–"], help="등급으로")
-    pick.add_argument("--new", action="store_true", help="아직 안 해본 질문만")
+    pick.add_argument("--new", action="store_true",
+                      help="기존 대본·QA 에 없던 질문만 (「시연」 칸이 «신규»)")
     pick.add_argument("--item", help="항목 이름 일부 (예: 세액공제)")
     pick.add_argument("--auto", action="store_true",
                       help="답이 대조로 갈리는 항목만 (question_map.AUTO_ITEMS)")
