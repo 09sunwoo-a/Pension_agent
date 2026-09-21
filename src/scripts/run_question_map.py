@@ -4,6 +4,7 @@
     cd src
     python -m scripts.run_question_map --new --grade ◎        # 기존 대본에 없던 1순위 전부
     python -m scripts.run_question_map --rows 17,54,62         # 번호로 골라서
+    python -m scripts.run_question_map --rows 10-20            # 구간 (양끝 포함 · 10~20 · 10–20 도 같다)
     python -m scripts.run_question_map --item 세액공제 --full   # 항목으로 · 근거까지 기록
     python -m scripts.run_question_map --new --dry-run         # 무엇을 돌릴지만 본다
     python -m scripts.run_question_map                         # 아직 안 채운 행 전부
@@ -143,9 +144,49 @@ def _llm_down(tr) -> bool:
     return any(n.delta.get("llm_error") or n.name == TR.LLM_DOWN_NODE for n in turn.nodes)
 
 
+#: `--rows` 의 구간 구분자. `-` 은 영문 자판, `~` 는 한글 자판에서 손이 먼저 가는 글자이고,
+#: `–`(en dash)는 문서·엑셀에서 복사해 붙일 때 딸려 온다. 셋 다 같은 뜻으로 받는다 —
+#: 안 받으면 「왜 안 되지」로 한 번 걸리고, 받아서 손해 볼 일이 없다.
+_RANGE_SEPS = "-~–—"
+
+
+def parse_rows(spec: str) -> set[int]:
+    """`--rows` 한 칸 → 번호 집합. 낱개와 구간을 섞어 쓸 수 있다.
+
+        17,54,62        낱개
+        10-20           구간(양끝 포함)
+        10~20 · 10–20   같은 구간(한글 자판 · 문서에서 복사한 en dash)
+        1-9,13,25-30    섞어서
+
+    구간은 **양끝을 포함한다** — 「10번부터 20번까지」라고 말할 때 20 을 빼는 사람은 없다.
+    거꾸로 쓴 구간(`20-10`)은 바로잡지 않고 **거절한다**: 뒤집어 받아 주면 오타가 조용히
+    도는 20행이 되고, 그건 `--redo` 와 만나면 멀쩡한 답을 덮는다.
+    """
+    want: set[int] = set()
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        cut = next((i for i, ch in enumerate(chunk) if ch in _RANGE_SEPS and i > 0), None)
+        if cut is None:
+            if not chunk.isdigit():
+                raise SystemExit(f"--rows: 번호가 아닙니다 — {chunk!r}")
+            want.add(int(chunk))
+            continue
+        lo, hi = chunk[:cut].strip(), chunk[cut + 1:].strip()
+        if not (lo.isdigit() and hi.isdigit()):
+            raise SystemExit(f"--rows: 구간이 «숫자-숫자» 가 아닙니다 — {chunk!r}")
+        if int(lo) > int(hi):
+            raise SystemExit(f"--rows: 구간이 거꾸로입니다 — {chunk!r} (작은 번호를 앞에)")
+        want.update(range(int(lo), int(hi) + 1))
+    if not want:
+        raise SystemExit("--rows: 고른 번호가 없습니다")
+    return want
+
+
 def _select(ws, idx, args) -> list[int]:
     """돌릴 행 번호(엑셀 행 인덱스)를 고른다."""
-    want_rows = {int(x) for x in args.rows.split(",")} if args.rows else None
+    want_rows = parse_rows(args.rows) if args.rows else None
     items = _filled(ws, idx["항목"])          # 둘 다 세로 병합이다 — _filled 머리말
     picked = []
     for r in range(2, ws.max_row + 1):
@@ -181,6 +222,17 @@ def _select(ws, idx, args) -> list[int]:
         picked.append(r)
         if args.limit and len(picked) >= args.limit:
             break
+
+    # 표에 없는 번호를 달라고 했으면 **말한다.** 구간을 받게 되면서(`parse_rows`) 없는
+    # 번호를 포함하기가 쉬워졌는데, 그냥 빠지면 화면에는 「돌릴 행이 없다」만 남아
+    # «왜 안 돌지»의 답이 어디에도 없다. 표 번호는 164까지다.
+    if want_rows is not None:
+        have = {ws.cell(r, idx["번호"]).value for r in range(2, ws.max_row + 1)}
+        missing = sorted(n for n in want_rows if n not in have)
+        if missing:
+            shown = ", ".join(str(n) for n in missing[:12])
+            print(f"⚠ 표에 없는 번호 {len(missing)}개는 건너뛴다 — {shown}"
+                  + (" …" if len(missing) > 12 else ""))
     return picked
 
 
@@ -221,7 +273,7 @@ def main(argv: list[str]) -> int:
         prog="python -m scripts.run_question_map",
         description="질문 리스트를 돌려 docs/QUESTION_MAP.xlsx 의 「실측 답변」을 채운다.")
     pick = ap.add_argument_group("돌릴 행 고르기")
-    pick.add_argument("--rows", help="번호 목록 (예: 17,54,62)")
+    pick.add_argument("--rows", help="번호 목록·구간 (예: 17,54,62 · 10-20 · 1-9,13)")
     pick.add_argument("--grade", choices=["◎", "○", "–"], help="등급으로")
     pick.add_argument("--new", action="store_true",
                       help="기존 대본·QA 에 없던 질문만 (「시연」 칸이 «신규»)")
