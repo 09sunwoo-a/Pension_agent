@@ -990,6 +990,26 @@ def check_caution_roles() -> int:
     print(f"{'✓' if hit else '✗'} 직원에게 나가는 주의·비고에 코드 이름이 없다"
           + ("" if hit else f" — {jargon[:3]}"))
     ok += hit
+
+    # ⑦ 형제 표와 행 이름을 공유하는 표는 오짝 판정에서 **건너뛴다**(판정 불가).
+    #    「투자성향별 포트폴리오」는 같은 꼴의 표 다섯 장이 「국내채권」 행을 공유한다. 표를
+    #    한 장씩 따로 보면 위험중립형을 정확히 옮긴 답변이 적극투자형 표에서 「같은 표의 다른
+    #    행 값」으로 신고돼 폐기되고, 그 자리에 카드 원문이 덤프됐다(2026-09-21 실측, 96번).
+    from pension_agent.consult_agent.evidence import relations as _REL
+    _port = next(c for c in KB.cards if c["id"] == "lnp.퇴직연금펀드_포트폴리오_2026-08.02")
+    _ok_answer = ("위험중립형은 국내채권 60% · 해외채권 15% · 해외혼합 25% 로 짜여 있어요. "
+                  "하나 파워e단기채 60%, 우리미국 단기채공모주(H) 15%, 삼성EMP 리얼리턴(UH) 25% 예요.")
+    hit = not _REL.table_mispaired(_ok_answer, _port["tables"])
+    print(f"{'✓' if hit else '✗'} 형제 표와 행 이름이 겹치면 오짝 판정을 하지 않는다")
+    ok += hit
+
+    # 표가 한 장뿐이면 판정은 그대로 선다 — 좁힌 것은 «가릴 수 없는 표»뿐이다.
+    _one = next((c for c in KB.cards if len(c.get("tables") or []) == 1
+                 and len((c["tables"][0].get("rows") or [])) >= 2), None)
+    hit = _one is not None and not (_REL._row_names(_one["tables"][0])
+                                    & _REL._ambiguous_names(_one["tables"]))
+    print(f"{'✓' if hit else '✗'} 표가 한 장인 카드는 건너뛰지 않는다")
+    ok += hit
     return ok
 
 

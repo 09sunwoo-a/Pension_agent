@@ -185,6 +185,25 @@ _HEADER_HINT = re.compile(r"^(누구를|왜\s|어떤\s|이 조건이|왜$)")
 
 
 def joined(fields: dict[str, list[str]], key: str) -> str:
+    """그 절의 줄들을 한 덩이로. **표는 줄바꿈을 지킨다.**
+
+    평소에는 문단이 여러 줄로 접혀 있을 뿐이라 공백으로 이으면 된다. 그런데 절 안에 마크다운
+    표가 들어 있는 경우가 있고(세그먼트 3 의 조건문은 임계값 세 개를 표로 적는다), 그것까지
+    공백으로 이으면 표가 **한 줄로 뭉개진다** — 카드에 「… 단, 임계값이 자료마다 다름: | 기준 |
+    출처·시기 | 용도 | |---|---|---| | 7,500만원 이상 …」로 실리고, 조건문은 원문 그대로 실어야
+    하는 항목이라(`atomic`) 그 줄이 답변에 통째로 나간다(2026-09-21 실측, 질문 리스트 71번).
+
+    **원문을 고치는 것이 아니다** — 글자는 그대로이고 원문에 있던 줄바꿈을 지우지 않을 뿐이다
+    (루트 절대 규칙 1). 표가 있는 절만 줄바꿈으로 잇고, 표 앞뒤의 산문은 평소대로 접는다.
+    """
     vals = [v for v in fields.get(key, [])
             if v and not (len(v) <= 24 and _HEADER_HINT.match(v))]
-    return " ".join(vals).strip()
+    if not any(v.lstrip().startswith("|") for v in vals):
+        return " ".join(vals).strip()
+    out: list[str] = []
+    for v in vals:
+        if v.lstrip().startswith("|") or (out and out[-1].lstrip().startswith("|")):
+            out.append("\n" + v)          # 표 줄과 그 바로 뒤 줄은 새 줄에서 시작한다
+        else:
+            out.append((" " if out else "") + v)
+    return "".join(out).strip()

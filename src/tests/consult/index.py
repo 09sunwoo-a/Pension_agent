@@ -348,7 +348,28 @@ def check_trigger_entrances() -> int:
           f"({' · '.join(f'{s:.2f}' for s in idle)})")
     ok += hit
 
-    # ⑦ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
+    # ⑦ 표가 든 본문에서 **표 조각**을 검색 입구로 만들지 않는다.
+    #    세그먼트 3·33·50 의 조건문에는 마크다운 표가 들어 있다. 변환기가 표의 줄바꿈을
+    #    지키게 되면서(`parse.joined`) 절 자르기가 표 줄까지 먹으면 입구가 「… 분류: | 유형 |
+    #    이탈 사유 | 상세」가 된다 — n-gram 이 잴 것이 없는 말이다(2026-09-21).
+    piped = [(c["id"], e[:40]) for c in cards
+             for e in (c.get("trigger_examples") or []) if "|" in e or "\n" in e]
+    hit = not piped
+    print(f"{'✓' if hit else '✗'} 검색 입구에 표 조각이 들어가지 않는다"
+          + ("" if hit else f" — {piped[:3]}"))
+    ok += hit
+
+    # ⑧ 본문의 표는 **줄바꿈을 지킨다** — 한 줄로 뭉개지면 조건문이 원문 그대로 실리는
+    #    항목이라(atomic) 그 줄이 답변에 통째로 나간다(질문 리스트 71번).
+    flat = [c["id"] for c in cards
+            if "|---" in str(c.get("condition_text") or "")
+            and "\n|" not in str(c.get("condition_text") or "")]
+    hit = not flat
+    print(f"{'✓' if hit else '✗'} 조건문 안의 표가 한 줄로 뭉개지지 않는다"
+          + ("" if hit else f" — {flat[:3]}"))
+    ok += hit
+
+    # ⑨ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
     card = next(c for c in cards if c["_kind"] == "method")
     _, with_title = KBMOD.score_parts(card, utterance=card["title"])
     hit = with_title >= 4.0
