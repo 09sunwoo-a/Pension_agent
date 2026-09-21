@@ -1549,10 +1549,28 @@ def check_market_material() -> int:
     print(f"{'✓' if hit else '✗'} 경고 문구와 기준시점을 원문에서 읽어 온다")
     ok += hit
 
-    # 필드 이름을 코드표기로 인용한 원문(`as_of`)이 밑줄 제거로 깨지지 않는가 —
-    # 깨지면 직원이 존재하지 않는 필드를 찾게 된다.
-    hit = bool(sample) and "asof" not in sample["volatile"]
-    print(f"{'✓' if hit else '✗'} 원문의 필드 이름 표기가 깨지지 않는다")
+    # 경고 문구에 필드 이름(`as_of`)·저작 표기(`⏳ 시효 민감`)가 없다 — 직원이 읽는 문장이다
+    # (2026-09-29 행내 실측: 답변 끝에 「인용 전 as_of 기준시점을 확인하고 …」가 그대로 나갔다).
+    # README ※ 줄은 이 저장소가 쓴 선언이라 고쳐도 원문(절대 규칙 1)이 아니다.
+    hit = bool(sample) and not any(w in sample["volatile"] for w in ("as_of", "asof", "⏳"))
+    print(f"{'✓' if hit else '✗'} 시효 경고 문구에 개발 용어·저작 표기가 없다")
+    ok += hit
+
+    # 같은 경고를 든 카드 여러 장이 한 묶음이면 ※ 줄은 **한 번**이고 기준시점만 나란히 선다 —
+    # 카드마다 세우면 같은 문장이 두 번 «빠뜨리면 안 되는 표시»로 나갔다(같은 날 실측).
+    from pension_agent.consult_agent.tools.market import market_evidence, stale_marks
+    two = [c for c in cards if c.get("volatile") and c.get("as_of")]
+    two = [next(c for c in two if c["_kind"] == "market"), next(c for c in two if c["_kind"] == "lineup")]
+    ev2 = market_evidence("market", "q", [(1.0, c) for c in two])
+    stale = [n for n in (ev2["notices"] if ev2 else []) if n.startswith("※")]
+    hit = (len(stale) == 1 and all(c["as_of"] in stale[0] for c in two)
+           and ev2["text"].count("※") == 1)
+    print(f"{'✓' if hit else '✗'} 시황 카드 2장의 시효 표시가 한 줄로 합쳐진다"
+          + ("" if hit else f" — {stale}"))
+    ok += hit
+
+    hit = bool(sample) and stale_marks([sample]) == [tools.stale_mark(sample)]
+    print(f"{'✓' if hit else '✗'} 카드 한 장이면 합친 표시가 낱장 표시와 같다")
     ok += hit
 
     # 행내한 자료는 고객에게 그대로 못 준다 — 원문 confidentiality 선언에서 온다.

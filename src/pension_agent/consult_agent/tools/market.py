@@ -53,11 +53,31 @@ def _render_market(card: dict) -> str:
         lines.append(f"· 요점: {k}")
     if card.get("content"):
         lines += ["", card["content"].strip()]
-    mark = stale_mark(card)
-    if mark:
-        lines.append(mark)
+    # 시효 표시(※)는 카드마다 붙이지 않는다 — 묶음 하나에 한 번이다(stale_marks).
     lines.append(f"· 출처 {KBMOD.origin_of(KB, card)}")
     return "\n".join(lines)
+
+
+def stale_marks(cards: list[dict]) -> list[str]:
+    """카드 묶음의 시효 표시 — **같은 경고 문구는 한 줄로 합치고 기준시점만 나란히** 적는다.
+
+    05 카드는 폴더 README 의 ※ 경고 하나를 전부 같이 들고 있고(`volatile`) 기준시점(`as_of`)만
+    문서마다 다르다. 카드마다 `stale_mark` 를 따로 세우면 같은 문장이 기준시점만 바꿔 두 번
+    «빠뜨리면 안 되는 표시»로 나간다 — 시황 카드 2장으로 답한 턴에 ※ 줄이 두 번 섰다
+    (2026-09-29 행내 실측, 「시황 근거로 원리금보장 그대로 둬도 되는지」). 문구가 다른 카드는
+    각자 한 줄이다. 카드 한 장이면 `stale_mark` 와 같은 문장이 나온다.
+    """
+    groups: dict[str, list[str]] = {}
+    for c in cards:
+        warn = (c.get("volatile") or "").strip()
+        if not warn:
+            continue
+        as_of = (c.get("as_of") or "").strip()
+        bucket = groups.setdefault(warn, [])
+        if as_of and as_of not in bucket:
+            bucket.append(as_of)
+    return [f"※ {warn}" + (f" — {' · '.join(as_ofs)} 기준 표기입니다." if as_ofs else ".")
+            for warn, as_ofs in groups.items()]
 
 
 def _prefer_sections(hits: list[tuple[float, dict]]) -> list[tuple[float, dict]]:
@@ -137,18 +157,20 @@ def market_evidence(kind: str, query: str, hits: list[tuple[float, dict]],
                     tool: str | None = None) -> Evidence | None:
     """시황·상품 카드 → 원장 항목. 검색 도구와 «카드 id 로 되싣기»가 함께 쓴다 —
     표시 선언(※·⚖)이 두 곳에 있으면 한쪽만 빠지는 날이 온다(cards.fact_evidence 와 같다)."""
-    notices: list[str] = []
+    cards = [c for _s, c in hits]
+    # 시효 표시(※)와 인용 고지(⚖)는 다른 것을 말한다 — 앞은 «이 수치가 낡을 수 있다»,
+    # 뒤는 «이건 정보 제공이지 권유가 아니다». 둘 다 카드의 선언에서 온다. ※ 는 묶음
+    # 단위로 합친다(stale_marks) — 카드마다 세우면 같은 문장이 기준시점만 바꿔 되풀이된다.
+    stale = stale_marks(cards)
+    notices: list[str] = list(stale)
     scopes: list[dict] = []
-    for _s, c in hits:
-        # 시효 표시(※)와 인용 고지(⚖)는 다른 것을 말한다 — 앞은 «이 수치가 낡을 수
-        # 있다», 뒤는 «이건 정보 제공이지 권유가 아니다». 둘 다 카드의 선언에서 온다.
-        marks = [m for m in (stale_mark(c), advisory_mark(c)) if m]
+    for c in cards:
+        marks = [m for m in (*stale, advisory_mark(c)) if m]
         if not marks:
             continue
         notices += [m for m in marks if m not in notices]
         scopes.append(_scope(c["title"], [], marks))
-    cards = [c for _s, c in hits]
-    text = "\n\n".join(_render_market(c) for c in cards)
+    text = "\n\n".join([*(_render_market(c) for c in cards), *stale])
     pct = _percent_allow(cards)
     return _ev(tool or kind, query, text,
                kb_index.sources_of(KB, hits), notices=notices, scopes=scopes,
