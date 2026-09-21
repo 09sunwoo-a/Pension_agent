@@ -969,6 +969,27 @@ def check_caution_roles() -> int:
     hit = bool(hit)
     print(f"{'✓' if hit else '✗'} 가드가 역할 선언만 본다(_AUTHORING 휴리스틱 삭제)")
     ok += hit
+
+    # ⑥ 직원에게 나가는 역할(caution·info)의 문구에 **코드 안의 이름**이 없다.
+    #
+    # 역할이 맞아도 문구가 틀릴 수 있다 — seg.01 의 주의는 임계값 차이를 알리는 진짜
+    # caution 인데 문장이 「코드 판정(customer.conditions dep)은 룰베이스 TG-202 의 …」였고,
+    # 그것이 답변 본문과 «빠뜨리면 안 되는 표시»에 두 번 나갔다(2026-09-21 실측, 질문 리스트
+    # 72번). 역할 축(gap 17)과 다른 축이라 ②가 못 잡는다 — §5 「재료에 개발 용어를 쓰지
+    # 않는다」 쪽이다. 심볼·룰베이스 번호는 config 주석에 남기고 text 에는 업무 표현만 쓴다.
+    import re as _re
+    _code = _re.compile(r"[a-z_]{3,}\.[a-z_]{3,}"          # customer.conditions
+                        r"|\bTG-\d+\b"                     # 룰베이스 번호
+                        r"|(?<![0-9A-Za-z_])(dep|mat|nod|dor|idl|out|hlt|nch|sec)"
+                        r"(?![0-9A-Za-z_가-힣])")            # 요건 코드
+    jargon = [(c["id"], e["text"][:40]) for c in with_field
+              for e in c[ROLE_FIELDS[c["_kind"]]]
+              if isinstance(e, dict) and e.get("role") in ("caution", "info")
+              and _code.search(e.get("text") or "")]
+    hit = not jargon
+    print(f"{'✓' if hit else '✗'} 직원에게 나가는 주의·비고에 코드 이름이 없다"
+          + ("" if hit else f" — {jargon[:3]}"))
+    ok += hit
     return ok
 
 
