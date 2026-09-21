@@ -459,6 +459,20 @@ def _post_json(req: urllib.request.Request) -> dict:
                 # 그대로 올려 `HTTPError: HTTP Error 404: Not Found` 한 줄만 남았는데,
                 # 404 는 «경로가 없다»와 «그런 모델이 없다»가 같은 코드로 온다 — 응답
                 # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
+                #
+                # **본문을 로그에 통째로 한 번 더 남긴다**(2026-09-21). 예외 문장만으로는
+                # 진단이 끝나지 않는다 — 그 문장은 세 번 잘려서 사람에게 온다: 여기서
+                # `ERROR_BODY_LIMIT`(400자) · 단계 로그에서 `STEP_TEXT_MAX`(120자) ·
+                # 화면에서 `plan.REASON_MAX`(120자). 행내 게이트웨이가 400 을 준 실측에서
+                # 운영자가 본 것은 `응답: { "error":` 까지였다(김서연 턴, gemma-4).
+                # 잘라야 하는 이유는 **상담 화면과 로그가 스택트레이스 자리가 되면 안 된다**
+                # 는 것이고, 그건 재시도해도 소용없는 요청 오류에는 해당하지 않는다 —
+                # 429·5xx 는 직원이 기다리면 되지만 4xx 는 고쳐야 하고, 고치려면 본문을
+                # 봐야 한다. 그래서 자르는 쪽은 그대로 두고 **한 줄을 따로** 남긴다.
+                if body:
+                    logging.getLogger("agent").error(
+                        "LLM %s %s — 응답 전문 ↓\n%s\n요청 URL: %s",
+                        exc.code, exc.reason, _full_error_body(exc, body), req.full_url)
                 raise LLMError(
                     f"HTTP {exc.code} {exc.reason} — {req.full_url}"
                     + (f"\n응답: {body}" if body else ""), status=exc.code) from exc
@@ -485,7 +499,23 @@ def _post_json(req: urllib.request.Request) -> dict:
 
 
 #: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
+#: 이 상한은 **예외 문장**에 걸린다 — 그 문장은 답변 자리·단계 로그로 흘러가므로 짧아야
+#: 한다. 재시도 안 되는 오류의 전문은 위 `_post_json` 이 로그에 따로 한 줄 남긴다.
 ERROR_BODY_LIMIT = 400
+
+#: 로그에 남기는 전문의 상한. 화면·답변이 아니라 **진단 로그**라 넉넉히 두되, HTML 오류
+#: 페이지를 통째로 받는 경우가 있어 무한은 아니다.
+FULL_ERROR_BODY_LIMIT = 4000
+
+
+def _full_error_body(exc: urllib.error.HTTPError, already: str) -> str:
+    """진단 로그용 응답 전문. 본문은 한 번만 읽히므로 이미 읽어 둔 것을 쓴다.
+
+    `_error_body` 가 자르기 **전의** 원문을 들고 있지 않으므로, 잘린 표시가 붙어 있으면
+    그 사실을 밝힌다 — 「더 있는데 안 보여준다」가 조용히 일어나면 안 된다.
+    """
+    raw = getattr(exc, "_full_body", None) or already
+    return raw[:FULL_ERROR_BODY_LIMIT]
 
 
 def _error_body(exc: urllib.error.HTTPError) -> str:
@@ -498,6 +528,9 @@ def _error_body(exc: urllib.error.HTTPError) -> str:
         raw = exc.read().decode("utf-8", "replace")
     except Exception:  # noqa: BLE001 — 본문을 못 읽는 것이 원래 오류를 가리면 안 된다
         return ""
+    # 자르기 전의 원문을 예외에 붙여 둔다 — 스트림은 한 번만 읽히는데, 진단 로그는
+    # 짧게 자른 것이 아니라 전문을 봐야 한다(`_full_error_body`).
+    exc._full_body = raw  # noqa: SLF001 — 우리가 만든 자리다
     text = " ".join(raw.split())
     return text[:ERROR_BODY_LIMIT] + ("…" if len(text) > ERROR_BODY_LIMIT else "")
 
