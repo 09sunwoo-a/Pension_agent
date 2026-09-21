@@ -142,7 +142,11 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     # 구획을 나눠 싣는다 — 오늘 나눈 대화가 「과거 상담」으로 오독되면 방금 한 말이
     # 지난 상담의 근거처럼 인용된다.
-    lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
+    # 머리줄에 고객 식별번호를 싣지 않는다 — 행내 개인정보 필터가 KB-PIN 을 주민등록번호로
+    # 보고 요청을 400 으로 끊는다(`pension_agent/privacy.py`). 한 턴에 열려 있는 고객은
+    # 하나라 «지금 열려 있는 고객»으로 갈린다(이 도구는 이름을 쓰려고 브리핑을 부르지
+    # 않는다 — 기록 한 줄 때문에 고객 한 명의 판정을 통째로 돌릴 이유가 없다).
+    lines = ["■ 지금 열려 있는 고객 — 상담 이력 기록"]
     if records:
         lines.append("[과거 상담 기록]")
         for session in records[:HISTORY_SESSIONS]:
@@ -158,7 +162,9 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     # 기록입니다"를 붙이면 표시가 거짓말을 하고, 매번 붙는 표시는 읽히지 않는다 —
     # 정작 낡은 값이 실린 턴에서도 그냥 지나가게 된다.
     return _ev("history", query, "\n".join(lines),
-               [{"id": f"session.{customer_id}", "title": f"고객 {customer_id} 상담 이력",
+               # 제목은 화면뿐 아니라 계획 프롬프트의 「이미 모은 재료」로도 나간다
+               # (`evidence/ledger.py::summarize`) — 여기에도 KB-PIN 을 넣지 않는다.
+               [{"id": f"session.{customer_id}", "title": "이 고객의 상담 이력",
                  "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],
                notices=[HISTORY_MARK] if records else [])

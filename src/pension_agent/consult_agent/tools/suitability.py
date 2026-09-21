@@ -67,7 +67,9 @@ def _suitable(state: AgentState, query: str) -> Evidence | None:
         return None
     advice = advisory_mark({"advisory": kb_index.advisory_note(KB)})
 
-    lines = [f"■ 고객 {customer_id} — 투자성향 {profile.rk} · 위험등급 {profile.grade}",
+    # 고객 식별번호 대신 이름으로 부른다 — 행내 개인정보 필터가 KB-PIN 을 주민등록번호로
+    # 보고 요청을 400 으로 끊는다(`pension_agent/privacy.py` · briefing.py 의 같은 자리).
+    lines = [f"■ 고객 {profile.nm} — 투자성향 {profile.rk} · 위험등급 {profile.grade}",
              f"· 적합성 허용 상한: {cap} (이 등급까지의 상품만 안내할 수 있다)",
              "",
              f"── 안내할 수 있는 상품 {len(passed)}종"]
@@ -101,7 +103,8 @@ def _suitable(state: AgentState, query: str) -> Evidence | None:
                       f"(허용 상한이 {cap}이라 카탈로그 전부가 범위 안이다)"]
     return _ev("suitable", query, "\n".join(lines),
                [{"id": f"suitable.{customer_id}",
-                 "title": f"{profile.nm} 고객 적합성 판정 (KB-PIN {customer_id})",
+                 # 제목은 계획 프롬프트에도 실린다 — KB-PIN 을 넣지 않는다(briefing.py 와 같은 자리).
+                 "title": f"{profile.nm} 고객 적합성 판정",
                  "doc": "투자성향 적합성 확인 — 위험등급 상한·거래채널 판정 결과 "
                         "(브리핑 화면 ⑤ 와 같은 후보군)",
                  "score": None, "page": None}],

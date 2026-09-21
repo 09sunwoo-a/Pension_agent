@@ -96,7 +96,9 @@ _ALLOWED_EDGES: dict[str, set[str]] = {
     "config": set(), "clock": set(),                       # 단일 출처 — 아무것도 임포트하지 않는다
     "env": {"config"},                                     # .env 위치만 config 에서 받는다
     "observability": {"env"},                              # 키·호스트는 .env 에서 (llm 을 모르면서 관측한다)
-    "llm": {"env", "observability"},                       # 클라이언트가 관측을 부른다 — 반대는 순환
+    "privacy": set(),                                      # 행내 개인정보 필터 규칙표 — 정규식만 안다
+    "llm": {"env", "observability", "privacy"},            # 클라이언트가 관측을 부른다 — 반대는 순환
+                                                           # (privacy 는 나가기 직전에 가리는 문 — llm 만 부른다)
     "verify": {"clock"},                                   # 연도 없는 날짜를 «오늘 언저리»로 읽는다
     "session_store": {"config"},
     "note": {"clock", "strategy_agent"},                   # 공용 → 에이전트 간선(유일) 쪽지 본문의 타겟·잔여일수

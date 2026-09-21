@@ -52,8 +52,11 @@ def _render(card: dict, matched: set[str] | None, customer_id: str | None) -> li
     else:
         lines.append("· 이 세그먼트는 자동 판정 요건이 없습니다(이벤트형이거나 보유하지 않은 데이터).")
     if matched is not None and customer_id:
+        # 고객 식별번호는 적지 않는다 — 한 턴에 열려 있는 고객은 하나라 이 줄에 번호가
+        # 없어도 누구 얘기인지 갈리고, 행내 개인정보 필터는 KB-PIN 이 실린 요청을 통째로
+        # 400 으로 끊는다(`pension_agent/privacy.py`).
         hit = card["id"] in matched
-        lines.append(f"· 지금 열려 있는 고객({customer_id}): "
+        lines.append("· 지금 열려 있는 고객: "
                      + ("이 세그먼트에 해당합니다." if hit else "해당하지 않습니다."))
     lines.append(f"· 출처 {origin_of(KB, card)}")
     return lines

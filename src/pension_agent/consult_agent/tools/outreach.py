@@ -68,7 +68,9 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
     n_fallback = sum(1 for key in ("event", "seminar") if picked.get(key) and not matched[key])
     n_other = {key: max(len(pools.get(key) or []) - (1 if picked.get(key) else 0), 0)
                for key in ("event", "seminar")}
-    lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
+    # 고객 식별번호 대신 이름으로 부른다 — 행내 개인정보 필터가 KB-PIN 을 주민등록번호로
+    # 보고 요청을 400 으로 끊는다(`pension_agent/privacy.py` · briefing.py 의 같은 자리).
+    lines = [f"■ 고객 {profile.nm} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
              f"· 지금 안내할 것 {n_picked}건 — "
              + " · ".join(f"{label} {1 if matched[key] else 0}건"
                           for key, label in (("event", "이벤트"), ("seminar", "세미나")))

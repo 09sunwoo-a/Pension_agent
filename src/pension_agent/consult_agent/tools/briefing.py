@@ -35,7 +35,13 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     except Exception:
         return None
 
-    lines = [f"■ 고객 {customer_id} — 브리핑 자료"]
+    # 머리줄은 **이름으로** 부른다. 고객 식별번호(KB-PIN)를 싣지 않는 이유는 둘이다:
+    # LLM 이 답하는 데 쓰지 않는 값이고(직원은 그 고객 화면을 열어 둔 채 묻는다), 행내
+    # 게이트웨이의 개인정보 필터가 이 꼴을 주민등록번호로 보고 **요청을 통째로 400 으로
+    # 끊는다**(2026-09-29 실측 — `pension_agent/privacy.py` 머리말). 한 턴에 열려 있는
+    # 고객은 하나라 이름만으로 어느 고객인지 갈린다. 경계는 여기서 긋는다 — 재료에 없으면
+    # 프롬프트에도 없다(§3 오늘의 타겟 목록이 같은 결정을 이미 적어 뒀다).
+    lines = [f"■ 고객 {profile.nm} — 브리핑 자료"]
     lines += [f"· {k} {v}" for k, v in facts["customer"].items()]
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
     # 계좌 상태 — **정상인 항목도 값으로** 싣는다. 화면(briefing)은 요건이 성립한 것만
@@ -132,7 +138,10 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                for k, v in src.items()]
     return _ev("customer", query, "\n".join(lines),
                [{"id": f"customer.{customer_id}",
-                 "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
+                 # 제목에도 KB-PIN 을 넣지 않는다 — 출처 제목은 화면에만 서는 것이 아니라
+                 # 계획 프롬프트의 「이미 모은 재료」로도 나간다(`evidence/ledger.py::summarize`).
+                 # id 는 아래 `id` 칸에 그대로 있고 그쪽은 프롬프트로 나가지 않는다.
+                 "title": f"{profile.nm} 고객 계좌 현황",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}, *deduped],
                source_keys=card_keys,
