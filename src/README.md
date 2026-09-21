@@ -152,6 +152,7 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 | `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
 | `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
 | `HTTP 429` | 호출이 몰림 | `.env` 「호출 게이트」 구역 — 간격을 늘리거나(`LLM_MIN_INTERVAL_SEC`) 버킷을 나눈다(`LLM_CLIENT_USER_SPREAD`). 재시작 필요 |
+| `HTTP 400 민감정보 감지됨` | 게이트웨이 앞단의 개인정보 필터. 응답의 `rule_name` 이 어느 룰인지 말한다 | 그 꼴을 **프롬프트 재료에서** 뺀다(고객 식별번호가 그랬다 — `pension_agent/privacy.py` 머리말). 나가기 직전에 가리는 문은 이미 서 있고, 무엇이 가려졌는지는 로그의 `llm 개인정보 가림 가린룰=…` 줄이 말한다. 걸린 값을 직접 보려면 `LLM_PII_SCRUB=0` 으로 끄고 재현한다 |
 
 **STG 는 분당 10회다.** 브리핑 한 편이 순차 11회라 한 편이 한도를 넘는다 —
 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=6.5` 로 조이면 한 편이 약 70초에 완주하고,

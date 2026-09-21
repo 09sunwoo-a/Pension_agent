@@ -133,6 +133,7 @@ STEP_KEYS: dict[str, str] = {
     "recipients": "수신", "mode": "모드",
     # llm
     "retries": "재시도", "wait": "대기", "source": "출처", "chars": "입력", "elapsed": "소요",
+    "masked": "가린룰",   # 개인정보 필터에 걸린 **룰 이름**. 걸린 값은 싣지 않는다(privacy.py)
     # briefing
     "tier": "등급", "skipped": "건너뜀",
 }

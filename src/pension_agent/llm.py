@@ -35,6 +35,7 @@
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
   LLM_CLIENT_USER_SPREAD  사번 뒤에 붙일 임의 접미의 길이. 0(기본)이면 안 붙인다.
                     한 사번의 쿼터 버킷이 바닥날 때 여러 버킷으로 나눈다 — 「쿼터 버킷 분산」
+  LLM_PII_SCRUB     행내 개인정보 필터가 잡는 꼴을 나가기 직전에 가린다. 기본 켜짐(0 으로 끈다)
   LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
   LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
@@ -76,7 +77,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from pension_agent import env, observability
+from pension_agent import env, observability, privacy
 
 # .env(= src/.env)를 먼저 읽는다 — 아래 모듈 상수가 그 값으로 정해진다.
 # 파싱은 env.py 가 한다(관측 설정도 같은 파일에서 와야 하므로 아래층으로 내렸다).
@@ -171,6 +172,43 @@ MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
 #: 429·5xx 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
 RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
+
+# ─────────────────────────────────────────────────────────────
+# 개인정보 필터 — 나가기 직전의 마지막 문
+#
+# 행내 게이트웨이 앞단에 개인정보 탐지 필터가 서 있고, 걸리면 모델까지 가지 못하고 400 이다
+# (`privacy.py` 머리말의 실측 — 고객 id 가 주민등록번호 꼴이라 걸렸다). 400 은 재시도 대상이
+# 아니라(`_retryable`) 그 턴은 답을 한 글자도 못 내보낸다.
+#
+# **경계는 재료에서 먼저 긋는다** — 고객 식별번호는 프롬프트 재료에 싣지 않는다
+# (`consult_agent/tools/briefing.py` 등). 여기 있는 것은 그 뒤의 한 겹이다: 프롬프트에는
+# 직원 질문 원문·상담 기록·카드 원문처럼 **우리가 쓰지 않은 글**도 실리기 때문이다.
+#
+# 가리면 답이 그만큼 어긋날 수 있다. 그래도 400 보다 낫다 — 그쪽은 답이 아예 없다.
+# 진단이 필요하면 `LLM_PII_SCRUB=0` 으로 끄고 게이트웨이의 `rule_name` 을 직접 본다.
+# ─────────────────────────────────────────────────────────────
+
+#: 나가는 글에서 행내 필터가 잡는 꼴을 가릴까. 기본 켜짐.
+PII_SCRUB = (os.getenv("LLM_PII_SCRUB", "1") or "1").strip().lower() not in ("0", "false", "no")
+
+
+def _scrub(prompt: str, system: str | None) -> tuple[str, str | None, list[str]]:
+    """프롬프트·시스템 프롬프트에서 개인정보 꼴을 가린다. 걸린 룰 이름도 함께 돌려준다.
+
+    **걸린 값은 어디에도 남기지 않는다** — 로그에 싣는 것은 룰 이름뿐이다(`privacy` 머리말).
+    가린 사실 자체는 남긴다: 답이 왜 그 자리를 비우고 말하는지 되짚을 길이 없으면 다음
+    사람은 모델이 이상하다고 판단한다.
+    """
+    if not PII_SCRUB:
+        return prompt, system, []
+    prompt, hit = privacy.mask(prompt)
+    if system:
+        system, hit_system = privacy.mask(system)
+        hit += [r for r in hit_system if r not in hit]
+    if hit:
+        observability.step("llm", "개인정보 가림", masked=", ".join(hit), level=logging.WARNING)
+    return prompt, system, hit
+
 
 # ─────────────────────────────────────────────────────────────
 # 호출 게이트 — 429 는 «재시도»가 아니라 «덜 몰아치기»로 막는다
@@ -622,6 +660,9 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
             "어느 .env 가 읽혔는지는 python -m pension_agent.env 로 봅니다."
             % PROVIDER
         )
+    # 가리는 것은 **여기 한 곳**이다 — 모든 호출이 이 함수를 지나므로, 새 프롬프트가 생겨도
+    # 빠지지 않는다(프로바이더별 함수에 두면 genai 만 고치고 gemma 를 빠뜨린다).
+    prompt, system, _masked = _scrub(prompt, system)
     started = time.time()
     try:
         if PROVIDER == "anthropic":

@@ -11,6 +11,8 @@
   실행 환경 — env ← observability ← llm 한 방향
     env.py             .env 로딩과 실행 단계(train | serving)
     observability/     Langfuse 관측 — 트레이스·span·score·전송 워커 (자가진단: python -m pension_agent.observability)
+    privacy.py         행내 개인정보 필터 규칙표 — 나가는 글에서 그 필터가 잡는 꼴을 가린다
+                       (자가진단: python -m pension_agent.privacy "<글>")
     llm.py             프로바이더 전환식 LLM 클라이언트 (환경 이전 시 여기만 수정) · 응답 JSON 추출
 
   검증
