@@ -969,6 +969,47 @@ def check_caution_roles() -> int:
     hit = bool(hit)
     print(f"{'✓' if hit else '✗'} 가드가 역할 선언만 본다(_AUTHORING 휴리스틱 삭제)")
     ok += hit
+
+    # ⑥ 직원에게 나가는 역할(caution·info)의 문구에 **코드 안의 이름**이 없다.
+    #
+    # 역할이 맞아도 문구가 틀릴 수 있다 — seg.01 의 주의는 임계값 차이를 알리는 진짜
+    # caution 인데 문장이 「코드 판정(customer.conditions dep)은 룰베이스 TG-202 의 …」였고,
+    # 그것이 답변 본문과 «빠뜨리면 안 되는 표시»에 두 번 나갔다(2026-09-21 실측, 질문 리스트
+    # 72번). 역할 축(gap 17)과 다른 축이라 ②가 못 잡는다 — §5 「재료에 개발 용어를 쓰지
+    # 않는다」 쪽이다. 심볼·룰베이스 번호는 config 주석에 남기고 text 에는 업무 표현만 쓴다.
+    import re as _re
+    _code = _re.compile(r"[a-z_]{3,}\.[a-z_]{3,}"          # customer.conditions
+                        r"|\bTG-\d+\b"                     # 룰베이스 번호
+                        r"|(?<![0-9A-Za-z_])(dep|mat|nod|dor|idl|out|hlt|nch|sec)"
+                        r"(?![0-9A-Za-z_가-힣])")            # 요건 코드
+    jargon = [(c["id"], e["text"][:40]) for c in with_field
+              for e in c[ROLE_FIELDS[c["_kind"]]]
+              if isinstance(e, dict) and e.get("role") in ("caution", "info")
+              and _code.search(e.get("text") or "")]
+    hit = not jargon
+    print(f"{'✓' if hit else '✗'} 직원에게 나가는 주의·비고에 코드 이름이 없다"
+          + ("" if hit else f" — {jargon[:3]}"))
+    ok += hit
+
+    # ⑦ 형제 표와 행 이름을 공유하는 표는 오짝 판정에서 **건너뛴다**(판정 불가).
+    #    「투자성향별 포트폴리오」는 같은 꼴의 표 다섯 장이 「국내채권」 행을 공유한다. 표를
+    #    한 장씩 따로 보면 위험중립형을 정확히 옮긴 답변이 적극투자형 표에서 「같은 표의 다른
+    #    행 값」으로 신고돼 폐기되고, 그 자리에 카드 원문이 덤프됐다(2026-09-21 실측, 96번).
+    from pension_agent.consult_agent.evidence import relations as _REL
+    _port = next(c for c in KB.cards if c["id"] == "lnp.퇴직연금펀드_포트폴리오_2026-08.02")
+    _ok_answer = ("위험중립형은 국내채권 60% · 해외채권 15% · 해외혼합 25% 로 짜여 있어요. "
+                  "하나 파워e단기채 60%, 우리미국 단기채공모주(H) 15%, 삼성EMP 리얼리턴(UH) 25% 예요.")
+    hit = not _REL.table_mispaired(_ok_answer, _port["tables"])
+    print(f"{'✓' if hit else '✗'} 형제 표와 행 이름이 겹치면 오짝 판정을 하지 않는다")
+    ok += hit
+
+    # 표가 한 장뿐이면 판정은 그대로 선다 — 좁힌 것은 «가릴 수 없는 표»뿐이다.
+    _one = next((c for c in KB.cards if len(c.get("tables") or []) == 1
+                 and len((c["tables"][0].get("rows") or [])) >= 2), None)
+    hit = _one is not None and not (_REL._row_names(_one["tables"][0])
+                                    & _REL._ambiguous_names(_one["tables"]))
+    print(f"{'✓' if hit else '✗'} 표가 한 장인 카드는 건너뛰지 않는다")
+    ok += hit
     return ok
 
 
@@ -1054,6 +1095,33 @@ def check_account_state() -> int:
     ev = tools.TOOLS["customer"].run({"customer_id": p0.id}, "언제 가입했어?")
     hit = bool(p0.joined) and p0.joined in (ev or {}).get("text", "")
     print(f"{'✓' if hit else '✗'} 가입일이 경과연수가 아니라 날짜로 실린다")
+    ok += hit
+
+    # 경과는 **사람이 말하는 꼴**로 — 「3.0년」이 아니라 「3년」·「2년 10개월」이다.
+    # `invest_period_years` 는 소수 한 자리로 반올림한 수(적합성·상품추천의 입력)라 문장에
+    # 그대로 실으면 직원 화면에 「가입 후 3.0년이 지났어요」가 나간다(2026-09-21 실측,
+    # 질문 리스트 25번). 게다가 반올림 때문에 2년 11개월이 「3.0년」으로 보였다.
+    import re as _re
+    from pension_agent.strategy_agent.engine import render as RENDER
+    bad = [p.id for p in CUST.PERSONAS
+           if _re.search(r"가입 후 \d+\.\d", str(RENDER._account_state(p).get("IRP_가입일") or ""))]
+    hit = not bad
+    print(f"{'✓' if hit else '✗'} 가입 후 경과에 소수점 연수를 쓰지 않는다"
+          + ("" if hit else f" — {bad[:3]}"))
+    ok += hit
+
+    hit = (CUST.tenure_text("2023-10-02") is not None
+           and "." not in (CUST.tenure_text("2023-10-02") or "")
+           and CUST.tenure_text(None) is None)
+    print(f"{'✓' if hit else '✗'} tenure_text 는 「n년」·「n년 m개월」만 만든다 "
+          f"({CUST.tenure_text('2023-10-02')})")
+    ok += hit
+
+    # 상품추천 LLM 스냅샷도 같은 표기를 쓴다 — 프롬프트에 실린 말이 답변에 그대로 나온다.
+    from pension_agent.strategy_agent import agent as _SA
+    hit = all(_re.fullmatch(r"(\d+년( \d+개월)?|\d+개월|미확인)", _SA._tenure(p))
+              for p in CUST.PERSONAS)
+    print(f"{'✓' if hit else '✗'} 상품추천 스냅샷의 「투자기간」도 소수점을 쓰지 않는다")
     ok += hit
 
     # 실린 값은 인용할 수 있고, 안 실린 날짜는 여전히 막힌다(경계는 넓어지지 않았다).

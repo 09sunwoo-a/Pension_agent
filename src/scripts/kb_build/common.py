@@ -100,9 +100,15 @@ def first_clause(text: str, limit: int = 70) -> str | None:
 
     「데이터 — '25.11~'26.4 이탈고객 분석: …」처럼 앞에 짧은 표지가 붙은 본문은 표지를
     건너뛰어야 내용이 있는 절이 잡힌다.
+
+    **표는 보지 않는다.** 본문에 마크다운 표가 들어 있는 절이 있고(세그먼트 3·33·50 의
+    조건문), 그 줄까지 절로 세면 검색 입구가 「… 분류: | 유형 | 이탈 사유 | 상세」처럼
+    표 머리말 조각이 된다 — n-gram 이 잴 것이 없는 말이다. 표 앞의 산문까지만 본다
+    (`parse.joined` 가 표의 줄바꿈을 지키게 된 뒤로 이 경계가 그어진다).
     """
     if not text:
         return None
+    text = text.split("\n|", 1)[0]
     for head in _CLAUSE_SPLIT.split(text.strip()):
         head = head.strip().rstrip(".")
         if len(head) < 8:

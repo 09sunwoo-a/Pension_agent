@@ -220,10 +220,49 @@ def _bare(nums: set[str]) -> set[str]:
     return {n.rstrip("%") for n in nums}
 
 
+def _row_names(table: dict) -> set[str]:
+    """그 표의 행을 지목할 수 있는 이름 전부(별칭 포함)."""
+    return {a for row in (table.get("rows") or [])
+            for k in (row.get("keys") or []) if k for a in _aliases(k)}
+
+
+def _ambiguous_names(tables: list[dict]) -> frozenset[str]:
+    """표 **둘 이상에** 같이 나오는 행 이름. 그 이름으로는 어느 표인지 가릴 수 없다.
+
+    한 카드가 같은 꼴의 표를 여러 장 들고 있는 경우가 있다 — 「투자성향별 포트폴리오」는
+    안정형·안정추구형·위험중립형·적극투자형·공격투자형 다섯 장이 전부 같은 열
+    (`구분 | 상품명 | 투자비중 | 상품특징`)이고 「국내채권」 행이 다섯 장에 다 있다. 표를
+    한 장씩 따로 보면 답변의 「국내채권 60%」(위험중립형)가 **적극투자형 표에서도** 그 행을
+    말한 것으로 잡히고, 그 표의 국내채권은 35% 라 60 이 「같은 표의 다른 행 값」으로 신고된다.
+    정확히 옮긴 답변이 그렇게 폐기되고 카드 원문이 덤프됐다(2026-09-21 실측, 질문 리스트
+    96번 — 「위험중립형은 어떻게 짜여 있어?」).
+
+    어느 표인지 가르는 말(「위험중립형」)은 표가 아니라 카드 본문의 소제목에 있어, 행 단위로
+    대조하는 이 검사가 볼 수 없다. **그러면 그건 판정 불가이지 위반이 아니다**(§6 — 검증기가
+    옳은 문장을 거부하는 것은 틀린 문장을 통과시키는 것보다 나쁘다). 겹치는 이름을 «행을
+    지목하는 이름»에서 빼면, 답변이 그 표의 다른 열(여기서는 상품명 — 표마다 다르다)로 행을
+    처음에는 겹치는 이름만 «행을 지목하는 이름»에서 뺐는데 그걸로는 모자랐다 — 이 카드는
+    행 이름(국내채권)뿐 아니라 **상품명까지 표끼리 공유한다**(우리미국 단기채공모주는 세 표에
+    있다). 이름을 부분적으로 빼면 세 행을 다 말한 답변에서 한 행만 인식돼, 이번에는 같은 표
+    안에서 남의 값이라고 신고했다. 그래서 겹치는 이름이 하나라도 있는 표는 **표째로** 건너뛴다
+    (`table_mispaired`). 실측상 이 카드는 10장 중 3장이고, 그중 하나(mkt …07)의 겹침은
+    「단위: pt」라는 표 머리말 조각이라 잃는 판정이 없다. 판정을 **좁히기만** 하므로 맞는 답을
+    거부하는 쪽으로는 가지 않는다(`_aliases` 머리말과 같은 방향).
+    """
+    seen: dict[str, int] = {}
+    for table in tables or []:
+        for name in _row_names(table):
+            seen[name] = seen.get(name, 0) + 1
+    return frozenset(n for n, c in seen.items() if c > 1)
+
+
 def table_mispaired(answer: str, tables: list[dict]) -> list[str]:
     """답변이 다른 행의 값을 갖다 붙인 자리. 판정할 수 없으면 빈 목록."""
     bad: list[str] = []
+    ambiguous = _ambiguous_names(tables)
     for table in tables or []:
+        if _row_names(table) & ambiguous:
+            continue                      # 형제 표와 행 이름을 공유한다 → 판정 불가(위 머리말)
         rows = table.get("rows") or []
         said = _said_rows(answer, rows)
         if not said or len(said) == len(rows):

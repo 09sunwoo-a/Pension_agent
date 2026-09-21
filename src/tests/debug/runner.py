@@ -83,9 +83,14 @@ def session(*, customer_id: str | None = None,
         # 파일로 남는다 — 리허설을 돌 때마다 `git status src/session_data/` 가 더러워지고,
         # 그건 «걷어낸다»는 이 블록의 약속이 지켜지지 않은 것이다(기록 없는 고객 3명이
         # 매번 그랬다). 있던 파일은 건드리지 않는다 — 시연용 시드가 거기 들어 있다.
+        # 에이전트는 **고정 id 의 별도 세션**에도 쓴다 — 브리핑 수정 내역은 `correction-log`,
+        # 화면 연계·쪽지 실행은 `tool-log`. 우리 id 만 지우면 그 둘이 추적 파일에 남고, 실제로
+        # 커밋까지 갔다(2026-09-20 — 송도윤 픽스처에 9/19·9/20 실행 기록 3턴). 리허설이 남긴
+        # 것은 전부 걷는다.
         if ours and customer_id:
             try:
-                session_store.drop_session(customer_id, session_id)
+                for sid in (session_id, "correction-log", "tool-log"):
+                    session_store.drop_session(customer_id, sid)
                 if not existed:
                     session_store._path(customer_id).unlink(missing_ok=True)
             except Exception:  # noqa: BLE001 — 정리 실패가 리허설을 죽이지 않는다

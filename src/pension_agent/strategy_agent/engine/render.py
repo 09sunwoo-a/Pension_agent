@@ -17,6 +17,7 @@ from pension_agent.strategy_agent.customer import (
     churn,
     days_to_year_end,
     tax_credit,
+    tenure_text,
 )
 from pension_agent.strategy_agent.engine.catalog import (
     ASSETS,
@@ -34,8 +35,18 @@ def customer_facing_asset(branch: str | None = None) -> dict | None:
 
     content_type 이 있는 레코드(이벤트·세미나 — REQUIREMENTS.md ⑨, next_event_and_seminar() 가
     다룬다)는 여기서 제외한다 — 같은 asset kind·같은 customer_facing 필드를 쓰지만 이 함수가
-    찾는 '전략에 첨부할 발송 자료'와는 다른 성격의 콘텐츠다."""
-    rows = [a for a in ASSETS if a.get("customer_facing") is True and not a.get("content_type")]
+    찾는 '전략에 첨부할 발송 자료'와는 다른 성격의 콘텐츠다.
+
+    **더미도 제외한다**(2026-09-21). `customer_facing` 과 `dummy` 는 다른 선언이다 — 앞은
+    「고객에게 그대로 안내해도 되는 내용인가」, 뒤는 「실제 콘텐츠로 확정됐는가」다. 발송
+    문구 초안은 앞이 참이면서 뒤도 참일 수 있고, 그건 **아직 내보내면 안 되는 자료**다
+    (`consult_agent/effects/actions.py::open_lms_screen` 의 더미 게이트가 같은 판정을 한다).
+    지금까지 이 구멍이 안 드러난 것은 그때그때의 더미 자산이 전부 content_type 을 갖고
+    있어(AS03·AS04 — 이벤트·세미나) 위 줄에서 먼저 걸렸기 때문이다. content_type 없는
+    더미가 하나 들어오자 이 함수가 그것을 전략 첨부 자료로 골랐다."""
+    rows = [a for a in ASSETS
+            if a.get("customer_facing") is True and not a.get("content_type")
+            and not a.get("dummy")]
     if branch:
         rows = [a for a in rows if a.get("branch") in (branch, None)] or rows
     return rows[0] if rows else None
@@ -219,8 +230,11 @@ def _account_state(p: Profile) -> dict[str, Any]:
     # 가입일은 날짜로 싣는다. 경과연수만 주면 LLM 이 오늘에서 빼서 날짜를 «만들어» 말한다
     # (matDate 가 이미 같은 이유로 있다).
     if p.joined:
-        years = f" (가입 후 {p.invest_period_years}년)" if p.invest_period_years else ""
-        state["IRP_가입일"] = f"{p.joined}{years}"
+        # 경과는 「3.0년」이 아니라 「3년」·「2년 10개월」로 적는다 — 반올림한 수를 문장에
+        # 그대로 실으면 사람이 쓰지 않는 말이 되고, 3년 1개월과 2년 11개월이 같은 값으로
+        # 보인다(customer.tenure_text 머리말).
+        tenure = tenure_text(p.joined)
+        state["IRP_가입일"] = f"{p.joined}" + (f" (가입 후 {tenure})" if tenure else "")
     return state
 
 

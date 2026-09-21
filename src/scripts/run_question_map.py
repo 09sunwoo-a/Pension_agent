@@ -2,7 +2,7 @@
 """질문 리스트를 실 LLM 으로 돌려 xlsx 의 「실측 답변」 칸을 채운다.
 
     cd src
-    python -m scripts.run_question_map --new --grade ◎        # 아직 안 해본 1순위 전부
+    python -m scripts.run_question_map --new --grade ◎        # 기존 대본에 없던 1순위 전부
     python -m scripts.run_question_map --rows 17,54,62         # 번호로 골라서
     python -m scripts.run_question_map --item 세액공제 --full   # 항목으로 · 근거까지 기록
     python -m scripts.run_question_map --new --dry-run         # 무엇을 돌릴지만 본다
@@ -40,6 +40,17 @@
 ③ **상담 기록을 더럽히지 않는다.** 실행은 `tests.debug.runner.session()` 을 그대로 쓰므로
    세션마다 기록이 남았다가 나갈 때 걷힌다(그 함수 주석). `git status src/session_data/`
    가 깨끗한지 끝나고 한 번 본다.
+
+④ **쪽지 행(「이번 상담 요약·쪽지」)은 사번이 있어야 돈다.** 실서비스에서는 프론트가
+   로그인 사번을 넘기지만 이 실행기는 안 넘긴다 — 그러면 에이전트는 받을 사람을 모르고,
+   기준서 §10 「받을 사람을 모르면 묻지 않는다」대로 **제안 자체를 하지 않는다.** 그게
+   올바른 동작이라 화면에는 오류가 안 뜨고, 칸만 「쪽지를 보낼 받는 사람을 알 수 없어요」로
+   채워진다(108·109 가 그렇게 채워져 있었다). 폴백 환경변수로 준다.
+
+       WORKB_EMP_NO=3902172 PENSION_TODAY=2026-09-29 python -m scripts.run_question_map --rows 108,109
+
+   **발송까지 가지는 않는다** — `MCP_*` 가 없으면 WorkB 클라이언트가 안 붙어 「미연결」로
+   답한다(109 의 확인 포인트가 재는 것이 그 자리다).
 """
 
 from __future__ import annotations
@@ -148,7 +159,7 @@ def _select(ws, idx, args) -> list[int]:
             continue
         if args.grade and not demo.startswith(args.grade):
             continue
-        if args.new and "안 해본 질문" not in demo:
+        if args.new and "신규" not in demo:
             continue
         if args.item and args.item not in item:
             continue
@@ -212,7 +223,8 @@ def main(argv: list[str]) -> int:
     pick = ap.add_argument_group("돌릴 행 고르기")
     pick.add_argument("--rows", help="번호 목록 (예: 17,54,62)")
     pick.add_argument("--grade", choices=["◎", "○", "–"], help="등급으로")
-    pick.add_argument("--new", action="store_true", help="아직 안 해본 질문만")
+    pick.add_argument("--new", action="store_true",
+                      help="기존 대본·QA 에 없던 질문만 (「시연」 칸이 «신규»)")
     pick.add_argument("--item", help="항목 이름 일부 (예: 세액공제)")
     pick.add_argument("--auto", action="store_true",
                       help="답이 대조로 갈리는 항목만 (question_map.AUTO_ITEMS)")

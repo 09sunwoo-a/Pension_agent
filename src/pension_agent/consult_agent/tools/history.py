@@ -103,6 +103,19 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     if current:
         sessions = [s for s in sessions if s.get("session_id") != current]
 
+    # **감사로그도 «지난 상담»이 아니다.** 위 한 줄은 이번 세션 id 만 빼는데, 에이전트는
+    # 같은 상담 중에 **고정 id 의 별도 세션**에도 쓴다 — 브리핑 수정 내역은
+    # `correction-log`(nodes/correction.py), 화면 연계·쪽지 실행은 `tool-log`
+    # (effects/actions.py). id 가 이번 세션과 다르니 위 필터를 그대로 지나가고, 그래서
+    # **30초 전에 한 수정 요청이 다음 턴에 「지난 상담」으로 나갔다**(2026-09-20 실측 —
+    # 「지난번엔 무슨 얘기 했지?」가 방금 한 112·113번 턴을 2026년 9월 20일 상담 기록으로
+    # 읽었다). 위 주석이 막으려던 바로 그 사고이고, 같은 사고의 두 번째 갈래다.
+    # **id 가 아니라 역할로 가른다** — id 는 호출부가 바꿀 수 있지만 역할은 그 턴이 무엇인지
+    # 그 자체다(§3 의 `transcript` 가 `role=tool` 을 빼는 것과 같은 자리). 직원 발화도
+    # 에이전트 답변도 없는 세션은 상담이 아니다.
+    sessions = [s for s in sessions
+                if any((t.get("role") or "") not in _AUDIT_ROLES for t in _turns(s))]
+
     recent = sorted(sessions, key=lambda s: s.get("started_at") or "", reverse=True)
     records = [s for s in recent if any(t.get("role") == "record" for t in _turns(s))]
     dialogs = [s for s in recent if s not in records and _turns(s)]
@@ -164,6 +177,12 @@ TRANSCRIPT_NONE = "· 기록 없음 — 이번 상담에서 아직 오간 대화
 #: 아니라 화면 장치라 요약 재료에서 뗀다 — 추천질문을 기록에서 빼는 것과 같은 이유다(graph.ask).
 #: 쪽지 본문을 감싼 코드블록 펜스(state.FENCE)도 같은 이유로 뗀다(_strip_devices).
 _OFFER_TRAILER = re.compile(r"\n*— [^\n]*\(네 / 아니오\)\s*$")
+
+
+#: 대화가 아니라 **실행 기록**인 턴의 역할. 이 역할만 든 세션은 상담이 아니다(아래 필터).
+#: 지금 쓰이는 것은 셋이다 — 도구 실행(`tool`)·쪽지 본문(`note`, effects/actions.py) ·
+#: 브리핑 수정 내역(`correction`, nodes/correction.py). 상담은 `user`·`agent`·`record` 다.
+_AUDIT_ROLES = frozenset({"tool", "note", "correction"})
 
 
 def _strip_devices(text: str) -> str:
