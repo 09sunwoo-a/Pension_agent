@@ -1,0 +1,123 @@
+{
+  "customer_id": "TEST_ACT",
+  "sessions": [
+    {
+      "session_id": "tool-log",
+      "started_at": "2026-09-21T02:06:04.815167+00:00",
+      "employee_id": null,
+      "turns": [
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계] 고객님, 남은 세액공제 한도가 264만원 있어요",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              },
+              "result": {
+                "status": "ok",
+                "detail": "발송 화면에 채울 수 있는 문구입니다",
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              }
+            }
+          ],
+          "ts": "2026-09-21T02:06:04.815167+00:00"
+        },
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계 차단] 더미 콘텐츠 TEST-DUMMY",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "(광고) 검사 고객님, KB국민은행입니다.\n안내드려요.\n▶ https://example.invalid/demo/gate-probe\n무료수신거부 080-XXX-XXXX"
+              },
+              "result": {
+                "status": "blocked",
+                "detail": "더미 콘텐츠는 발송 화면에 채울 수 없습니다 — 실제 콘텐츠로 교체한 뒤(자산의 dummy 표시 제거) 다시 시도하세요",
+                "asset_id": "TEST-DUMMY",
+                "message": "(광고) 검사 고객님, KB국민은행입니다.\n안내드려요.\n▶ https://example.invalid/demo/gate-probe\n무료수신거부 080-XXX-XXXX"
+              }
+            }
+          ],
+          "ts": "2026-09-21T02:06:04.815705+00:00"
+        },
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계] 고객님, 남은 세액공제 한도가 264만원 있어요",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              },
+              "result": {
+                "status": "ok",
+                "detail": "발송 화면에 채울 수 있는 문구입니다",
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              }
+            }
+          ],
+          "ts": "2026-09-21T02:06:04.816097+00:00"
+        },
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계] 고객님, 남은 세액공제 한도가 264만원 있어요",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              },
+              "result": {
+                "status": "ok",
+                "detail": "발송 화면에 채울 수 있는 문구입니다",
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              }
+            }
+          ],
+          "ts": "2026-09-21T02:06:15.453225+00:00"
+        },
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계 차단] 더미 콘텐츠 TEST-DUMMY",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "(광고) 검사 고객님, KB국민은행입니다.\n안내드려요.\n▶ https://example.invalid/demo/gate-probe\n무료수신거부 080-XXX-XXXX"
+              },
+              "result": {
+                "status": "blocked",
+                "detail": "더미 콘텐츠는 발송 화면에 채울 수 없습니다 — 실제 콘텐츠로 교체한 뒤(자산의 dummy 표시 제거) 다시 시도하세요",
+                "asset_id": "TEST-DUMMY",
+                "message": "(광고) 검사 고객님, KB국민은행입니다.\n안내드려요.\n▶ https://example.invalid/demo/gate-probe\n무료수신거부 080-XXX-XXXX"
+              }
+            }
+          ],
+          "ts": "2026-09-21T02:06:15.453741+00:00"
+        },
+        {
+          "role": "tool",
+          "text": "[발송 화면 연계] 고객님, 남은 세액공제 한도가 264만원 있어요",
+          "tool_calls": [
+            {
+              "name": "open_lms_screen",
+              "args": {
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              },
+              "result": {
+                "status": "ok",
+                "detail": "발송 화면에 채울 수 있는 문구입니다",
+                "message": "고객님, 남은 세액공제 한도가 264만원 있어요"
+              }
+            }
+          ],
+          "ts": "2026-09-21T02:06:15.454210+00:00"
+        }
+      ],
+      "outcome": null
+    }
+  ]
+}

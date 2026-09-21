@@ -36,6 +36,10 @@ from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크�
 _TIER_WHENS = 4
 _TIER_CHARS = 90
 
+#: 후보 한 줄에 싣는 대사(`dialogue`) 길이 상한. «무슨 말을 하는 카드인가»가 서면 되고,
+#: 대사 전문은 싣지 않는다 — 원장이 갖는다(`_tiers_line` 과 같은 규약).
+_SPEECH_CHARS = 70
+
 
 def _tiers_line(card: dict) -> str:
     """카드가 선언한 조건별 값(`tiers`)의 **조건**만 한 줄로. 선언이 없으면 빈 문자열.
@@ -57,11 +61,45 @@ def _tiers_line(card: dict) -> str:
     return line[:_TIER_CHARS]
 
 
+def _speech_line(card: dict) -> str:
+    """카드가 든 대사(`dialogue`) 한 줄. 선언이 없으면 빈 문자열.
+
+    **화법 카드의 내용은 대사이고 `summary` 는 원문의 정리 문단이다 — 그 둘이 갈리는 카드가
+    있다.** 정리 문단이 «원문 자료에 대한 저작 메모»인 카드들이 그렇다: pitch.k03.020 은
+    「이 축에서 가장 자료가 두꺼운 상황. 세 자료가 같은 상황을 각각 다른 톤으로 다룬다…」,
+    pitch.k03.069 는 「1부 지식항목 20 의 현장 실행판이다…」로 시작한다. 게이트에 그 줄만
+    실으면 게이트는 **카드 안에 무슨 말이 들어 있는지 한 글자도 못 본다.**
+    실측(2026-09-21): 「고객이 '금액도 얼마 안 되는데 그냥 두면 안 되나요' 하면 뭐라고
+    하지?」에 계획이 방치 화법 3장(k03.020·069·021)을 정확히 골라 왔는데 게이트가 10번 중
+    9번 전멸시켰고, 그 턴은 「지식베이스에서 찾지 못했습니다」로 끝났다.
+
+    **싣는 것은 행원 대사다 — 고객 발화가 아니다.** 처음에는 고객 발화를 먼저 실었다.
+    직원이 던지는 질문이 고객 대사인 경우가 많으니(§5 「고객 대사를 그대로 던진 질문」)
+    대조가 그 자리에서 설 것 같아서였는데, 실제로 실어 보니 k03.020 의 고객 발화는
+    「아, 그래요? 신경 안서 잘 모르겠어요」였다 — 저 줄은 빌더가 검색 입구로 쓰기를
+    거부하는 바로 그 부류의 말이고(`kb_build/pitches.py::useful_trigger`), 게이트에
+    실으면 신호가 아니라 잡음이다. 39장을 훑어보니 고객 발화는 **비어 있거나 상황 설정**
+    이고 내용이 있는 고객 발화는 이미 제목 인용과 `trigger_examples` 에 들어가 있어
+    한 줄 앞에서 보인다. 어디에도 없는 것은 **행원이 할 말**이고, 화법 카드의 내용이
+    바로 그것이다.
+
+    **정리 문단을 밀어내지 않고 칸을 하나 더 둔다** — 대부분의 화법 카드는 정리 문단이
+    제대로 된 요약이라, 순서를 뒤집으면 지금 잘 되는 쪽을 대가로 치른다(`_tiers_line` 이
+    조건을 «덧붙이는» 것과 같은 규약).
+    """
+    lines = [d for d in (card.get("dialogue") or []) if isinstance(d, dict)]
+    staff = [str(d.get("text") or "").strip() for d in lines if d.get("speaker") == "행원"]
+    pick = next((t for t in staff if t), "")
+    return " ".join(pick.split())[:_SPEECH_CHARS]
+
+
 def _headline(card: dict) -> str:
     """후보 한 줄. 종류마다 필드 이름이 다르므로 있는 것 중 앞에서부터 고른다.
 
-    카드가 조건별 값(`tiers`)을 선언했으면 그 조건을 «조건별 값:» 칸으로 덧붙인다 — 한 장
-    안에서 답이 갈리는 카드를 게이트가 갈래로 볼 수 있어야 한다(`_tiers_line`).
+    카드가 조건별 값(`tiers`)을 선언했으면 그 조건을 «조건별 값:» 칸으로 덧붙이고, 대사
+    (`dialogue`)를 들었으면 그 한 줄을 «대사:» 칸으로 덧붙인다 — 한 장 안에서 답이 갈리는
+    카드를 갈래로 볼 수 있어야 하고(`_tiers_line`), 카드가 무슨 말을 하는 카드인지도 보여야
+    한다(`_speech_line`).
     """
     title = card.get("title") or card.get("label") or card.get("id")
     detail = next((str(card[k]) for k in
@@ -69,8 +107,10 @@ def _headline(card: dict) -> str:
                    if card.get(k)), "")
     points = "; ".join(card.get("key_points") or [])[:80]
     tail = (detail or points).replace("\n", " ")[:80]
+    speech = _speech_line(card)
     tiers = _tiers_line(card)
     return (f"- [{card.get('id')}] {title}" + (f" · {tail}" if tail else "")
+            + (f" · 대사: {speech}" if speech else "")
             + (f" · 조건별 값: {tiers}" if tiers else ""))
 
 

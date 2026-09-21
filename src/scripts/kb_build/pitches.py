@@ -83,6 +83,7 @@ def build_pitches(resolver: DocResolver) -> list[dict]:
         title = raw_title.removeprefix("[참고] ").strip()
         scope = "참고" if raw_title.startswith("[참고]") else "사후관리"
 
+        pid = f"pitch.k03.{no.zfill(3)}"
         dialogue = _dialogue([q["text"] for q in quote_records])
         # 검색 예시는 '내용이 있는 말'만 쓴다 — 제목 안의 고객 발화 인용, 대사 속 고객 발화,
         # 그리고 제목의 상황 절("… 고객에게"). "어떻게 말하면 되나요?" 같은 일반 질문 꼬리를
@@ -94,6 +95,16 @@ def build_pitches(resolver: DocResolver) -> list[dict]:
             situation = title.split("→")[0].strip()
             if len(situation) >= 8:
                 triggers = [situation]
+        # 보강표를 화법에도 적용한다 — `common.triggers_of` 를 쓰는 다른 종류는 이미 받고
+        # 있었는데, 화법만 규칙이 달라(제목 인용 + 고객 발화) 이 줄이 없어서 **표에 적어도
+        # 아무 일도 일어나지 않았다.** 규칙이 입구를 못 뽑는 화법 카드가 여기 걸린다:
+        # 방치 화법(k03.020)의 고객 발화는 「아, 그래요? 신경 안서 잘 모르겠어요」라
+        # `useful_trigger` 가 정당하게 떨어뜨리고, 손실 프레이밍(k03.018·045)은 대사에
+        # 고객 발화가 아예 없어 제목 절 하나로 끝난다. 그래서 「그냥 두면 안 되나요」가
+        # n-gram 폴백에서 **전부 0.000** 이었다(2026-09-21 실측).
+        for extra in config.TRIGGER_EXTRA.get(pid, []):
+            if extra not in triggers:
+                triggers.append(extra)
 
         key_points = sentences(redact(summary))
         if not key_points:
@@ -114,7 +125,6 @@ def build_pitches(resolver: DocResolver) -> list[dict]:
             tags["objection_type"] = spec["objection_type"]
 
         primary = next((q["doc"] for q in quote_records if q["doc"]), None)
-        pid = f"pitch.k03.{no.zfill(3)}"
         # 시효성 수치 선언을 카드에 붙인다(config.RATE_SLOTS / CLAIM_CONDITIONS).
         # 원문(quotes·content)은 건드리지 않는다 — 슬롯 치환과 조건 판정은 전부 런타임 몫이다.
         rate_slots = [

@@ -326,9 +326,30 @@ def check_trigger_entrances() -> int:
           + ("" if hit else f" — {bad[:3]}"))
     ok += hit
 
-    # ⑤ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
-    card = next(c for c in cards if c["_kind"] == "method")
+    # ⑤ 보강표가 **화법에도 적용된다.** 화법 빌더는 `common.triggers_of` 를 안 쓰고 자기
+    #    규칙(제목 인용 + 고객 발화)으로 입구를 뽑는데, 거기에 보강표를 읽는 줄이 없어서
+    #    **표에 적어도 아무 일도 일어나지 않았다**(2026-09-21). 그래서 「금액도 얼마 안
+    #    되는데 그냥 두면 안 되나요」가 방치 화법 넷(k03.018·020·045·069)에 대해 n-gram
+    #    점수 0.000 이었고, 게이트가 떨어뜨리면 물러설 자리가 없었다.
+    missed = [cid for cid, extras in kb_config.TRIGGER_EXTRA.items()
+              if cid in by_id and extras
+              and not set(extras) <= set(by_id[cid].get("trigger_examples") or [])]
+    hit = not missed
+    print(f"{'✓' if hit else '✗'} TRIGGER_EXTRA 가 카드에 실제로 실린다(화법 포함)"
+          + ("" if hit else f" — {missed[:3]}"))
+    ok += hit
+
+    # ⑥ 그 결과로 방치 화법이 n-gram 사정권에 들어온다 — 0.000 이면 폴백이 아예 못 닿는다.
     from pension_agent.knowledge import kb as KBMOD
+    idle = [KBMOD.score_parts(by_id[cid], utterance="그냥 두면 안 되나요")[1]
+            for cid in ("pitch.k03.020", "pitch.k03.045") if cid in by_id]
+    hit = len(idle) == 2 and all(s > 0 for s in idle)
+    print(f"{'✓' if hit else '✗'} 「그냥 두면」 방치 화법이 n-gram 점수를 받는다 "
+          f"({' · '.join(f'{s:.2f}' for s in idle)})")
+    ok += hit
+
+    # ⑦ 폴백 점수는 제목도 잰다 — 제목을 첫 칸에서 뺀 대가를 여기서 갚는다.
+    card = next(c for c in cards if c["_kind"] == "method")
     _, with_title = KBMOD.score_parts(card, utterance=card["title"])
     hit = with_title >= 4.0
     print(f"{'✓' if hit else '✗'} 제목 그대로의 질문이 n-gram 점수 상한을 받는다 ({with_title:.2f})")
