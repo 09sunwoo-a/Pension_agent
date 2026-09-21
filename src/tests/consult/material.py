@@ -296,6 +296,69 @@ def check_customer_material() -> int:
     return ok
 
 
+def check_no_card_ids_in_material() -> int:
+    """작성 프롬프트에 실리는 재료 본문에 **카드 id 가 없다**(§5 「재료에 개발 용어를 쓰지 않는다」).
+
+    회귀 대상: 화법 렌더러(`kb_index.build_context`)가 머리줄을 「### [pitch.k03.020] 제목
+    (관련도 4.2)」로 만들었고, 고객 재료(`customer` 도구)의 ⑥⑦⑧ 줄 꼬리가
+    「[pitch.k03.020 · 문제상황]」이었다. 재료에 있는 말은 답변에 그대로 나온다 — 행내 실측
+    (2026-09-21, 질문 리스트 31번 「이 고객 상태에 걸린 참고자료 뭐뭐 있어?」)에서 답변이
+    「우선 [pitch.k03.020] 자료를 활용해 보세요」라고 썼다. 직원은 그 id 가 무엇인지 모르고,
+    안다 해도 상담에서 쓸 수 없다. id 는 출처(`sources`)에 남는다 — 화면이 역추적용으로
+    보여주는 자리이고, 여기서는 그것을 막지 않는다.
+
+    id 접두는 지식베이스에서 읽는다(pitch·proc·m·seg·fact·screen·channel·tip·mkt·lnp) —
+    종류가 늘어도 검사가 따라간다.
+    """
+    import re
+
+    from pension_agent.consult_agent.evidence import kb_index
+    from pension_agent.consult_agent.state import KB as _KB
+    from pension_agent.consult_agent.tools.combine import evidence_from_cards
+
+    ok = 0
+    SONG = "188406-7352194"
+    prefixes = sorted({c["id"].split(".")[0] for c in _KB.cards}, key=len, reverse=True)
+    card_id = re.compile(r"(?<![0-9A-Za-z_가-힣.])(" + "|".join(map(re.escape, prefixes))
+                         + r")\.[0-9A-Za-z_][0-9A-Za-z_.-]*")
+
+    def leaked(text: str) -> list[str]:
+        return sorted({m.group(0) for m in card_id.finditer(text or "")})
+
+    # ① 화법 렌더러 — 검색 결과 3장을 그대로 태운다(도구·playbook·last_answer 가 함께 쓴다).
+    pitches = [(4.0 - i, c) for i, c in enumerate(_KB.pitches[:3])]
+    text = kb_index.build_context(_KB, pitches)
+    bad = leaked(text)
+    hit = bool(text) and not bad and all(f"■ {c['title']}" in text for _s, c in pitches)
+    print(f"{'✓' if hit else '✗'} 화법 재료 머리줄은 「■ 제목」이고 카드 id·관련도가 없다"
+          + (f" — {bad[:3]}" if bad else ""))
+    ok += hit
+
+    # ② 종류가 섞인 묶음(playbook·last_answer 의 조립) — 어느 렌더러도 id 를 싣지 않는다.
+    mixed = [(1.0, c) for kind in ("pitch", "procedure", "method", "fact", "screen", "channel",
+                                   "segment", "fieldtip", "market", "lineup")
+             for c in [next((x for x in _KB.cards if x["_kind"] == kind), None)] if c]
+    ev = evidence_from_cards("playbook", "q", mixed, customer_id=SONG)
+    bad = leaked(ev["text"] if ev else "")
+    hit = ev is not None and not bad
+    print(f"{'✓' if hit else '✗'} 종류별 렌더러 전부가 재료 본문에 카드 id 를 싣지 않는다"
+          + (f" — {bad[:3]}" if bad else ""))
+    ok += hit
+
+    # ③ 고객 재료 — ⑥⑦⑧ 줄 꼬리에 문제상황만 남고 id 는 출처로 간다.
+    ev = tools.run("customer", {"customer_id": SONG}, "이 고객 상태에 걸린 참고자료 뭐뭐 있어?")
+    bad = leaked(ev["text"] if ev else "")
+    hit = ev is not None and not bad
+    print(f"{'✓' if hit else '✗'} 고객 재료의 ⑥⑦⑧ 줄에 카드 id 가 없다"
+          + (f" — {bad[:3]}" if bad else ""))
+    ok += hit
+
+    hit = ev is not None and any(card_id.fullmatch(s["id"]) for s in ev["sources"])
+    print(f"{'✓' if hit else '✗'} 그 카드 id 는 출처에 그대로 남는다(역추적용)")
+    ok += hit
+    return ok
+
+
 def check_playbook_material() -> int:
     """고객 상태에 걸린 화법 — 화면 ⑥⑦⑧ 과 **같은 후보군**에서 나오는가(§3 · §10).
 

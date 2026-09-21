@@ -37,6 +37,7 @@ from tests.consult.material import (
     check_history_selection,
     check_market_material,
     check_material_marks,
+    check_no_card_ids_in_material,
     check_origin,
     check_playbook_material,
     check_relations,
@@ -135,6 +136,7 @@ def main() -> int:
         check_briefing_shared()
         check_customer_material()
         check_playbook_material()
+        check_no_card_ids_in_material()
         check_context_and_clarify()
         check_adequacy_and_shape()
         check_material_marks()

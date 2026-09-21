@@ -252,10 +252,17 @@ def build_context(kb: KnowledgeBase, hits: list[tuple[float, dict]]) -> str:
         return "(관련 화법 없음)"
 
     blocks, used_facts, used_res = [], [], []
-    for sc, p in hits:
+    for _sc, p in hits:
         t = p.get("tags") or {}
         scope = ", ".join(x for x in (t.get("stage"), *(t.get("customer_type") or [])) if x)
-        lines = [f"### [{p['id']}] {p['title']}  (관련도 {sc:.1f})"]
+        # 머리줄에 카드 id·관련도를 싣지 않는다. 재료에 있는 말은 답변에 그대로 나온다(§5
+        # 「재료에 개발 용어를 쓰지 않는다」) — 「### [pitch.k03.020] 제목」으로 실었던 동안
+        # 답변이 「우선 [pitch.k03.020] 자료를 활용해 보세요」라고 썼다(2026-09-21 행내 실측,
+        # 질문 리스트 31번). 직원은 그 id 가 무엇인지 모르고 쓸 수도 없다. id 와 관련도는
+        # 출처(`sources_of`)에 그대로 남아 화면이 역추적용으로 보여준다. 머리줄 꼴은 다른
+        # 종류의 렌더러(`■ 제목`)와 맞춘다 — 작성 규칙 12 가 ■ 제목 줄을 «옮기지 않는
+        # 관리 정보»로 이미 가리키고 있다.
+        lines = [f"■ {p['title']}"]
         if scope:
             lines.append(f"- 적용 범위 {scope}"
                          + (f" | 거절유형 {t['objection_type']}" if t.get("objection_type") else ""))
