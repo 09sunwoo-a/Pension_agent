@@ -63,6 +63,7 @@ from tests.consult.plan_loop import (
     check_plan_failure,
     check_progress,
     check_replan_on_empty,
+    check_tone_and_marks,
     check_tool_loop,
     check_turn_cost,
 )
@@ -177,6 +178,7 @@ def main() -> int:
         check_all_kinds_reachable()
         check_trigger_entrances()
         check_atomic_spans()
+        check_tone_and_marks()
         check_origin()
         check_plan_failure()
         check_llm_down()

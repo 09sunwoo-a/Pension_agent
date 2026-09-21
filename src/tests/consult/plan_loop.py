@@ -605,6 +605,66 @@ def check_tool_loop() -> int:
     return ok
 
 
+def check_tone_and_marks() -> int:
+    """답변 말투가 「-다」체로 새지 않고, 표시(※)가 제 줄에 서는가(2026-09-29, 질문 리스트 29번).
+
+    실측: 「그때 안내한 금리가 지금도 맞는 거야?」의 첫 문단이 팩트 F65 의 값 원문(「…고정
+    팩트로 쓸 수 없다. … 유일하게 정확한 안내다.」)으로 그대로 나갔고, 상담 기록의 시효
+    표시가 앞 문장 뒤에 한 칸 띄고 붙었다. 원인이 둘이라 검사도 둘이다.
+    ① 관계 선언이 없는 팩트는 값을 «한 글자도 바꾸지 말고» 옮기게 강제되는데(atomic), F65 는
+       숫자가 화면번호뿐인 산문이라 그 강제가 지키는 값이 없다 — 그런 스팬은 강제하지 않는다.
+       값이 있는 미선언 팩트는 그대로 강제된다(가짜 완화가 되지 않게 함께 잰다).
+    ② 표시가 본문 한 줄에 이어 붙으면 코드가 제 줄로 내린다. 글자는 바꾸지 않는다.
+    """
+    from pension_agent.consult_agent.evidence import relations as REL
+    from pension_agent.consult_agent.prompts import COMPOSE_SYSTEM
+    from pension_agent.consult_agent.state import KB as _KB
+    from pension_agent.consult_agent.tools.cards import fact_evidence
+
+    ok = 0
+    f65 = _KB.facts["fact.k04.f65"]
+    ev = fact_evidence("q", [(1.0, f65)])
+    hit = ev is not None and not REL.declared(f65) and ev["atomic"] == []
+    print(f"{'✓' if hit else '✗'} 숫자가 화면번호뿐인 미선언 팩트(F65)는 원문을 강제하지 않는다"
+          + ("" if hit else f" — {ev and ev['atomic']}"))
+    ok += hit
+
+    # 값이 있는 미선언 팩트는 여전히 강제된다 — 이 완화가 종류 단위 해제가 아니라는 증거.
+    valued = next(f for f in _KB.facts.values()
+                  if not REL.declared(f) and (numbers(f.get("value") or "")
+                                              - {t for s in f.get("screens") or [] for t in numbers(s)}))
+    ev = fact_evidence("q", [(1.0, valued)])
+    hit = ev is not None and valued["value"] in ev["atomic"]
+    print(f"{'✓' if hit else '✗'} 값이 있는 미선언 팩트({valued['id']})는 그대로 원문을 강제한다")
+    ok += hit
+
+    hit = "「-다」로 끝나는 문어체여도" in COMPOSE_SYSTEM and "줄을 바꿔 따로 세운다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 규칙이 해요체 유지와 표시 줄바꿈을 시킨다")
+    ok += hit
+
+    mark = tools.HISTORY_MARK
+    inline = f"밝히신 적이 있어요. {mark}"
+    hit = plan._break_marks(inline) == f"밝히신 적이 있어요.\n{mark}" \
+        and plan._break_marks(f"앞 문장.\n{mark}") == f"앞 문장.\n{mark}" \
+        and plan._break_marks("금리 3.5% ※표시 아님") == "금리 3.5% ※표시 아님"
+    print(f"{'✓' if hit else '✗'} 앞 문장에 이어 붙은 표시를 제 줄로 내린다(이미 제 줄이면 그대로)")
+    ok += hit
+
+    # compose 를 통과한 답변에도 적용된다 — 표시가 붙은 채로 나가지 않는다.
+    ev_h = tools._ev("history", "q", "■ 지난 상담\n2025-10-06 재투자 의사", [{"id": "h", "title": "h"}],
+                     notices=[mark])
+    orig = plan.generate
+    try:
+        plan.generate = lambda p, **kw: inline
+        out = plan.compose({"question": "q", "evidence": [ev_h]})
+    finally:
+        plan.generate = orig
+    hit = f"있어요.\n{mark}" in out["answer"] and plan.MISSING_NOTICES not in out["answer"]
+    print(f"{'✓' if hit else '✗'} 통과한 답변의 표시가 제 줄에 서고 중복 덧붙임은 없다")
+    ok += hit
+    return ok
+
+
 def check_atomic_spans() -> int:
     """원문 스팬 집행 — 도구 종류가 아니라 **재료**가 보호 수준을 정한다.
 

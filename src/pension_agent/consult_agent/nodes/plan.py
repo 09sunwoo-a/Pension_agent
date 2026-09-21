@@ -152,6 +152,18 @@ def _no_evidence(state: AgentState) -> str:
 #: 빠진 필수 표시를 채워 넣는 블록의 머리말. 근거 원문 전체가 아니라 표시만 붙는다.
 MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
 
+#: 본문 한 줄 안에서 앞 문장에 이어 붙은 표시(※·⚠·⚖). 표시는 «그대로 옮겨 적을 문장»이라
+#: LLM 이 앞 문장 뒤에 한 칸 띄고 붙이는 일이 잦다 — 「…밝히신 적이 있어요. ※ 지난 상담
+#: 기록입니다 — …」(2026-09-29 행내 실측, 질문 리스트 29번). 표시가 문장의 일부로 읽힌다.
+_MARK_INLINE = re.compile(r"(?<=\S)[ \t]+(?=[※⚠⚖]\s)")
+
+
+def _break_marks(text: str) -> str:
+    """앞 문장에 이어 붙은 표시를 제 줄로 내린다. 글자는 바꾸지 않는다 — 공백 하나가 줄바꿈이
+    될 뿐이라 검증(수치·스팬·표시 포함 여부)의 결과는 그대로다. 작성 규칙 14 가 같은 것을
+    시키지만 지시만으로는 지켜지지 않아 코드가 마지막에 한 번 정리한다."""
+    return _MARK_INLINE.sub("\n", text)
+
 #: 재료 성격 표시 블록의 머리말(§7). 어느 자료에서 온 말인지 · 고객에게 그대로 옮겨도
 #: 되는지. 답을 읽는 사람은 직원이고, 무엇을 옮길지는 직원이 거른다 — 그 판단에 필요한
 #: 표시를 주는 데까지가 에이전트의 몫이다.
@@ -913,7 +925,7 @@ def compose(state: AgentState) -> dict[str, Any]:
                 "sources": _sources(evidence, [], [])}
 
     if answer:
-        parts = [answer] + ([MISSING_NOTICES, *appends] if appends else [])
+        parts = [_break_marks(answer)] + ([MISSING_NOTICES, *appends] if appends else [])
     else:
         # 생성문을 못 쓰면 근거 원문이 답이다 — 다만 그것이 **답변이 아님을 밝힌다**.
         parts = [RAW_EVIDENCE.format(reason=fault_kinds(faults))]
