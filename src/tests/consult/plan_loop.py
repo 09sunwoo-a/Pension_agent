@@ -235,6 +235,11 @@ def check_no_material_tone() -> int:
     print(f"{'✓' if hit else '✗'} 안내문은 한 문장이고 개발 용어·재료 나열·찾아본 곳·되묻기 안내가 없다")
     ok += hit
 
+    # 같은 말이 다른 안내문(LLM 장애·도구 고장·검증 폴백 머리말)에도 있었다 — 함께 걷어낸다.
+    hit = not any("지식베이스" in t for t in (plan.LLM_FAILED, plan.TOOL_FAILED, plan.RAW_EVIDENCE))
+    print(f"{'✓' if hit else '✗'} 장애·고장·폴백 안내문에도 «지식베이스»가 없다")
+    ok += hit
+
     # 옛 예시 문구가 «이렇게 답하라»로 서 있으면 LLM 이 그대로 베낀다. 금지 예시로
     # 인용하는 것은 남아 있어도 된다 — 재는 것은 지시문 쪽이다.
     hit = '"그 자료는 없어요"라고 답한다' not in COMPOSE_SYSTEM
@@ -788,7 +793,7 @@ def check_plan_failure() -> int:
             raise LLMError("LLM 미설정")
 
         state, answer = drive(dead)
-        hit = bool(state.get("llm_error")) and "지식베이스에 자료가 없다는 뜻이 아니" in answer \
+        hit = bool(state.get("llm_error")) and "자료가 없다는 뜻이 아니" in answer \
             and plan.NO_EVIDENCE not in answer
         print(f"{'✓' if hit else '✗'} LLM 호출 실패를 '근거 없음'으로 둔갑시키지 않음")
         ok += hit
@@ -826,7 +831,7 @@ def check_plan_failure() -> int:
 
         hit = (bool([s for s in state.get("steps") or [] if s["outcome"] == "failed"])
                and plan.NO_EVIDENCE not in answer
-               and "지식베이스에 자료가 없다는 뜻이 아니" in answer
+               and "자료가 없다는 뜻이 아니" in answer
                and "KeyError" in answer)
         print(f"{'✓' if hit else '✗'} 도구가 죽은 것을 '근거 없음'으로 둔갑시키지 않는다")
         ok += hit
@@ -936,7 +941,7 @@ def check_llm_down() -> int:
     try:
         out = G.build_agent().invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
         answer = out.get("answer", "")
-        hit = ("지식베이스에 자료가 없다는 뜻이 아니" in answer
+        hit = ("자료가 없다는 뜻이 아니" in answer
                and plan.NO_EVIDENCE not in answer and "LLMError" in answer)
     except Exception as exc:
         answer, hit = f"({type(exc).__name__})", False
@@ -956,7 +961,7 @@ def check_llm_down() -> int:
                      "atomic": [], "notices": [], "notice_scopes": [], "allow": [],
                      "sources": [{"id": "f1"}], "meta": {}}]
         answer = plan.compose({"question": "한도가 얼마야?", "evidence": evidence})["answer"]
-        hit = "지식베이스에 자료가 없다는 뜻이 아니" in answer and "900만원" not in answer
+        hit = "자료가 없다는 뜻이 아니" in answer and "900만원" not in answer
     finally:
         plan.generate = orig
     print(f"{'✓' if hit else '✗'} compose: 문장 작성 실패를 근거 원문 덤프로 덮지 않음")
