@@ -34,8 +34,18 @@ def customer_facing_asset(branch: str | None = None) -> dict | None:
 
     content_type 이 있는 레코드(이벤트·세미나 — REQUIREMENTS.md ⑨, next_event_and_seminar() 가
     다룬다)는 여기서 제외한다 — 같은 asset kind·같은 customer_facing 필드를 쓰지만 이 함수가
-    찾는 '전략에 첨부할 발송 자료'와는 다른 성격의 콘텐츠다."""
-    rows = [a for a in ASSETS if a.get("customer_facing") is True and not a.get("content_type")]
+    찾는 '전략에 첨부할 발송 자료'와는 다른 성격의 콘텐츠다.
+
+    **더미도 제외한다**(2026-09-21). `customer_facing` 과 `dummy` 는 다른 선언이다 — 앞은
+    「고객에게 그대로 안내해도 되는 내용인가」, 뒤는 「실제 콘텐츠로 확정됐는가」다. 발송
+    문구 초안은 앞이 참이면서 뒤도 참일 수 있고, 그건 **아직 내보내면 안 되는 자료**다
+    (`consult_agent/effects/actions.py::open_lms_screen` 의 더미 게이트가 같은 판정을 한다).
+    지금까지 이 구멍이 안 드러난 것은 그때그때의 더미 자산이 전부 content_type 을 갖고
+    있어(AS03·AS04 — 이벤트·세미나) 위 줄에서 먼저 걸렸기 때문이다. content_type 없는
+    더미가 하나 들어오자 이 함수가 그것을 전략 첨부 자료로 골랐다."""
+    rows = [a for a in ASSETS
+            if a.get("customer_facing") is True and not a.get("content_type")
+            and not a.get("dummy")]
     if branch:
         rows = [a for a in rows if a.get("branch") in (branch, None)] or rows
     return rows[0] if rows else None
