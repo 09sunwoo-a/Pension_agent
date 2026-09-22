@@ -659,7 +659,7 @@ def check_tone_and_marks() -> int:
         out = plan.compose({"question": "q", "evidence": [ev_h]})
     finally:
         plan.generate = orig
-    hit = f"있어요.\n{mark}" in out["answer"] and plan.MISSING_NOTICES not in out["answer"]
+    hit = f"있어요.\n{mark}" in out["answer"] and out["answer"].count(mark) == 1
     print(f"{'✓' if hit else '✗'} 통과한 답변의 표시가 제 줄에 서고 중복 덧붙임은 없다")
     ok += hit
     return ok
@@ -690,7 +690,7 @@ def check_atomic_spans() -> int:
         # ② 값을 원문 그대로 실으면 그대로 통과한다 — 산문 안에 인용이 녹는다.
         plan.generate = lambda p, **kw: f"정리하면 이래요. {VALUE} 라고 안내하시면 돼요."
         out = plan.compose({"question": "q", "evidence": [ev_num]})
-        hit = VALUE in out["answer"] and plan.MISSING_NOTICES not in out["answer"]
+        hit = out["answer"].count(VALUE) == 1 and "빠뜨리면" not in out["answer"]
         print(f"{'✓' if hit else '✗'} 값 원문 인용 → 블록 덧붙임 없이 통과")
         ok += hit
 
@@ -708,9 +708,20 @@ def check_atomic_spans() -> int:
         plan.generate = lambda p, **kw: "현장에서는 KPI부터 본다고 해요."
         out = plan.compose({"question": "q", "evidence": [ev_mark]})
         hit = ("현장에서는" in out["answer"] and tools.FIELDTIP_MARK in out["answer"]
-               and plan.MISSING_NOTICES in out["answer"]
+               and "빠뜨리면" not in out["answer"]         # 코드 라벨 머리말은 세우지 않는다
                and ev_mark["text"] not in out["answer"])   # 표시만 붙고 카드 전문은 안 붙는다
-        print(f"{'✓' if hit else '✗'} 필수 표시 누락 → 생성문 유지 + 빠진 표시만 덧붙임")
+        print(f"{'✓' if hit else '✗'} 필수 표시 누락 → 생성문 유지 + 빠진 표시만 덧붙임(머리말 없이)")
+        ok += hit
+
+        # 표지 없는 표시(세액공제 카드의 결정세액 단서)는 ※ 를 앞세워 붙는다 — 본문에 이어진
+        # 문단으로 읽히지 않게. 문장은 그대로라 표시 포함 검사도 그대로 통과한다.
+        caveat = "단, 세액공제 전 결정세액이 공제액보다 적으면 최대 환급액을 받지 못한다."
+        ev_plain = tools._ev("tax_credit", "q", "■ 환급 계산\n300만원 추가 납입 시 495,000원",
+                             [{"id": "t.1", "title": "환급"}], notices=[caveat])
+        plan.generate = lambda p, **kw: "300만원 더 넣으면 495,000원을 돌려받을 수 있어요."
+        out = plan.compose({"question": "q", "evidence": [ev_plain]})
+        hit = f"\n※ {caveat}" in out["answer"] and out["answer"].count(caveat) == 1
+        print(f"{'✓' if hit else '✗'} 표지 없는 표시는 ※ 를 앞세워 제 줄에 붙는다")
         ok += hit
 
         # ⑤ 화법은 atomic 이 비어 있을 뿐, 처리 경로가 다르지 않다.

@@ -374,6 +374,12 @@ def main(argv: list[str]) -> int:
                     print(f"    ✗ LLM 다운으로 끝난 턴 ({len(text)}자)")
                 else:
                     print(f"    ✓ {len(text)}자")
+                # 답변을 터미널에도 찍는다 — 엑셀을 열어야만 볼 수 있으면 돌리는 동안 이상한
+                # 답을 그 자리에서 잡지 못한다(2026-09-22). 셀에 적는 글과 같은 것이다.
+                print("    ┌ 답변")
+                for line in text.splitlines():
+                    print(f"    │ {line}")
+                print("    └")
             chunks.append(f"● {label}\n{text}" if label else text)
             if args.pause:
                 time.sleep(args.pause)

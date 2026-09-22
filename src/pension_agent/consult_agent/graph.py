@@ -52,7 +52,7 @@ from pension_agent.consult_agent.routing import (
 )
 from pension_agent.consult_agent.state import ANSWER_KEEP, HISTORY_LIMIT, KB, AgentState
 
-#: 답변 끝 추천질문 블록의 머리말. `plan.MISSING_NOTICES`·`MATERIAL_MARKS` 와 같은 꼴로,
+#: 답변 끝 추천질문 블록의 머리말. `MATERIAL_MARKS` 와 같은 꼴로,
 #: **프론트가 이 블록만 떼어낼 수 있게** 고정 문자열로 둔다(반환값의 "followups" 를 쓰면
 #: 떼어낼 필요도 없다). 지금은 텍스트로 붙이고, 실서비스 프론트가 칩 UI 를 따로 만든다.
 FOLLOWUP_HEADER = "── 이어서 물어보실 수 있어요"

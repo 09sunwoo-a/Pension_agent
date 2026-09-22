@@ -149,8 +149,19 @@ def _no_evidence(state: AgentState) -> str:
     """
     return NO_EVIDENCE
 
-#: 빠진 필수 표시를 채워 넣는 블록의 머리말. 근거 원문 전체가 아니라 표시만 붙는다.
-MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
+#: 표시 문장의 첫 글자. 카드에서 온 표시는 이 셋 중 하나로 시작한다(※ 시효 · ⚠ 주의 · ⚖ 고지).
+_MARK_HEADS = ("※", "⚠", "⚖")
+
+
+def _as_mark(text: str) -> str:
+    """빠져서 코드가 덧붙이는 표시 한 줄. 표지가 없는 문장(세액공제 카드의 결정세액 단서처럼
+    카드 본문에서 떼어 온 것)에는 ※ 를 앞세운다 — 그래야 본문 뒤에 이어진 문단이 아니라
+    표시로 읽힌다. 예전에는 「── 빠뜨리면 안 되는 표시」 머리말을 세웠는데, 그 말은 코드
+    안의 라벨이지 직원이 읽을 말이 아니었다(2026-09-22, 질문 리스트 49·50번). 문장 자체는
+    한 글자도 바꾸지 않는다 — 표시 포함 검사(`_span_verdict`)가 그 문장을 그대로 찾는다."""
+    text = text.strip()
+    return text if text.startswith(_MARK_HEADS) else f"※ {text}"
+
 
 #: 본문 한 줄 안에서 앞 문장에 이어 붙은 표시(※·⚠·⚖). 표시는 «그대로 옮겨 적을 문장»이라
 #: LLM 이 앞 문장 뒤에 한 칸 띄고 붙이는 일이 잦다 — 「…밝히신 적이 있어요. ※ 지난 상담
@@ -759,8 +770,9 @@ def _screen(answer: str, evidence: list[tools.Evidence],
     for _found, (verdict, gaps) in zip(evidence, verdicts):
         if verdict != APPEND:
             continue
-        appends += [f"· {label}\n" + "\n".join(f"  {m}" for m in missing)
-                    for label, missing in gaps]
+        # 표시 문장만 모은다 — 카드 제목 줄(「· 세액공제 — 한도 900만원 …」)은 붙이지 않는다.
+        # 그 줄은 화면의 근거 목록이 이미 말하고, 답변 본문에 서면 코드 라벨로 읽힌다.
+        appends += [m for _label, missing in gaps for m in missing if m not in appends]
     return [], appends
 
 
@@ -925,7 +937,8 @@ def compose(state: AgentState) -> dict[str, Any]:
                 "sources": _sources(evidence, [], [])}
 
     if answer:
-        parts = [_break_marks(answer)] + ([MISSING_NOTICES, *appends] if appends else [])
+        # 빠진 표시는 머리말 없이 본문 아래 제 줄로 선다 — 근거 원문 전체가 아니라 표시만.
+        parts = [_break_marks(answer)] + ([ "\n".join(_as_mark(a) for a in appends)] if appends else [])
     else:
         # 생성문을 못 쓰면 근거 원문이 답이다 — 다만 그것이 **답변이 아님을 밝힌다**.
         parts = [RAW_EVIDENCE.format(reason=fault_kinds(faults))]
