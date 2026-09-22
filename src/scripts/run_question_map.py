@@ -189,6 +189,9 @@ def _select(ws, idx, args) -> list[int]:
     want_rows = parse_rows(args.rows) if args.rows else None
     items = _filled(ws, idx["항목"])          # 둘 다 세로 병합이다 — _filled 머리말
     picked = []
+    # 번호로 지목했는데 빠진 행은 **왜 빠졌는지** 모아 둔다. 「돌릴 행이 없다」만 남으면
+    # 손으로 돌리는 행(137)을 지목한 사람이 실행기가 고장난 줄 안다(2026-09-22 실측).
+    skipped: dict = {}
     for r in range(2, ws.max_row + 1):
         num = ws.cell(r, idx["번호"]).value
         item = items[r]
@@ -198,30 +201,38 @@ def _select(ws, idx, args) -> list[int]:
 
         if want_rows is not None and num not in want_rows:
             continue
+        broken = isinstance(done, str) and FAILED in done
+        why = None
         if args.grade and not demo.startswith(args.grade):
-            continue
-        if args.new and "신규" not in demo:
-            continue
-        if args.item and args.item not in item:
-            continue
-        if args.auto and not QM.is_auto(item):
-            continue
-        if args.manual and QM.is_auto(item):
-            continue
-        if pre_cell.startswith("["):        # 실행 대상이 아닌 행(상황 표기·장애)
-            continue
+            why = f"시연 등급이 {args.grade!r} 가 아니다"
+        elif args.new and "신규" not in demo:
+            why = "신규 행이 아니다"
+        elif args.item and args.item not in item:
+            why = f"항목이 {args.item!r} 가 아니다"
+        elif args.auto and not QM.is_auto(item):
+            why = "사람이 읽는 항목이다(--auto 제외)"
+        elif args.manual and QM.is_auto(item):
+            why = "자동 판정 항목이다(--manual 제외)"
+        elif pre_cell.startswith("["):        # 실행 대상이 아닌 행(상황 표기·장애)
+            why = f"실행기가 돌리지 않는 행 — {pre_cell.strip('[] ')}"
         # 실패로 끝난 칸은 «채워진» 것이 아니다 — 그냥 두면 건너뛰어져 영영 안 돌고,
         # `--redo` 로 돌리면 멀쩡한 답까지 다시 친다(429 를 부르는 쪽이다).
         # 부분 실패도 실패다 — 대조 행은 고객 여럿을 한 칸에 적으므로 한 명만 죽으면
         # 머리가 아니라 중간에 이 글이 박힌다. startswith 로 재면 그 칸을 영영 못 잡는다.
-        broken = isinstance(done, str) and FAILED in done
-        if args.retry_failed and not broken:
-            continue
-        if done and not broken and not args.redo:
+        elif args.retry_failed and not broken:
+            why = "실패로 끝난 칸이 아니다(--retry-failed 제외)"
+        elif done and not broken and not args.redo:
+            why = "이미 답이 채워져 있다 — 다시 돌리려면 --redo"
+        if why:
+            if want_rows is not None:
+                skipped[num] = why
             continue
         picked.append(r)
         if args.limit and len(picked) >= args.limit:
             break
+
+    for num, why in skipped.items():
+        print(f"⚠ {num}번은 건너뛴다 — {why}")
 
     # 표에 없는 번호를 달라고 했으면 **말한다.** 구간을 받게 되면서(`parse_rows`) 없는
     # 번호를 포함하기가 쉬워졌는데, 그냥 빠지면 화면에는 「돌릴 행이 없다」만 남아
