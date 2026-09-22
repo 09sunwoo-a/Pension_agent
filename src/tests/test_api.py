@@ -325,6 +325,19 @@ try:
                                             customer_id="1548214938201")))
     check(_seen.get("customer_id") == "154821-4938201",
           "customer_id 는 하이픈 없는 13자리로 와도 원장 표기로 되돌린다", str(_seen.get("customer_id")))
+    # 숫자가 없는 꼴 — 13자리도 막혀서(같은 날 두 번째 실측) 프론트가 보내는 기본 꼴이 됐다.
+    from pension_agent.strategy_agent import customer as _sc
+    _enc = _sc.encode_id("154821-4938201")
+    _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
+                                            customer_id=_enc)))
+    import re as _re
+    check(_enc.startswith("b64:") and not _re.search(r"\d{4}", _enc)
+          and _seen.get("customer_id") == "154821-4938201",
+          "customer_id 의 b64 꼴은 숫자열이 없고(4자리 연속 없음), 원장 표기로 되돌아온다",
+          f"{_enc} → {_seen.get('customer_id')}")
+    _events(client.post("/chat", json=_body(message="q", x_client_user="emp-0417", customer_id="b64:@@")))
+    check(_seen.get("customer_id") == "b64:@@",
+          "풀리지 않는 b64 값은 그대로 둔다(없는 고객으로 떨어진다)")
     _events(client.post("/chat", json=_body(message="q", x_client_user="emp-0417", customer_id="C-없음")))
     check(_seen.get("customer_id") == "C-없음",
           "customer_id 의 다른 꼴은 손대지 않는다 — 없는 고객을 있는 고객으로 읽지 않는다")

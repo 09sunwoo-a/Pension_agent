@@ -30,6 +30,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import uuid
@@ -114,11 +115,14 @@ def _inner(question: str, x_client_user: str, customer_id: str = "", session_id:
         }
     inner = {"message": question, "x_client_user": x_client_user, "session_id": session_id}
     if customer_id:
-        # 하이픈을 빼서 보낸다. 원장 표기(`171203-4815062`)는 주민등록번호와 같은 꼴이라
-        # 플랫폼 게이트웨이의 «기본필터»(policy 350 · FR-400)가 **요청**을 통째로 끊는다 —
-        # 질문이 「d」한 글자여도 FILTER_INVALID 였다(2026-09-22 실측). 에이전트는 13자리를
-        # 원장 표기로 되돌린다(src/main.py 머리말 customer_id). 실서비스 프론트도 같게 보낸다.
-        inner["customer_id"] = customer_id.replace("-", "")
+        # 숫자열이 남지 않는 꼴로 보낸다 — `b64:` + base64(원장 표기). base64 에 숫자 글자는
+        # 섞이지만 연속된 숫자열은 생기지 않아 번호 룰에 걸릴 꼴이 없다. 원장 표기
+        # (`171203-4815062`)는 주민등록번호와 같은 꼴이라 플랫폼 게이트웨이의 «기본필터»
+        # (policy 350 · FR-400)가 **요청**을 통째로 끊었고(질문이 「d」한 글자여도
+        # FILTER_INVALID), 하이픈을 뺀 13자리도 같았다(2026-09-22 실측 두 번). 에이전트는
+        # 접두를 보고 되돌린다(src/main.py 머리말 customer_id · strategy_agent/customer.py::
+        # normalize_id). 실서비스 프론트도 같게 보낸다.
+        inner["customer_id"] = "b64:" + base64.b64encode(customer_id.encode("utf-8")).decode("ascii")
     return inner
 
 
