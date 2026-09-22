@@ -78,7 +78,20 @@ def route_intent(state: AgentState) -> str:
         if not last.get("pending_action") and last.get("pending_clarify"):
             return "plan"
 
+    # 직원 쪽지 요청을 고객 문자(LMS) 연계로 오분류해도 그 노드로 보내지 않는다(§10 「쪽지
+    # 보내기」). lms_link 노드는 큰따옴표 문구를 찾다가 «어떤 문구를 보낼지 알려달라»로 턴을
+    # 끝내고, 그러면 사번을 적은 쪽지 요청이 그 안내로 사라진다. «쪽지»라고 말했는지는 코드가
+    # 아는 값이다 — LMS·문자를 함께 말한 턴은 분류를 존중한다.
+    if state.get("intent") == "lms_link":
+        said = state.get("question") or ""
+        if "쪽지" in said and not any(w in said for w in _LMS_WORDS):
+            return "plan"
+
     return _INTENT_NODE.get(state.get("intent"), "plan")
+
+
+#: 고객 문자 발송을 뜻하는 말 — 이것이 함께 있으면 lms_link 분류를 그대로 둔다.
+_LMS_WORDS = ("LMS", "lms", "문자", "SMS", "sms", "MMS", "mms")
 
 
 # ─────────────────────────────────────────────────────────────

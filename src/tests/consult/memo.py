@@ -100,6 +100,17 @@ def check_memo() -> int:
             other = act.offer({**turn, "question": "이 내용 사번 3902173한테 쪽지로 보내줘"})
             # 로그인 사번이 넘어온 턴 — 받는 사람이 환경변수가 아니라 그 사번이다.
             login = act.offer({**turn, "employee_id": "3902174"})
+            # 원장이 빈 쪽지 턴 — 「이거 사번 …한테 쪽지로 보내줘」에서 계획이 last_answer 를
+            # 안 골라 재료 0건·NO_EVIDENCE 로 끝난 꼴. 직전 답변이 있으면 코드가 붙인다.
+            from pension_agent.consult_agent.nodes import plan as PL
+            bare = act.offer({"question": "이거 사번 3902173한테 쪽지로 보내줘", "customer_id": "CM",
+                              "session_id": now, "evidence": [], "answer": PL.NO_EVIDENCE,
+                              "history": [{"question": "과세이연 등록은 어떻게 해?",
+                                           "answer": "[06-12-501] 후선업무 의뢰등록부터 해요."}]})
+            # 직전 답변도 없으면 예전처럼 제안 없이 끝난다.
+            bare_none = act.offer({"question": "이거 사번 3902173한테 쪽지로 보내줘",
+                                   "customer_id": "CM", "session_id": now, "evidence": [],
+                                   "answer": PL.NO_EVIDENCE, "history": []})
 
             # 검증에 걸리는 초안 — 원장에 없는 수치를 쓴다. 보내지 않고 사유를 말한다.
             memo.generate = _writer("한도 정리", "세액공제 한도는 1,234만원이에요.")
@@ -196,6 +207,38 @@ def check_memo() -> int:
            and act.employee_no("잔액이 5000000원인 고객 쪽지로 보내줘") is None
            and act.employee_no("쪽지로 보내줘") is None)
     print(f"{'✓' if hit else '✗'} 수신자 사번은 «사번» 이나 사람 조사가 붙었을 때만 읽는다(금액과 갈린다)")
+    ok += hit
+
+    # 직원이 실제로 쓰는 말 — 사번을 적었는데 본인에게 가던 꼴들(2026-09-22 개정).
+    read = {
+        "3902173 사번으로 보내줘": "3902173", "사번은 3902173이야, 쪽지로": "3902173",
+        "3902173님 앞으로 쪽지 보내줘": "3902173", "김대리(3902173)한테 쪽지로": "3902173",
+        "직원 3902173에게 쪽지": "3902173", "3902173번한테 쪽지 부탁해": "3902173",
+        "담당자가 3902173인데 쪽지로 넘겨줘": "3902173",
+        # 읽지 않는 것 — 단서 없는 맨숫자(«(으)로»는 금액과 안 갈린다) · 금액 · 사번이 둘
+        "3902173 쪽지로 보내줘": None, "3902173으로 전달해줘": None,
+        "5000000으로 보내줘": None, "사번 3902173 말고 3902174 둘 다": None,
+        "사번 있는 고객, 잔액 5000000원 쪽지로": None, "3902173원으로 보내줘": None,
+    }
+    misses = {q: act.employee_no(q) for q, want in read.items() if act.employee_no(q) != want}
+    hit = not misses
+    print(f"{'✓' if hit else '✗'} 사번 단서를 직원 말대로 넓게 읽되 금액·맨숫자·둘 이상은 읽지 않는다"
+          + (f" — {misses}" if misses else ""))
+    ok += hit
+
+    # 원장이 빈 쪽지 턴 — 직전 답변이 있으면 코드가 붙여 제안이 선다(사번 그대로). 없으면 예전대로.
+    hit = ((bare.get("pending_action") or {}).get("recipients") == ["3902173"]
+           and bare["answer"].startswith(memo.FENCE) and PL.NO_EVIDENCE not in bare["answer"]
+           and not bare_none.get("pending_action"))
+    print(f"{'✓' if hit else '✗'} 원장이 빈 쪽지 턴은 직전 답변을 코드가 재료로 붙인다(계획이 안 골라도)")
+    ok += hit
+
+    # 쪽지 요청이 lms_link 로 오분류돼도 그 노드로 가지 않는다 — LMS·문자를 말한 턴만 존중.
+    from pension_agent.consult_agent import routing as RT
+    hit = (RT.route_intent({"intent": "lms_link", "question": "사번 3902173한테 쪽지로 보내줘"}) == "plan"
+           and RT.route_intent({"intent": "lms_link", "question": '"문구" 로 LMS 보내줘'}) == "lms_link"
+           and RT.route_intent({"intent": "lms_link", "question": "이 문구 문자로 보내줘"}) == "lms_link")
+    print(f"{'✓' if hit else '✗'} «쪽지» 턴은 lms_link 로 분류돼도 계획 루프로 간다")
     ok += hit
 
     hit = (pending["recipients"] == ["3902172"] and pending["to"] == REG.MEMO_DEFAULT_TO
