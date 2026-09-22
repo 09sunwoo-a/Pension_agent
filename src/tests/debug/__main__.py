@@ -15,6 +15,8 @@
     --show-llm       compose 가 LLM 에게 받은 문장(폐기됐어도)을 그대로 보여준다
     --script N       캔드 LLM 시나리오로 실행한다(키 없이 돈다)
     --any-customer   이 체크아웃에 없는 고객 id 로도 그냥 진행한다(경고만)
+    -e/--employee    이 상담을 하는 직원의 사번(운영 CLI 와 같다) — 쪽지의 받는 사람 기본값이자
+                     보내는 주체. 없으면 WORKB_EMP_NO 로 떨어진다
 
 `-c` 로 넘긴 값은 **손대지 않고 그대로** `graph.ask(customer_id=...)` 로 간다 — 운영 CLI 와
 같다. 다만 없는 id 를 넘기면 아무 일도 일어나지 않은 것처럼 보인다(`get_profile` 이 None →
@@ -135,7 +137,8 @@ def main(argv: list[str]) -> int:
 
     scenario = None
     customer_id = None
-    for flag in ("-c", "--customer", "--script"):
+    employee_id = None
+    for flag in ("-c", "--customer", "-e", "--employee", "--script"):
         if flag not in argv:
             continue
         i = argv.index(flag)
@@ -150,6 +153,8 @@ def main(argv: list[str]) -> int:
                 print(f"그런 시나리오가 없습니다: {value}")
                 _usage()
                 return 1
+        elif flag in ("-e", "--employee"):
+            employee_id = value      # 운영 CLI 와 같은 뜻 — 이 상담을 하는 직원의 사번
         else:
             customer_id = value
 
@@ -163,7 +168,7 @@ def main(argv: list[str]) -> int:
     unknown = [a for a in argv if a.startswith("--")]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
-        print("  이 CLI 의 옵션: --debug · --show-llm · --script N · --any-customer · -c/--customer")
+        print("  이 CLI 의 옵션: --debug · --show-llm · --script N · --any-customer · -c/--customer · -e/--employee")
         print("  시연 대본을 돌리려면 다른 모듈입니다: python -m tests.debug.reps demo --why")
         return 1
 
@@ -172,12 +177,17 @@ def main(argv: list[str]) -> int:
     # 운영 CLI 와 같이 행내 MCP(쪽지 발송)를 붙인다 — 캔드 시나리오(--script)는 LLM 도 발송도
     # 스텁이라 붙이지 않는다. 안 붙이면 쪽지 승낙 턴이 설정과 무관하게 «미연결»로 끝난다.
     if scenario is None:
-        from pension_agent import mcp  # noqa: PLC0415 — graph 적재 뒤
+        from pension_agent import mcp, note  # noqa: PLC0415 — graph 적재 뒤
         if not mcp.install():
             print("(쪽지 발송: 미연결 — .env 의 MCP_* 가 없거나 행내 패키지가 없습니다. "
                   "확인: python -m pension_agent.mcp)", file=sys.stderr)
+        elif note.employee_id(employee_id) is None:
+            # 붙었는데 보내는 사번이 없으면 승낙 턴이 «보낼 직원 사번이 없다»로 끝난다.
+            print(f"(쪽지 보내는 사번: 없음 — -e 사번 을 넘기거나 {note.EMP_NO_ENV} 를 채우세요)",
+                  file=sys.stderr)
 
-    with session(customer_id=customer_id, scenario=scenario) as (ask, tr):
+    with session(customer_id=customer_id, scenario=scenario,
+                 employee_id=employee_id) as (ask, tr):
         tr.note(warning)
         if questions:
             for question in questions:
