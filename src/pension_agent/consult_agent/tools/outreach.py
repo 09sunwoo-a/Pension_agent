@@ -131,7 +131,8 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
             lines.append(f"· 참고: {key} — {why}")
 
     return _ev("outreach", query, "\n".join(lines),
-               [{"id": f"outreach.{customer_id}",
+               # id 에 KB-PIN 을 넣지 않는다(briefing.py 와 같은 자리) — 응답의 sources 이벤트로 나간다.
+               [{"id": "outreach",
                  "title": "고객님께 안내해보세요 — 열려 있는 이벤트·세미나",
                  "doc": "안내 콘텐츠 레지스트리 (브리핑 ⑨ 와 같은 산출)",
                  "score": None, "page": None}],

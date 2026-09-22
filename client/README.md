@@ -73,7 +73,7 @@ Content-Type: application/json
 | `answer` | `text`, `intent`, `links[]` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다. `links` 는 아래 |
 | `action` | `kind`, `label`, `prompt` (+ 쪽지면 `title`, `text`, `to`) | 연계 제안 턴에만, `answer` 다음. **답변 본문 바로 아래**에 `prompt` 와 **네 / 아니오 버튼**을 그린다(아래 「제안은 근거가 아니다」). 누르면 다음 턴 `message` 로 `"네"` 또는 `"아니오"` 를 보낸다 |
 | `clarify` | `question`, `options[]` | 되묻기 턴에만, `answer` 다음. 선택지 버튼. 누른 값을 다음 턴 `message` 로 보낸다 |
-| `sources` | `items[]` — `id`, `doc`, `title`, `url`, `score`, `page`, `role` | 근거. **항상** 온다. `role` 은 `"근거"` 와 `"주의"`(이 고객 상담에서 지켜야 할 것) 두 종류라 두 블록으로 나눠 그린다. `score` 는 있을 때만 관련도로 표기. `items` 가 비면 «근거 없음»을 **표시한다**(빼지 않는다) |
+| `sources` | `items[]` — `id`, `doc`, `title`, `url`, `score`, `page`, `role` | 근거. **항상** 온다. `role` 은 `"근거"` 와 `"주의"`(이 고객 상담에서 지켜야 할 것) 두 종류라 두 블록으로 나눠 그린다. `score` 는 있을 때만 관련도로 표기. `items` 가 비면 «근거 없음»을 **표시한다**(빼지 않는다). `id` 는 표시·중복 제거용 라벨이고 **고객 번호를 싣지 않는다** — 고객 재료는 `customer`·`suitable`·`outreach`·`session` 처럼 종류 이름만 온다(고객 번호가 실리면 플랫폼 게이트웨이의 개인정보 필터가 응답을 막는다). 어느 고객인지는 프론트가 보낸 `customer_id` 가 정한다 |
 | `followups` | `items[]` | 추천질문. 항상 온다(없으면 빈 목록). 누르면 그 문장을 다음 턴 `message` 로 보낸다 |
 | `error` | `text` | 실패. `answer` 대신 온다. 이 뒤에 `done` |
 | `done` | 없음 | 턴 끝. 항상 마지막. 스피너를 끈다 |

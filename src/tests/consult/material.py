@@ -275,7 +275,7 @@ def check_customer_material() -> int:
     if ev:
         # 원장 한 줄 답 — 딸려 온 카드는 전부 빠지고 원장 출처만 남는다.
         lean = P._sources([ev], [], [], "네, 디폴트옵션이 설정되어 있어요.")
-        hit = len(lean) == 1 and lean[0]["id"].startswith("customer.")
+        hit = len(lean) == 1 and lean[0]["id"] == "customer"
         print(f"{'✓' if hit else '✗'} 원장 한 줄로 답한 턴에는 딸려 온 화법 카드가 근거로 서지 않는다"
               f" ({len(ev['sources'])}건 → {len(lean)}건)")
         ok += hit
@@ -1332,7 +1332,7 @@ def check_history_material() -> int:
             session_store.SESSION_DATA_DIR = orig_dir
 
     hit = bool(found) and "수수료 부담된다고 하시네요" in found["text"] \
-        and found["sources"][0]["id"] == "session.CX"
+        and found["sources"][0]["id"] == "session"
     print(f"{'✓' if hit else '✗'} 지난 상담 기록이 재료로 올라온다")
     ok += hit
 

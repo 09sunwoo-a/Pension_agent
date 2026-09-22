@@ -303,6 +303,11 @@ try:
           "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
     check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",
           str(logging.getLogger().handlers))
+    # httpx 는 요청마다 주소를 INFO 로 찍고 MCP 주소에는 클라이언트 id 가 경로에 있다 —
+    # 루트가 INFO 여도 그 줄은 나가지 않아야 한다(main._QUIET_LOGGERS).
+    check(all(logging.getLogger(n).level >= logging.WARNING for n in main._QUIET_LOGGERS),
+          "바깥 라이브러리(httpx·MCP SDK)의 INFO 는 stdout 으로 나가지 않는다",
+          str({n: logging.getLogger(n).level for n in main._QUIET_LOGGERS}))
     check(_seen.get("x_client_user") == "emp-0417",
           "x_client_user 가 에이전트까지 전달된다", str(_seen.get("x_client_user")))
     check(_seen.get("session_id") == "default" and _seen.get("customer_id") is None,

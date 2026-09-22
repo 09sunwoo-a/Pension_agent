@@ -102,8 +102,9 @@ def _suitable(state: AgentState, query: str) -> Evidence | None:
         lines += ["", "── 안내할 수 없는 상품 없음 "
                       f"(허용 상한이 {cap}이라 카탈로그 전부가 범위 안이다)"]
     return _ev("suitable", query, "\n".join(lines),
-               [{"id": f"suitable.{customer_id}",
-                 # 제목은 계획 프롬프트에도 실린다 — KB-PIN 을 넣지 않는다(briefing.py 와 같은 자리).
+               # id·제목에 KB-PIN 을 넣지 않는다(briefing.py 와 같은 자리) — 제목은 계획 프롬프트로,
+               # id 는 응답의 sources 이벤트로 나가고 그 길마다 개인정보 필터가 서 있다.
+               [{"id": "suitable",
                  "title": f"{profile.nm} 고객 적합성 판정",
                  "doc": "투자성향 적합성 확인 — 위험등급 상한·거래채널 판정 결과 "
                         "(브리핑 화면 ⑤ 와 같은 후보군)",

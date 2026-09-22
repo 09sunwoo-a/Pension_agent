@@ -142,16 +142,20 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                            facts.get("account_state") or {})
                for k, v in src.items()]
     return _ev("customer", query, "\n".join(lines),
-               [{"id": f"customer.{customer_id}",
-                 # 제목에도 KB-PIN 을 넣지 않는다 — 출처 제목은 화면에만 서는 것이 아니라
-                 # 계획 프롬프트의 「이미 모은 재료」로도 나간다(`evidence/ledger.py::summarize`).
-                 # id 는 아래 `id` 칸에 그대로 있고 그쪽은 프롬프트로 나가지 않는다.
+               # 출처 id 에도 KB-PIN 을 넣지 않는다. 출처는 응답의 `sources` 이벤트로 프론트까지
+               # 나가는데, 그 길에 선 플랫폼 게이트웨이의 개인정보 필터가 `customer.171203-4815062`
+               # 를 주민등록번호로 보고 **응답을 통째로 막았다**(FILTER_INVALID — 김서연 「이 고객
+               # 왜 타겟」, LLM 쪽을 고친 다음 날 실측). 한 턴에 열려 있는 고객은 하나라 id 에
+               # 번호가 없어도 갈리고, 이 id 를 되읽어 고객을 찾는 코드는 없다(고객은 항상
+               # `state["customer_id"]` 에서 읽는다). 제목도 같다 — 제목은 화면뿐 아니라 계획
+               # 프롬프트의 「이미 모은 재료」로도 나간다(`evidence/ledger.py::summarize`).
+               [{"id": "customer",
                  "title": f"{profile.nm} 고객 계좌 현황",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}, *deduped],
                source_keys=card_keys,
                allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)],
-               cards=[{"id": f"customer.{customer_id}", "labeled": labeled,
+               cards=[{"id": "customer", "labeled": labeled,
                        # 재료 전문 — 항목 이름이 다른 자리(문제상황 제목·⑥⑦⑧ 카드 문구
                        # 등)에도 나오면 그 항목은 판정에서 뺀다(relations.checkable).
                        #
