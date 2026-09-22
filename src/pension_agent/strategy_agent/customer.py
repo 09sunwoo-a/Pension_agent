@@ -28,6 +28,7 @@ D 는 «행내 기준»이 아니라 «검증 전 제안값»이므로, 실데�
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 from dataclasses import dataclass, field
@@ -772,13 +773,18 @@ _BY_ID = {p.id: p for p in PERSONAS}
 #: 잡는다. 그래서 프론트는 하이픈을 뺀 13자리로 보내고 여기서 원장 표기로 되돌린다 —
 #: 13자리 연속 숫자는 알려진 룰 12종(`pension_agent/privacy.py`) 어디에도 걸리지 않는다.
 _ID_COMPACT = re.compile(r"^\d{13}$")
+#: 숫자열이 남지 않는 꼴 — `b64:` + 원장 표기의 base64(`b64:MTcxMjAzLTQ4MTUwNjI=`). base64 에
+#: 숫자 글자는 섞이지만 연속된 숫자열은 생기지 않아 번호 룰이 잡을 꼴이 없다. 13자리
+#: 숫자열도 필터가 잡을 때를 위한 것이다(«기본필터»의 룰 표는 확인된 바 없다). 접두를 두는
+#: 이유는 base64 문자열이 다른 꼴과 겉으로 갈리지 않기 때문이다 — 접두 없는 값은 풀지 않는다.
+ID_B64_PREFIX = "b64:"
 
 
 def normalize_id(value: str | None) -> str | None:
     """요청이 실어 온 고객 id 를 원장 표기(`171203-4815062`)로. 비어 있으면 None.
 
-    받는 꼴은 둘이다 — 원장 표기 그대로, 또는 하이픈을 뺀 13자리(`1712034815062`). 뒤엣것을
-    받는 이유는 위 `_ID_COMPACT` 주석이다(2026-09-22 실측: 플랫폼 게이트웨이의 «기본필터»가
+    받는 꼴은 셋이다 — 원장 표기 그대로 · 하이픈을 뺀 13자리(`1712034815062`) · `b64:` 접두의
+    base64. 뒤의 둘을 받는 이유는 위 주석이다(2026-09-22 실측: 플랫폼 게이트웨이의 «기본필터»가
     `"customer_id": "171203-4815062"` 가 실린 **요청**을 `FILTER_INVALID` 로 끊어, 질문이 한
     글자여도 에이전트에 닿지 않았다). 그 밖의 꼴은 손대지 않는다 — 여기서 고쳐 쓰기 시작하면
     없는 고객이 있는 고객으로 읽힐 수 있다. id 의 형식을 아는 곳은 이 모듈 하나다.
@@ -786,9 +792,21 @@ def normalize_id(value: str | None) -> str | None:
     text = (value or "").strip()
     if not text:
         return None
+    if text.startswith(ID_B64_PREFIX):
+        try:
+            decoded = base64.b64decode(text[len(ID_B64_PREFIX):], validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return text          # 풀리지 않는 값은 그대로 — 없는 고객으로 떨어진다
+        return normalize_id(decoded)
     if _ID_COMPACT.match(text):
         return f"{text[:6]}-{text[6:]}"
     return text
+
+
+def encode_id(customer_id: str) -> str:
+    """원장 표기를 요청에 실을 꼴(`b64:…`)로 — 연속된 숫자열이 남지 않는다. `normalize_id` 의
+    역이고, 프론트가 보내야 하는 꼴의 기준이다(client/README.md)."""
+    return ID_B64_PREFIX + base64.b64encode(customer_id.encode("utf-8")).decode("ascii")
 
 
 def get_profile(customer_id: str) -> Profile | None:
