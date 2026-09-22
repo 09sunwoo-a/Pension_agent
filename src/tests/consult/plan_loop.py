@@ -642,7 +642,9 @@ def check_tone_and_marks() -> int:
     print(f"{'✓' if hit else '✗'} 작성 규칙이 해요체 유지와 표시 줄바꿈을 시킨다")
     ok += hit
 
-    mark = tools.HISTORY_MARK
+    # 표시 예시는 notices 로 남는 종류(⚠ 유의)를 쓴다 — 상담 기록 표시(HISTORY_MARK)는
+    # 2026-09-22 부터 재료 성격 표시라 본문에 서지 않는다(material.check_history_material).
+    mark = "⚠ 유의 — 기록의 값은 그때 기준이라 지금과 다를 수 있어요."
     inline = f"밝히신 적이 있어요. {mark}"
     hit = plan._break_marks(inline) == f"밝히신 적이 있어요.\n{mark}" \
         and plan._break_marks(f"앞 문장.\n{mark}") == f"앞 문장.\n{mark}" \

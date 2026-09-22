@@ -1315,9 +1315,12 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 에이전트 답변은 발췌만 싣는다(가장 긴 줄 {longest}자)")
     ok += hit
 
-    # 기록은 "그때 무슨 얘기를 했나"의 근거이지 현재 기준 값의 근거가 아니다.
-    hit = bool(found) and tools.HISTORY_MARK in found["notices"]
-    print(f"{'✓' if hit else '✗'} 시효 표시를 재료가 달고 나온다(빠지면 코드가 채운다)")
+    # 기록은 "그때 무슨 얘기를 했나"의 근거이지 현재 기준 값의 근거가 아니다. 표시는 재료
+    # 성격 표시(`marks`)다 — `notices` 로 두면 <필수 인용> 으로 LLM 에 넘어가 본문 아무
+    # 자리에나 선다(2026-09-22, 질문 리스트 28번).
+    hit = (bool(found) and tools.HISTORY_MARK in found["marks"]
+           and tools.HISTORY_MARK not in found["notices"])
+    print(f"{'✓' if hit else '✗'} 시효 표시를 재료가 성격 표시로 달고 나온다(본문 필수 인용이 아니다)")
     ok += hit
 
     # 고객 화면이 닫혀 있으면 어느 고객인지가 없다 — «확인하지 못함»이라 None 이고, 계획은
@@ -1331,7 +1334,7 @@ def check_history_material() -> int:
     # 원장에 싣고 질문과 무관한 ⑥⑦⑧ 화법 카드를 «근거»로 세웠다. 시효 표시는 붙지
     # 않는다 — 낡을 값 자체가 없다.
     hit = (bool(unseen) and tools.HISTORY_NONE in unseen["text"]
-           and tools.HISTORY_MARK not in unseen["notices"])
+           and tools.HISTORY_MARK not in unseen["marks"])
     print(f"{'✓' if hit else '✗'} 기록 0건도 재료로 올라온다(없다고 답할 근거)")
     ok += hit
 
@@ -1503,12 +1506,39 @@ def check_history_selection() -> int:
 
     # 시효 표시는 과거 상담이 실렸을 때만. 방금 나눈 대화에 "지난 상담 기록입니다"가
     # 붙으면 표시가 거짓말을 하고, 매번 붙는 표시는 정작 낡은 값이 실린 턴에서 안 읽힌다.
-    hit = bool(today_only) and today_only["notices"] == [] \
+    hit = bool(today_only) and today_only["marks"] == [] \
         and "[과거 상담 기록]" not in today_only["text"]
     print(f"{'✓' if hit else '✗'} 오늘 대화만 있으면 시효 표시를 달지 않는다")
     ok += hit
-    hit = bool(plain) and tools.HISTORY_MARK in plain["notices"]
+    hit = bool(plain) and tools.HISTORY_MARK in plain["marks"]
     print(f"{'✓' if hit else '✗'} 과거 상담이 실리면 시효 표시를 단다")
+    ok += hit
+
+    # 표시는 **본문이 아니라 답변 끝** 「── 참고한 자료」 블록에 선다(2026-09-22 — 질문 리스트
+    # 28번, 송도윤). <필수 인용> 으로 LLM 에 넘기던 동안 첫 문장 뒤에 서서, 그 아래 여섯
+    # 문단이 전부 지난 상담 얘기로 읽혔다. 본문의 경계는 형태 요구(날짜 문단)가 맡는다.
+    from pension_agent.consult_agent import prompts as PR
+
+    mark = tools.HISTORY_MARK
+    prompts_seen: list[str] = []
+    orig_gen = plan.generate
+
+    def fake_generate(prompt, **kw):
+        prompts_seen.append(prompt)
+        return "지난 상담에서는 수수료 부담으로 상품 전환을 보류하셨어요."
+
+    try:
+        plan.generate = fake_generate
+        out = plan.compose({"question": "지난 상담 참고해서 오늘 뭐라고 말하지", "evidence": [plain]})
+    finally:
+        plan.generate = orig_gen
+    body, _sep, tail = out["answer"].partition("\n\n" + plan.MATERIAL_MARKS + "\n")
+    hit = bool(prompts_seen) and mark not in prompts_seen[0] \
+        and mark not in body and f"· {mark}" in tail
+    print(f"{'✓' if hit else '✗'} 시효 표시는 필수 인용으로 넘기지 않고 답변 끝 참고 블록에만 선다")
+    ok += hit
+    hit = "날짜를 앞세운" in PR.ANSWER_SHAPES["history"] and "오늘 기준" in PR.ANSWER_SHAPES["history"]
+    print(f"{'✓' if hit else '✗'} history 형태 요구가 지난 상담 문단의 경계(날짜 문단)를 시킨다")
     ok += hit
     return ok
 
