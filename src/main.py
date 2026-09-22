@@ -157,12 +157,23 @@ from pension_agent.consult_agent.nodes import act as consult_act
 from pension_agent.strategy_agent import briefing_store
 
 
+#: INFO 를 끄는 바깥 라이브러리 로거. `httpx` 는 요청마다 «HTTP Request: GET <주소>» 를
+#: INFO 로 찍는데, MCP 게이트웨이 주소는 `/workb/{MCP_USER_ID}` 라 **클라이언트 id 가 경로에
+#: 있고**, SSE 접속은 그 줄을 반복해서 남긴다. 루트를 INFO 로 잡는 순간 그 줄이 전부 stdout
+#: (Grafana)으로 나간다. 행내 MCP SDK·어댑터도 같은 이유로 WARNING 부터만 받는다 — 우리
+#: 로그(`api`·`agent`·`pension_agent.*`)가 무엇을 찍는지는 우리가 정하지만 저쪽은 아니다.
+_QUIET_LOGGERS = ("httpx", "httpcore", "mcp", "langchain_mcp_adapters", "mcp_sdk")
+
+
 def _setup_logging() -> None:
     """루트 로거 → stdout · INFO. 바깥(테스트 러너 등)이 이미 잡아 두었으면 손대지 않는다.
 
     타임스탬프는 넣지 않는다 — 플랫폼 수집기가 줄마다 붙인다(행내 화면에서 확인).
     형식은 uvicorn 의 접속 로그(`INFO:     …`)와 나란히 읽히게 맞춘다.
+    바깥 라이브러리의 INFO 는 루트를 누가 잡았든 끈다(`_QUIET_LOGGERS`).
     """
+    for name in _QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
     if logging.getLogger().handlers:
         return
     logging.basicConfig(

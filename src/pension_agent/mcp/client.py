@@ -66,6 +66,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -259,6 +260,35 @@ def user_key(client_id: str, client_secret: str, emp_no: str) -> str:
     return base64.b64encode(json.dumps(payload).encode()).decode()
 
 
+#: 자격증명 꼴 — 값 자체를 몰라도 가릴 수 있는 것들. JWT(`eyJ….….…`) · `Bearer <토큰>` ·
+#: MCP-User-Key 같은 긴 base64 덩이(사용자 키는 JSON 을 base64 한 200자 안팎이다).
+_CREDENTIAL_SHAPES = (
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+"),
+    re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{80,}={0,2}(?![A-Za-z0-9+/=])"),
+)
+REDACTED = "[가림]"
+
+
+def redact(text: str, cfg: Settings | None = None, *extra: str) -> str:
+    """로그·오류 문구로 나가는 글에서 자격증명을 가린다.
+
+    어댑터·전송 계층이 올리는 예외 문구에는 **요청 그대로**가 실려 온다 — 게이트웨이 주소
+    (`/workb/{client_id}` 라 MCP_USER_ID 가 경로에 있다), `Authorization: Bearer …`,
+    `MCP-User-Key` 헤더 값까지. 그 문구를 `%s` 로 그대로 찍으면 자격증명이 Grafana 에 남고,
+    `MCPCallError` 에 실려 화면의 «쪽지를 보내지 못했어요. …»까지 올라간다. 값을 아는 것
+    (설정의 id·시크릿, 이번 접속의 토큰)은 값으로, 모르는 것은 꼴로 가린다.
+    """
+    out = text or ""
+    known = [v for v in ((cfg.client_id, cfg.client_secret) if cfg else ()) + tuple(extra)
+             if v and len(v) >= 4]
+    for value in sorted(set(known), key=len, reverse=True):
+        out = out.replace(value, REDACTED)
+    for shape in _CREDENTIAL_SHAPES:
+        out = shape.sub(REDACTED, out)
+    return out
+
+
 def issue_token(cfg: Settings) -> str:
     """게이트웨이에서 JWT 를 받아 온다(`POST /token`). 실패하면 사유를 남기고 올린다.
 
@@ -431,16 +461,25 @@ class MCPClient:
                 raise                       # 설정·패키지·도구 이름 — 다시 시도해도 같다
             except Exception as exc:        # noqa: BLE001 — 전송·서버·어댑터 어느 쪽이든
                 last = exc
+                # 예외 문구는 가려서 남긴다 — 전송 계층은 요청(주소·헤더)을 문구에 그대로
+                # 싣고, 그 안에 클라이언트 id·토큰·사용자 키가 있다(`redact` 머리말). drop()
+                # 이 토큰을 지우기 전에 읽어 둔다.
+                reason = self._redact(f"{type(exc).__name__}: {exc}")
                 self.drop()
-                log.warning("MCP 호출 실패 · 도구 %s · %d/%d회 · %s: %s",
-                            name, attempt + 1, attempts, type(exc).__name__, exc)
+                log.warning("MCP 호출 실패 · 도구 %s · %d/%d회 · %s",
+                            name, attempt + 1, attempts, reason)
                 if invoked and not idempotent:
                     break                   # 나갔는지 모르는 호출을 다시 부르지 않는다
                 if attempt + 1 < attempts and self.config.retry_backoff > 0:
                     await asyncio.sleep(self.config.retry_backoff * (2 ** attempt))
+        # 화면까지 올라가는 문구다(note.send_note 의 detail) — 위와 같은 이유로 가린다.
         raise MCPCallError(
             f"MCP 도구 '{name}' 호출에 실패했습니다 — "
-            f"{type(last).__name__ if last else 'UNKNOWN'}: {last}") from last
+            + (self._redact(f"{type(last).__name__}: {last}") if last else "UNKNOWN")) from last
+
+    def _redact(self, text: str) -> str:
+        """이 접속이 아는 자격증명(설정의 id·시크릿 + 이번 토큰)까지 값으로 가린다."""
+        return redact(text, self.config, self._context.get("auth_token", ""))
 
 
 # ─────────────────────────────────────────────────────────────

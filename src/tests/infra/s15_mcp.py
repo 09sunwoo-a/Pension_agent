@@ -175,6 +175,48 @@ try:
           "mcp: 발송이 실패해도 다시 부르지 않는다 — 재시도가 곧 중복 발송이다",
           f"{_failed['status']} · 호출 {len(_flaky.calls)}회")
 
+    # ── 실패 문구에 자격증명이 남지 않는다 — 로그(Grafana)와 화면 둘 다 ──
+    # 전송 계층의 예외 문구는 요청을 그대로 싣는다: 게이트웨이 주소(경로에 MCP_USER_ID) ·
+    # Authorization · MCP-User-Key. 그 문구가 `MCP 호출 실패` 경고와 `MCPCallError` 에 실려
+    # 로그와 화면의 «쪽지를 보내지 못했어요. …»까지 올라갔다.
+    import logging as _logging  # noqa: PLC0415
+
+    class _LeakyTool(_FakeTool):
+        async def ainvoke(self, args):
+            self.calls.append(args)
+            raise ConnectionError(
+                "POST https://mcp.test/api/workb/tea000/messages failed · headers="
+                "{'Authorization': 'Bearer jwt-test', 'MCP-User-Key': '" + _b64.b64encode(
+                    _js.dumps({"client_id": "tea000", "emp_no": "3902172", "timestamp": "x",
+                               "request_id": "y", "signature": "z" * 44}).encode()).decode()
+                + "'} · secret=s3cret")
+
+    class _Capture(_logging.Handler):
+        lines: list[str] = []
+
+        def emit(self, record):
+            _Capture.lines.append(record.getMessage())
+
+    _leaky = _LeakyTool("send_memo")
+    _use_mcp(tools=[_leaky])
+    _mcp.install()
+    _handler = _Capture()
+    _mcpc.log.addHandler(_handler)
+    try:
+        _leaked = note.send_note_sync(["3902172"], _note)
+    finally:
+        _mcpc.log.removeHandler(_handler)
+    _texts = [_leaked["detail"], *_Capture.lines]
+    check(_leaked["status"] == "failed" and _Capture.lines
+          and not any(s in t for t in _texts for s in ("tea000", "jwt-test", "s3cret", "eyJ")),
+          "mcp: 실패 문구(로그·화면)에 클라이언트 id·토큰·사용자 키·시크릿이 남지 않는다",
+          str(_texts)[:300])
+    check("send_memo" in _leaked["detail"] and "ConnectionError" in _leaked["detail"],
+          "mcp: 가려도 무엇이 어떻게 실패했는지는 남는다(도구 이름·예외 종류)", _leaked["detail"])
+    check(_mcpc.redact("주소 https://gw/workb/tea000/sse", _mcpc.settings())
+          == f"주소 https://gw/workb/{_mcpc.REDACTED}/sse",
+          "mcp.redact: 설정에 있는 값은 값으로 가린다")
+
     # 다시 불러도 되는 도구는 재시도한다(읽기 도구가 붙을 자리 — 지금은 쪽지뿐이다).
     _readonly = _FakeTool("some_query", fail=1)
     _use_mcp(tools=[_readonly])
