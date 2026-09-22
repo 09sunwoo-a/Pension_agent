@@ -275,9 +275,15 @@ def _isa_rollover_lines(p, said: tuple | None, state: AgentState) -> list[str]:
         f"만기일로부터 {CUST.ISA_ROLLOVER_DEADLINE_DAYS}일 이내에 전환한다",
         f"· 전환금은 연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)}과 무관하다 — "
         f"만기금액의 전부 또는 일부를 넣을 수 있다",
+        # 「전환금 전액이 공제 대상」은 카드 f4 가 오답으로 등록한 문구다(pitfalls). 이 줄이
+        # 그 문구를 부정문으로 담고 있던 동안(「…이 되는 것이 아니다」) LLM 이 그대로 옮겨
+        # 썼고, 관계 검사가 그것을 오답 주장으로 잡아 재작성까지 두 번 다 폐기됐다 — 52번
+        # (송도윤)이 근거 원문 폴백으로 끝났다. 재료가 오답 문구를 주면 답변이 그 문구를
+        # 쓴다. 같은 뜻을 그 문구 없이 적는다.
         f"· 전환액의 {CUST.ISA_ROLLOVER_CREDIT_RATE * 100:.0f}%가 세액공제 대상에 "
         f"**더해진다**(상한 {_won(cap)}) — 전환액 {_won(at_cap)}에서 상한에 닿는다. "
-        f"전환금 전액이 공제 대상이 되는 것이 아니다",
+        f"더해지는 것은 전환액의 {CUST.ISA_ROLLOVER_CREDIT_RATE * 100:.0f}%뿐이고 "
+        f"전환액 자체가 공제 대상이 되지는 않는다",
         f"· 그래서 공제 대상 한도가 {_won(CUST.TAX_CREDIT_CAP_WON)}에서 최대 "
         f"{_won(CUST.TAX_CREDIT_CAP_WON + cap)}으로 늘어난다",
     ]
@@ -295,7 +301,12 @@ def _isa_rollover_lines(p, said: tuple | None, state: AgentState) -> list[str]:
     # 부담스럽다」)도 여기로 들어와 상한에서 잘린다 — 지어낸 수가 아니라 원장 값이다.
     conv = min(said[1], amt) if said else amt
     add_room = CUST.isa_rollover_credit(conv)
-    lines.append(f"· 계산에 쓴 전환액 {_won(conv)} → 추가 공제 대상 {_won(add_room)}"
+    # 10% 의 원값도 적는다 — 상한에 잘린 전환액이면 LLM 은 「8,000만원의 10% 인 800만원이
+    # 아니라 300만원」이라고 설명하려 하고, 800만원이 재료에 없으면 그 문장이 수치 검사에
+    # 걸린다(52번 실측 후보). 코드가 이미 계산한 값이라 지어낸 수가 아니다.
+    raw = int(conv * CUST.ISA_ROLLOVER_CREDIT_RATE)
+    cut = f"10%는 {_won(raw)}이지만 상한에서 잘려 " if raw > add_room else ""
+    lines.append(f"· 계산에 쓴 전환액 {_won(conv)} → {cut}추가 공제 대상 {_won(add_room)}"
                  + ("" if said else " (질문에 금액이 없어 만기금액 전부로 계산했다)"))
     for label, rate in _rates(p, state):
         lines.append(f"· {label}({rate * 100:.1f}%): 이 전환으로 늘어나는 환급 "

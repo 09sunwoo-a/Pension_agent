@@ -822,6 +822,33 @@ def check_relations() -> int:
     print(f"{'✓' if hit else '✗'} 한쪽에서 정정하고 다른 쪽에서 그대로 말하면 잡는다")
     ok += hit
 
+    # 문구 바로 뒤에 부정이 붙으면 인용이 아니라 반대 주장이다 — 따옴표가 없어도 정정이다.
+    # 52번(송도윤) 실측: 재료가 「전환금 전액이 공제 대상이 되는 것이 아니다」를 주고 LLM 이
+    # 그대로 옮겨 썼는데 오답 주장으로 잡혀 두 번 다 폐기, 근거 원문 폴백으로 끝났다.
+    pf4 = (KB.facts.get("fact.k04.f4") or {}).get("pitfalls") or []
+    hit = (bool(pf4)
+           and not R.known_wrong("전환금 전액이 공제 대상이 되는 것이 아니에요. 10%만 더해져요.", pf4)
+           and not R.known_wrong("전환금 전액이 공제 대상이 아니라 10%예요.", pf4)
+           and R.known_wrong("전환금 전액이 공제 대상이에요.", pf4) != []
+           and R.known_wrong("전환금 전액이 공제 대상이에요. 아니, 확인해 볼게요.", pf4) != [])
+    print(f"{'✓' if hit else '✗'} 오답 문구 바로 뒤의 부정은 정정이고, 문장 부호 너머의 부정은 아니다")
+    ok += hit
+
+    # 재료가 오답 문구를 주면 답변이 그 문구를 쓴다 — 도구 재료 자체에 자기 카드의 오답
+    # 문구가 있으면 안 된다(위 52번의 첫 원인).
+    from pension_agent.strategy_agent import customer as CUST
+    isa_cust = next((p for p in CUST.PERSONAS if p.isa), None)
+    ev_tax = tools.run("tax_credit", {"customer_id": isa_cust.id, "question": "ISA 8천만원 다 옮기면?"},
+                       "ISA") if isa_cust else None
+    wrongs = [w for c in (ev_tax or {}).get("related") or [] for x in c.get("pitfalls") or []
+              for w in x.get("wrong") or []]
+    hit = bool(ev_tax) and bool(wrongs) and not any(w in ev_tax["text"] for w in wrongs)
+    print(f"{'✓' if hit else '✗'} 세액공제 재료 본문에 자기 카드의 오답 문구가 없다")
+    ok += hit
+    hit = bool(ev_tax) and "10%는" in ev_tax["text"] and "상한에서 잘려" in ev_tax["text"]
+    print(f"{'✓' if hit else '✗'} 상한에 잘린 전환액은 10% 원값도 재료에 있다(수치 검사 대비)")
+    ok += hit
+
     # 오답 문자열은 **구절**이어야 한다 — 값 하나짜리는 다른 팩트의 맞는 문장에도 들어간다.
     bare = [w for f in KB.facts.values() for x in f.get("pitfalls") or []
             for w in x.get("wrong") or [] if " " not in w and len(w) < 8]

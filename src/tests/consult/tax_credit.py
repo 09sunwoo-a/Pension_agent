@@ -191,7 +191,7 @@ def check_tax_credit_isa() -> int:
     add = CUST.isa_rollover_credit(isa.isa["amount"])
     hit = (add == cap and CUST.isa_rollover_credit(10_000_000) == 1_000_000
            and f"{at_cap // 10_000:,}만원에서 상한에 닿는다" in text
-           and "전환금 전액이 공제 대상이 되는 것이 아니다" in text)
+           and "전환액 자체가 공제 대상이 되지는 않는다" in text)
     print(f"{'✓' if hit else '✗'} 늘어나는 몫은 전환액의 10%(상한 {cap // 10_000:,}만원)다")
     ok += hit
 
