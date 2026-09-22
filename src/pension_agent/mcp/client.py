@@ -228,12 +228,34 @@ def unavailable() -> str:
     return _MISSING
 
 
+#: INFO 를 끄는 바깥 로거. 2026-09-22 행내 로그 실측(쪽지 승낙 턴 하나):
+#:   [httpx]          HTTP Request: GET https://…/workb/{client_id}/sse · POST …?session_id=…
+#:   [mcp_sdk.audit]  {"event": "mcp_connected", "client_id": …, "emp_no": …, "mcp_user_key": …,
+#:                     "server_url": …}  — 같은 JSON 이 접두 없이 한 줄 더 찍힌다(자기 핸들러 +
+#:                     루트 전파)
+#:   [mcp_sdk.identity] · [mcp_sdk.hooks] · [mcp_sdk]  설치 진행 문구
+#: 루트 로거가 INFO 라 전부 stdout(Grafana)으로 나갔다. 자식 로거까지 이름을 적는 이유는
+#: SDK 가 `install()` 때 자기 로거의 레벨·핸들러를 따로 세울 수 있어서다 — 부모만 내리면
+#: 그 순간 다시 풀린다. 그래서 목록은 여기 있고, 기동 때(main.py)와 `install()` 직후에
+#: 두 번 적용한다.
+NOISY_LOGGERS = ("httpx", "httpcore", "mcp", "langchain_mcp_adapters",
+                 "mcp_sdk", "mcp_sdk.audit", "mcp_sdk.hooks", "mcp_sdk.identity")
+
+
+def quiet_loggers() -> None:
+    """바깥 라이브러리의 INFO 를 끈다(`NOISY_LOGGERS`). 몇 번 불러도 같다."""
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def _setup_system(sdk: Any, cfg: Settings) -> None:
     """SDK 활성화와 에이전트 인증 정보 등록 — 프로세스당 1회(자격증명이 바뀌면 다시)."""
     global _SYSTEM
     if _SYSTEM == (cfg.client_id, cfg.client_secret):
         return
     sdk.install()
+    # install() 이 자기 로거를 INFO 로 다시 세운다 — 그 뒤에 한 번 더 내린다(NOISY_LOGGERS).
+    quiet_loggers()
     sdk.setup_system(client_id=cfg.client_id, client_secret=cfg.client_secret)
     _SYSTEM = (cfg.client_id, cfg.client_secret)
 

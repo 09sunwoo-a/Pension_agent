@@ -217,6 +217,32 @@ try:
           == f"주소 https://gw/workb/{_mcpc.REDACTED}/sse",
           "mcp.redact: 설정에 있는 값은 값으로 가린다")
 
+    # ── SDK 가 install() 때 자기 로거를 INFO 로 다시 세워도 감사 JSON 이 나가지 않는다 ──
+    # 2026-09-22 행내 로그: [mcp_sdk.audit] {"client_id", "emp_no", "mcp_user_key", …} 가
+    # 접속마다 두 줄(자기 핸들러 + 루트 전파)로 찍혔다. 기동 때 부모만 내리면 SDK 설치 순간
+    # 풀리므로 install() 직후에 다시 내린다(client._setup_system).
+    class _LoudSdk(_FakeSdk):
+        @staticmethod
+        def install():
+            _FakeSdk.log.append(("install",))
+            for _n in ("mcp_sdk", "mcp_sdk.audit"):
+                _lg = _logging.getLogger(_n)
+                _lg.setLevel(_logging.INFO)
+                _lg.addHandler(_logging.NullHandler())
+
+    _mcpc.quiet_loggers()
+    _use_mcp(tools=[_FakeTool("send_memo")])
+    _mcpc.use_backend(sdk=_LoudSdk, adapter=_fake_adapter([_FakeTool("send_memo")]))
+    _mcp.install()
+    note.send_note_sync(["3902172"], _note)
+    check(all(_logging.getLogger(n).getEffectiveLevel() >= _logging.WARNING
+              for n in _mcpc.NOISY_LOGGERS),
+          "mcp: SDK 설치 뒤에도 감사·httpx 로거의 INFO 가 꺼져 있다(자격증명 JSON 이 안 나간다)",
+          str({n: _logging.getLogger(n).getEffectiveLevel() for n in _mcpc.NOISY_LOGGERS}))
+    for _n in ("mcp_sdk", "mcp_sdk.audit"):
+        for _h in list(_logging.getLogger(_n).handlers):
+            _logging.getLogger(_n).removeHandler(_h)
+
     # 다시 불러도 되는 도구는 재시도한다(읽기 도구가 붙을 자리 — 지금은 쪽지뿐이다).
     _readonly = _FakeTool("some_query", fail=1)
     _use_mcp(tools=[_readonly])
