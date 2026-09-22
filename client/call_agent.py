@@ -168,12 +168,21 @@ def _events_in(text: str) -> Iterator[dict]:
 
 
 def _note_status(obj: dict) -> None:
-    """게이트웨이 이벤트의 status 가 SUCCESS 가 아니면 알린다 — content 는 그때 오류 문구다."""
+    """게이트웨이 이벤트의 status 가 SUCCESS 가 아니면 알린다 — content 는 그때 오류 문구다.
+
+    오류 객체는 **통째로** 찍는다(content 만 빼고 — 그건 _render 가 «이벤트가 아닌 응답»으로
+    따로 보여준다). `FILTER_INVALID` 실측(2026-09-22)에서 status·responseCode 두 칸만 찍었더니
+    «The content was blocked by the filter» 밖에 안 남았다 — 어느 방향(요청/응답)을 어떤 룰이
+    막았는지는 나머지 칸(filter_block_reason · rule · direction 류)에 있을 수 있는데 그것을
+    버리고 있었다. 오류 객체에 비밀은 없다(토큰은 요청 헤더에만 있다).
+    """
     status = obj.get("status")
     if status and status != "SUCCESS":
         code = obj.get("responseCode") or obj.get("response_code")
         print(f"[게이트웨이 status={status} responseCode={code}] content 는 답변이 아니라 오류 문구입니다.",
               file=sys.stderr)
+        rest = {k: v for k, v in obj.items() if k != "content"}
+        print(f"[게이트웨이 오류 객체] {json.dumps(rest, ensure_ascii=False)}", file=sys.stderr)
 
 
 def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
