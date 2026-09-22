@@ -838,7 +838,13 @@ def compose(state: AgentState) -> dict[str, Any]:
     guards = guard.cautions_for(KB, conds) if conds else []
     alts = guard.sensitive_cards(KB, conds) if conds else []
 
-    spans = [a for e in evidence for a in (e["atomic"] + e["notices"])]
+    # <필수 인용> 은 값+조건 스팬(`atomic`)뿐이다. 표시(`notices`)는 넘기지 않는다(2026-09-22,
+    # 질문 리스트 19번 — 이수민 세액공제): 넘기던 동안 LLM 이 카드 원문 단서를 「-다」체로
+    # 본문 한가운데 절반만 베꼈고, 나머지 절반이 빠졌다고 코드가 전문을 ※ 로 덧붙여 같은
+    # 단서가 세 번 섰다(원문 절반 · LLM 의 의역 · 코드의 전문). 표시는 어차피 빠지면 코드가
+    # 채우는 것이라 LLM 이 쓸 이유가 없다 — 아래 `appends` 가 답변 아래에 한 번 세운다.
+    # 표시 안의 수치는 여전히 인용 허용이다(`tools.ledger_texts` — 기준시점을 본문에 녹인다).
+    spans = [a for e in evidence for a in e["atomic"]]
     prompt = COMPOSE_PROMPT.format(
         context="\n\n".join(e["text"] for e in evidence),
         must_block=MUST_BLOCK.format(spans="\n".join(f"- {a}" for a in spans)) if spans else "",

@@ -638,8 +638,9 @@ def check_tone_and_marks() -> int:
     print(f"{'✓' if hit else '✗'} 값이 있는 미선언 팩트({valued['id']})는 그대로 원문을 강제한다")
     ok += hit
 
-    hit = "「-다」로 끝나는 문어체여도" in COMPOSE_SYSTEM and "줄을 바꿔 따로 세운다" in COMPOSE_SYSTEM
-    print(f"{'✓' if hit else '✗'} 작성 규칙이 해요체 유지와 표시 줄바꿈을 시킨다")
+    hit = "「-다」로 끝나는 문어체여도" in COMPOSE_SYSTEM and "줄을 바꿔 따로 세운다" in COMPOSE_SYSTEM \
+        and "직접 쓰지 않는다 — 시스템이 답변 아래에 세운다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 규칙이 해요체 유지·표시는 코드가 아래에 세움·줄바꿈을 시킨다")
     ok += hit
 
     # 표시 예시는 notices 로 남는 종류(⚠ 유의)를 쓴다 — 상담 기록 표시(HISTORY_MARK)는
@@ -720,10 +721,29 @@ def check_atomic_spans() -> int:
         caveat = "단, 세액공제 전 결정세액이 공제액보다 적으면 최대 환급액을 받지 못한다."
         ev_plain = tools._ev("tax_credit", "q", "■ 환급 계산\n300만원 추가 납입 시 495,000원",
                              [{"id": "t.1", "title": "환급"}], notices=[caveat])
-        plan.generate = lambda p, **kw: "300만원 더 넣으면 495,000원을 돌려받을 수 있어요."
+        prompts_seen: list[str] = []
+
+        def gen_capture(p, **kw):
+            prompts_seen.append(p)
+            return "300만원 더 넣으면 495,000원을 돌려받을 수 있어요."
+
+        plan.generate = gen_capture
         out = plan.compose({"question": "q", "evidence": [ev_plain]})
         hit = f"\n※ {caveat}" in out["answer"] and out["answer"].count(caveat) == 1
         print(f"{'✓' if hit else '✗'} 표지 없는 표시는 ※ 를 앞세워 제 줄에 붙는다")
+        ok += hit
+
+        # 표시는 <필수 인용> 으로 넘기지 않는다(2026-09-22 — 질문 리스트 19번, 이수민). 넘기던
+        # 동안 LLM 이 「-다」체 원문을 본문 한가운데 절반만 베꼈고, 코드가 전문을 또 붙여 같은
+        # 단서가 세 번 섰다. 값+조건 스팬(atomic)은 그대로 필수 인용이다.
+        hit = bool(prompts_seen) and "<필수 인용" not in prompts_seen[0] and caveat not in prompts_seen[0]
+        print(f"{'✓' if hit else '✗'} 표시(notices)는 필수 인용에 넣지 않는다(코드가 아래에 세운다)")
+        ok += hit
+        prompts_seen.clear()
+        plan.generate = gen_capture
+        plan.compose({"question": "q", "evidence": [ev_num]})
+        hit = bool(prompts_seen) and "<필수 인용" in prompts_seen[0] and VALUE in prompts_seen[0]
+        print(f"{'✓' if hit else '✗'} 값+조건 스팬(atomic)은 여전히 필수 인용이다")
         ok += hit
 
         # ⑤ 화법은 atomic 이 비어 있을 뿐, 처리 경로가 다르지 않다.
