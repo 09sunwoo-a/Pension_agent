@@ -568,8 +568,11 @@ async def send_note(recipients: list[str], note: Note, *, send: Sender | None = 
     ids = validate_recipients(recipients)
     send = send or SENDER
     if send is None:
+        # 화면에 그대로 나가는 문구다(«쪽지를 보내지 못했어요. …») — 직원과 운영자가 다음에
+        # 할 일을 읽을 수 있어야 한다. 「클라이언트 미주입」은 코드 안의 말이다.
         return {"status": "not_connected",
-                "detail": "WorkB 클라이언트가 주입되지 않았습니다 — 본문만 생성했습니다",
+                "detail": ("이 실행에는 쪽지 발송 연결(행내 MCP)이 설정되어 있지 않아 보내지 "
+                           "않았어요 — 초안만 만들었어요. 설정 확인: python -m pension_agent.mcp"),
                 "recipients": ids, "title": note.title, "body": note.body}
     try:
         # 발송 함수는 주입받은 것이라 시그니처를 늘릴 수 없다 — 주체는 ContextVar 로

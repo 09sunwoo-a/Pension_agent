@@ -169,6 +169,14 @@ def main(argv: list[str]) -> int:
 
     questions = argv or ([scenario.question] if scenario else [])
 
+    # 운영 CLI 와 같이 행내 MCP(쪽지 발송)를 붙인다 — 캔드 시나리오(--script)는 LLM 도 발송도
+    # 스텁이라 붙이지 않는다. 안 붙이면 쪽지 승낙 턴이 설정과 무관하게 «미연결»로 끝난다.
+    if scenario is None:
+        from pension_agent import mcp  # noqa: PLC0415 — graph 적재 뒤
+        if not mcp.install():
+            print("(쪽지 발송: 미연결 — .env 의 MCP_* 가 없거나 행내 패키지가 없습니다. "
+                  "확인: python -m pension_agent.mcp)", file=sys.stderr)
+
     with session(customer_id=customer_id, scenario=scenario) as (ask, tr):
         tr.note(warning)
         if questions:
