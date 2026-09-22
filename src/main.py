@@ -32,7 +32,13 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
                            사람이 된다(뒤에 접미가 붙어도 구분자로 이었으면 읽는다 —
                            `3902172-550e8400-…`). 아래 employee_id
     customer_id     (선택) 지금 열려 있는 브리핑 화면의 고객 id. 고객 관련 기능은
-                           이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다
+                           이것이 있어야 성립한다 — 없으면 에이전트가 그렇게 답한다.
+                           **하이픈을 뺀 13자리로 보낸다**(`1712034815062`). 원장 표기
+                           (`171203-4815062`)는 앞자리가 생년월일이라 주민등록번호와 같은
+                           꼴이고, 플랫폼 게이트웨이의 개인정보 필터(«기본필터»)가 그 꼴이
+                           실린 요청을 `FILTER_INVALID` 로 끊는다 — 질문이 한 글자여도
+                           에이전트에 닿지 않는다(2026-09-22 실측). 두 꼴 다 받아 원장
+                           표기로 되돌린다(`strategy_agent/customer.py::normalize_id`)
     session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
                            이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
     employee_id     (선택) 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송
@@ -155,6 +161,7 @@ from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent.nodes import act as consult_act
 from pension_agent.strategy_agent import briefing_store
+from pension_agent.strategy_agent import customer as strategy_customer
 
 
 #: INFO 를 끄는 바깥 라이브러리 로거 — 목록과 이유는 `mcp/client.py::NOISY_LOGGERS`. `httpx`
@@ -378,7 +385,10 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
     return {
         "question": str(message),
         "history": history,
-        "customer_id": payload.get("customer_id") or None,
+        # 하이픈 없는 13자리로 와도 원장 표기로 되돌린다 — 플랫폼 게이트웨이의 개인정보
+        # 필터가 `171203-4815062` 꼴이 실린 요청을 통째로 끊는다(2026-09-22 실측, 머리말).
+        # 형식을 아는 곳은 customer.py 하나다.
+        "customer_id": strategy_customer.normalize_id(payload.get("customer_id")),
         "session_id": str(payload.get("session_id") or "default"),
         "x_client_user": str(x_client_user),
         # 사번을 따로 실어 보내는 게이트웨이·프론트를 위한 자리(머리말). 없으면 ask() 가

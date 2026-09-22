@@ -114,7 +114,11 @@ def _inner(question: str, x_client_user: str, customer_id: str = "", session_id:
         }
     inner = {"message": question, "x_client_user": x_client_user, "session_id": session_id}
     if customer_id:
-        inner["customer_id"] = customer_id
+        # 하이픈을 빼서 보낸다. 원장 표기(`171203-4815062`)는 주민등록번호와 같은 꼴이라
+        # 플랫폼 게이트웨이의 «기본필터»(policy 350 · FR-400)가 **요청**을 통째로 끊는다 —
+        # 질문이 「d」한 글자여도 FILTER_INVALID 였다(2026-09-22 실측). 에이전트는 13자리를
+        # 원장 표기로 되돌린다(src/main.py 머리말 customer_id). 실서비스 프론트도 같게 보낸다.
+        inner["customer_id"] = customer_id.replace("-", "")
     return inner
 
 

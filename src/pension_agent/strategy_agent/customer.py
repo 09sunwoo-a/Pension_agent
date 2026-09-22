@@ -29,6 +29,7 @@ D 는 «행내 기준»이 아니라 «검증 전 제안값»이므로, 실데�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -765,6 +766,29 @@ def _load_personas() -> list[Profile]:
 PERSONAS: list[Profile] = _load_personas()
 
 _BY_ID = {p.id: p for p in PERSONAS}
+
+#: 고객 id(KB-PIN)의 원장 표기 — 6자리-7자리. 앞자리가 생년월일이라 **주민등록번호와 같은
+#: 꼴**이고, 행내 개인정보 필터(APIM 의 LLM 앞단 · 플랫폼 게이트웨이의 요청/응답)가 그 꼴을
+#: 잡는다. 그래서 프론트는 하이픈을 뺀 13자리로 보내고 여기서 원장 표기로 되돌린다 —
+#: 13자리 연속 숫자는 알려진 룰 12종(`pension_agent/privacy.py`) 어디에도 걸리지 않는다.
+_ID_COMPACT = re.compile(r"^\d{13}$")
+
+
+def normalize_id(value: str | None) -> str | None:
+    """요청이 실어 온 고객 id 를 원장 표기(`171203-4815062`)로. 비어 있으면 None.
+
+    받는 꼴은 둘이다 — 원장 표기 그대로, 또는 하이픈을 뺀 13자리(`1712034815062`). 뒤엣것을
+    받는 이유는 위 `_ID_COMPACT` 주석이다(2026-09-22 실측: 플랫폼 게이트웨이의 «기본필터»가
+    `"customer_id": "171203-4815062"` 가 실린 **요청**을 `FILTER_INVALID` 로 끊어, 질문이 한
+    글자여도 에이전트에 닿지 않았다). 그 밖의 꼴은 손대지 않는다 — 여기서 고쳐 쓰기 시작하면
+    없는 고객이 있는 고객으로 읽힐 수 있다. id 의 형식을 아는 곳은 이 모듈 하나다.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    if _ID_COMPACT.match(text):
+        return f"{text[:6]}-{text[6:]}"
+    return text
 
 
 def get_profile(customer_id: str) -> Profile | None:

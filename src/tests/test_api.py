@@ -319,6 +319,15 @@ try:
     _events(r)
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
+    # 하이픈 없는 13자리 — 프론트가 보내는 꼴이다. 원장 표기는 주민등록번호와 같은 꼴이라
+    # 플랫폼 게이트웨이의 «기본필터»가 요청을 통째로 끊었다(2026-09-22 실측, main.py 머리말).
+    _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
+                                            customer_id="1548214938201")))
+    check(_seen.get("customer_id") == "154821-4938201",
+          "customer_id 는 하이픈 없는 13자리로 와도 원장 표기로 되돌린다", str(_seen.get("customer_id")))
+    _events(client.post("/chat", json=_body(message="q", x_client_user="emp-0417", customer_id="C-없음")))
+    check(_seen.get("customer_id") == "C-없음",
+          "customer_id 의 다른 꼴은 손대지 않는다 — 없는 고객을 있는 고객으로 읽지 않는다")
 
     # ── 사번(employee_id) ────────────────────────────────────
     # 쪽지의 수신자이자 발송 주체이고 상담이력에 «누가 상담했나»로 남는다. x_client_user
