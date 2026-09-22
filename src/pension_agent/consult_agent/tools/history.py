@@ -171,8 +171,9 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     # 「── 참고한 자료」 블록에 선다(HISTORY_MARK 주석).
     return _ev("history", query, "\n".join(lines),
                # 제목은 화면뿐 아니라 계획 프롬프트의 「이미 모은 재료」로도 나간다
-               # (`evidence/ledger.py::summarize`) — 여기에도 KB-PIN 을 넣지 않는다.
-               [{"id": f"session.{customer_id}", "title": "이 고객의 상담 이력",
+               # (`evidence/ledger.py::summarize`) — 여기에도 KB-PIN 을 넣지 않는다. id 도 같다:
+               # 응답의 sources 이벤트로 프론트까지 나가는 값이다(briefing.py 와 같은 자리).
+               [{"id": "session", "title": "이 고객의 상담 이력",
                  "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],
                marks=[HISTORY_MARK] if records else None)
@@ -242,6 +243,8 @@ def _transcript(state: AgentState, query: str) -> Evidence | None:
     if len(lines) == 1:
         lines.append(TRANSCRIPT_NONE)
     return _ev("transcript", query, "\n".join(lines),
-               [{"id": f"session.{customer_id}.{session_id}", "title": "이번 상담 대화 기록",
+               # id 에 KB-PIN 을 넣지 않는다(위 `history` 와 같은 이유). 세션 구분자만 남긴다 —
+               # 같은 턴에 `history`(id "session")와 함께 실려도 중복 제거에서 갈려야 한다.
+               [{"id": f"session.{session_id}", "title": "이번 상담 대화 기록",
                  "doc": "상담 세션 기록(에이전트가 턴마다 남긴 이번 상담의 대화)",
                  "score": None, "page": None}])

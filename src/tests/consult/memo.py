@@ -156,7 +156,7 @@ def check_memo() -> int:
     # ① 시점으로 갈린다.
     hit = (bool(found) and "과세이연 등록은 어떻게 해?" in found["text"]
            and "지난 세션의 질문" not in found["text"]
-           and found["sources"][0]["id"] == f"session.CM.{now}")
+           and found["sources"][0]["id"] == f"session.{now}")
     print(f"{'✓' if hit else '✗'} transcript 는 이번 세션의 대화만 싣는다")
     ok += hit
 

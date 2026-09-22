@@ -165,3 +165,42 @@ _seg_cards = [(1.0, c) for c in _KB.cards if c["_kind"] == "segment"][:2]
 _seg = _segment_qa.render(_seg_cards, _sc.PERSONAS[0].id)
 check(_sc.PERSONAS[0].id not in _seg and not privacy.findings(_seg),
       "재료: 세그먼트 블록의 «지금 열려 있는 고객» 줄에도 식별번호가 없다")
+
+
+# ── 응답 — 프론트로 나가는 이벤트 스트림에도 식별번호가 실리지 않는다 ─────────────
+#
+# 위 재료 검사가 들어간 다음 날 같은 고객(김서연)의 「이 고객 왜 타겟」이 다시 답을 못 냈다 —
+# 이번에는 LLM 쪽이 아니라 **플랫폼 게이트웨이가 에이전트의 응답을** 막았다
+# (`status=FILTER_INVALID` · «The content was blocked by the filter»). 응답의 `sources` 이벤트가
+# 출처 id 로 `customer.171203-4815062` 를 싣고 있었고, 그 문자열이 주민등록번호 꼴이다. LLM
+# 쪽을 고치기 전에는 그 턴이 `error`·`done` 으로 끝나 응답에 번호가 없었다 — 앞의 문을 통과
+# 하자 다음 문에서 걸린 것이다. 그래서 프롬프트가 아니라 **API 가 내보내는 이벤트 전체**를
+# 잰다: 12명 전원 × 도구 넷의 출처를 `plan._sources` 로 응답 꼴로 만들고, `main._turn_events`
+# 가 내보내는 이벤트를 JSON 으로 직렬화해 id 원문과 필터 룰 매치가 없음을 본다.
+import main as _main  # noqa: E402
+
+from pension_agent.consult_agent.nodes import plan as _plan  # noqa: E402
+
+_out_leaks: list[str] = []
+_out_caught: list[str] = []
+_out_ids: set[str] = set()
+for _p in _sc.PERSONAS:
+    _state = {"customer_id": _p.id, "session_id": "s-privacy"}
+    _evidence = [_ev for _name, _fn in _TOOLS if (_ev := _fn(_state, "이 고객 현황"))]
+    # 답변 본문은 원장 값을 옮긴 한 줄로 둔다 — 여기서 재는 것은 본문이 아니라 출처·이벤트 꼴이다.
+    _sources = _plan._sources(_evidence, [], [], f"{_p.nm} 고객 현황입니다.")
+    _out_ids |= {s["id"] for s in _sources}
+    _events = _main._turn_events({"answer": f"{_p.nm} 고객 현황입니다.", "sources": _sources,
+                                  "followups": [], "links": []})
+    _wire = "\n".join(json.dumps(e, ensure_ascii=False) for e in _events)
+    if _p.id in _wire:
+        _out_leaks.append(_p.nm)
+    _out_caught += [f"{_p.nm}:{r}" for r in privacy.findings(_wire)]
+
+check(all(not any(ch.isdigit() for ch in i.split(".")[0]) for i in _out_ids)
+      and {"customer", "suitable", "outreach", "session"} <= _out_ids,
+      "응답: 고객 재료의 출처 id 가 종류 이름만으로 선다 (customer·suitable·outreach·session)",
+      str(sorted(_out_ids))[:200])
+check(not _out_leaks, "응답: sources 이벤트를 포함한 이벤트 스트림에 고객 식별번호가 없다 (12명 전원)",
+      str(_out_leaks))
+check(not _out_caught, "응답: 이벤트 스트림이 행내 개인정보 필터에 걸리지 않는다", str(sorted(set(_out_caught))))
