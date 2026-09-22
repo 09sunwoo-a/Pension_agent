@@ -2,9 +2,15 @@
 
     python -m pension_agent.consult_agent -c 198734-1205842
     python -m pension_agent.consult_agent -c 198734-1205842 "질문1" "질문2"    # 멀티턴 시나리오
+    python -m pension_agent.consult_agent -c 198734-1205842 -e 3902172 "…쪽지 보내줘" "네"
 
 -c/--customer 를 넘기지 않으면 브리핑질의·LMS발송·수정 세 의도가 "고객 화면을 먼저
 열어주세요"로 답한다. 고객 id(KB-PIN)는 strategy_agent/customer.py 의 PERSONAS 참고.
+
+-e/--employee 는 **이 상담을 하는 직원의 사번**이다 — 행내 API 가 요청의 x_client_user 에서
+읽는 값의 자리다(main.py). 쪽지의 기본 받는 사람이자 **보내는 주체**(MCP 인증에 들어간다)라,
+없으면 WORKB_EMP_NO 로 떨어지고 그것도 없으면 쪽지 승낙 턴이 «보낼 직원 사번이 없다»로
+끝난다(2026-09-22 실측 — MCP 를 붙인 뒤에 드러났다).
 """
 
 from __future__ import annotations
@@ -12,7 +18,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from pension_agent import mcp
+from pension_agent import mcp, note
 from pension_agent.consult_agent.effects import render
 from pension_agent.consult_agent.graph import ask
 from pension_agent.session_store import scrub_text
@@ -37,14 +43,25 @@ if not mcp.install():
 
 argv = sys.argv[1:]
 customer_id = None
-for flag in ("-c", "--customer"):
+employee_id = None
+for flag, what in (("-c", "customer_id"), ("--customer", "customer_id"),
+                   ("-e", "사번"), ("--employee", "사번")):
     if flag in argv:
         i = argv.index(flag)
         if i + 1 >= len(argv):
-            print(f"{flag} 뒤에 customer_id 를 지정하세요")
+            print(f"{flag} 뒤에 {what} 를 지정하세요")
             sys.exit(1)
-        customer_id = argv[i + 1]
+        if what == "customer_id":
+            customer_id = argv[i + 1]
+        else:
+            employee_id = argv[i + 1]
         del argv[i:i + 2]
+
+# 쪽지를 «누구 이름으로» 보내는가 — 행내에서는 로그인 사번이고 여기서는 -e 또는 환경변수다.
+# 없으면 승낙 턴이 실패하므로 시작할 때 말한다(붙었는데 못 보내는 것과 안 붙은 것은 다르다).
+if note.employee_id(employee_id) is None:
+    print(f"(쪽지 보내는 사번: 없음 — -e 사번 을 넘기거나 {note.EMP_NO_ENV} 를 채우세요. "
+          "없으면 쪽지 승낙 턴이 실패합니다)", file=sys.stderr)
 
 def _progress(text: str) -> None:
     # 진행 표시(graph.ask on_progress). 답변과 구분되게 들여서 찍는다.
@@ -67,11 +84,13 @@ if len(argv) > 1:
     history: list[dict] = []
     for q in argv:
         print(f"\n> {q}")
-        r = ask(q, history=history, customer_id=customer_id, on_progress=_progress)
+        r = ask(q, history=history, customer_id=customer_id, employee_id=employee_id,
+                on_progress=_progress)
         history = r["history"]
         _print_answer(r)
 elif argv:
-    r = ask(argv[0], customer_id=customer_id, on_progress=_progress)
+    r = ask(argv[0], customer_id=customer_id, employee_id=employee_id,
+                on_progress=_progress)
     _print_answer(r)
 else:
     print("질문을 입력하세요 (빈 줄 입력 시 종료). 후속 질문은 이전 맥락을 이어서 물어보면 됩니다.")
@@ -87,6 +106,7 @@ else:
             break
         if not q:
             break
-        r = ask(q, history=history, customer_id=customer_id, on_progress=_progress)
+        r = ask(q, history=history, customer_id=customer_id, employee_id=employee_id,
+                on_progress=_progress)
         history = r["history"]
         _print_answer(r)
