@@ -1282,6 +1282,7 @@ def check_history_material() -> int:
     from pension_agent.consult_agent.nodes import clarify as CL
     from pension_agent.consult_agent.nodes import meta
     from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.state import HISTORY_LIMIT
 
     ok = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -1351,12 +1352,54 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 앞 턴의 미답을 이번 답변에서 사과하지 않는다")
     ok += hit
 
-    opened = meta.agent_help({"question": "뭘 도와줄 수 있어?", "customer_id": "CX"})["answer"]
-    shut = meta.agent_help({"question": "뭘 도와줄 수 있어?"})["answer"]
-    hit = "지난 상담 기록" in opened and "지난 상담 기록" not in shut \
-        and "단말 화면번호" in opened
-    print(f"{'✓' if hit else '✗'} 도울 수 있는 것 안내가 실제 능력과 같다(화면번호·채널·상담 기록)")
+    # 능력 안내의 재료는 코드가 만들고(실제로 쓸 수 있는 도구만), 문장은 LLM 이 질문에 맞춰 쓴다.
+    # 템플릿으로 찍던 동안 「기억해?」·「문자 보내줄 수 있어?」에도 같은 능력 표가 나갔다
+    # (2026-09-22 행내 실측, 질문 리스트 121~123번).
+    opened = meta.help_material({"question": "뭘 도와줄 수 있어?", "customer_id": "CX"})
+    shut = meta.help_material({"question": "뭘 도와줄 수 있어?"})
+    hit = ("지난 상담" in opened and "지난 상담 기록" in opened
+           and "지난 상담에서 무슨 얘기를 했는지도 볼 수 있어요" not in shut
+           and "고객 화면이 열려 있지 않아서" in shut
+           and "단말 화면번호" in opened and "문자(LMS)를 직접 보내지 않아요" in opened
+           and f"최근 {HISTORY_LIMIT}턴" in opened)
+    print(f"{'✓' if hit else '✗'} 능력 안내 재료가 실제 능력과 같다(화면번호·상담 기록·기억 범위·하지 않는 것)")
     ok += hit
+
+    # 도구 설명은 계획 LLM 용이라 「적합성 게이트」·「도구」·「세션」·굵게 표기가 섞여 있다 —
+    # 재료에 실을 때 직원 표현으로 바꾼다(재료에 있는 말은 답변에 그대로 나온다, §5).
+    import re as _re
+    dev = [w for w in ("(86건)", "(131건)", "게이트", "원장", "도구", "세션", "후보군", "⑥⑦⑧", "**", "LLM")
+           if w in opened]
+    dev += [n for n in tools.TOOLS if _re.search(rf"(?<![0-9A-Za-z_]){n}(?![0-9A-Za-z_])", opened)]
+    hit = not dev
+    print(f"{'✓' if hit else '✗'} 능력 안내 재료에 카드 장수·개발 용어가 없다" + (f" — {dev}" if dev else ""))
+    ok += hit
+
+    orig_gen = meta.generate
+    try:
+        meta.generate = lambda p, **kw: "네, 이번 상담의 대화는 최근 12턴까지 함께 보고 답해요."
+        out = meta.agent_help({"question": "너 이전 대화 기억해?", "customer_id": "CX"})
+        hit = out["answer"].startswith("네, 이번 상담") and out["sources"] == []
+        print(f"{'✓' if hit else '✗'} 능력 안내는 LLM 이 질문에 맞춰 쓴 문장으로 나간다")
+        ok += hit
+
+        # 재료 밖 수치를 지어내면 재료(코드가 쓴 사실 목록)를 그대로 낸다.
+        meta.generate = lambda p, **kw: "최근 40턴까지 기억해요."
+        out = meta.agent_help({"question": "너 이전 대화 기억해?"})
+        hit = out["answer"] == shut
+        print(f"{'✓' if hit else '✗'} 재료 밖 수치를 말하면 재료를 그대로 낸다")
+        ok += hit
+
+        from pension_agent.llm import LLMError as _LLMError
+        def _dead(p, **kw):
+            raise _LLMError("LLM 미설정 — 테스트")
+        meta.generate = _dead
+        out = meta.agent_help({"question": "뭘 도와줄 수 있어?"})
+        hit = bool(out.get("llm_error")) and out["answer"].startswith(plan.LLM_FAILED.split("{", 1)[0])
+        print(f"{'✓' if hit else '✗'} LLM 이 죽으면 규칙으로 대신 답하지 않고 장애 안내로 끝난다(§11)")
+        ok += hit
+    finally:
+        meta.generate = orig_gen
 
     # ③ 답이 나온 재료와 표현을 제한한 재료를 갈라 싣는다.
     ev = [{"tool": "screen", "query": "자동이체", "text": "퇴직연금 자동이체 [06-12-619]",

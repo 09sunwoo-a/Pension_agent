@@ -29,6 +29,7 @@
                     JUDGE_BRANCHES_BLOCK       적합성 게이트가 표시한 갈래
 
     특수 턴 · 쪽지
+    meta.py         HELP_SYSTEM · HELP_PROMPT  에이전트 자신에 대한 질문 — 코드가 준 사실 안에서
     correction.py   CORRECTION_SYSTEM · CORRECTION_PROMPT   브리핑 산문 수정
     memo.py         MEMO_SYSTEM · MEMO_PROMPT  이번 턴의 재료로 제목·본문
                     MEMO_SELF_GUIDE · MEMO_OTHER_GUIDE   받는 사람이 본인 / 다른 직원
@@ -76,6 +77,10 @@ from pension_agent.consult_agent.prompts.plan import (  # noqa: F401
 from pension_agent.consult_agent.prompts.clarify import (  # noqa: F401
     CLARIFY_PROMPT,
     JUDGE_BRANCHES_BLOCK,
+)
+from pension_agent.consult_agent.prompts.meta import (  # noqa: F401
+    HELP_SYSTEM,
+    HELP_PROMPT,
 )
 from pension_agent.consult_agent.prompts.memo import (  # noqa: F401
     MEMO_SYSTEM,

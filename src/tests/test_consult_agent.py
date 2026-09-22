@@ -13,7 +13,7 @@ from __future__ import annotations
 from pension_agent import config
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import tools
-from pension_agent.consult_agent.nodes import plan
+from pension_agent.consult_agent.nodes import meta, plan
 from pension_agent.consult_agent.evidence import pitch_slots
 
 from tests.consult._common import (  # noqa: A001 — 집계용 print
@@ -110,6 +110,7 @@ def main() -> int:
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성
+    meta.generate = stub_talk              # agent_help 의 능력 안내 작성
     tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     agent = G.build_agent()
 
