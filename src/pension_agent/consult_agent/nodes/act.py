@@ -31,6 +31,7 @@ from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.effects import memo, screens
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent.effects.actions import ACTIONS, MEMO_DEFAULT_TO
+from pension_agent.llm import LLMError
 
 _YES = ("네", "예", "웅", "응", "그래", "좋아", "열어", "연계", "해줘", "해주세요", "부탁", "보내",
         "ok", "yes")
@@ -102,9 +103,22 @@ _MEMO_WORDS = ("쪽지",)
 _EMP_NO = re.compile(rf"(?<!\d)({note.EMP_NO_PATTERN})(?!\d)")
 
 #: 그 7자리가 **사번으로 불린** 것인지의 단서. 숫자 꼴만으로는 사번과 금액이 갈리지 않는다.
-#: 앞에 「사번」이 붙었거나, 뒤에 사람에게 붙는 조사가 붙은 경우만 사번으로 읽는다.
-_EMP_BEFORE = re.compile(r"사번\s*[:：]?\s*$")
-_EMP_AFTER = re.compile(r"^\s*(?:님)?\s*(?:한테|에게|께)")
+#:
+#: 2026-09-22 개정 — 처음에는 「사번」이 바로 앞에 붙거나 「한테·에게·께」가 바로 뒤에 붙은
+#: 것만 읽었다. 직원이 실제로 쓰는 말은 그보다 넓다: 「3902173 사번으로 보내줘」·「사번은
+#: 3902173이야」·「3902173님 앞으로」·「(3902173)한테」·「3902173으로 전달해줘」 — 전부 사번을
+#: 적었는데 본인에게 가서 «타인 사번 쪽지가 안 된다»로 보였다. 넓히는 것은 **단서의
+#: 종류**이고 원칙은 그대로다: 단서 없는 맨숫자는 읽지 않고, 금액 단위(원·만·천·억·%)가
+#: 붙은 숫자는 어떤 단서가 있어도 읽지 않는다.
+#:   앞 단서  「사번」·「직원」·「담당자」·「행원」 + (은/는/이/가/:) 가 숫자 바로 앞에
+#:   뒤 단서  (번·님·씨·닫는 괄호 뒤) 사람 조사(한테·에게·께·앞으로) / 「사번」
+#:   문장 단서 문장에 「사번」이 있으면 그 숫자
+#: 「3902173으로 보내줘」의 «(으)로»는 단서로 삼지 않는다 — 「5000000으로」와 갈리지 않는다.
+#: 그 말은 본인에게 가고(되돌릴 수 있다), 직원은 「사번」 한 마디를 더하면 된다.
+_EMP_BEFORE = re.compile(r"(?:사번|직원|담당자?|행원)\s*(?:번호)?\s*(?:은|는|이|가|을|를|[:：=])?\s*$")
+_EMP_AFTER = re.compile(r"^\s*[)\]]?\s*(?:번)?\s*(?:님|씨)?\s*(?:한테|에게|께|앞으로|앞에|사번)")
+#: 금액이다 — 어떤 단서가 있어도 사번으로 읽지 않는다.
+_EMP_AMOUNT = re.compile(r"^\s*(?:원|만|천|억|%|,\d|\.\d)")
 
 #: 받는 사람을 모를 때. **묻지 않고 끝낸다** — 받을 사람이 없는 «보낼까요?»는 승낙받을
 #: 대상이 없는 제안이다.
@@ -121,13 +135,20 @@ def employee_no(question: str) -> str | None:
     남고**, 그건 확인 절차로도 못 막는다 — 직원은 자기가 승낙한 게 누구 앞인지 안 읽는다.
     사번은 직원이 직접 적은 것이라 그 책임이 갈리지 않는다.
 
-    **숫자 꼴만으로 판정하지 않는다.** 7자리 숫자는 금액에도 나온다("5000000원"). 앞에
-    「사번」이 붙었거나 뒤에 사람 조사(한테·에게·께)가 붙은 것만 사번으로 읽는다 — 못
-    알아보면 본인에게 가고, 그건 되돌릴 수 있는 실패다(잘못 보내는 쪽은 아니다).
+    **숫자 꼴만으로 판정하지 않는다.** 7자리 숫자는 금액에도 나온다("5000000원"). 사번이라는
+    단서(`_EMP_BEFORE`·`_EMP_AFTER`·문장의 「사번」)가 있는 것만 읽는다 — 못 알아보면
+    본인에게 가고, 그건 되돌릴 수 있는 실패다(잘못 보내는 쪽은 아니다).
     """
-    for m in _EMP_NO.finditer(question or ""):
-        if _EMP_BEFORE.search(question[:m.start()]) or _EMP_AFTER.match(question[m.end():]):
-            return m.group(1)
+    text = question or ""
+    candidates = [m for m in _EMP_NO.finditer(text) if not _EMP_AMOUNT.match(text[m.end():])]
+    # 후보가 둘 이상이면 읽지 않는다 — 「사번 3902173 말고 3902174」에서 어느 쪽인지는 코드가
+    # 정할 수 없고, 틀리면 남의 받은편지함에 고객 정보가 남는다(본인에게 가는 쪽이 되돌릴 수 있다).
+    if len(candidates) != 1:
+        return None
+    m = candidates[0]
+    before, after = text[:m.start()], text[m.end():]
+    if _EMP_BEFORE.search(before) or _EMP_AFTER.match(after) or "사번" in text:
+        return m.group(1)
     return None
 
 
@@ -158,9 +179,47 @@ def _wants_memo(state: AgentState) -> bool:
     안 띄운 채 오늘의 타겟 목록을 보내려는 요청, 방금 확인한 제도 수치를 옆자리에
     넘기려는 요청이 전부 걸렸다. 무엇을 재료로 쓸지는 이제 화면이 정한다(memo.material).
     """
-    if not any(w in (state.get("question") or "") for w in _MEMO_WORDS):
+    if not _said_memo(state):
         return False
-    return bool(state.get("evidence")) and bool((state.get("answer") or "").strip())
+    # ③의 예외 — 직전 답변을 코드가 재료로 붙인 턴(`_with_memo_material`)은 화면 답변이 비어
+    # 있다(재료 없음 안내문을 비웠다). 그 턴의 출발점은 붙인 재료다.
+    answered = bool((state.get("answer") or "").strip()) or bool(state.get("memo_material"))
+    return bool(state.get("evidence")) and answered
+
+
+def _said_memo(state: AgentState) -> bool:
+    """직원이 이번 턴에 «쪽지»라고 말했나 — 규칙이지 LLM 판단이 아니다(§10)."""
+    return any(w in (state.get("question") or "") for w in _MEMO_WORDS)
+
+
+def _with_memo_material(state: AgentState) -> AgentState:
+    """«쪽지»를 말한 턴인데 원장이 비었으면 **직전 답변을 코드가 재료로 붙인다.**
+
+    「이거 사번 3902173한테 쪽지로 보내줘」는 무엇을 보낼지를 «이거»로만 가리킨다. 그 재료는
+    직전 답변(`last_answer`)인데, 계획 LLM 이 그 도구를 안 고르면 원장이 빈 채 턴이 끝나고
+    답은 「죄송해요, …」(NO_EVIDENCE)가 되며 쪽지 제안은 붙지 않는다 — 직원에게는 «사번을
+    적으면 쪽지가 안 된다»로 보인다. 쪽지를 말했다는 것과 직전 답변이 있다는 것은 둘 다
+    코드가 아는 값이므로, 여기서 그 도구를 그대로 불러 붙인다(지워진 gap 30 이 되묻기
+    판정에 고객 재료를 코드로 붙인 것과 같은 자리 — LLM 의 도구 선택에 기능을 걸지 않는다).
+    붙일 답변이 없으면 아무것도 바꾸지 않는다: 그 턴은 예전처럼 제안 없이 끝난다.
+
+    이때 화면 답변은 재료가 없다는 안내문이라 쪽지의 출발점이 못 된다 — 비운다. 쪽지 본문은
+    붙인 직전 답변(재료)에서 쓴다(`memo.draft` 의 context).
+    """
+    if state.get("evidence") or not _said_memo(state):
+        return state
+    from pension_agent.consult_agent.nodes import plan  # noqa: PLC0415 — 순환 임포트 회피
+
+    try:
+        found = tools.run("last_answer", state, "")
+    except (LLMError, tools.ToolFailure):
+        found = None
+    if found is None:
+        return state
+    answer = state.get("answer") or ""
+    # `memo_material` 은 이 턴 안에서만 쓰는 표지다 — offer 가 돌려주는 값에는 실리지 않는다.
+    return {**state, "evidence": [found], "memo_material": True,
+            "answer": "" if plan.is_failure_notice(answer) else answer}
 
 
 def _memo_offer(state: AgentState) -> dict[str, Any]:
@@ -175,11 +234,13 @@ def _memo_offer(state: AgentState) -> dict[str, Any]:
     보낸 쪽지는 되돌릴 수 없다(루트 규칙 5).
     """
     ids, label, to_self = _recipients(state)
+    # 화면 답변이 비어 있으면(직전 답변을 재료로 붙인 턴 — `_with_memo_material`) 사유만 선다.
+    head = (state.get("answer") or "").strip()
     if not ids:
-        return {"answer": f"{state['answer']}\n\n— {NO_RECIPIENT}"}
+        return {"answer": f"{head}\n\n— {NO_RECIPIENT}" if head else NO_RECIPIENT}
     found, why = memo.draft(state, recipients=ids, to=label, to_self=to_self)
     if found is None:
-        return {"answer": f"{state['answer']}\n\n— {why}"}
+        return {"answer": f"{head}\n\n— {why}" if head else why}
     action = {"kind": "memo", "label": f"이 쪽지 보내기(받는 사람: {label})",
               "prompt": f"이대로 쪽지를 보낼까요? 받는 사람은 {label}이에요. (네 / 아니오)",
               "title": found.title, "text": found.text, "html": found.html,
@@ -395,6 +456,8 @@ def offer(state: AgentState) -> dict[str, Any]:
     if state.get("pending_action"):
         observability.step("offer", pending=state["pending_action"].get("label"))
         return {}
+    if _said_memo(state):
+        state = _with_memo_material(state)
     if _wants_memo(state):
         out = _memo_offer(state)
         observability.step("offer", pending=(out.get("pending_action") or {}).get("label") or "없음")

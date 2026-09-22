@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import sys
 
+from pension_agent import mcp
 from pension_agent.consult_agent.effects import render
 from pension_agent.consult_agent.graph import ask
 from pension_agent.session_store import scrub_text
@@ -24,6 +25,15 @@ if hasattr(sys.stdout, "reconfigure"):
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO,
                         format="%(levelname)s:     [%(name)s] %(message)s", stream=sys.stderr)
+mcp.quiet_loggers()
+
+# 행내 MCP(쪽지 발송)를 붙인다 — main.py·app.py 와 같은 자리. 여기서 안 붙이면 이 CLI 의
+# 쪽지 승낙 턴은 .env 에 MCP_* 를 채워도 **언제나** «미연결»로 끝난다(2026-09-22 실측 —
+# 「…3902172한테 쪽지 보내줘」→「네」가 그렇게 끝나 발송 경로를 이 CLI 로 확인할 수 없었다).
+# 설정이 없으면 아무것도 하지 않고, 그 사실을 한 줄 알린다.
+if not mcp.install():
+    print("(쪽지 발송: 미연결 — .env 의 MCP_* 가 없거나 행내 패키지가 없습니다. 승낙 턴은 보내지 않고 "
+          "초안만 만듭니다. 확인: python -m pension_agent.mcp)", file=sys.stderr)
 
 argv = sys.argv[1:]
 customer_id = None
