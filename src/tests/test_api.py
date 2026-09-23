@@ -387,6 +387,10 @@ try:
     check(next(e for e in evs if e["type"] == "followups")["items"] == [],
           "연계 제안 턴에는 추천질문이 없다(빈 목록으로는 온다)")
 
+    # 동명이인 목록 턴 — 네/아니오 턴이 아니라 action 을 내지 않는다(버튼이 서지 않게).
+    picking = main._turn_events({"answer": "a", "pending_action": {**ACTION, "candidates": [{"user_id": "1"}]}})
+    check("action" not in _types(picking), "동명이인 목록 턴에는 action 이벤트가 없다", str(_types(picking)))
+
     # 되묻기 — 선택지가 clarify 이벤트로 간다.
     evs = _events(client.post("/chat", json=_body(message="되묻기", x_client_user="emp-1")))
     clar = next((e for e in evs if e["type"] == "clarify"), None)

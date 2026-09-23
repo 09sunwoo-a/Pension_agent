@@ -277,7 +277,9 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
         "links": list(result.get("links") or []),
     }]
     action = result.get("pending_action")
-    if action:
+    # 동명이인 목록을 띄운 쪽지 턴(`candidates`)은 네/아니오로 답할 턴이 아니다 — 버튼을 그리게
+    # 하지 않으려고 action 을 내지 않는다. 고를 후보는 세션에 남고 직원은 번호·부서를 입력한다.
+    if action and not action.get("candidates"):
         ev = {k: action[k] for k in _ACTION_KEYS if action.get(k) is not None}
         # 본문에 붙는 문장과 버튼 위 문장은 **같은 함수가 만든 같은 문장**이다. 여기에
         # 폴백 문자열을 따로 적어 두면 제안 갈래가 하나 늘 때 두 곳이 어긋난다 — 버튼

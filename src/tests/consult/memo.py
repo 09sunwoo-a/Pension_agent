@@ -826,9 +826,10 @@ def check_memo_by_name() -> int:
     print(f"{'✓' if hit else '✗'} 승낙한 뒤에만 이름 발송을 부르고, 1명이면 받은 사람의 사번을 밝힌다")
     ok += hit
 
-    hit = (listed["answer"] == ("김국민 님이 2명 있어요. 어느 분께 보낼까요?\n"
+    hit = (listed["answer"] == ("김국민 님이 2명 있어요.\n\n"
                                 "1. 데이터시스템부(P) 대리 · 사번 5905382\n"
-                                "2. 미아동지점 차장 · 사번 1631024")
+                                "2. 미아동지점 차장 · 사번 1631024\n\n"
+                                "어느 분께 보낼까요? 번호나 부서로 답해 주세요.")   # 묻는 말은 맨 끝
            and yes_again["answer"] == listed["answer"]                    # 「네」로는 고른 게 아니다
            and picked["pending_action"]["recipients"] == ["1631024"]
            and "받는 사람은 미아동지점 김국민 님(사번 1631024)이에요" in picked["answer"]
@@ -909,7 +910,7 @@ def check_memo_also() -> int:
     """초안 고치기의 «함께 고친 것»(§10) — 지시 밖 수정은 여섯 가지만, 표시 문장은 코드가 정한다.
 
       ① LLM 은 코드만 돌려주고 화면 표시는 `ALSO_LABELS` 다 — 목록 밖 코드는 표시하지 않는다
-      ② 함께 고친 것이 있으면 초안 위에 한 줄로 서고, 없으면 그 줄이 없다
+      ② 함께 고친 것이 있으면 초안 아래 묻는 문장 앞에 한 줄로 서고, 없으면 그 줄이 없다
       ③ 받는 사람이 바뀌었고 본문에 옛 이름이 있을 때만 <받는 사람 바뀜> 을 LLM 에 알린다
     """
     import json
@@ -974,13 +975,16 @@ def check_memo_also() -> int:
     print(f"{'✓' if hit else '✗'} 받는 사람이 바뀌고 본문에 옛 이름이 있을 때만 호칭을 맞추게 알린다")
     ok += hit
 
-    hit = (moved["answer"].startswith(f"함께 고친 것: 호칭을 받는 사람에 맞춤\n\n{memo.FENCE}")
+    tail = f"{memo.FENCE}\n\n함께 고친 것: {{}}\n\n— "
+    hit = (moved["answer"].startswith(memo.FENCE)
+           and tail.format("호칭을 받는 사람에 맞춤") in moved["answer"]
            and "김국민 님, 안녕하세요." in moved["pending_action"]["body"]
            and moved["pending_action"]["user_name"] == "김국민"
-           and edited["answer"].startswith(f"함께 고친 것: 겹치는 인사·맺음 정리\n\n{memo.FENCE}")
+           and tail.format("겹치는 인사·맺음 정리") in edited["answer"]
            and none_also["answer"].startswith(memo.FENCE)
+           and "함께 고친 것" not in none_also["answer"]
            and "함께 고친 것" not in edited["pending_action"]["html"])     # 화면 표시일 뿐 나가지 않는다
-    print(f"{'✓' if hit else '✗'} 함께 고친 것은 초안 위에 한 줄로 서고, 없으면 줄이 없으며, 쪽지에는 안 들어간다")
+    print(f"{'✓' if hit else '✗'} 함께 고친 것은 초안 아래 묻는 문장 앞에 서고, 없으면 줄이 없으며, 쪽지에는 안 들어간다")
     ok += hit
     return ok
 
@@ -1029,7 +1033,7 @@ def check_memo_pick_partial() -> int:
             os.environ[note.EMP_NO_ENV] = orig_env
     hit = (picked["pending_action"]["recipients"] == ["3901317"]
            and "받는 사람은 WM플랫폼부(P) 이선우 님(사번 3901317)이에요" in picked["answer"]
-           and again["answer"].startswith(act.PICK_AGAIN)
+           and again["answer"].endswith(act.PICK_AGAIN)
            and again["pending_action"].get("candidates") == cands)
     print(f"{'✓' if hit else '✗'} 「WM」이면 그 후보로 다시 제안하고, 안 맞는 짧은 답이면 목록을 다시 보인다")
     ok += hit
