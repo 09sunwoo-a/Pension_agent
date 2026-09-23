@@ -363,8 +363,12 @@ def assemble(title: str, body: str, *, tail_html: str, tail_note: str, to: str,
 # 공들여 고친 문장이 매번 사라진다(2026-09-23 실측 — 「저거 쪽지 내용 사번 …한테 보내줘」가
 # 고친 글이 아니라 새로 쓴 글을 내밀었다).
 #
-#   재료        직전 초안 + 직원의 이번 말(+ 이전 대화) — 지식베이스를 다시 찾지 않는다
-#   검사        같은 `plan.screen`. 허용 범위는 «직전 초안 + 직원의 이번 말»이다
+#   재료        직전 초안 + 직원의 이번 말 + **이번 상담에서 나간 답변** — 지식베이스를 다시
+#               찾지 않는다. 답변을 넣는 이유: 「안내 가능한 상품 6종 내용 담아서」의 6종은
+#               초안이 아니라 두 턴 전 답변에 있다. 그 재료가 없던 동안 LLM 은 «6종의 내용을
+#               알려달라»고 되물었다(2026-09-23 실측). 그 답변은 이미 검사를 통과해 화면에
+#               나간 글이라 지어낸 값이 아니다
+#   검사        같은 `plan.screen`. 허용 범위는 «직전 초안 + 직원의 이번 말 + 그 답변들»이다
 #   직원이 적은 값  원장과 달라도 직원이 적은 대로 쓴다 — 직원이 직접 확인한 값이다
 # ─────────────────────────────────────────────────────────────
 
@@ -431,6 +435,32 @@ def verbatim(found: Draft, body: str) -> tuple[Draft | None, str]:
                     user_name=found.user_name, group_name=found.group_name)
 
 
+#: 초안 고치기에 싣는 이번 상담 답변 — 최근 몇 개 · 전체 몇 자까지. 대화 전체를 싣지 않는
+#: 이유는 `last_answer` 가 한 턴만 싣는 것과 같다(인용 허용 집합이 대화 전체가 되면 오래된
+#: 답변의 수치가 아무 문장에나 근거를 대준다).
+EDIT_ANSWERS = 4
+EDIT_ANSWERS_CHARS = 4000
+
+
+def session_answers(history: list[dict] | None) -> list[str]:
+    """이번 상담에서 화면에 나간 답변(최근 것부터 `EDIT_ANSWERS` 개). 쪽지 초안 턴은 뺀다 —
+    지금 고치는 초안이 이미 재료이고, 앞선 초안은 직원이 고쳐서 버린 글이다."""
+    out: list[str] = []
+    total = 0
+    for turn in reversed(history or []):
+        text = (turn or {}).get("answer") or ""
+        if not text or FENCE in text:
+            continue
+        text = tools._strip_devices(text)
+        if total + len(text) > EDIT_ANSWERS_CHARS:
+            break
+        out.append(text)
+        total += len(text)
+        if len(out) >= EDIT_ANSWERS:
+            break
+    return list(reversed(out))
+
+
 def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revision:
     """직원의 지시로 초안을 고친다. 고치라는 말이 아니면 `not_edit` 을 돌려준다.
 
@@ -442,8 +472,11 @@ def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revisi
     from pension_agent import verify  # noqa: PLC0415
     from pension_agent.consult_agent.nodes import plan  # noqa: PLC0415 — 순환 임포트 회피
 
+    answers = session_answers(history)
     prompt = MEMO_EDIT_PROMPT.format(
         title=found.title, body=found.body, question=instruction,
+        answers_block=("<이번 상담에서 나간 답변>\n" + "\n\n---\n\n".join(answers)
+                       + "\n</이번 상담에서 나간 답변>\n") if answers else "",
         history_block=format_history(history),
         table_note=f"(본문 아래에 코드가 붙이는 표는 고칠 수 없다 — {found.tail_note})"
         if found.tail_note else "")
@@ -467,7 +500,7 @@ def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revisi
     # 통과한 글이고, 직원의 말에 적힌 값은 직원이 직접 확인한 값이다 — 원장 값과 달라도 이긴다.
     # 그래서 관계 검사(값–조건 짝)도 여기서는 걸지 않는다: 재료에 관계 선언이 없다.
     # 걸리는 것은 **둘 어디에도 없는** 값 — LLM 이 옮기다 틀리거나 지어낸 것이다.
-    allowed = f"{found.title}\n{found.body}\n{instruction}"
+    allowed = "\n".join([found.title, found.body, instruction, *answers])
     ledger = tools.Evidence(
         tool="memo_draft", query="", text=allowed, atomic=[], notices=[], notice_scopes=[],
         source_keys={}, allow=[allowed], related=[], marks=[], sources=[], meta={})

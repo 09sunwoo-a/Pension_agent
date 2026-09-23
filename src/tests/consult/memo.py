@@ -568,6 +568,9 @@ def check_memo_schedule() -> int:
         "다음 주 월요일에 보내줘": ("ok", "9월 28일(월) 오전 9시"),
         "오후 3시에 보내줘": ("ok", "9월 23일(수) 오후 3시"),
         "예약은 10월 7일": ("ok", "10월 7일(수) 오전 9시"),
+        # 날짜와 «보내» 사이에 받는 사람이 낀 꼴(2026-09-23 행내 실측 — 즉시 발송이 됐다)
+        "지금 대화 내용 10월 7일에  정석희 대리에게 쪽지로 보내줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 5일에 만기되는 고객에게 쪽지 보내줘": ("none", ""),        # 사이 말이 날짜를 꾸민다
         "1월 5일에 보내줘": ("ok", "1월 5일(화) 오전 9시"),          # 지난 지 오래면 내년
         "10월 5일 만기 고객 정리해서 쪽지 보내줘": ("none", ""),     # 쪽지 내용의 날짜
         "쪽지 보내줘": ("none", ""),
@@ -828,5 +831,52 @@ def check_memo_by_name() -> int:
            and sched_done["answer"] == ("10월 5일(월) 오전 9시에 보내도록 예약했어요 — "
                                         "받는 사람: 미아동지점 김국민 님(사번 3901182)."))
     print(f"{'✓' if hit else '✗'} 0명이면 초안을 걸어 두고, 사번을 함께 적으면 사번으로, 시연 실행기는 이름 예약도 받는다")
+    ok += hit
+    return ok
+
+
+
+def check_memo_edit_material() -> int:
+    """초안 고치기는 이번 상담에서 나간 답변을 재료로 쓴다(2026-09-23 행내 실측).
+
+    「안내 가능한 상품 6종 내용 담아서」의 6종은 초안이 아니라 두 턴 전 답변에 있었다. 재료가
+    직전 초안과 직원의 말뿐이던 동안 LLM 은 «6종의 내용을 알려달라»고 되물었다.
+      ① 답변(쪽지 초안 턴 제외)이 고치기 프롬프트에 실린다
+      ② 그 답변의 값은 고친 초안의 검사를 통과한다 — 아무 데도 없는 값은 여전히 걸린다
+    """
+    from pension_agent.consult_agent.effects import memo
+
+    ok = 0
+    answer = ("안내 가능한 상품은 총 6종입니다.\n- KB 정기예금(1년) — 매우낮은위험\n"
+              "- KB GIC 확정금리 — 매우낮은위험")
+    history = [{"question": "적합성 범위", "answer": answer},
+               {"question": "쪽지로 보내줘", "answer": f"{memo.FENCE}\n[제목] x\n\n옛 초안 99건\n{memo.FENCE}"}]
+    found, _ = memo.assemble("상담 공유", "오세훈 고객 공유드립니다.", tail_html="", tail_note="",
+                             to="정석희 님", recipients=[], user_name="정석희")
+    seen: list[str] = []
+    orig = memo.generate
+
+    def _gen(body: str):
+        def gen(prompt, **kw):
+            seen.append(prompt)
+            import json
+            return json.dumps({"edit": True, "title": "상담 공유", "body": body}, ensure_ascii=False)
+        return gen
+
+    try:
+        memo.generate = _gen("오세훈 고객 공유드립니다.\n안내 가능 상품 6종\n- KB 정기예금(1년)")
+        good = memo.revise(found, "안내 가능한 상품 6종 내용 담아서", history)
+        memo.generate = _gen("오세훈 고객 공유드립니다.\n안내 가능 상품 7종")
+        bad = memo.revise(found, "안내 가능한 상품 내용 담아서", history)
+    finally:
+        memo.generate = orig
+
+    hit = (bool(seen) and answer.splitlines()[0] in seen[0] and "옛 초안 99건" not in seen[0]
+           and memo.session_answers(history) == [answer])
+    print(f"{'✓' if hit else '✗'} 초안 고치기 프롬프트에 이번 상담 답변이 실린다(쪽지 초안 턴은 뺀다)")
+    ok += hit
+
+    hit = good.kind == "edited" and bad.kind == "screened" and "7" in bad.reason
+    print(f"{'✓' if hit else '✗'} 앞선 답변의 값은 고친 초안에 들어가고, 어디에도 없는 값은 걸린다")
     ok += hit
     return ok

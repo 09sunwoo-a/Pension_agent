@@ -170,10 +170,16 @@ try:
 
     # 이름 발송 — 위 호출 횟수 검사 뒤에 둔다(그 검사가 호출 수를 센다).
     note.send_note_by_name_sync("김국민", "미아동지점", _note)
-    check(_name_tool.calls[-1:] == [{"user_name": "김국민", "TITLE": _note.title,
-                                     "BODY": _note.body, "group_name": "미아동지점"}],
-          "mcp.workb: 이름 발송은 user_name·group_name·TITLE·BODY 규격 이름으로 나간다",
+    check(_name_tool.calls[-1:] == [{"user_name": "김국민", "title": _note.title,
+                                     "body": _note.body, "group_name": "미아동지점"}],
+          "mcp.workb: 이름 발송은 소문자 user_name·group_name·title·body 로 나간다"
+          "(대문자 TITLE·BODY 는 서버가 «Missing required parameters» 로 거부했다)",
           str(_name_tool.calls))
+    # 도구가 인자 이름을 밝히면 그 대소문자를 따른다(명세가 한 번 어긋났던 자리).
+    _name_tool.args = {"USER_NAME": {}, "TITLE": {}, "BODY": {}, "GROUP_NAME": {}}
+    note.send_note_by_name_sync("김국민", None, _note)
+    check(_name_tool.calls[-1] == {"USER_NAME": "김국민", "TITLE": _note.title, "BODY": _note.body},
+          "mcp.workb: 이름 발송 인자는 도구가 밝힌 이름의 대소문자를 따른다", str(_name_tool.calls[-1]))
 
     # ── 발송은 재시도하지 않는다 — 타임아웃은 «안 나갔다»가 아니라 «나갔는지 모른다» ──
     _flaky = _FakeTool("send_memo", fail=99)
