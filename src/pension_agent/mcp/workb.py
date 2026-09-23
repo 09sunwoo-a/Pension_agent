@@ -1,4 +1,4 @@
-"""WorkB(행내 직원용 작업툴) MCP 도구 어댑터 — 지금은 쪽지 발송 하나.
+"""WorkB(행내 직원용 작업툴) MCP 도구 어댑터 — 쪽지 발송(사번) · 이름으로 찾아 보내기.
 
 **같은 이름의 두 층이 있다.** 무엇을 보낼지(본문·제목·수신자 검증·결과 판정)는
 `pension_agent/workb.py` 가 이미 갖고 있고, 여기는 그 아래 층이다 — **어떤 도구를 어떤
@@ -15,11 +15,14 @@
 메일 등)의 기능이면 `servers.CATALOG` 에서 그 서버를 켜고 파일을 하나 새로 만든다 —
 서버 하나에 어댑터 파일 하나가 규칙이다.
 
-━━ 쓰지 않기로 한 도구 ━━
-WorkB 에는 이름·부서로 사람을 찾아 보내는 도구(`search_emp_and_send_memo`)도 있지만
-쓰지 않는다. 동명이인이 갈리는 자리를 검색에 맡기면 엉뚱한 사람의 받은편지함에 고객
-정보가 남고, 그건 확인 절차로도 못 막는다(`consult_agent/CLAUDE.md` §10). 수신자는
-직원이 적은 사번이거나 본인이다.
+━━ 이름으로 찾아 보내는 도구 ━━
+`search_emp_and_send_memo` 는 이름(과 부서)으로 직원을 찾아 **1명이면 그 호출에서 보내고**,
+여러 명이면 보내지 않고 후보 목록을, 0명이면 «결과 없음»을 준다. 한때 «동명이인이 갈리는
+자리를 검색에 맡긴다»는 이유로 쓰지 않았는데(2026-09-23 까지), 실측해 보니 동명이인은 이
+도구가 **스스로 보내지 않고** 목록으로 돌려준다 — 그 자리는 직원이 목록에서 사번을 골라
+`send_memo` 로 보내면 된다. 남는 위험은 1명일 때 발송 전에 사번을 확인할 수 없다는 것
+하나이고, 그래서 대화형은 직원이 승낙한 뒤에만 이 도구를 부르고 결과 문장에 응답의 사번을
+밝힌다(`consult_agent/CLAUDE.md` §10 「이름으로 보내기」).
 """
 
 from __future__ import annotations
@@ -76,6 +79,30 @@ async def send_memo(recipients: list[str], title: str, body: str,
         TOOL, {ARG_RECIPIENT: ids, ARG_TITLE: title, ARG_BODY: body}, idempotent=False)
 
 
+#: 이름 발송 도구의 이름과 인자 이름. 규격 그대로다(user_name·group_name 은 소문자,
+#: TITLE·BODY 는 대문자 — 2026-09-23 명세).
+NAME_TOOL = "search_emp_and_send_memo"
+ARG_NAME, ARG_GROUP = "user_name", "group_name"
+
+
+async def search_emp_and_send_memo(user_name: str, group_name: str | None, title: str,
+                                   body: str, *, emp_no: str | None = None) -> Any:
+    """이름(과 부서)으로 찾아 보낸다 — **찾은 사람이 1명이면 이 호출에서 발송된다.**
+
+    `note.NameSender` 의 모양이라 `use_name_sender` 에 그대로 등록된다. 판정은 위층의
+    `parse_name_result` 가 한다. 재시도하지 않는 이유는 `send_memo` 와 같다.
+    """
+    sender = note.employee_id(emp_no)
+    if not sender:
+        raise mcp_client.MCPUnavailable(
+            "쪽지를 보낼 직원 사번이 없습니다 — 로그인 사번이 넘어오지 않았고 "
+            f"{note.EMP_NO_ENV} 환경변수도 비어 있습니다")
+    args: dict[str, Any] = {ARG_NAME: user_name, ARG_TITLE: title, ARG_BODY: body}
+    if group_name:
+        args[ARG_GROUP] = group_name
+    return await mcp_client.client_for(sender).call(NAME_TOOL, args, idempotent=False)
+
+
 def install() -> bool:
     """위층(`pension_agent/workb.py`)의 발송 함수로 이 어댑터를 등록한다.
 
@@ -103,5 +130,6 @@ def install() -> bool:
                     "python-mcp-sdk · langchain-mcp-adapters 가 설치됐는지 봅니다", reason)
         return False
     note.use_sender(send_memo)
-    log.info("MCP 쪽지 발송을 붙였습니다 — 도구 %s", TOOL)
+    note.use_name_sender(search_emp_and_send_memo)
+    log.info("MCP 쪽지 발송을 붙였습니다 — 도구 %s · %s", TOOL, NAME_TOOL)
     return True

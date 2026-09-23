@@ -182,8 +182,140 @@ def send_memo(customer_id: str, text: str, *, title: str,
     return result
 
 
+def _dummy_block(text: str) -> dict[str, Any] | None:
+    """더미 콘텐츠가 실린 쪽지면 거부 결과, 아니면 None — 사번·이름 발송이 같은 판정을 쓴다."""
+    asset = _match_asset(_plain(text))
+    if asset is not None and asset.get("dummy"):
+        return {"status": "blocked",
+                "detail": ("더미 콘텐츠가 실린 쪽지는 보낼 수 없습니다 — 실제 콘텐츠로 교체한 뒤"
+                           "(자산의 dummy 표시 제거) 다시 시도하세요"),
+                "asset_id": asset.get("id")}
+    return None
+
+
+def send_memo_by_name(customer_id: str, text: str, *, title: str, user_name: str,
+                      group_name: str = "", to: str = "", as_employee: str | None = None,
+                      session_id: str = "tool-log") -> dict[str, Any]:
+    """이름(과 부서)으로 찾아 보낸다(§10 「이름으로 보내기」). **찾은 사람이 1명이면 발송된다.**
+
+    결과는 넷이다 — `sent`(응답의 사번 `recipients` 를 함께 준다) · `candidates`(여러 명이라
+    보내지 않았다 — 목록) · `not_found` · 실패류. 부르는 쪽(`nodes/act._send_memo`)은 직원이
+    승낙한 뒤에만 부르고, 여러 명이면 직원이 고른 사번으로 `send_memo` 를 부른다.
+    더미 게이트는 `send_memo` 와 같은 판정이다.
+    """
+    from pension_agent import note  # noqa: PLC0415
+
+    blocked = _dummy_block(text)
+    if blocked is not None:
+        result: dict[str, Any] = {**blocked, "to": to, "user_name": user_name, "title": title}
+    else:
+        result = {**note.send_note_by_name_sync(user_name, group_name or None,
+                                                note.Note(title=title, body=text),
+                                                as_employee=as_employee), "to": to}
+    append_turn(customer_id, session_id, {
+        "role": "tool",
+        "text": f"[쪽지 발송(이름) · {to}] {title}",
+        "tool_calls": [{"name": "send_memo_by_name",
+                        "args": {"to": to, "user_name": user_name, "group_name": group_name or None,
+                                 "title": title, "text": text},
+                        "result": result}],
+    })
+    return result
+
+
+# ─────────────────────────────────────────────────────────────
+# 예약 쪽지 (consult_agent/CLAUDE.md §10 「예약 발송」)
+#
+# 날짜 해석·확인 절차·답변 문장은 실제 기능과 같게 만들고, **맨 끝의 예약 실행기만 교체할 수
+# 있게** 둔다. 백엔드가 실제 예약을 구현하면 `SCHEDULERS` 에 실행기 하나를 더하고 환경변수로
+# 고른다 — 부르는 쪽(`nodes/act._send_memo`)은 바뀌지 않는다.
+#
+# 실행기가 정해지지 않았으면 **보내지 않는다.** 조용히 즉시 발송으로 바꾸면 직원은 예약했다고
+# 믿는 쪽지가 이미 나간 상태가 된다(쪽지는 되돌릴 수 없다 — 루트 규칙 5).
+# ─────────────────────────────────────────────────────────────
+
+#: 예약 실행기를 고르는 환경변수. `demo` 면 시연용 실행기(아래). 비어 있으면 «미연결».
+SCHEDULER_ENV = "PENSION_MEMO_SCHEDULER"
+
+
+def _demo_scheduler(customer_id: str, text: str, *, send_at: str, **kw: Any) -> dict[str, Any]:
+    """시연용 실행기 — 예약을 **접수하고 곧바로 한 통을 보낸다.**
+
+    시연에서는 미래에 나갈 쪽지를 보여줄 수 없어서, 접수하는 순간 한 통을 보내 쪽지함에
+    도착하는 것을 보인다. 그래서 이 실행기가 켜져 있는 동안 «예약했어요»는 **사실이 아니다** —
+    그 사실은 화면이 아니라 `docs/DEMO_STATUS.md`(생성물)와 로그·트레이스·상담이력이 말한다.
+    발송이 실패하면 «예약했다»로 접지 않고 발송 결과를 그대로 돌려준다.
+    """
+    # 이름 예약도 받는다 — 접수하는 순간 이름 발송 도구를 부른다. 여러 명·0명이면 그 결과를
+    # 그대로 돌려준다(부르는 쪽이 목록을 보여주고, 고르면 사번 예약으로 다시 제안한다).
+    user_name, group_name = kw.pop("user_name", ""), kw.pop("group_name", "")
+    if user_name:
+        kw.pop("recipients", None)
+        sent = send_memo_by_name(customer_id, text, user_name=user_name, group_name=group_name,
+                                 **kw)
+    else:
+        sent = send_memo(customer_id, text, **kw)
+    if sent.get("status") not in ("sent", "stubbed"):
+        return sent
+    return {**sent, "status": "scheduled", "executor": "demo", "send_at": send_at,
+            "detail": "시연 실행기: 예약 접수와 동시에 즉시 발송"}
+
+
+#: 예약 실행기 표. 키가 `SCHEDULER_ENV` 의 값이다.
+SCHEDULERS: dict[str, Callable[..., dict[str, Any]]] = {
+    "demo": _demo_scheduler,
+}
+
+
+def scheduler_name() -> str:
+    """지금 고른 예약 실행기 이름. 표에 없는 값·빈 값은 ""(미연결)."""
+    import os  # noqa: PLC0415
+
+    name = (os.getenv(SCHEDULER_ENV) or "").strip().lower()
+    return name if name in SCHEDULERS else ""
+
+
+def schedule_memo(customer_id: str, text: str, *, send_at: str, send_label: str, title: str,
+                  recipients: list[str] | None = None, to: str = MEMO_DEFAULT_TO,
+                  user_name: str = "", group_name: str = "",
+                  as_employee: str | None = None,
+                  session_id: str = "tool-log") -> dict[str, Any]:
+    """행내 WorkB 쪽지를 `send_at`(ISO)에 보내도록 예약한다. 본문·제목은 만들지도 고치지도 않는다.
+
+    실행기가 없으면 `not_connected` — 부르는 쪽이 «예약했어요»라고 말하지 않는다. 예약 접수
+    사실은 실행기와 무관하게 상담이력에 남긴다(무엇을·언제로·어느 실행기가).
+
+    `user_name` 이 있으면 이름 예약이다. **실제 예약 백엔드로 넘길 때의 규칙은 아직 없다** —
+    그 백엔드가 발송 시각에 이름을 검색하면 여러 명일 때 고를 사람이 없고, 1명이면 확인 없이
+    나간다(§13 「이름 예약」). 지금 그것을 받는 실행기는 시연용(`demo`) 하나뿐이다.
+    """
+    name = scheduler_name()
+    if not name:
+        result: dict[str, Any] = {
+            "status": "not_connected", "to": to, "recipients": list(recipients or []),
+            "detail": f"예약 실행기가 정해지지 않았습니다({SCHEDULER_ENV})"}
+    else:
+        result = SCHEDULERS[name](customer_id, text, send_at=send_at, title=title,
+                                  recipients=recipients, to=to, as_employee=as_employee,
+                                  user_name=user_name, group_name=group_name,
+                                  session_id=session_id)
+    append_turn(customer_id, session_id, {
+        "role": "tool",
+        "text": f"[쪽지 예약 · {send_label} · {to}] {title}"
+                + (" (시연 실행기: 즉시 발송)" if name == "demo" else ""),
+        "tool_calls": [{"name": "schedule_memo",
+                        "args": {"to": to, "recipients": list(recipients or []), "title": title,
+                                 "user_name": user_name or None, "group_name": group_name or None,
+                                 "send_at": send_at, "executor": name or None},
+                        "result": {k: v for k, v in result.items() if k != "title"}}],
+    })
+    return result
+
+
 ACTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "open_lms_screen": open_lms_screen,
     "register_consult_note": register_consult_note,
     "send_memo": send_memo,
+    "schedule_memo": schedule_memo,
+    "send_memo_by_name": send_memo_by_name,
 }

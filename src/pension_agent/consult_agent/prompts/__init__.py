@@ -34,6 +34,7 @@
     memo.py         MEMO_SYSTEM · MEMO_PROMPT  이번 턴의 재료로 제목·본문
                     MEMO_SELF_GUIDE · MEMO_OTHER_GUIDE   받는 사람이 본인 / 다른 직원
                     MEMO_TABLE_BLOCK           코드가 값 표를 붙일 때
+                    MEMO_EDIT_SYSTEM · MEMO_EDIT_PROMPT  걸려 있는 초안을 직원의 지시대로 고친다
 """
 
 from __future__ import annotations
@@ -88,4 +89,6 @@ from pension_agent.consult_agent.prompts.memo import (  # noqa: F401
     MEMO_OTHER_GUIDE,
     MEMO_TABLE_BLOCK,
     MEMO_PROMPT,
+    MEMO_EDIT_SYSTEM,
+    MEMO_EDIT_PROMPT,
 )

@@ -603,6 +603,124 @@ def send_note_sync(recipients: list[str], note: Note, *, send: Sender | None = N
             "error": "RunningLoop", "recipients": list(recipients), "title": note.title}
 
 
+# ─────────────────────────────────────────────────────────────
+# 이름으로 보내기 — WorkB `search_emp_and_send_memo` (consult_agent/CLAUDE.md §10 「이름으로 보내기」)
+#
+# 이 도구는 **검색과 발송이 한 호출에 묶여 있다.** 이름(과 부서)으로 찾은 직원이 1명이면 그
+# 호출에서 발송이 끝나고, 여러 명이면 발송하지 않고 후보 목록만, 0명이면 «결과 없음»을 준다
+# (2026-09-23 행내 실측 응답 — 아래 `parse_name_result`). 그래서 1명일 때는 발송 **전에**
+# 사번을 확인할 방법이 없다 — 부르는 쪽은 직원이 승낙한 뒤에만 부르고, 결과 문장에 응답의
+# 사번을 밝힌다. 여러 명이면 직원이 고른 사번으로 `send_note`(사번 발송)를 부른다 — 이름을
+# 다시 검색하지 않는다(두 번째 검색이 다른 결과를 낼 수 있다).
+# ─────────────────────────────────────────────────────────────
+
+#: 주입받는 이름 발송 함수의 모양 — `send(user_name, group_name, title, body)` 를 await 하면
+#: 원시 결과가 온다. 행내 어댑터 `pension_agent/mcp/workb.py::search_emp_and_send_memo`.
+NameSender = Callable[[str, "str | None", str, str], Awaitable[Any]]
+
+#: 앱이 등록한 이름 발송 함수. 등록 전에는 None 이고 «미연결»로 답한다(`SENDER` 와 같다).
+NAME_SENDER: NameSender | None = None
+
+
+def use_name_sender(fn: NameSender | None) -> None:
+    """이름 발송 함수를 등록한다(앱 시작 시 1회 — 보통 `mcp.install()` 이 부른다)."""
+    global NAME_SENDER
+    NAME_SENDER = fn
+
+
+def parse_name_result(raw: Any) -> dict[str, Any]:
+    """이름 발송 결과 판정. status 는 넷 중 하나다(판정 못 하면 unknown · 거부면 failed).
+
+        sent        1명을 찾아 **이미 발송했다**   {"recipients": [사번]}
+        candidates  여러 명이라 보내지 않았다      {"candidates": [{user_id, group_name, dsgt}]}
+        not_found   찾은 사람이 없다(204)
+
+    실측 응답 셋(2026-09-23):
+      {"success": true, "data": {"message": "Successfully sent memo to 1 recipients.",
+                                 "recipients": ["3901182"], "api_response": "0;OK"}}
+      {"success": true, "data": {"resultCode": 200, "resultData": [{"user_id": …}, …]}}
+      {"success": true, "data": {"resultCode": 204, "resultMessage": "NO CONTENT", "resultData": null}}
+
+    `success: true` 가 셋 다 같으므로 **success 만 보고 «보냈다»로 접지 않는다** — 후보 목록
+    응답을 발송으로 읽으면 아무에게도 안 간 쪽지가 «보냈어요»로 화면에 뜬다.
+    """
+    text = _text_of(raw).strip()
+    try:
+        body = json.loads(text)
+    except (TypeError, ValueError):
+        return {"status": "unknown",
+                "detail": "발송 결과를 판정하지 못했습니다 — 응답이 JSON 이 아닙니다",
+                "raw": text[:200]}
+    if not isinstance(body, dict) or "success" not in body:
+        return {"status": "unknown",
+                "detail": "발송 결과를 판정하지 못했습니다 — 응답에 success 가 없습니다",
+                "raw": text[:200]}
+    if not body.get("success"):
+        return {"status": "failed",
+                "detail": f"WorkB 가 발송을 거부했습니다: {body.get('error') or '사유 없음'}",
+                "error": body.get("error")}
+    data = body.get("data") if isinstance(body.get("data"), dict) else {}
+    sent_to = data.get("recipients")
+    if isinstance(sent_to, list) and sent_to:
+        return {"status": "sent", "detail": "쪽지를 발송했습니다",
+                "recipients": [str(r) for r in sent_to]}
+    code = data.get("resultCode")
+    found = data.get("resultData")
+    if code == 204 or (code == 200 and not found):
+        return {"status": "not_found", "detail": "이름으로 찾은 직원이 없습니다"}
+    if isinstance(found, list) and found:
+        cands = [{"user_id": str(c.get("user_id") or ""), "group_name": str(c.get("group_name") or ""),
+                  "dsgt": str(c.get("dsgt") or "")}
+                 for c in found if isinstance(c, dict) and c.get("user_id")]
+        if cands:
+            return {"status": "candidates", "detail": f"같은 이름의 직원이 {len(cands)}명입니다",
+                    "candidates": cands}
+    return {"status": "unknown",
+            "detail": "발송 결과를 판정하지 못했습니다 — 발송도 후보 목록도 아닙니다",
+            "raw": text[:200]}
+
+
+async def send_note_by_name(user_name: str, group_name: str | None, note: Note, *,
+                            send: NameSender | None = None,
+                            as_employee: str | None = None) -> dict[str, Any]:
+    """이름(과 부서)으로 찾아 보낸다. **찾은 사람이 1명이면 이 호출에서 발송된다.**
+
+    `send_note` 와 같은 규약이다 — 연결이 없으면 보내지 않고 «미연결», 호출이 죽으면 실패,
+    결과는 `parse_name_result` 가 판정한다. 승낙은 여기서 받지 않는다(부르는 쪽의 몫이다).
+    """
+    name = (user_name or "").strip()
+    if not name:
+        raise ValueError("user_name 이 비어 있습니다")
+    send = send or NAME_SENDER
+    if send is None:
+        return {"status": "not_connected",
+                "detail": ("이 실행에는 쪽지 발송 연결(행내 MCP)이 설정되어 있지 않아 보내지 "
+                           "않았어요 — 초안만 만들었어요. 설정 확인: python -m pension_agent.mcp"),
+                "user_name": name, "title": note.title}
+    try:
+        with acting(as_employee):
+            raw = await send(name, (group_name or "").strip() or None, note.title, note.body)
+    except Exception as exc:
+        return {"status": "failed", "detail": f"발송 호출이 실패했습니다: {type(exc).__name__}: {exc}",
+                "error": type(exc).__name__, "user_name": name, "title": note.title}
+    return {**parse_name_result(raw), "user_name": name, "title": note.title}
+
+
+def send_note_by_name_sync(user_name: str, group_name: str | None, note: Note, *,
+                           send: NameSender | None = None,
+                           as_employee: str | None = None) -> dict[str, Any]:
+    """동기 문맥의 이름 발송 — `send_note_sync` 와 같은 이유로 있다."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(send_note_by_name(user_name, group_name, note, send=send,
+                                             as_employee=as_employee))
+    return {"status": "failed",
+            "detail": ("이벤트 루프 안에서는 동기 발송을 기다릴 수 없습니다 — "
+                       "await send_note_by_name(...) 를 쓰세요"),
+            "error": "RunningLoop", "user_name": user_name, "title": note.title}
+
+
 if __name__ == "__main__":  # 아웃풋 눈으로 보기: python -m pension_agent.note
     import sys
 

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime
 
 #: 오늘을 고정하는 환경변수. 형식이 틀리면 조용히 실제 날짜로 넘어가지 않고 즉시 실패한다 —
 #: 오타 하나로 «고정한 줄 알았는데 안 고정된» 산출물이 나오는 것이 가장 나쁜 실패다.
@@ -37,3 +37,13 @@ def today() -> date:
         return date.fromisoformat(pinned)
     except ValueError as exc:
         raise ValueError(f"{TODAY_ENV}={pinned!r} 는 YYYY-MM-DD 가 아닙니다") from exc
+
+
+def now() -> datetime:
+    """지금 시각. 날짜는 `today()` 를 따르고(고정 스위치 포함) 시각은 실제 시계다.
+
+    예약 쪽지가 «이미 지난 시각인가»를 가를 때 쓴다(consult_agent/effects/schedule.py).
+    날짜를 따로 읽으면 `PENSION_TODAY` 로 고정한 리허설에서 «오늘 오후 3시»가 실제 날짜로
+    계산된다 — 오늘의 출처가 둘이 되는 사고(이 모듈 머리말)의 시각 버전이다.
+    """
+    return datetime.combine(today(), datetime.now().time().replace(microsecond=0))
