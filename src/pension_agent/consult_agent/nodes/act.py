@@ -884,15 +884,24 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
         _record_staff(pasted=True, added=[], removed=[], text=paste[1])
         return _memo_turn(made, state, unclear=unclear)
 
+    # 받는 사람이 바뀌었고 본문이 옛 받는 사람을 이름으로 부르고 있으면 호칭을 맞추게 알린다
+    # (§10 「함께 고친 것」 address). 이름을 모르면(사번·본인) 알리지 않는다 — 코드가 확인할 수
+    # 없는 호칭을 LLM 에게 찾게 하면 본문을 더 넓게 건드린다.
+    address = _address_change(pending, found) if moved else None
     with observability.span("consult.memo.edit", input={"instruction": question}) as span:
-        rev = memo.revise(found, question, state.get("history"))            # ⑤
+        rev = memo.revise(found, question, state.get("history"), recipient=address)  # ⑤
         span.update(output={"kind": rev.kind, "added": rev.added, "removed": rev.removed})
     observability.step("confirm", pending=pending.get("label"), reply=rev.kind,
                        recipients="변경" if moved else None, reason=rev.reason or None)
 
     if rev.kind == "edited" and rev.draft is not None:
         _record_staff(pasted=False, added=rev.added, removed=rev.removed)
-        return _memo_turn(rev.draft, state, unclear=unclear)
+        unknown = [c for c in rev.also if c not in memo.ALSO_LABELS]
+        if rev.also:
+            observability.step("confirm", pending=pending.get("label"), reply="edited",
+                               reason=f"함께 고친 것 {','.join(rev.also)}"
+                                      + (f" (목록 밖 {','.join(unknown)})" if unknown else ""))
+        return _memo_turn(rev.draft, state, head=memo.also_line(rev.also), unclear=unclear)
     if rev.kind == "ask":
         # 초안은 그대로 걸어 둔다 — 다음 턴의 「5,300만원으로」가 이 초안을 고치는 말이다.
         # 제안은 다시 조립한다: 이번 말이 받는 사람을 바꿨으면 제안 문장도 그 사람이어야 한다.
@@ -922,6 +931,22 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     # 새 질문 — 답은 계획 루프가 쓴다(routing.route_confirm). 초안은 여기서 무효가 된다
     # (§10 「제안은 그 자리에서만 유효하다」). 나가는 것이 없으니 되돌릴 수 있는 쪽이다.
     return {"pending_action": None}
+
+
+_ADDRESSEE = re.compile(r"([가-힣]{2,5}) 님")
+
+
+def _address_change(pending: dict, found: memo.Draft) -> tuple[str, str, str] | None:
+    """받는 사람이 바뀌었고 본문에 옛 받는 사람의 **이름**이 있으면 (옛 표기, 새 표기, 옛 이름).
+
+    옛 이름은 제안에 적힌 표기(「정석희 님」·「미아동지점 김국민 님(사번 …)」)에서 읽는다.
+    사번·본인으로 적힌 받는 사람은 이름을 모르므로 None — 본문의 호칭을 코드가 확인할 수 없다.
+    """
+    old_label = pending.get("to") or ""
+    m = _ADDRESSEE.search(old_label)
+    if not m or m.group(1) not in (found.body or "") or found.to == old_label:
+        return None
+    return old_label, found.to, m.group(1)
 
 
 _ORDINALS = ("첫", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열")

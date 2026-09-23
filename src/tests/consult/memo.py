@@ -903,3 +903,83 @@ def check_memo_edit_material() -> int:
     print(f"{'✓' if hit else '✗'} 앞선 답변의 값은 고친 초안에 들어가고, 어디에도 없는 값은 걸린다")
     ok += hit
     return ok
+
+
+def check_memo_also() -> int:
+    """초안 고치기의 «함께 고친 것»(§10) — 지시 밖 수정은 여섯 가지만, 표시 문장은 코드가 정한다.
+
+      ① LLM 은 코드만 돌려주고 화면 표시는 `ALSO_LABELS` 다 — 목록 밖 코드는 표시하지 않는다
+      ② 함께 고친 것이 있으면 초안 위에 한 줄로 서고, 없으면 그 줄이 없다
+      ③ 받는 사람이 바뀌었고 본문에 옛 이름이 있을 때만 <받는 사람 바뀜> 을 LLM 에 알린다
+    """
+    import json
+    import os
+
+    from pension_agent import note
+    from pension_agent.consult_agent.effects import memo
+    from pension_agent.consult_agent.nodes import act
+
+    ok = 0
+    hit = (memo.also_line(["dup", "title"]) == "함께 고친 것: 겹치는 인사·맺음 정리 · 제목을 본문에 맞춤"
+           and memo.also_line(["xyz"]) == "" and memo.also_line([]) == ""
+           and memo.also_line(["dup", "dup", "xyz"]) == "함께 고친 것: 겹치는 인사·맺음 정리")
+    print(f"{'✓' if hit else '✗'} «함께 고친 것»은 정해진 문장으로 서고 목록 밖 코드는 표시하지 않는다")
+    ok += hit
+
+    seen: list[str] = []
+    reply = {"obj": {}}
+
+    def _gen(prompt, **kw):
+        seen.append(prompt)
+        return json.dumps(reply["obj"], ensure_ascii=False)
+
+    orig_gen, orig_env = memo.generate, os.environ.get(note.EMP_NO_ENV)
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    memo.generate = _gen
+
+    def _pending(body: str) -> dict:
+        found, _ = memo.assemble("상담 공유", body, tail_html="", tail_note="", to="정석희 님",
+                                 recipients=[], user_name="정석희")
+        return act._offer_draft(found, {"customer_id": "CM"})["pending_action"]
+
+    def _say(q: str, pending: dict) -> dict:
+        return act.confirm_action({"question": q, "customer_id": "CM",
+                                   "history": [{"question": "q", "pending_action": pending}]})
+
+    try:
+        named = _pending("정석희 대리님, 안녕하세요.\n오세훈 고객 공유드립니다.")
+        reply["obj"] = {"edit": True, "title": "상담 공유", "also": ["address"],
+                        "body": "김국민 님, 안녕하세요.\n오세훈 고객 공유드립니다."}
+        moved = _say("김국민한테 보내줘", named)
+        prompt_moved = seen[-1]
+        plain = _pending("안녕하세요.\n오세훈 고객 공유드립니다.")
+        reply["obj"] = {"edit": False}
+        _say("김국민한테 보내줘", plain)
+        prompt_plain = seen[-1]
+        reply["obj"] = {"edit": True, "title": "상담 공유", "also": ["dup", "xyz"],
+                        "body": "안녕하세요 퇴직연금 전달차 쪽지드립니다.\n오세훈 고객 공유드립니다."}
+        edited = _say("맨 앞에 안녕하세요 퇴직연금 전달차 쪽지드립니다. 붙여줘", named)
+        reply["obj"] = {"edit": True, "title": "상담 공유", "also": [],
+                        "body": "-- 정석희 대리님, 안녕하세요.\n-- 오세훈 고객 공유드립니다."}
+        none_also = _say("앞에 --를 붙여줘", named)
+    finally:
+        memo.generate = orig_gen
+        if orig_env is None:
+            os.environ.pop(note.EMP_NO_ENV, None)
+        else:
+            os.environ[note.EMP_NO_ENV] = orig_env
+
+    hit = ("<받는 사람 바뀜>" in prompt_moved and "정석희 님 → 김국민 님" in prompt_moved
+           and "<받는 사람 바뀜>" not in prompt_plain)
+    print(f"{'✓' if hit else '✗'} 받는 사람이 바뀌고 본문에 옛 이름이 있을 때만 호칭을 맞추게 알린다")
+    ok += hit
+
+    hit = (moved["answer"].startswith(f"함께 고친 것: 호칭을 받는 사람에 맞춤\n\n{memo.FENCE}")
+           and "김국민 님, 안녕하세요." in moved["pending_action"]["body"]
+           and moved["pending_action"]["user_name"] == "김국민"
+           and edited["answer"].startswith(f"함께 고친 것: 겹치는 인사·맺음 정리\n\n{memo.FENCE}")
+           and none_also["answer"].startswith(memo.FENCE)
+           and "함께 고친 것" not in edited["pending_action"]["html"])     # 화면 표시일 뿐 나가지 않는다
+    print(f"{'✓' if hit else '✗'} 함께 고친 것은 초안 위에 한 줄로 서고, 없으면 줄이 없으며, 쪽지에는 안 들어간다")
+    ok += hit
+    return ok

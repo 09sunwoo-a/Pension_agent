@@ -47,8 +47,8 @@ from pension_agent import note
 from pension_agent.clock import today
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import (
-    COMPOSE_RETRY_BLOCK, MEMO_EDIT_PROMPT, MEMO_EDIT_SYSTEM, MEMO_OTHER_GUIDE, MEMO_PROMPT,
-    MEMO_SELF_GUIDE, MEMO_SYSTEM, MEMO_TABLE_BLOCK,
+    COMPOSE_RETRY_BLOCK, MEMO_EDIT_PROMPT, MEMO_EDIT_RECIPIENT_BLOCK, MEMO_EDIT_SYSTEM,
+    MEMO_OTHER_GUIDE, MEMO_PROMPT, MEMO_SELF_GUIDE, MEMO_SYSTEM, MEMO_TABLE_BLOCK,
 )
 from pension_agent.consult_agent import state
 from pension_agent.consult_agent.state import AgentState, format_history
@@ -397,6 +397,26 @@ EDIT_SCREENED = ("고친 초안에 근거 밖 내용이 들어가서 반영하�
                  "직전 초안을 그대로 둡니다.")
 
 
+#: 지시 밖에서 «함께 고친 것»의 코드 → 화면 표시(§10 「함께 고친 것」). LLM 은 코드만 돌려주고
+#: 표시 문장은 여기가 정한다 — LLM 이 설명을 쓰게 하면 문장 모양이 매번 달라지고 길어진다.
+#: 목록 밖 코드는 표시하지 않고 로그에만 남는다(`act._memo_reply`).
+ALSO_LABELS = {
+    "dup": "겹치는 인사·맺음 정리",
+    "address": "호칭을 받는 사람에 맞춤",
+    "tone": "말투 통일",
+    "ref": "지운 내용을 가리키는 문장 정리",
+    "number": "번호 다시 매김",
+    "title": "제목을 본문에 맞춤",
+}
+ALSO_HEAD = "함께 고친 것: {items}"
+
+
+def also_line(codes: list[str]) -> str:
+    """«함께 고친 것» 한 줄. 목록 안 코드가 없으면 ""(줄을 쓰지 않는다)."""
+    items = [ALSO_LABELS[c] for c in dict.fromkeys(codes) if c in ALSO_LABELS]
+    return ALSO_HEAD.format(items=" · ".join(items)) if items else ""
+
+
 @dataclass(frozen=True)
 class Revision:
     """초안 고치기의 결과 하나.
@@ -411,6 +431,7 @@ class Revision:
     reason: str = ""
     added: list[str] = field(default_factory=list)     # 직원이 적어 새로 들어간 값
     removed: list[str] = field(default_factory=list)   # 그 대신 빠진 직전 초안의 값
+    also: list[str] = field(default_factory=list)      # 지시 밖에서 함께 고친 것(LLM 이 밝힌 코드)
 
 
 def from_pending(pending: dict) -> Draft:
@@ -479,13 +500,18 @@ def session_answers(history: list[dict] | None) -> list[str]:
     return list(reversed(out))
 
 
-def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revision:
+def revise(found: Draft, instruction: str, history: list[dict] | None,
+           recipient: tuple[str, str, str] | None = None) -> Revision:
     """직원의 지시로 초안을 고친다. 고치라는 말이 아니면 `not_edit` 을 돌려준다.
 
     «고치라는 지시인가»의 판정과 고치기를 **한 번의 호출**로 한다 — 둘을 나누면 초안이 걸린
     턴마다 LLM 왕복이 하나 는다. 판정이 애매하면 고치지 않는 쪽이다(프롬프트) — 새 질문을
     초안 수정으로 읽으면 질문에 대한 답 대신 엉뚱한 초안이 서지만, 반대는 초안이 사라질 뿐
     나가는 것이 없다.
+
+    `recipient` 는 받는 사람이 바뀌었고 본문에 옛 받는 사람의 이름이 있을 때만 온다 —
+    (옛 표기, 새 표기, 옛 이름). 그때 LLM 은 호칭을 맞춘다(§10 「함께 고친 것」 address).
+    이름이 본문에 있는지는 코드가 보고(`act._address_change`), 어떻게 고칠지는 LLM 이 정한다.
     """
     from pension_agent import verify  # noqa: PLC0415
     from pension_agent.consult_agent.nodes import plan  # noqa: PLC0415 — 순환 임포트 회피
@@ -496,6 +522,9 @@ def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revisi
         answers_block=("<이번 상담에서 나간 답변>\n" + "\n\n---\n\n".join(answers)
                        + "\n</이번 상담에서 나간 답변>\n") if answers else "",
         history_block=format_history(history),
+        recipient_block=MEMO_EDIT_RECIPIENT_BLOCK.format(old=recipient[0], new=recipient[1],
+                                                         old_name=recipient[2])
+        if recipient else "",
         table_note=f"(본문 아래에 코드가 붙이는 표는 고칠 수 없다 — {found.tail_note})"
         if found.tail_note else "")
     try:
@@ -518,7 +547,8 @@ def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revisi
     # 통과한 글이고, 직원의 말에 적힌 값은 직원이 직접 확인한 값이다 — 원장 값과 달라도 이긴다.
     # 그래서 관계 검사(값–조건 짝)도 여기서는 걸지 않는다: 재료에 관계 선언이 없다.
     # 걸리는 것은 **둘 어디에도 없는** 값 — LLM 이 옮기다 틀리거나 지어낸 것이다.
-    allowed = "\n".join([found.title, found.body, instruction, *answers])
+    # 받는 사람 표기(「사번 3902175」·「김국민 님」)도 허용 범위다 — 호칭을 맞추며 옮겨 적는 값이다.
+    allowed = "\n".join([found.title, found.body, instruction, *answers, *(recipient or ())])
     ledger = tools.Evidence(
         tool="memo_draft", query="", text=allowed, atomic=[], notices=[], notice_scopes=[],
         source_keys={}, allow=[allowed], related=[], marks=[], sources=[], meta={})
@@ -533,5 +563,7 @@ def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revisi
         return Revision("screened", reason=why)
     before, after = verify.numbers(f"{found.title}\n{found.body}"), verify.numbers(f"{title}\n{body}")
     said = verify.numbers(instruction)
+    also = [str(c).strip().lower() for c in (obj.get("also") or []) if isinstance(c, str)]
     return Revision("edited", draft=made,
-                    added=sorted((after - before) & said), removed=sorted(before - after))
+                    added=sorted((after - before) & said), removed=sorted(before - after),
+                    also=also)
