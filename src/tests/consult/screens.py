@@ -194,6 +194,37 @@ def check_outreach() -> int:
     hit = "요건 일치: " in text and "요건 일치: 없음" not in text and "지금 안내할 것 2건" in text
     print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 «요건 일치: <요건 이름>»이 붙는다")
     ok += hit
+
+    # ⑥ 답변이 인용한 발송 문구는 화법 대사와 갈라 `messages` 로 실린다(effects/messages.py).
+    #
+    # 회귀 대상(2026-09-23 시연 화면): 발송 문구가 큰따옴표 인용이라 «고객에게 이렇게 말씀해
+    # 보세요» 화법 블록으로 섰다 — 직원이 말할 대사와 발송 화면에 붙여 넣을 문자가 구분되지
+    # 않았다. 답변은 문구의 줄바꿈을 한 줄로 이어 쓰기도 하므로, 복사 값은 원본으로 돌린다.
+    from pension_agent.consult_agent.effects import messages as lms_messages
+    original = ev["meta"]["messages"][0]
+    flat = " ".join(original.split())
+    answer = (f"이 대사로 먼저 말씀해 보세요. “노후 자금 한번 같이 점검해 보시죠.”\n\n"
+              f"고객님께 보낼 발송 문구는 다음과 같습니다.\n\n“{flat}”")
+    got = lms_messages.messages_in(answer, lms_messages.canonical([ev]))
+    hit = (len(got) == 1 and got[0]["kind"] == "lms" and got[0]["text"] == flat
+           and got[0]["copy"] == original and "\n" in got[0]["copy"])
+    print(f"{'✓' if hit else '✗'} 발송 문구 인용만 messages 로 실리고(화법 대사는 빠진다), "
+          f"복사 값은 줄바꿈이 살아 있는 원본이다")
+    ok += hit
+
+    # 원장에 outreach 재료가 없는 턴(「더 짧게」로 다시 쓴 턴)의 문구도 `(광고)` 로 알아본다 —
+    # 원본이 없으니 복사 값은 본문 그대로다.
+    short = "(광고) 김현수 고객님, KB국민은행입니다. 이벤트 확인해 보세요. 무료수신거부 080-XXX-XXXX"
+    got = lms_messages.messages_in(f"줄인 문구예요.\n\"{short}\"", [])
+    hit = len(got) == 1 and got[0]["text"] == short and got[0]["copy"] == short
+    print(f"{'✓' if hit else '✗'} 재료 없는 턴의 발송 문구도 (광고) 접두로 알아보고 본문 그대로 복사한다")
+    ok += hit
+
+    # 폴백 콘텐츠의 문구도 인용되면 같은 꼴로 선다(발송 화면 제안과 달리 복사는 막지 않는다 —
+    # 본문에 이미 떠 있는 문구다). 재료에 원본이 실려 있어야 한다.
+    hit = (not none_cid) or bool(none_ev and none_ev["meta"]["messages"])
+    print(f"{'✓' if hit else '✗'} 요건 무관 콘텐츠의 발송 문구도 재료가 원본을 싣는다")
+    ok += hit
     return ok
 
 
@@ -437,6 +468,36 @@ def check_screen_registry() -> int:
     hit = (bool(pay) and "해지" in line
            and (pay.get("trigger_examples") or [""] * 2)[1].startswith("해지, 계좌이체"))
     print(f"{'✓' if hit else '✗'} 표A 「주요 기능」 칸이 둘째 검색 예시로 실려 화면명에 없는 말(해지)로도 닿는다")
+    ok += hit
+
+    # «같은 말» — [06-12-610] 의 주요 기능 칸은 「사전지정운용제도 신청」이라고만 적는다.
+    # 직원은 「디폴트옵션 등록 화면」으로 묻고, 그 둘이 같은지를 LLM 이 턴마다 따로 판단해
+    # 답이 갈렸다(2026-09-23 — 첫 턴은 화면번호를 답하고, 다음 턴은 «자료로는 확인이
+    # 어려워요», 대화가 쌓인 턴은 그 화면을 빼고 되물었다). 원문(표B)이 두 이름을 괄호로
+    # 병기하므로 변환기가 파생 필드로 붙이고, 카드 선택·게이트·작성 재료가 전부 그것을 본다.
+    from pension_agent.consult_agent.tools.adequacy import _headline
+    dopt = by_screen.get("[06-12-610]")
+    alias = "사전지정운용 = 디폴트옵션"
+    hit = (bool(dopt) and alias in (dopt.get("aliases") or [])
+           and "디폴트옵션" in _card_line(dopt, 2)
+           and alias in tools._render_screen(dopt)
+           and alias in _headline(dopt))
+    print(f"{'✓' if hit else '✗'} 원문 표기만 있는 화면 카드에 «같은 말»이 붙어 카드 선택·게이트·재료에 보인다")
+    ok += hit
+
+    # 이미 직원이 부르는 이름을 쓰는 카드에는 붙이지 않는다 — [06-12-918] 디폴트옵션 대기자금 관리.
+    # 원문 summary 는 손대지 않는다(루트 CLAUDE.md 규칙 1) — 괄호 병기는 검색 예시에만 있다.
+    idle = by_screen.get("[06-12-918]")
+    hit = (bool(idle) and not idle.get("aliases") and bool(dopt)
+           and "디폴트옵션" not in (dopt.get("summary") or ""))
+    print(f"{'✓' if hit else '✗'} «같은 말»은 이름이 빠진 카드에만, 원문 칸은 그대로 둔다")
+    ok += hit
+
+    # 원문이 병기하지 않은 쌍은 붙이지 않는다 — 코드가 동의어를 지어내지 않는다.
+    from scripts.kb_build import procedures as _procs
+    hit = (_procs._attested_aliases("디폴트옵션(사전지정운용) 등록") == {"사전지정운용": "디폴트옵션"}
+           and _procs._attested_aliases("사전지정운용제도 신청 · 디폴트옵션 대기자금") == {})
+    print(f"{'✓' if hit else '✗'} 원문에 괄호 병기가 없는 «같은 말»은 붙이지 않는다")
     ok += hit
 
     # 화면번호는 한 글자만 틀려도 없는 화면이라 원문 그대로 요구한다.

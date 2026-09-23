@@ -82,6 +82,7 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
                      "가까운 것이며, 이 고객에게 맞는 것으로 안내하지 않는다")
     atomic: list[str] = []
     lms: dict[str, dict] = {}
+    messages: list[str] = []
     for key, label in (("event", "이벤트"), ("seminar", "세미나")):
         item = picked.get(key)
         if not item:
@@ -106,6 +107,9 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
             # 링크는 한 글자만 달라도 죽는다 — 답변이 이 값을 말하면 원문 그대로여야 한다.
             atomic.append(item["url"])
         lines.append(f"  발송 문구: {item['lms_message']}")
+        # 답변이 인용한 발송 문구를 화면이 «복사할 문구»로 가를 때 원본으로 쓴다
+        # (effects/messages.py). 요건 일치와 무관하다 — 폴백 문구도 답변에 인용되면 같은 꼴로 선다.
+        messages.append(item["lms_message"])
         # 발송 화면 제안(act._propose_lms)은 요건에 맞는 것에만 붙는다 — 폴백 문구가 나가면
         # 그 고객과 무관한 문자가 나간다.
         if matched[key]:
@@ -139,4 +143,4 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
                atomic=atomic,
                # 발송 화면 연계(act.py)가 쓰는 문구. 승낙 턴이 문구를 다시 만들지 않도록
                # 이번 턴의 산출을 그대로 들려 보낸다(CLAUDE.md §10 「제안한 턴이 남긴 것으로 정한다」).
-               meta={"lms": lms})
+               meta={"lms": lms, "messages": messages})
