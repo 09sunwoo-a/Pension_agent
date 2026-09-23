@@ -288,10 +288,12 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
         customer_id: str = "", session_id: str = "default") -> dict:
     """한 턴을 돌려 이벤트를 종류별로 모은 dict 를 돌려준다.
 
-        {"answer": str, "intent": str|None, "links": [..], "sources": [..], "followups": [..],
+        {"answer": str, "intent": str|None, "links": [..], "messages": [..], "sources": [..],
+         "followups": [..],
          "action": dict|None, "clarify": dict|None, "error": str|None, "progress": [..]}
     """
-    out: dict = {"answer": "", "intent": None, "links": [], "sources": [], "followups": [],
+    out: dict = {"answer": "", "intent": None, "links": [], "messages": [], "sources": [],
+                 "followups": [],
                  "action": None, "clarify": None, "error": None, "progress": [], "raw": []}
     for ev in events(question, x_client_user, customer_id=customer_id, session_id=session_id):
         t = ev.get("type")
@@ -301,6 +303,7 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
             out["answer"] += ev.get("text", "")
             out["intent"] = ev.get("intent")
             out["links"] = list(ev.get("links") or [])
+            out["messages"] = list(ev.get("messages") or [])
         elif t == "sources":
             out["sources"] = list(ev.get("items") or [])
         elif t == "followups":
@@ -328,6 +331,10 @@ def _render(ev: dict) -> None:
         for item in ev.get("links") or []:
             print(f"  [화면] {item.get('screen')} {item.get('label') or ''} → {item.get('url')}",
                   flush=True)
+        # 본문이 인용한 고객 발송 문구 — 프론트는 본문의 그 인용을 화법 블록 대신 복사 블록으로
+        # 그린다. 터미널에서는 복사할 값(copy)을 따로 세운다.
+        for item in ev.get("messages") or []:
+            print(f"  [{item.get('label') or '고객 발송 문구'} · 복사]\n{item.get('copy')}", flush=True)
     elif t == "action":
         # 본문 끝에 제안 문장이 이미 있다. 여기서는 «버튼 자리»만 알린다 — 다음 턴에 네/아니오.
         print(f"  [연계 제안 · {ev.get('label')}] — 다음 질문에 «네» 또는 «아니오»로 답합니다", flush=True)

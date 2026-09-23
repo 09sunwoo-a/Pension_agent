@@ -56,7 +56,8 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
 
     {"type": "progress",  "text": "질문 내용을 파악하고 있어요"}            0개 이상 · 답변 전에
     {"type": "answer",    "text": "<본문>", "intent": "situation",
-                          "links": [{"screen","url","label"}]}             1개 · links 는 항상(없으면 [])
+                          "links": [{"screen","url","label"}],
+                          "messages": [{"kind","label","text","copy"}]}    1개 · links·messages 는 항상(없으면 [])
     {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용.
                                                                           본문 끝의 제안 문장은 그대로 둔다
     {"type": "clarify",   "question": "...", "options": ["..."]}           되묻기 턴에만 — 선택지 버튼용
@@ -71,6 +72,10 @@ answer.links 는 **본문이 인용한 단말 화면의 딥링크**다(`mystar-l
 프론트가 조립하지 않는 이유는 `mode`(운영·개발)와 `scnNo` 자릿수 판정이 백엔드에만 있어야
 하기 때문이다(consult_agent/effects/screens.py). 커스텀 스킴이라 프론트의 링크 sanitizer 가
 href 를 지울 수 있다 — 스킴을 허용 목록에 넣어야 한다.
+
+answer.messages 는 **본문이 인용한 고객 발송 문구(LMS)**다. 프론트는 큰따옴표 인용을 화법
+블록으로 그리는데, `text` 와 내용이 같은 인용은 화법이 아니라 «복사할 발송 문구» 블록으로
+그리고 복사 버튼에는 `copy` 를 넣는다(consult_agent/effects/messages.py).
 
 answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — followups 로만 간다. 연계 제안
 문장(«… 보여드릴까요? / 연계해드릴까요? (네 / 아니오)»)은 답변의 마지막 문장으로 남긴다 — 직원이
@@ -275,6 +280,9 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
         # 화면번호를 감싸는 재료라, 본문 없이는 그릴 수 없고 본문과 함께 도착해야 한다.
         # 없으면 빈 목록을 보낸다(sources·followups 와 같은 규약).
         "links": list(result.get("links") or []),
+        # 본문이 인용한 고객 발송 문구(LMS). links 와 같은 이유로 answer 의 필드다 — 본문의
+        # 인용을 화법 블록 대신 복사 블록으로 바꿔 그리는 재료라 본문과 함께 도착해야 한다.
+        "messages": list(result.get("messages") or []),
     }]
     action = result.get("pending_action")
     # 동명이인 목록을 띄운 쪽지 턴(`candidates`)은 네/아니오로 답할 턴이 아니다 — 버튼을 그리게

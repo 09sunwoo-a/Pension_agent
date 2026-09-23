@@ -194,6 +194,37 @@ def check_outreach() -> int:
     hit = "요건 일치: " in text and "요건 일치: 없음" not in text and "지금 안내할 것 2건" in text
     print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 «요건 일치: <요건 이름>»이 붙는다")
     ok += hit
+
+    # ⑥ 답변이 인용한 발송 문구는 화법 대사와 갈라 `messages` 로 실린다(effects/messages.py).
+    #
+    # 회귀 대상(2026-09-23 시연 화면): 발송 문구가 큰따옴표 인용이라 «고객에게 이렇게 말씀해
+    # 보세요» 화법 블록으로 섰다 — 직원이 말할 대사와 발송 화면에 붙여 넣을 문자가 구분되지
+    # 않았다. 답변은 문구의 줄바꿈을 한 줄로 이어 쓰기도 하므로, 복사 값은 원본으로 돌린다.
+    from pension_agent.consult_agent.effects import messages as lms_messages
+    original = ev["meta"]["messages"][0]
+    flat = " ".join(original.split())
+    answer = (f"이 대사로 먼저 말씀해 보세요. “노후 자금 한번 같이 점검해 보시죠.”\n\n"
+              f"고객님께 보낼 발송 문구는 다음과 같습니다.\n\n“{flat}”")
+    got = lms_messages.messages_in(answer, lms_messages.canonical([ev]))
+    hit = (len(got) == 1 and got[0]["kind"] == "lms" and got[0]["text"] == flat
+           and got[0]["copy"] == original and "\n" in got[0]["copy"])
+    print(f"{'✓' if hit else '✗'} 발송 문구 인용만 messages 로 실리고(화법 대사는 빠진다), "
+          f"복사 값은 줄바꿈이 살아 있는 원본이다")
+    ok += hit
+
+    # 원장에 outreach 재료가 없는 턴(「더 짧게」로 다시 쓴 턴)의 문구도 `(광고)` 로 알아본다 —
+    # 원본이 없으니 복사 값은 본문 그대로다.
+    short = "(광고) 김현수 고객님, KB국민은행입니다. 이벤트 확인해 보세요. 무료수신거부 080-XXX-XXXX"
+    got = lms_messages.messages_in(f"줄인 문구예요.\n\"{short}\"", [])
+    hit = len(got) == 1 and got[0]["text"] == short and got[0]["copy"] == short
+    print(f"{'✓' if hit else '✗'} 재료 없는 턴의 발송 문구도 (광고) 접두로 알아보고 본문 그대로 복사한다")
+    ok += hit
+
+    # 폴백 콘텐츠의 문구도 인용되면 같은 꼴로 선다(발송 화면 제안과 달리 복사는 막지 않는다 —
+    # 본문에 이미 떠 있는 문구다). 재료에 원본이 실려 있어야 한다.
+    hit = (not none_cid) or bool(none_ev and none_ev["meta"]["messages"])
+    print(f"{'✓' if hit else '✗'} 요건 무관 콘텐츠의 발송 문구도 재료가 원본을 싣는다")
+    ok += hit
     return ok
 
 
