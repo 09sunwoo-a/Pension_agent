@@ -108,6 +108,11 @@ def _render_screen(card: dict) -> str:
     lines = [f"■ {card['screen']} {card['title']}  ({card.get('group')})"]
     if card.get("summary"):
         lines.append(f"· 무슨 화면인지: {card['summary']}")
+    # «같은 말»은 판단이 아니라 재료로 준다. 이 줄이 없으면 「디폴트옵션 등록 화면」을 물었을 때
+    # 「사전지정운용제도 신청」 화면이 같은 것인지를 되묻기 판정·작성 LLM 이 매번 따로 정하고,
+    # 턴마다 «[06-12-610] 에서 하세요»와 «자료로는 확인이 어려워요»로 갈렸다(config.SCREEN_TERM_ALIASES).
+    if card.get("aliases"):
+        lines.append(f"· 같은 말: {' · '.join(card['aliases'])}")
     if card.get("confidence"):
         lines.append(f"· 근거 신뢰도: {card['confidence']}")
     # 비고는 역할 선언(role)대로만 싣는다 — authoring(저작·검증 메모)은 직원에게 띄우지
