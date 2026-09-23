@@ -87,7 +87,7 @@ from tests.consult.index import (
     check_trigger_entrances,
 )
 from tests.consult.tax_credit import check_tax_credit_calc
-from tests.consult.memo import check_memo, check_memo_edit, check_memo_schedule
+from tests.consult.memo import check_memo, check_memo_edit, check_memo_schedule, check_memo_by_name
 from tests.consult.meta import (
     check_architecture_doc,
     check_node_label_collision,
@@ -166,6 +166,7 @@ def main() -> int:
         check_memo()
         check_memo_edit()
         check_memo_schedule()
+        check_memo_by_name()
         check_today_material()
         check_account_state()
         check_labeled_pairs()

@@ -117,9 +117,11 @@ try:
 
     # ── 붙었을 때: 인증 헤더 · 주소 · 도구 인자 ──
     _memo_tool = _FakeTool("send_memo")
-    _adapter = _use_mcp(tools=[_memo_tool, _FakeTool("search_emp_and_send_memo")])
-    check(_mcp.install() is True and note.SENDER is _mcpw.send_memo,
-          "mcp.install: 설정이 갖춰지면 위층(note)의 발송 함수로 등록된다")
+    _name_tool = _FakeTool("search_emp_and_send_memo")
+    _adapter = _use_mcp(tools=[_memo_tool, _name_tool])
+    check(_mcp.install() is True and note.SENDER is _mcpw.send_memo
+          and note.NAME_SENDER is _mcpw.search_emp_and_send_memo,
+          "mcp.install: 설정이 갖춰지면 위층(note)의 발송 함수로 등록된다(사번 · 이름)")
 
     _sent = note.send_note_sync(["3902172"], _note)
     check(_sent["status"] == "sent", "mcp: 승낙받은 쪽지가 MCP 도구로 나가고 발송으로 판정된다",
@@ -165,6 +167,13 @@ try:
           "mcp: SDK 활성화·인증 정보 등록은 접속 전에 한 번뿐이다", str(_FakeSdk.log[:2]))
     check(_FakeSdk.log.count(("context", "3902172", "jwt-test")) == 2,
           "mcp: 요청 컨텍스트를 접속할 때와 **호출 직전에** 다시 세운다", str(_FakeSdk.log))
+
+    # 이름 발송 — 위 호출 횟수 검사 뒤에 둔다(그 검사가 호출 수를 센다).
+    note.send_note_by_name_sync("김국민", "미아동지점", _note)
+    check(_name_tool.calls[-1:] == [{"user_name": "김국민", "TITLE": _note.title,
+                                     "BODY": _note.body, "group_name": "미아동지점"}],
+          "mcp.workb: 이름 발송은 user_name·group_name·TITLE·BODY 규격 이름으로 나간다",
+          str(_name_tool.calls))
 
     # ── 발송은 재시도하지 않는다 — 타임아웃은 «안 나갔다»가 아니라 «나갔는지 모른다» ──
     _flaky = _FakeTool("send_memo", fail=99)

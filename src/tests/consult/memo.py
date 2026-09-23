@@ -682,3 +682,151 @@ def check_memo_schedule() -> int:
     print(f"{'✓' if hit else '✗'} 실행기가 없으면 보내지 않고, 시연 실행기는 즉시 한 통을 보내며 «예약했어요»·기록을 남긴다(실패면 말하지 않는다)")
     ok += hit
     return ok
+
+
+def check_memo_by_name() -> int:
+    """이름으로 보내기(§10 「이름으로 보내기」 · WorkB `search_emp_and_send_memo`).
+
+      ① 받는 사람 이름·부서는 코드가 꼴로 읽는다 — 고객 이름·호칭·보통명사는 읽지 않는다
+      ② 결과 판정은 셋이다 — 1명(이미 발송) · 여러 명(목록) · 0명. success 만 보고 접지 않는다
+      ③ 1명이면 결과 문장에 응답의 사번을 밝힌다
+      ④ 여러 명이면 보내지 않고 목록을 보여주며, 고른 사번으로 `send_memo` 를 쓴다(재검색 없음)
+      ⑤ 0명이면 찾지 못했다고 말하고 초안을 걸어 둔다
+      ⑥ 사번을 함께 적으면 사번으로 보낸다 · 시연 실행기는 이름 예약도 받는다
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from pension_agent import note, session_store
+    from pension_agent.consult_agent.effects import actions as REG
+    from pension_agent.consult_agent.effects import memo
+    from pension_agent.consult_agent.nodes import act
+    from pension_agent.strategy_agent import customer as CUST
+
+    ok = 0
+    customer_nm = CUST.PERSONAS[0].nm
+    table = {
+        "김국민에게 쪽지 보내줘": ("김국민", ""),
+        "데이터시스템부(P) 김국민한테": ("김국민", "데이터시스템부(P)"),
+        "미아동지점 김국민 차장님께 보내줘": ("김국민", "미아동지점"),
+        "김국민 대리한테 전달해줘": ("김국민", ""),
+        "박정호 고객 건 김국민한테 보내줘": ("김국민", ""),
+        "남궁민수님께": ("남궁민수", ""),
+        "고객에게 보내줘": None, "본인에게": None, "팀장님께 보내줘": None, "나한테 보내줘": None,
+        "김대리한테 보내줘": None, "정리해서 쪽지 보내줘": None,
+        f"{customer_nm}님께 보내줘": None,                                 # 시연 고객 이름
+        "김국민이랑 이영희한테": act.NAME_MANY, "김국민한테, 이영희에게도": act.NAME_MANY,
+    }
+    misses = {q: act.recipient_name(q) for q, want in table.items() if act.recipient_name(q) != want}
+    hit = not misses
+    print(f"{'✓' if hit else '✗'} 받는 사람 이름·부서를 꼴로 읽고 고객·호칭·보통명사는 읽지 않는다"
+          + (f" — {misses}" if misses else ""))
+    ok += hit
+
+    one = ('{"success": true, "data": {"message": "Successfully sent memo to 1 recipients.", '
+           '"recipients": ["3901182"], "api_response": "0;OK"}}')
+    many = ('{"success": true,"data": {"resultCode": 200,"resultMessage": "SUCCESS","resultData": ['
+            '{"user_id": "5905382","group_name": "데이터시스템부(P)","dsgt": "대리"},'
+            '{"user_id": "1631024","group_name": "미아동지점","dsgt": "차장"}]}}')
+    none = '{"success": true,"data": {"resultCode": 204,"resultMessage": "NO CONTENT","resultData": null}}'
+    parsed = [note.parse_name_result(x) for x in (one, many, none, '{"success": false, "error": "x"}', "?")]
+    hit = ([r["status"] for r in parsed] == ["sent", "candidates", "not_found", "failed", "unknown"]
+           and parsed[0]["recipients"] == ["3901182"] and len(parsed[1]["candidates"]) == 2)
+    print(f"{'✓' if hit else '✗'} 이름 발송 결과는 1명(발송)·여러 명(목록)·0명으로 갈린다 — success 만 보지 않는다")
+    ok += hit
+
+    orig = (note.SENDER, note.NAME_SENDER, memo.draft)
+    orig_env = {k: os.environ.get(k) for k in (note.EMP_NO_ENV, REG.SCHEDULER_ENV)}
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    os.environ.pop(REG.SCHEDULER_ENV, None)
+    calls: list[tuple] = []
+    answer = {"raw": one}
+
+    async def _by_name(name, group, title, body):
+        calls.append(("name", name, group))
+        return answer["raw"]
+
+    async def _by_id(ids, title, body):
+        calls.append(("id", ids))
+        return '{"success": true}'
+
+    note.use_name_sender(_by_name)
+    note.use_sender(_by_id)
+    base, _ = memo.assemble("상담 정리", "본문", tail_html="", tail_note="", to="x", recipients=[])
+    memo.draft = lambda state, **kw: (memo.readdress(base, kw["recipients"], kw["to"]), "")
+    tmp = tempfile.TemporaryDirectory()
+    orig_dir = session_store.SESSION_DATA_DIR
+    session_store.SESSION_DATA_DIR = Path(tmp.name)
+
+    def _offer(q: str) -> dict:
+        return act._memo_offer({"question": q, "customer_id": "CM", "answer": "요약", "evidence": [{}]})
+
+    def _say(q: str, pending: dict) -> dict:
+        return act.confirm_action({"question": q, "customer_id": "CM",
+                                   "history": [{"question": "q", "pending_action": pending}]})
+
+    try:
+        o1 = _offer("김국민에게 쪽지 보내줘")
+        p1 = o1["pending_action"]
+        before_yes = len(calls)
+        sent = _say("네", p1)
+        answer["raw"] = many
+        listed = _say("네", p1)
+        pc = listed["pending_action"]
+        yes_again = _say("네", pc)
+        picked = _say("2번", pc)
+        by_group = _say("데이터시스템부", pc)
+        by_id = _say("사번 1631024로", pc)
+        not_hour = act._pick("2시에 보내줘", pc["candidates"])
+        n_before = len(calls)
+        final = _say("네", picked["pending_action"])
+        final_calls = calls[n_before:]
+        answer["raw"] = none
+        missing = _say("네", p1)
+        with_id = _offer("김국민(3902172)한테 보내줘")
+        os.environ[REG.SCHEDULER_ENV] = "demo"
+        answer["raw"] = one
+        sched = _offer("미아동지점 김국민 차장님께 10월 5일에 보내줘")
+        sched_done = _say("네", sched["pending_action"])
+    finally:
+        session_store.SESSION_DATA_DIR = orig_dir
+        tmp.cleanup()
+        note.SENDER, note.NAME_SENDER, memo.draft = orig
+        for k, v in orig_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    hit = (p1["user_name"] == "김국민" and p1["recipients"] == []
+           and o1["answer"].endswith("이대로 쪽지를 보낼까요? 받는 사람은 김국민 님이에요. (네 / 아니오)")
+           and before_yes == 0                                            # 제안 턴에는 부르지 않는다
+           and sent["answer"] == "쪽지를 보냈어요 — 받는 사람: 김국민 님(사번 3901182).")
+    print(f"{'✓' if hit else '✗'} 승낙한 뒤에만 이름 발송을 부르고, 1명이면 받은 사람의 사번을 밝힌다")
+    ok += hit
+
+    hit = (listed["answer"] == ("김국민 님이 2명 있어요. 어느 분께 보낼까요?\n"
+                                "1. 데이터시스템부(P) 대리 · 사번 5905382\n"
+                                "2. 미아동지점 차장 · 사번 1631024")
+           and yes_again["answer"] == listed["answer"]                    # 「네」로는 고른 게 아니다
+           and picked["pending_action"]["recipients"] == ["1631024"]
+           and "받는 사람은 미아동지점 김국민 님(사번 1631024)이에요" in picked["answer"]
+           and by_group["pending_action"]["recipients"] == ["5905382"]
+           and by_id["pending_action"]["recipients"] == ["1631024"] and not_hour is None
+           and final_calls == [("id", ["1631024"])]                         # 재검색 없이 사번 발송
+           and "미아동지점 김국민 님(사번 1631024)" in final["answer"])
+    print(f"{'✓' if hit else '✗'} 여러 명이면 목록을 보여주고, 고른 사번으로 다시 제안해 사번으로 보낸다")
+    ok += hit
+
+    hit = (missing["answer"] == "김국민 님을 찾지 못했어요. 이름이나 부서를 다시 확인해 주세요."
+           and (missing["pending_action"] or {}).get("user_name") == "김국민"
+           and with_id["pending_action"]["recipients"] == ["3902172"]
+           and not with_id["pending_action"]["user_name"]
+           and "받는 사람은 김국민 님(사번 3902172)이에요" in with_id["answer"]
+           and sched["pending_action"]["group_name"] == "미아동지점"
+           and sched_done["answer"] == ("10월 5일(월) 오전 9시에 보내도록 예약했어요 — "
+                                        "받는 사람: 미아동지점 김국민 님(사번 3901182)."))
+    print(f"{'✓' if hit else '✗'} 0명이면 초안을 걸어 두고, 사번을 함께 적으면 사번으로, 시연 실행기는 이름 예약도 받는다")
+    ok += hit
+    return ok

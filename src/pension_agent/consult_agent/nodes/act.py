@@ -129,11 +129,10 @@ NO_RECIPIENT = ("쪽지를 보낼 받는 사람을 알 수 없어요 — 로그�
 def employee_no(question: str) -> str | None:
     """직원이 말한 **수신자 사번**. 없으면 None(= 본인에게 보낸다).
 
-    ━━ 사번을 받을 때만 타인 전송이다 ━━
-    이름·부서로 사람을 찾아 보내는 WorkB 도구(`search_emp_and_send_memo`)가 있지만 쓰지
-    않는다. 동명이인이 갈리는 자리를 검색에 맡기면 **엉뚱한 사람의 받은편지함에 고객 정보가
-    남고**, 그건 확인 절차로도 못 막는다 — 직원은 자기가 승낙한 게 누구 앞인지 안 읽는다.
-    사번은 직원이 직접 적은 것이라 그 책임이 갈리지 않는다.
+    ━━ 사번이 가장 정확하다 ━━
+    사번은 직원이 직접 적은 것이라 그 책임이 갈리지 않는다. 이름으로 보내는 길도 있지만
+    (`recipient_name` · §10 「이름으로 보내기」) 1명이면 발송 전에 사번을 확인할 수 없다 —
+    그래서 사번과 이름을 함께 적으면 사번을 쓴다(`_recipients`).
 
     **숫자 꼴만으로 판정하지 않는다.** 7자리 숫자는 금액에도 나온다("5000000원"). 사번이라는
     단서(`_EMP_BEFORE`·`_EMP_AFTER`·문장의 「사번」)가 있는 것만 읽는다 — 못 알아보면
@@ -152,17 +151,122 @@ def employee_no(question: str) -> str | None:
     return None
 
 
-def _recipients(state: AgentState) -> tuple[list[str], str, bool]:
-    """(받는 사람 사번, 화면에 밝힐 표기, 본인인가). 사번이 없으면 빈 목록이다.
+# ─────────────────────────────────────────────────────────────
+# 받는 사람 이름 — 코드가 규칙으로 읽는다(§10 「이름으로 보내기」)
+#
+# 이름은 사번보다 헷갈리는 말이 많다 — 「고객에게」·「본인에게」·「팀장님께」·「나한테」는
+# 사람 이름이 아니고, 「박정호 고객 건 김국민한테」의 박정호는 고객이다. 고객 이름을 받는
+# 사람으로 잘못 읽으면 그 고객과 이름이 같은 직원에게 고객 정보가 나간다. 그래서 읽는 꼴을
+# 좁힌다: 성씨로 시작하는 한글 2~4자 + (직급·님·씨) + 사람 조사. 이름 바로 앞의
+# 「~부·~지점·~센터·~팀·~본부」는 부서로 읽는다. LLM 이 뽑지 않는다(루트 규칙 2).
+# ─────────────────────────────────────────────────────────────
+
+_SURNAMES = ("남궁", "황보", "제갈", "선우", "독고", "사공", "서문",
+             "김", "이", "박", "최", "정", "강", "조", "윤", "장", "임", "한", "오", "서", "신",
+             "권", "황", "안", "송", "전", "홍", "유", "고", "문", "양", "손", "배", "백", "허",
+             "남", "심", "노", "하", "곽", "성", "차", "주", "우", "구", "민", "류", "나", "진",
+             "지", "엄", "채", "원", "천", "방", "공", "현", "함", "변", "염", "여", "추", "도",
+             "소", "석", "선", "설", "마", "길", "연", "위", "표", "명", "기", "반", "왕", "금",
+             "옥", "육", "인", "맹", "제", "모", "탁", "국", "어", "은", "편", "용", "예", "경",
+             "봉", "태", "피", "승", "빈", "라", "견", "당", "화")
+_TITLES = ("부센터장", "센터장", "지점장", "본부장", "부부장", "팀장", "실장", "부장", "차장",
+           "과장", "대리", "주임", "계장", "사원", "행원", "선임", "책임", "수석", "이사", "상무",
+           "전무", "부행장", "행장", "매니저", "프로", "RM", "PB")
+#: 이름 자리에 와도 사람 이름이 아닌 말. 성씨로 시작하는 보통명사가 여기 걸린다.
+_NOT_NAMES = frozenset((
+    "고객", "고객님", "고객분", "본인", "직원", "행원", "담당", "담당자", "모두", "전체", "우리",
+    "저희", "여기", "거기", "이분", "그분", "저분", "이사람", "그사람", "사번", "본부", "지점",
+    "부서", "기존", "신규", "정리", "내용", "요약", "상담", "이거", "그거", "이번", "다음",
+    "전화", "문자", "쪽지", "메모", "사람", "동료", "선배", "후배", "상사", "대상", "신청",
+    "전달", "공유", "나에", "제게", "원장", "주인", "고객들", "직원들", "각자", "모든", "전원",
+    *_TITLES))
+_GROUP_TAIL = r"(?:부|지점|센터|팀|본부|실|사업부|영업점)(?:\([^)]{1,4}\))?"
+_NAME = re.compile(
+    rf"(?:(?P<g>[가-힣A-Za-z0-9·]{{1,20}}{_GROUP_TAIL})\s+)?"
+    rf"(?<![가-힣])(?P<n>(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?)"
+    rf"\s*(?:\(\s*{note.EMP_NO_PATTERN}\s*\))?\s*"
+    rf"(?:(?:{'|'.join(_TITLES)})\s*)?(?:님|씨)?\s*(?:한테|에게|께|앞으로)")
+
+
+#: 이름 둘을 이어 말한 꼴(「김국민이랑 이영희한테」) — 이름 발송은 한 사람만 받으므로 고르지 않는다.
+_NAME_AND = re.compile(
+    rf"(?<![가-힣])(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?\s*(?:님|씨)?\s*(?:이랑|랑|하고|와|과|,|및)\s*"
+    rf"(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?\s*(?:님|씨)?\s*(?:한테|에게|께|앞으로)")
+
+
+class _Many:
+    """이름 후보가 둘 이상 — 코드가 고르지 않는다."""
+
+
+NAME_MANY = _Many()
+
+
+def recipient_name(text: str) -> tuple[str, str] | _Many | None:
+    """직원이 말한 **받는 사람 이름**과 부서. 없으면 None, 둘 이상이면 `NAME_MANY`.
+
+    읽지 않는 것: 보통명사(`_NOT_NAMES`) · 직급만 붙은 호칭(「김대리」) · 시연 고객 명부의
+    이름(고객 이름으로 직원을 찾는 일은 없다) · 「고객」이 바로 붙은 이름(조사가 안 붙어
+    애초에 꼴에 안 걸린다).
+    """
+    if _NAME_AND.search(text or ""):
+        return NAME_MANY
+    hits: dict[str, str] = {}
+    for m in _NAME.finditer(text or ""):
+        name = m.group("n")
+        if name in _NOT_NAMES or name[1:] in _TITLES or name in _customer_names():
+            continue
+        group = (m.group("g") or "").strip()
+        if name not in hits or (group and not hits[name]):
+            hits[name] = group
+    if len(hits) > 1:
+        return NAME_MANY
+    return next(iter(hits.items()), None)
+
+
+def _customer_names() -> frozenset[str]:
+    try:
+        from pension_agent.strategy_agent import customer as strategy_customer  # noqa: PLC0415
+        return frozenset(getattr(p, "nm", "") for p in strategy_customer.PERSONAS)
+    except Exception:          # noqa: BLE001 — 명부를 못 읽어도 이름 읽기를 막지 않는다
+        return frozenset()
+
+
+def name_label(name: str, group: str = "", emp_no: str = "") -> str:
+    """화면에 세우는 받는 사람 표기 — 「미아동지점 김국민 님(사번 1631024)」."""
+    head = f"{group} {name} 님" if group else f"{name} 님"
+    return f"{head}(사번 {emp_no})" if emp_no else head
+
+
+class Recipient(dict):
+    """받는 사람 판정 — ids(사번) · label(표기) · to_self · user_name · group_name · unclear."""
+
+
+#: 받는 사람 이름을 하나로 정하지 못한 턴의 안내.
+NAME_UNCLEAR = ("받는 사람 이름을 하나로 정하지 못했어요. «김국민한테»처럼 한 분만 "
+                "말씀해 주세요.")
+
+
+def _recipients(state: AgentState) -> Recipient:
+    """처음 쪽지 요청 턴의 받는 사람. 사번 → 이름 → 본인 순이다.
 
     **정하는 것은 코드다.** 대화에서 LLM 이 사번을 뽑아내게 두면 문장 하나로 수신자가
-    갈릴 수 있다(`memo.draft` 머리말과 같은 자리).
+    갈릴 수 있다(`memo.draft` 머리말과 같은 자리). 사번과 이름을 함께 적으면(「김국민
+    (3902172)한테」) 사번으로 보내고 이름은 표기에만 쓴다 — 이름 검색을 하지 않는다.
     """
-    other = employee_no(state.get("question") or "")
+    question = state.get("question") or ""
+    other, named = employee_no(question), recipient_name(question)
     if other:
-        return [other], f"사번 {other}", False
+        label = (name_label(named[0], named[1], other) if isinstance(named, tuple)
+                 else f"사번 {other}")
+        return Recipient(ids=[other], label=label, to_self=False)
+    if named is NAME_MANY:
+        return Recipient(ids=[], label="", to_self=False, unclear=NAME_UNCLEAR)
+    if isinstance(named, tuple):
+        return Recipient(ids=[], label=name_label(*named), to_self=False,
+                         user_name=named[0], group_name=named[1])
     mine = note.employee_id(state.get("employee_id"))
-    return ([mine], MEMO_DEFAULT_TO, True) if mine else ([], "", True)
+    return Recipient(ids=[mine] if mine else [], label=MEMO_DEFAULT_TO if mine else "",
+                     to_self=True)
 
 
 def _wants_memo(state: AgentState) -> bool:
@@ -233,14 +337,18 @@ def _memo_offer(state: AgentState) -> dict[str, Any]:
     폴백이 있지만 쪽지에는 없다 — 근거 원문 덤프를 남의 받은편지함에 넣는 것은 답이 아니고,
     보낸 쪽지는 되돌릴 수 없다(루트 규칙 5).
     """
-    ids, label, to_self = _recipients(state)
+    who = _recipients(state)
     # 화면 답변이 비어 있으면(직전 답변을 재료로 붙인 턴 — `_with_memo_material`) 사유만 선다.
     head = (state.get("answer") or "").strip()
-    if not ids:
+    if who.get("unclear"):
+        return {"answer": f"{head}\n\n— {who['unclear']}" if head else who["unclear"]}
+    if not who["ids"] and not who.get("user_name"):
         return {"answer": f"{head}\n\n— {NO_RECIPIENT}" if head else NO_RECIPIENT}
-    found, why = memo.draft(state, recipients=ids, to=label, to_self=to_self)
+    found, why = memo.draft(state, recipients=who["ids"], to=who["label"], to_self=who["to_self"])
     if found is None:
         return {"answer": f"{head}\n\n— {why}" if head else why}
+    if who.get("user_name"):
+        found = memo.readdress(found, [], who["label"], who["user_name"], who.get("group_name", ""))
     # 발송 시각 — 단서가 붙은 날짜만 읽는다(effects/schedule.py). 못 가르면 초안은 세우되
     # 승낙으로 보내지 않고 언제 보낼지 묻는다(`when_unclear`).
     timing = schedule.parse(state.get("question") or "", clock.now())
@@ -254,6 +362,8 @@ def _memo_offer(state: AgentState) -> dict[str, Any]:
 WHEN_MANY = "언제 보낼지 하나로 정하지 못했어요."
 WHEN_PAST = "말씀하신 발송 시각이 이미 지났어요."
 _WHEN_NOTES = {"many": WHEN_MANY, "past": WHEN_PAST}
+#: 이름으로 찾은 직원이 없을 때. `who` 는 「김국민 님」 꼴의 표기다.
+NAME_NOT_FOUND = "{who}을 찾지 못했어요. 이름이나 부서를 다시 확인해 주세요."
 #: 예약 실행기가 없을 때(`actions.SCHEDULER_ENV`). 보내지 않았다는 사실을 말한다.
 SCHEDULE_OFF = "예약 발송이 아직 연결되지 않아 보내지 않았어요. 지금 보내려면 쪽지를 다시 부탁해 주세요."
 #: 발송 시각이 정해지지 않은 초안의 제안 문장 — «네»로 보낼 수 없는 제안이다.
@@ -285,6 +395,7 @@ def _offer_draft(found: memo.Draft, state: AgentState, head: str = "",
               "title": found.title, "text": found.text, "html": found.html,
               "body": found.body, "tail_html": found.tail_html, "tail_note": found.tail_note,
               "send_at": found.send_at, "send_label": found.send_label,
+              "user_name": found.user_name, "group_name": found.group_name,
               "when_unclear": unclear,
               "to": label, "recipients": list(found.recipients),
               "params": {"customer_id": state.get("customer_id") or ""}}
@@ -656,25 +767,38 @@ RECIPIENT_UNCLEAR = ("받는 사람을 사번과 본인 중 하나로 정하지 
                      "바꾸시려면 «사번 3902173한테» 또는 «나한테»처럼 한쪽만 말씀해 주세요.")
 
 
-def _both_named(order: str) -> bool:
-    """사번과 본인을 한 말에 함께 댔나 — 코드가 고르지 않는 자리(`_readdress`)."""
-    return bool(employee_no(order)) and any(w in order for w in _SELF_WORDS)
+def _both_named(order: str) -> str:
+    """받는 사람을 코드가 못 가르는 말인가 — 그 안내 문장, 아니면 "".
+
+    사번(또는 이름)과 본인을 함께 댔거나, 이름 후보가 둘 이상이면 고르지 않는다(`_readdress`).
+    사번과 이름을 함께 댄 것은 여기 해당하지 않는다 — 사번으로 보내고 이름은 표기에 쓴다.
+    """
+    named = recipient_name(order)
+    if named is NAME_MANY:
+        return NAME_UNCLEAR
+    if (employee_no(order) or named) and any(w in order for w in _SELF_WORDS):
+        return RECIPIENT_UNCLEAR
+    return ""
 
 
-def _readdress(order: str, pending: dict, state: AgentState) -> tuple[list[str], str] | None:
-    """직원의 말이 받는 사람을 바꿨으면 (사번 목록, 표기). 안 바꿨거나 못 가르면 None.
+def _readdress(order: str, pending: dict, state: AgentState) -> tuple | None:
+    """직원의 말이 받는 사람을 바꿨으면 (사번 목록, 표기, 이름, 부서). 안 바꿨거나 못 가르면 None.
 
     **말이 없으면 직전 수신자를 둔다** — 처음 요청 턴처럼 «사번이 없으면 본인»으로 읽으면
     「앞에 --를 붙여줘」마다 타인 앞으로 걸린 초안이 조용히 본인 앞으로 바뀐다.
     사번과 본인을 함께 말하면(「나한테 말고 사번 3902173한테」) 코드가 고르지 않는다 —
     `employee_no` 가 후보 둘을 읽지 않는 것과 같은 이유다. 제안 문장이 누구 앞인지 밝힌다.
     """
-    other = employee_no(order)
+    other, named = employee_no(order), recipient_name(order)
     to_self = any(w in order for w in _SELF_WORDS)
-    if other and to_self:
+    if (other or named) and to_self or named is NAME_MANY:
         return None
+    name, group = named if isinstance(named, tuple) else ("", "")
     if other:
-        ids, label = [other], f"사번 {other}"
+        ids, label, name, group = [other], (name_label(name, group, other) if name
+                                            else f"사번 {other}"), "", ""
+    elif name:
+        ids, label = [], name_label(name, group)
     elif to_self:
         mine = note.employee_id(state.get("employee_id"))
         if not mine:
@@ -682,9 +806,10 @@ def _readdress(order: str, pending: dict, state: AgentState) -> tuple[list[str],
         ids, label = [mine], MEMO_DEFAULT_TO
     else:
         return None
-    if ids == list(pending.get("recipients") or []):
+    if (ids == list(pending.get("recipients") or []) and name == (pending.get("user_name") or "")
+            and group == (pending.get("group_name") or "")):
         return None
-    return ids, label
+    return ids, label, name, group
 
 
 def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
@@ -696,12 +821,28 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     if plain and _PLAIN_NO.match(plain):                                     # ①
         return _reply(pending, state)
 
+    # 이름 발송이 여러 명을 돌려준 뒤의 턴 — 직원이 목록에서 고른다(「1번」·「미아동지점」·
+    # 「사번 1631024」). 고르면 그 사번으로 다시 제안한다(이름을 다시 검색하지 않는다).
+    cands = pending.get("candidates") or []
+    if cands:
+        picked = _pick(question, cands)
+        if picked is not None:
+            c = cands[picked]
+            found = memo.readdress(found, [c["user_id"]],
+                                   name_label(found.user_name, c.get("group_name", ""), c["user_id"]))
+            observability.step("confirm", pending=pending.get("label"), reply="accept")
+            return _memo_turn(found, state, unclear=bool(pending.get("when_unclear")))
+        if plain and _PLAIN_YES.match(plain):
+            return {"answer": _candidates_text(found.user_name, cands), "sources": [],
+                    "pending_action": pending}
+
     paste = _pasted(question)
     order = paste[0] if paste else question
-    if _both_named(order):
+    unclear_who = _both_named(order)
+    if unclear_who:
         # 누구 앞인지 코드가 못 가른다 — 바꾸지 않고, 그 사실과 지금 받는 사람을 밝혀 다시 묻는다.
         observability.step("confirm", pending=pending.get("label"), reply="unclear")
-        return _memo_turn(found, state, head=RECIPIENT_UNCLEAR)
+        return _memo_turn(found, state, head=unclear_who, unclear=bool(pending.get("when_unclear")))
     moved = _readdress(order, pending, state)                               # ②
     if moved:
         found = memo.readdress(found, *moved)
@@ -783,6 +924,40 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     return {"pending_action": None}
 
 
+_ORDINALS = ("첫", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열")
+
+
+def _pick(text: str, cands: list[dict]) -> int | None:
+    """후보 목록에서 직원이 고른 것의 번호(0부터). 못 고르거나 둘 이상이면 None.
+
+    받는 순서: 사번 → 「N번」·「N번째」·맨숫자 → 「첫 번째」 → 부서 이름. 사번이 목록에 없으면
+    고른 것이 아니다(목록 밖 사번은 받는 사람 바꾸기로 처리된다 — `_readdress`).
+    """
+    raw = text or ""
+    ids = [c["user_id"] for c in cands]
+    said = [i for i, uid in enumerate(ids) if uid in raw]
+    if len(said) == 1:
+        return said[0]
+    m = re.fullmatch(r"\s*(\d{1,2})(?!\s*(?:시|일|월|주|명|원|만|천|억|%|/|\.|:))\s*(?:번째|번)?\s*(?:분|께|에게|한테|으로|로)?[^\d]*", raw)
+    if m and 1 <= int(m.group(1)) <= len(cands):
+        return int(m.group(1)) - 1
+    for i, word in enumerate(_ORDINALS[:len(cands)]):
+        if re.search(rf"{word}\s*번째", raw):
+            return i
+    squash = re.sub(r"\s+", "", raw)
+    groups = [i for i, c in enumerate(cands)
+              if c.get("group_name") and (re.sub(r"\s+|\(.*?\)", "", c["group_name"]) in squash)]
+    return groups[0] if len(groups) == 1 else None
+
+
+def _candidates_text(name: str, cands: list[dict]) -> str:
+    """여러 명일 때의 화면 문장 — 합의한 문장 그대로다."""
+    lines = [f"{name} 님이 {len(cands)}명 있어요. 어느 분께 보낼까요?"]
+    lines += [f"{i}. {c.get('group_name', '')} {c.get('dsgt', '')} · 사번 {c['user_id']}".replace("  ", " ")
+              for i, c in enumerate(cands, 1)]
+    return "\n".join(lines)
+
+
 def _memo_turn(found: memo.Draft, state: AgentState, head: str = "",
                unclear: bool = False) -> dict[str, Any]:
     """초안이 걸린 턴에 초안을 (다시) 세운다. 이 턴은 근거를 모으지 않았으므로 출처는 비운다."""
@@ -822,7 +997,8 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
     """
     markup, title = (pending.get("html") or "").strip(), (pending.get("title") or "").strip()
     ids = [r for r in (pending.get("recipients") or []) if r]
-    if not markup or not title or not ids:
+    user_name, group_name = pending.get("user_name") or "", pending.get("group_name") or ""
+    if not markup or not title or not (ids or user_name):
         # 초안을 잃었으면 지어내지 않는다 — 무엇을 누구에게 보내기로 했는지 잃은 것이다.
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 부탁해 주세요.",
                 "sources": [], "pending_action": None}
@@ -837,7 +1013,14 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
     if send_at:
         name = "schedule_memo"
         result = ACTIONS[name](customer_id, markup, send_at=send_at, send_label=send_label,
-                               title=title, recipients=ids, to=to, as_employee=sender)
+                               title=title, recipients=ids, to=to, as_employee=sender,
+                               user_name=user_name if not ids else "",
+                               group_name=group_name if not ids else "")
+    elif user_name and not ids:
+        # 이름 발송 — 찾은 사람이 1명이면 **이 호출에서 발송된다**(발송 전 사번 확인 불가).
+        name = "send_memo_by_name"
+        result = ACTIONS[name](customer_id, markup, title=title, user_name=user_name,
+                               group_name=group_name, to=to, as_employee=sender)
     else:
         name = "send_memo"
         result = ACTIONS[name](customer_id, markup, title=title, recipients=ids, to=to,
@@ -845,6 +1028,21 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
     # 되돌릴 수 없는 행위의 결과는 반드시 기록에 남긴다 — 제목·본문·사번은 싣지 않는다.
     # 시연 실행기가 즉시 보낸 예약은 그 사실이 상세(`detail`)로 로그·트레이스에 남는다.
     status = result.get("status") or "unknown"
+    if status == "candidates":
+        # 여러 명 — 보내지 않았다. 목록을 보여주고 고르게 한다(고르면 사번으로 다시 제안).
+        observability.step("action", name, status=status, recipients=f"후보 {len(result['candidates'])}명")
+        cands = result["candidates"]
+        return {"answer": _candidates_text(user_name, cands), "sources": [],
+                "pending_action": {**pending, "candidates": cands,
+                                   "prompt": _candidates_text(user_name, cands).split("\n")[0]}}
+    if status == "not_found":
+        observability.step("action", name, status=status, reason=result.get("detail"))
+        # 초안은 그대로 걸어 둔다 — 다음 말로 받는 사람만 바꿀 수 있다.
+        return {"answer": NAME_NOT_FOUND.format(who=to), "sources": [],
+                "pending_action": {k: v for k, v in pending.items() if k != "candidates"}}
+    if user_name and not ids and result.get("recipients"):
+        # 이름으로 보낸 것 — 실제로 받은 사람의 사번을 결과 문장에 밝힌다.
+        to = name_label(user_name, group_name, ", ".join(result["recipients"]))
     done = status in ("sent", "stubbed", "scheduled")
     observability.score("action_outcome", status,
                         comment=f"{name} · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
