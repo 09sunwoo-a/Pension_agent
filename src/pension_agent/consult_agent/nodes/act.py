@@ -1046,7 +1046,8 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
     done = status in ("sent", "stubbed", "scheduled")
     observability.score("action_outcome", status,
                         comment=f"{name} · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
-    observability.step("action", name, status=status, recipients=f"{len(ids)}명",
+    observability.step("action", name, status=status,
+                       recipients=f"{len(ids) or len(result.get('recipients') or [])}명",
                        reason=result.get("detail") if status != "sent" else None,
                        level=logging.INFO if done else logging.WARNING)
     if status == "scheduled":

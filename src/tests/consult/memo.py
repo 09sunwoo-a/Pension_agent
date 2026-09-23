@@ -571,6 +571,9 @@ def check_memo_schedule() -> int:
         # 날짜와 «보내» 사이에 받는 사람이 낀 꼴(2026-09-23 행내 실측 — 즉시 발송이 됐다)
         "지금 대화 내용 10월 7일에  정석희 대리에게 쪽지로 보내줘": ("ok", "10월 7일(수) 오전 9시"),
         "10월 5일에 만기되는 고객에게 쪽지 보내줘": ("none", ""),        # 사이 말이 날짜를 꾸민다
+        # «에» 없이 받는 사람이 오는 꼴(같은 날 두 번째 실측)
+        "이 내용 요약해서 10월 7일 정석희 대리에게 쪽지로 보내줄래": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 5일 만기 고객에게 쪽지 보내줘": ("none", ""),
         "1월 5일에 보내줘": ("ok", "1월 5일(화) 오전 9시"),          # 지난 지 오래면 내년
         "10월 5일 만기 고객 정리해서 쪽지 보내줘": ("none", ""),     # 쪽지 내용의 날짜
         "쪽지 보내줘": ("none", ""),
@@ -874,6 +877,12 @@ def check_memo_edit_material() -> int:
     hit = (bool(seen) and answer.splitlines()[0] in seen[0] and "옛 초안 99건" not in seen[0]
            and memo.session_answers(history) == [answer])
     print(f"{'✓' if hit else '✗'} 초안 고치기 프롬프트에 이번 상담 답변이 실린다(쪽지 초안 턴은 뺀다)")
+    ok += hit
+
+    # LaTeX 수식 기호는 글자로 옮긴다 — WorkB 는 렌더하지 않는다(2026-09-23 실측 `$\\rightarrow$`).
+    hit = (memo._clean_body("16일 뒤 만기 $\\rightarrow$ 재배분 필요") == "16일 뒤 만기 → 재배분 필요"
+           and memo._clean_body("가격 $5$ 원") == "가격 5 원")
+    print(f"{'✓' if hit else '✗'} 쪽지 본문의 LaTeX 수식 기호를 글자로 옮긴다")
     ok += hit
 
     hit = good.kind == "edited" and bad.kind == "screened" and "7" in bad.reason
