@@ -595,7 +595,7 @@ def check_memo_schedule() -> int:
     orig_gen, orig_sender, orig_draft = memo.generate, note.SENDER, memo.draft
     orig_env = {k: os.environ.get(k) for k in (note.EMP_NO_ENV, REG.SCHEDULER_ENV)}
     os.environ[note.EMP_NO_ENV] = "3902172"
-    os.environ.pop(REG.SCHEDULER_ENV, None)
+    os.environ[REG.SCHEDULER_ENV] = REG.SCHEDULER_OFF
     outbox: list[tuple] = []
     fail = {"on": False}
 
@@ -678,6 +678,20 @@ def check_memo_schedule() -> int:
     print(f"{'✓' if hit else '✗'} 발송 시각은 수정 턴을 지나도 남고, 단서로 바뀌고, 「지금 보내줘」로 지워진다(보내지 않고 다시 제안)")
     ok += hit
 
+    # 실행기 고르기 — 비우면 시연용(demo), off·오타는 미연결(끄려던 값이 켜는 쪽으로 틀리지 않게).
+    saved = os.environ.get(REG.SCHEDULER_ENV)
+    picks = {}
+    for v in ("", "demo", "off", "dmeo"):
+        os.environ[REG.SCHEDULER_ENV] = v
+        picks[v] = REG.scheduler_name()
+    if saved is None:
+        os.environ.pop(REG.SCHEDULER_ENV, None)
+    else:
+        os.environ[REG.SCHEDULER_ENV] = saved
+    hit = picks == {"": "demo", "demo": "demo", "off": "", "dmeo": ""}
+    print(f"{'✓' if hit else '✗'} 예약 실행기 기본값은 시연용이고, off·오타는 보내지 않는다 {picks}")
+    ok += hit
+
     hit = (off["answer"] == act.SCHEDULE_OFF and sent_off == 0
            and on["answer"] == "10월 5일(월) 오전 9시에 보내도록 예약했어요 — 받는 사람: 사번 3902173."
            and len(sent_on) == 1 and sent_on[0][0] == ["3902173"] and sent_on[0][2] == p1["html"]
@@ -745,7 +759,7 @@ def check_memo_by_name() -> int:
     orig = (note.SENDER, note.NAME_SENDER, memo.draft)
     orig_env = {k: os.environ.get(k) for k in (note.EMP_NO_ENV, REG.SCHEDULER_ENV)}
     os.environ[note.EMP_NO_ENV] = "3902172"
-    os.environ.pop(REG.SCHEDULER_ENV, None)
+    os.environ[REG.SCHEDULER_ENV] = REG.SCHEDULER_OFF
     calls: list[tuple] = []
     answer = {"raw": one}
 
