@@ -9,6 +9,8 @@
     단서(앞)  날짜·시각 바로 앞의 「예약·발송일·발송 시각」
     단서(사이) 「날짜(에) + 받는 사람(한테·에게·께) + 보내」 — 사이 말에 「만기·예정·되는」 같은
              날짜를 꾸미는 말이 있으면 단서가 아니다
+    단서(약속) 「날짜(에) + (고객에게) 재접촉·상담·방문·연락 + 예정·약속」이고 그 뒤에 「보내」가
+             있으면 그 약속 날에 보낸다 — 재접촉 일정에 맞춰 쪽지를 받게 하는 말이다
     고칠 때   초안이 걸린 턴(`edit=True`)에서는 「로 바꿔·로 변경·로 미뤄」도 단서다
 
 읽지 못하면 «발송일 없음»이고 그 쪽지는 지금처럼 즉시 발송이다. 후보가 둘 이상이거나 이미
@@ -61,6 +63,18 @@ _CUE_VIA = re.compile(
 #: 그 사이 말에 이것이 있으면 받는 사람이 아니라 날짜를 꾸미는 말이다 — 「10월 5일에 만기되는
 #: 고객에게」의 10월 5일은 만기일(쪽지 내용)이다.
 _VIA_NOT = re.compile(r"만기|도래|예정|해지|가입|개시|되는|하는|있는|인\s|까지")
+#: 직원이 고객과 잡은 약속 날짜 — 「10월 7일에 이 고객에게 재접촉 예정인데 … 쪽지로 보내줘」.
+#: 시연에서 재접촉 일정 관리를 보이려고 날짜를 문장 앞에 둔 말이 즉시 발송이 됐다(2026-09-23
+#: 행내 실측 — 「예정」이 `_VIA_NOT` 에 걸렸다). 약속은 **직원이 하는 일**(재접촉·상담·방문·
+#: 연락)만이다. 「만기·도래 예정」은 상품에 생기는 일이라 쪽지 내용이지 발송일이 아니다.
+_CUE_APPT = re.compile(
+    r"^\s*(?:에|에는)?\s*(?P<mid>[^\n.,!?]{0,20}?)"
+    r"(?:재접촉|재상담|상담|방문|내방|내점|연락|통화|미팅|면담)\s*(?:이|을|를)?\s*"
+    r"(?:예정|약속|잡혀|잡았|하기로|드리기로)")
+_APPT_NOT = re.compile(r"만기|도래|해지|가입|개시")
+#: 약속 날짜는 **보내라는 말이 뒤에 있을 때만** 발송일이다 — 「10월 7일 재접촉 예정이라고
+#: 넣어줘」는 본문을 고치는 말이지 발송일을 옮기는 말이 아니다.
+_SEND_LATER = re.compile(r"보내|발송|전송|예약")
 _CUE_EDIT = re.compile(r"^\s*(?:으로|로)\s*(?:바꿔|변경|옮겨|미뤄|당겨|해\s*줘|해줘|예약)")
 _CUE_BEFORE = re.compile(r"(?:예약|발송일|발송\s*시각|발송\s*시간|보낼\s*날짜)\s*(?:은|는|을|를|:|：)?\s*$")
 
@@ -127,8 +141,11 @@ def _inside(m: re.Match, spans: list[tuple[int, int, date | None, time | None]])
 def _cued(text: str, start: int, end: int, edit: bool) -> bool:
     after = text[end:]
     via = _CUE_VIA.match(after)
+    appt = _CUE_APPT.match(after)
     return bool(_CUE_AFTER.match(after) or _CUE_BEFORE.search(text[:start])
                 or (via and not _VIA_NOT.search(via.group("mid")))
+                or (appt and not _APPT_NOT.search(appt.group("mid"))
+                    and _SEND_LATER.search(after[appt.end():]))
                 or (edit and _CUE_EDIT.match(after)))
 
 

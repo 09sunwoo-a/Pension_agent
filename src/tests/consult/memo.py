@@ -541,7 +541,8 @@ def check_memo_edit() -> int:
 def check_memo_schedule() -> int:
     """예약 쪽지(§10 「예약 발송」) — 발송 시각은 코드가 단서로 읽고, 맨 끝 실행기만 바뀐다.
 
-      ① 단서가 붙은 날짜만 발송일이다 — 「10월 5일 만기 고객」은 쪽지 내용이다
+      ① 단서가 붙은 날짜만 발송일이다 — 「10월 5일 만기 고객」은 쪽지 내용이고, 「10월 7일에
+         재접촉 예정인데 … 보내줘」는 그 약속 날에 보낸다
       ② 후보가 둘이거나 지난 시각이면 초안은 세우되 «네»로 보내지 않고 언제인지 묻는다
       ③ 발송 시각은 받는 사람처럼 수정 턴을 지나도 남고, 단서로 바뀌고, 「지금 보내줘」로 지워진다
       ④ 실행기가 없으면 보내지 않는다(즉시 발송으로 접지 않는다)
@@ -571,6 +572,13 @@ def check_memo_schedule() -> int:
         # 날짜와 «보내» 사이에 받는 사람이 낀 꼴(2026-09-23 행내 실측 — 즉시 발송이 됐다)
         "지금 대화 내용 10월 7일에  정석희 대리에게 쪽지로 보내줘": ("ok", "10월 7일(수) 오전 9시"),
         "10월 5일에 만기되는 고객에게 쪽지 보내줘": ("none", ""),        # 사이 말이 날짜를 꾸민다
+        # 직원이 고객과 잡은 약속 날에 보낸다(2026-09-23 행내 시연 — 재접촉 일정 관리)
+        "10월 7일에 이 고객에게 재접촉 예정인데 위 내용을 포함해서 오늘 상담내용 쪽지로 보내줘":
+            ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일 고객 방문 약속이 있어서 쪽지 보내줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일에 상담 예정이라고 넣어줘": ("none", ""),            # 보내라는 말이 없다
+        "10월 5일에 만기 예정인 상품 안내 쪽지 보내줘": ("none", ""),  # 상품의 일정은 내용이다
+        "10월 7일 상담 내용 쪽지로 보내줘": ("none", ""),
         # «에» 없이 받는 사람이 오는 꼴(같은 날 두 번째 실측)
         "이 내용 요약해서 10월 7일 정석희 대리에게 쪽지로 보내줄래": ("ok", "10월 7일(수) 오전 9시"),
         "10월 5일 만기 고객에게 쪽지 보내줘": ("none", ""),
@@ -1036,5 +1044,91 @@ def check_memo_pick_partial() -> int:
            and again["answer"].endswith(act.PICK_AGAIN)
            and again["pending_action"].get("candidates") == cands)
     print(f"{'✓' if hit else '✗'} 「WM」이면 그 후보로 다시 제안하고, 안 맞는 짧은 답이면 목록을 다시 보인다")
+    ok += hit
+    return ok
+
+
+def check_memo_echo_and_address() -> int:
+    """초안 고치기의 두 가드(2026-09-23 행내 실측).
+
+      ① 고친 본문에 직원의 말이 통째로 들어가면 한 번 다시 쓰게 하고, 또 그러면 반영하지 않는다
+      ② 넣으라고 준 문장이 든 줄은 옮긴 것으로 보지 않는다
+      ③ «호칭을 받는 사람에 맞춤»은 받는 사람이 바뀌었거나 호칭이 실제로 사라졌을 때만 선다
+    """
+    import json
+    import os
+
+    from pension_agent import note
+    from pension_agent.consult_agent.effects import memo
+    from pension_agent.consult_agent.nodes import act
+
+    ok = 0
+    order = "10월 7일에 이 고객에게 재접촉 예정인데 위 내용을 포함해서 오늘 상담내용 쪽지로 보내줘"
+    hit = (memo.echoed(order, "상담 준비", f"{order}\n\n- 만기 임박 예금")
+           and not memo.echoed(order, "상담 준비", "10월 7일 재접촉 예정입니다.\n- 만기 임박 예금")
+           and not memo.echoed("안녕하세요 퇴직연금 전달차 쪽지드립니다 넣어줘", "t",
+                               "안녕하세요 퇴직연금 전달차 쪽지드립니다.\n본문")
+           and not memo.echoed("--붙여줘", "t", "--붙여줘"))                     # 짧은 말은 보지 않는다
+    print(f"{'✓' if hit else '✗'} 직원의 말을 통째로 옮긴 줄만 걸리고, 넣으라고 준 문장은 걸리지 않는다")
+    ok += hit
+
+    seen: list[str] = []
+    replies: list[dict] = []
+
+    def _gen(prompt, **kw):
+        seen.append(prompt)
+        return json.dumps(replies.pop(0), ensure_ascii=False)
+
+    orig_gen, orig_env = memo.generate, os.environ.get(note.EMP_NO_ENV)
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    memo.generate = _gen
+
+    def _pending(body: str) -> dict:
+        found, _ = memo.assemble("상담 공유", body, tail_html="", tail_note="", to="본인",
+                                 recipients=["3902172"])
+        return act._offer_draft(found, {"customer_id": "CM"})["pending_action"]
+
+    def _say(q: str, pending: dict) -> dict:
+        return act.confirm_action({"question": q, "customer_id": "CM",
+                                   "history": [{"question": "q", "pending_action": pending}]})
+
+    echo_body = {"edit": True, "title": "상담 공유", "also": [], "body": f"{order}\n\n- 만기 임박 예금"}
+    good_body = {"edit": True, "title": "상담 공유", "also": [],
+                 "body": "10월 7일 재접촉 예정입니다.\n\n- 만기 임박 예금"}
+    try:
+        base = _pending("- 만기 임박 예금")
+        replies[:] = [echo_body, good_body]
+        fixed = _say(order, base)
+        retried = len(seen) == 2 and "<다시 쓰기>" in seen[1] and "<다시 쓰기>" not in seen[0]
+        replies[:] = [echo_body, echo_body]
+        stuck = _say(order, base)
+
+        greeted = _pending("이선우 대리님, 안녕하세요.\n- 만기 임박 예금")
+        replies[:] = [{"edit": True, "title": "상담 공유", "also": ["address"],
+                       "body": "- 만기 임박 예금\n- 재접촉 예정"}]
+        dropped_greet = _say("재접촉 예정 한 줄 추가해줘", greeted)
+        replies[:] = [{"edit": True, "title": "상담 공유", "also": ["address", "dup"],
+                       "body": "- 만기 임박 예금\n- 재접촉 예정"}]
+        no_greet = _say("재접촉 예정 한 줄 추가해줘", base)
+    finally:
+        memo.generate = orig_gen
+        if orig_env is None:
+            os.environ.pop(note.EMP_NO_ENV, None)
+        else:
+            os.environ[note.EMP_NO_ENV] = orig_env
+
+    hit = (retried and fixed["pending_action"]["body"].startswith("10월 7일 재접촉 예정입니다.")
+           and order not in fixed["answer"]
+           # 10월 7일 약속 날로 예약도 함께 걸린다(schedule — 약속 날짜)
+           and fixed["pending_action"]["send_label"].startswith("10월 7일")
+           and stuck["answer"].startswith(memo.EDIT_ECHO)
+           and stuck["pending_action"]["body"] == "- 만기 임박 예금")        # 직전 초안 그대로
+    print(f"{'✓' if hit else '✗'} 직원의 말을 본문에 옮기면 한 번 다시 쓰게 하고, 또 옮기면 반영하지 않는다")
+    ok += hit
+
+    hit = ("함께 고친 것: 호칭을 받는 사람에 맞춤" in dropped_greet["answer"]    # 호칭이 실제로 사라졌다
+           and "호칭을 받는 사람에 맞춤" not in no_greet["answer"]              # 호칭도 받는 사람도 그대로
+           and "함께 고친 것: 겹치는 인사·맺음 정리" in no_greet["answer"])
+    print(f"{'✓' if hit else '✗'} «호칭을 맞춤»은 받는 사람이 바뀌었거나 호칭이 사라졌을 때만 화면에 선다")
     ok += hit
     return ok

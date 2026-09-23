@@ -47,7 +47,7 @@ from pension_agent import note
 from pension_agent.clock import today
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import (
-    COMPOSE_RETRY_BLOCK, MEMO_EDIT_PROMPT, MEMO_EDIT_RECIPIENT_BLOCK, MEMO_EDIT_SYSTEM,
+    COMPOSE_RETRY_BLOCK, MEMO_EDIT_ECHO_BLOCK, MEMO_EDIT_PROMPT, MEMO_EDIT_RECIPIENT_BLOCK, MEMO_EDIT_SYSTEM,
     MEMO_OTHER_GUIDE, MEMO_PROMPT, MEMO_SELF_GUIDE, MEMO_SYSTEM, MEMO_TABLE_BLOCK,
 )
 from pension_agent.consult_agent import state
@@ -393,6 +393,42 @@ def assemble(title: str, body: str, *, tail_html: str, tail_note: str, to: str,
 #: 수정 지시를 처리하지 못했을 때 — 초안은 직전 것 그대로 남는다.
 EDIT_DOWN = "초안 수정 지시를 처리하지 못했어요 — {reason}. 직전 초안을 그대로 둡니다."
 #: 고친 초안이 검사에 걸렸을 때. 걸린 자리를 값까지 적는다(`SCREENED` 와 같은 이유).
+#: 다시 써도 직원의 말이 본문에 통째로 남았을 때. 초안은 그대로 둔다.
+EDIT_ECHO = ("말씀하신 문장이 쪽지 본문에 그대로 들어가서 반영하지 않았어요. 넣을 내용만 "
+             "말씀해 주세요(예: «10월 7일 재접촉 예정이라고 넣어줘»). 직전 초안을 그대로 둡니다.")
+#: 본문 한 줄이 직원의 말과 이만큼 겹치면 «말을 옮겨 적었다»로 본다(글자·숫자만 센다).
+#: 짧은 말(「--붙여줘」)은 보지 않는다 — 직원이 따옴표로 준 짧은 문장을 넣는 지시와 갈리지 않는다.
+ECHO_MIN_CHARS = 12
+ECHO_RATIO = 0.8
+#: 에이전트에게 하는 요청의 끝 — 말의 일부만 옮긴 줄은 이것으로 끝날 때만 옮긴 것이다.
+#: 없으면 「안녕하세요 … 쪽지드립니다 넣어줘」에서 넣으라고 한 문장까지 옮긴 것으로 걸린다.
+_REQUEST_END = re.compile(r"(?:줘|줄래|주라|해봐|할래)$")
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z가-힣]", "", text or "")
+
+
+def echoed(instruction: str, title: str, body: str) -> bool:
+    """고친 제목·본문의 한 줄이 직원의 말을 통째로 옮긴 것인가(§10 — 2026-09-23 행내 실측).
+
+    「10월 7일에 이 고객에게 재접촉 예정인데 … 쪽지로 보내줘」가 본문 첫 줄에 그대로 들어갔다.
+    줄이 말 전체를 담거나, 말의 대부분(`ECHO_RATIO`)이 그 줄이고 그 줄이 요청(「…해줘」)으로
+    끝나면 옮긴 것이다. 직원이 넣으라고 준 문장만 들어간 줄은 요청으로 끝나지 않아 걸리지 않는다.
+    """
+    said = _squash(instruction)
+    if len(said) < ECHO_MIN_CHARS:
+        return False
+    for line in [title, *(body or "").splitlines()]:
+        got = _squash(line)
+        if len(got) < ECHO_MIN_CHARS:
+            continue
+        if said in got or (got in said and len(got) >= ECHO_RATIO * len(said)
+                           and _REQUEST_END.search(got)):
+            return True
+    return False
+
+
 EDIT_SCREENED = ("고친 초안에 근거 밖 내용이 들어가서 반영하지 않았어요. 걸린 자리: {faults}. "
                  "직전 초안을 그대로 둡니다.")
 
@@ -422,7 +458,8 @@ class Revision:
     """초안 고치기의 결과 하나.
 
     kind      edited(고쳤다) · not_edit(고치라는 말이 아니다) · ask(새 값을 되묻는다) ·
-              screened(고친 것이 검사에 걸렸다) · down(LLM 이 죽었다)
+              screened(고친 것이 검사에 걸렸다) · echo(직원의 말을 본문에 그대로 옮겼다) ·
+              down(LLM 이 죽었다)
     """
 
     kind: str
@@ -527,21 +564,27 @@ def revise(found: Draft, instruction: str, history: list[dict] | None,
         if recipient else "",
         table_note=f"(본문 아래에 코드가 붙이는 표는 고칠 수 없다 — {found.tail_note})"
         if found.tail_note else "")
-    try:
-        raw = generate(prompt, max_tokens=MAX_TOKENS, system=MEMO_EDIT_SYSTEM,
-                       name="consult.memo.edit")
-    except LLMError as exc:
-        return Revision("down", reason=plan.short_reason(f"{type(exc).__name__}: {exc}"))
-    obj = json_object(raw) or {}
-    if not obj.get("edit"):
-        return Revision("not_edit")
-    ask = " ".join(str(obj.get("ask") or "").split())
-    if ask:
-        return Revision("ask", ask=ask)
-    title = " ".join(str(obj.get("title") or "").split()) or found.title
-    body = _clean_body(str(obj.get("body") or ""))
-    if not body:
-        return Revision("down", reason="고친 본문을 규격대로 받지 못했어요")
+    # 본문에 직원의 말을 통째로 옮겼으면 한 번만 다시 쓰게 한다(규칙 9). 이 경우에만 왕복이 는다.
+    for attempt in range(2):
+        try:
+            raw = generate(prompt + (MEMO_EDIT_ECHO_BLOCK if attempt else ""), max_tokens=MAX_TOKENS,
+                           system=MEMO_EDIT_SYSTEM, name="consult.memo.edit")
+        except LLMError as exc:
+            return Revision("down", reason=plan.short_reason(f"{type(exc).__name__}: {exc}"))
+        obj = json_object(raw) or {}
+        if not obj.get("edit"):
+            return Revision("not_edit")
+        ask = " ".join(str(obj.get("ask") or "").split())
+        if ask:
+            return Revision("ask", ask=ask)
+        title = " ".join(str(obj.get("title") or "").split()) or found.title
+        body = _clean_body(str(obj.get("body") or ""))
+        if not body:
+            return Revision("down", reason="고친 본문을 규격대로 받지 못했어요")
+        if not echoed(instruction, title, body):
+            break
+    else:
+        return Revision("echo", reason="직원의 말을 본문에 그대로 옮김")
 
     # 허용 범위는 «직전 초안 + 직원의 이번 말»이다. 직전 초안은 이미 원장에 대고 검사를
     # 통과한 글이고, 직원의 말에 적힌 값은 직원이 직접 확인한 값이다 — 원장 값과 달라도 이긴다.
