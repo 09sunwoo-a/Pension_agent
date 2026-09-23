@@ -252,8 +252,26 @@ def _footer_html(*, rule: bool) -> str:
 # 초안 — LLM 이 쓰고 코드가 검사한다
 # ─────────────────────────────────────────────────────────────
 
+#: LLM 이 평문에 섞어 쓰는 LaTeX 수식 기호 — WorkB 는 렌더하지 않아 `$\rightarrow$` 가 글자
+#: 그대로 남는다(2026-09-23 행내 실측, 초안 고치기의 «개조식으로» 턴). 흔한 것만 글자로 옮기고,
+#: 남은 `$…$` 는 달러 기호만 뗀다.
+_LATEX = {r"\rightarrow": "→", r"\to": "→", r"\leftarrow": "←", r"\Rightarrow": "⇒",
+          r"\times": "×", r"\cdot": "·", r"\ge": "≥", r"\geq": "≥", r"\le": "≤", r"\leq": "≤",
+          r"\sim": "~", r"\%": "%"}
+_MATH = re.compile(r"\$([^$\n]{1,40})\$")
+
+
+def _plain_math(text: str) -> str:
+    def one(m: re.Match) -> str:
+        inner = m.group(1).strip()
+        for k, v in _LATEX.items():
+            inner = inner.replace(k, v)
+        return inner.replace("\\", "").strip()
+    return _MATH.sub(one, text)
+
+
 def _clean_body(body: str) -> str:
-    """지시를 어긴 꼴만 걷어낸다 — 마크다운 표·강조. **문장은 고치지 않는다.**
+    """지시를 어긴 꼴만 걷어낸다 — 마크다운 표·강조·LaTeX 수식. **문장은 고치지 않는다.**
 
     걷어내는 이유는 그것이 WorkB 에서 렌더되지 않아 `| 항목 | 값 |` 이 글자 그대로 남기
     때문이다. 지시로만 막으면 어겼을 때 아무도 모른다.
@@ -268,7 +286,7 @@ def _clean_body(body: str) -> str:
             cells = [c.strip() for c in ln.strip().strip("|").split("|")]
             ln = " · ".join(c for c in cells if c)
         out.append(re.sub(r"\*\*|^\s*#+\s*", "", ln))
-    return "\n".join(out).strip()
+    return _plain_math("\n".join(out).strip())
 
 
 def _generate(prompt: str, name: str) -> tuple[str, str]:
