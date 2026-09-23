@@ -182,8 +182,83 @@ def send_memo(customer_id: str, text: str, *, title: str,
     return result
 
 
+# ─────────────────────────────────────────────────────────────
+# 예약 쪽지 (consult_agent/CLAUDE.md §10 「예약 발송」)
+#
+# 날짜 해석·확인 절차·답변 문장은 실제 기능과 같게 만들고, **맨 끝의 예약 실행기만 교체할 수
+# 있게** 둔다. 백엔드가 실제 예약을 구현하면 `SCHEDULERS` 에 실행기 하나를 더하고 환경변수로
+# 고른다 — 부르는 쪽(`nodes/act._send_memo`)은 바뀌지 않는다.
+#
+# 실행기가 정해지지 않았으면 **보내지 않는다.** 조용히 즉시 발송으로 바꾸면 직원은 예약했다고
+# 믿는 쪽지가 이미 나간 상태가 된다(쪽지는 되돌릴 수 없다 — 루트 규칙 5).
+# ─────────────────────────────────────────────────────────────
+
+#: 예약 실행기를 고르는 환경변수. `demo` 면 시연용 실행기(아래). 비어 있으면 «미연결».
+SCHEDULER_ENV = "PENSION_MEMO_SCHEDULER"
+
+
+def _demo_scheduler(customer_id: str, text: str, *, send_at: str, **kw: Any) -> dict[str, Any]:
+    """시연용 실행기 — 예약을 **접수하고 곧바로 한 통을 보낸다.**
+
+    시연에서는 미래에 나갈 쪽지를 보여줄 수 없어서, 접수하는 순간 한 통을 보내 쪽지함에
+    도착하는 것을 보인다. 그래서 이 실행기가 켜져 있는 동안 «예약했어요»는 **사실이 아니다** —
+    그 사실은 화면이 아니라 `docs/DEMO_STATUS.md`(생성물)와 로그·트레이스·상담이력이 말한다.
+    발송이 실패하면 «예약했다»로 접지 않고 발송 결과를 그대로 돌려준다.
+    """
+    sent = send_memo(customer_id, text, **kw)
+    if sent.get("status") not in ("sent", "stubbed"):
+        return sent
+    return {**sent, "status": "scheduled", "executor": "demo", "send_at": send_at,
+            "detail": "시연 실행기: 예약 접수와 동시에 즉시 발송"}
+
+
+#: 예약 실행기 표. 키가 `SCHEDULER_ENV` 의 값이다.
+SCHEDULERS: dict[str, Callable[..., dict[str, Any]]] = {
+    "demo": _demo_scheduler,
+}
+
+
+def scheduler_name() -> str:
+    """지금 고른 예약 실행기 이름. 표에 없는 값·빈 값은 ""(미연결)."""
+    import os  # noqa: PLC0415
+
+    name = (os.getenv(SCHEDULER_ENV) or "").strip().lower()
+    return name if name in SCHEDULERS else ""
+
+
+def schedule_memo(customer_id: str, text: str, *, send_at: str, send_label: str, title: str,
+                  recipients: list[str] | None = None, to: str = MEMO_DEFAULT_TO,
+                  as_employee: str | None = None,
+                  session_id: str = "tool-log") -> dict[str, Any]:
+    """행내 WorkB 쪽지를 `send_at`(ISO)에 보내도록 예약한다. 본문·제목은 만들지도 고치지도 않는다.
+
+    실행기가 없으면 `not_connected` — 부르는 쪽이 «예약했어요»라고 말하지 않는다. 예약 접수
+    사실은 실행기와 무관하게 상담이력에 남긴다(무엇을·언제로·어느 실행기가).
+    """
+    name = scheduler_name()
+    if not name:
+        result: dict[str, Any] = {
+            "status": "not_connected", "to": to, "recipients": list(recipients or []),
+            "detail": f"예약 실행기가 정해지지 않았습니다({SCHEDULER_ENV})"}
+    else:
+        result = SCHEDULERS[name](customer_id, text, send_at=send_at, title=title,
+                                  recipients=recipients, to=to, as_employee=as_employee,
+                                  session_id=session_id)
+    append_turn(customer_id, session_id, {
+        "role": "tool",
+        "text": f"[쪽지 예약 · {send_label} · {to}] {title}"
+                + (" (시연 실행기: 즉시 발송)" if name == "demo" else ""),
+        "tool_calls": [{"name": "schedule_memo",
+                        "args": {"to": to, "recipients": list(recipients or []), "title": title,
+                                 "send_at": send_at, "executor": name or None},
+                        "result": {k: v for k, v in result.items() if k != "title"}}],
+    })
+    return result
+
+
 ACTIONS: dict[str, Callable[..., dict[str, Any]]] = {
     "open_lms_screen": open_lms_screen,
     "register_consult_note": register_consult_note,
     "send_memo": send_memo,
+    "schedule_memo": schedule_memo,
 }

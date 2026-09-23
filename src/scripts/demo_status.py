@@ -78,6 +78,18 @@ def _outreach_runway() -> str:
     return " · ".join(out)
 
 
+def _scheduler_state() -> str:
+    """예약 실행기 표시 — 리포트를 만든 환경의 값이다(`.env` 포함)."""
+    from pension_agent import env  # noqa: PLC0415
+    from pension_agent.consult_agent.effects import actions  # noqa: PLC0415
+
+    env.load()
+    name = actions.scheduler_name()
+    if name == "demo":
+        return "demo (시연용 — 접수 즉시 발송)"
+    return name or "없음 (미연결 — 예약 요청은 보내지 않는다)"
+
+
 def _rows(lines: list[str], header: list[str], rows: list[list[str]]) -> None:
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "|".join("---" for _ in header) + "|")
@@ -233,6 +245,12 @@ def build() -> tuple[str, dict[str, int]]:
          "단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 "
          "TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, "
          "화면번호 자체는 지식베이스 절차 카드에서 온다"),
+        ("consult_agent.effects.actions 예약 실행기",
+         _scheduler_state(),
+         "예약 쪽지(«10월 5일에 보내줘»)를 누가 실행하나. 값이 demo 면 **예약을 접수하는 순간 한 통을 "
+         "즉시 보낸다** — 화면은 «예약했어요»라고 말하지만 실제로는 이미 나간 것이다(시연에서 쪽지가 "
+         "도착하는 것을 보이려는 것). 백엔드가 예약을 구현하면 actions.SCHEDULERS 에 실행기를 더하고 "
+         "PENSION_MEMO_SCHEDULER 로 고른다. 비어 있으면 예약 요청은 보내지 않고 «미연결»로 답한다"),
         ("consult_agent.effects.screens.link() 파라미터", "scnNo · mode",
          "규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 "
          "링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 "

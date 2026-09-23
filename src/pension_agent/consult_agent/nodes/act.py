@@ -25,10 +25,10 @@ import logging
 import re
 from typing import Any
 
-from pension_agent import note
+from pension_agent import clock, note
 from pension_agent import observability
 from pension_agent.consult_agent import tools
-from pension_agent.consult_agent.effects import memo, screens
+from pension_agent.consult_agent.effects import memo, schedule, screens
 from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent.effects.actions import ACTIONS, MEMO_DEFAULT_TO
 from pension_agent.llm import LLMError
@@ -241,10 +241,28 @@ def _memo_offer(state: AgentState) -> dict[str, Any]:
     found, why = memo.draft(state, recipients=ids, to=label, to_self=to_self)
     if found is None:
         return {"answer": f"{head}\n\n— {why}" if head else why}
-    return _offer_draft(found, state)
+    # 발송 시각 — 단서가 붙은 날짜만 읽는다(effects/schedule.py). 못 가르면 초안은 세우되
+    # 승낙으로 보내지 않고 언제 보낼지 묻는다(`when_unclear`).
+    timing = schedule.parse(state.get("question") or "", clock.now())
+    if timing.kind == "ok" and timing.at is not None:
+        found = memo.reschedule(found, timing.at.isoformat(timespec="minutes"), timing.label)
+    unclear = timing.kind in ("many", "past")
+    return _offer_draft(found, state, head=_WHEN_NOTES.get(timing.kind, ""), unclear=unclear)
 
 
-def _offer_draft(found: memo.Draft, state: AgentState, head: str = "") -> dict[str, Any]:
+#: 발송 시각을 못 가른 턴의 안내. 초안은 세우되 승낙으로 보내지 않는다.
+WHEN_MANY = "언제 보낼지 하나로 정하지 못했어요."
+WHEN_PAST = "말씀하신 발송 시각이 이미 지났어요."
+_WHEN_NOTES = {"many": WHEN_MANY, "past": WHEN_PAST}
+#: 예약 실행기가 없을 때(`actions.SCHEDULER_ENV`). 보내지 않았다는 사실을 말한다.
+SCHEDULE_OFF = "예약 발송이 아직 연결되지 않아 보내지 않았어요. 지금 보내려면 쪽지를 다시 부탁해 주세요."
+#: 발송 시각이 정해지지 않은 초안의 제안 문장 — «네»로 보낼 수 없는 제안이다.
+WHEN_ASK = ("언제 보낼까요? «10월 5일 오전 9시에 보내줘»처럼 말씀해 주세요. "
+            "지금 보내려면 «지금 보내줘»라고 해 주세요.")
+
+
+def _offer_draft(found: memo.Draft, state: AgentState, head: str = "",
+                 unclear: bool = False) -> dict[str, Any]:
     """초안 한 통을 화면에 세우고 «이대로 보낼까요?»를 건다. 처음 초안과 **고친 초안이 같은
     자리를 지난다** — 고칠 때마다 제안을 다시 거는 것이 «직전 한 턴의 제안만 실행한다»(§10)를
     지키면서 초안을 이어 가는 방법이다(발송되는 것은 늘 직전 턴에 화면에 선 초안이다).
@@ -253,10 +271,21 @@ def _offer_draft(found: memo.Draft, state: AgentState, head: str = "") -> dict[s
     그 초안을 고칠 때 코드가 붙인 값 표는 건드리지 않고 본문만 바꾼다(`memo.revise`).
     """
     label = found.to
-    action = {"kind": "memo", "label": f"이 쪽지 보내기(받는 사람: {label})",
-              "prompt": f"이대로 쪽지를 보낼까요? 받는 사람은 {label}이에요. (네 / 아니오)",
+    if unclear:
+        name, ask = f"이 쪽지 보내기(받는 사람: {label} · 발송 시각 미정)", WHEN_ASK
+    elif found.send_label:
+        # 예약 쪽지 — 제안 문장이 발송 시각을 그대로 말한다. 잘못 읽었으면 승낙 전에 보인다.
+        name = f"이 쪽지 예약하기({found.send_label} · 받는 사람: {label})"
+        ask = (f"{found.send_label}에 보내도록 예약할까요? 받는 사람은 {label}이에요. "
+               "(네 / 아니오)")
+    else:
+        name = f"이 쪽지 보내기(받는 사람: {label})"
+        ask = f"이대로 쪽지를 보낼까요? 받는 사람은 {label}이에요. (네 / 아니오)"
+    action = {"kind": "memo", "label": name, "prompt": ask,
               "title": found.title, "text": found.text, "html": found.html,
               "body": found.body, "tail_html": found.tail_html, "tail_note": found.tail_note,
+              "send_at": found.send_at, "send_label": found.send_label,
+              "when_unclear": unclear,
               "to": label, "recipients": list(found.recipients),
               "params": {"customer_id": state.get("customer_id") or ""}}
     # 초안은 코드블록으로 감싸 «여기까지가 쪽지»를 화면에서 가른다 — 초안이 답변 자리를
@@ -677,7 +706,31 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     if moved:
         found = memo.readdress(found, *moved)
 
-    if plain and _PLAIN_YES.match(plain) and not moved and not paste:       # ③
+    # ②′ 발송 시각 — 받는 사람과 같게 다룬다. 말이 없으면 직전 값을 두고, 단서가 있으면 바꾸고,
+    # 「지금 보내줘」는 예약을 지운다. 바뀌면 보내지 않고 제안을 다시 건다(무엇이 바뀌었는지 보게).
+    unclear = bool(pending.get("when_unclear"))
+    timing = schedule.parse(order, clock.now(), edit=True)
+    retimed = False
+    if timing.kind in ("many", "past"):
+        return _memo_turn(found, state, head=_WHEN_NOTES[timing.kind], unclear=True)
+    if timing.kind == "ok" and timing.at is not None:
+        at = timing.at.isoformat(timespec="minutes")
+        retimed = unclear or at != found.send_at
+        found = memo.reschedule(found, at, timing.label)
+        unclear = False
+    elif timing.kind == "clear":
+        if unclear or found.send_at:
+            retimed = True
+            found = memo.reschedule(found, "", "")
+            unclear = False
+        else:
+            return _reply(pending, state)           # 이미 즉시 발송 초안이다 — 「지금 보내줘」는 승낙이다
+    changed = bool(moved) or retimed
+
+    if plain and _PLAIN_YES.match(plain) and not changed and not paste:     # ③
+        if unclear:
+            # 발송 시각이 안 정해진 초안은 «네»로 보내지 않는다 — 언제인지 다시 묻는다.
+            return _memo_turn(found, state, unclear=True)
         return _reply(pending, state)
 
     if paste:                                                               # ④
@@ -688,7 +741,7 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
             return _memo_turn(found, state, head=why)
         # 글 전체가 직원이 적은 것이다 — 건수만 남기고 글은 스위치를 따르는 span 에 싣는다.
         _record_staff(pasted=True, added=[], removed=[], text=paste[1])
-        return _memo_turn(made, state)
+        return _memo_turn(made, state, unclear=unclear)
 
     with observability.span("consult.memo.edit", input={"instruction": question}) as span:
         rev = memo.revise(found, question, state.get("history"))            # ⑤
@@ -698,25 +751,30 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
 
     if rev.kind == "edited" and rev.draft is not None:
         _record_staff(pasted=False, added=rev.added, removed=rev.removed)
-        return _memo_turn(rev.draft, state)
+        return _memo_turn(rev.draft, state, unclear=unclear)
     if rev.kind == "ask":
         # 초안은 그대로 걸어 둔다 — 다음 턴의 「5,300만원으로」가 이 초안을 고치는 말이다.
         # 제안은 다시 조립한다: 이번 말이 받는 사람을 바꿨으면 제안 문장도 그 사람이어야 한다.
         return {"answer": rev.ask, "sources": [],
-                "pending_action": _offer_draft(found, state)["pending_action"]}
+                "pending_action": _offer_draft(found, state, unclear=unclear)["pending_action"]}
     if rev.kind == "screened":
-        return _memo_turn(found, state, head=memo.EDIT_SCREENED.format(faults=rev.reason))
+        return _memo_turn(found, state, head=memo.EDIT_SCREENED.format(faults=rev.reason),
+                          unclear=unclear)
     if rev.kind == "down":
-        return _memo_turn(found, state, head=memo.EDIT_DOWN.format(reason=rev.reason))
+        return _memo_turn(found, state, head=memo.EDIT_DOWN.format(reason=rev.reason),
+                          unclear=unclear)
 
     # ⑥ 고치라는 말이 아니다.
-    if moved:
-        return _memo_turn(found, state)
+    if changed:
+        return _memo_turn(found, state, unclear=unclear)
     # 승낙·거절로 읽는 것은 **말머리가 그 말이거나, «쪽지»를 «보내라»고 한** 때뿐이다.
     # `_YES` 의 부분문자열(「해줘」)로 읽으면 「지난 상담 요약해줘」 같은 새 질문이 이 초안을
     # 보낸다. 「저거 쪽지 내용 사번 3902173한테 보내줘」는 받는 사람이 이미 그 사번이면
     # 바뀐 것이 없으니 이 초안을 보내라는 말이다(새 질문으로 넘기면 쪽지를 새로 쓴다).
     text = question.lower()
+    if unclear and not text.startswith(_LEAD_NO):
+        if text.startswith(_LEAD_YES) or ("쪽지" in text and any(v in text for v in _SEND_VERBS)):
+            return _memo_turn(found, state, unclear=True)
     if (text.startswith(_LEAD_YES) or text.startswith(_LEAD_NO)
             or ("쪽지" in text and any(v in text for v in _SEND_VERBS))):
         return _reply(pending, state)
@@ -725,9 +783,10 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     return {"pending_action": None}
 
 
-def _memo_turn(found: memo.Draft, state: AgentState, head: str = "") -> dict[str, Any]:
+def _memo_turn(found: memo.Draft, state: AgentState, head: str = "",
+               unclear: bool = False) -> dict[str, Any]:
     """초안이 걸린 턴에 초안을 (다시) 세운다. 이 턴은 근거를 모으지 않았으므로 출처는 비운다."""
-    return {**_offer_draft(found, state, head=head), "sources": []}
+    return {**_offer_draft(found, state, head=head, unclear=unclear), "sources": []}
 
 
 def _record_staff(*, pasted: bool, added: list[str], removed: list[str], text: str = "") -> None:
@@ -768,18 +827,37 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
         return {"answer": f"{pending['label']}을 다시 불러오지 못했어요. 한 번 더 부탁해 주세요.",
                 "sources": [], "pending_action": None}
     to = pending.get("to") or MEMO_DEFAULT_TO
-    result = ACTIONS["send_memo"](
-        (pending.get("params") or {}).get("customer_id") or "", markup,
-        title=title, recipients=ids, to=to,
-        as_employee=note.employee_id(state.get("employee_id")))
+    if pending.get("when_unclear"):
+        # 발송 시각이 안 정해진 초안은 보내지 않는다 — `_memo_reply` 가 먼저 막지만, 버튼으로
+        # 곧장 승낙이 들어오는 길(main 의 pending_action)도 여기를 지난다.
+        return {"answer": WHEN_ASK, "sources": [], "pending_action": pending}
+    send_at, send_label = pending.get("send_at") or "", pending.get("send_label") or ""
+    customer_id = (pending.get("params") or {}).get("customer_id") or ""
+    sender = note.employee_id(state.get("employee_id"))
+    if send_at:
+        name = "schedule_memo"
+        result = ACTIONS[name](customer_id, markup, send_at=send_at, send_label=send_label,
+                               title=title, recipients=ids, to=to, as_employee=sender)
+    else:
+        name = "send_memo"
+        result = ACTIONS[name](customer_id, markup, title=title, recipients=ids, to=to,
+                               as_employee=sender)
     # 되돌릴 수 없는 행위의 결과는 반드시 기록에 남긴다 — 제목·본문·사번은 싣지 않는다.
+    # 시연 실행기가 즉시 보낸 예약은 그 사실이 상세(`detail`)로 로그·트레이스에 남는다.
     status = result.get("status") or "unknown"
+    done = status in ("sent", "stubbed", "scheduled")
     observability.score("action_outcome", status,
-                        comment=f"send_memo · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
-    observability.step("action", "send_memo", status=status, recipients=f"{len(ids)}명",
-                       reason=None if status in ("sent", "stubbed") else result.get("detail"),
-                       level=logging.INFO if status in ("sent", "stubbed") else logging.WARNING)
-    if result.get("status") not in ("sent", "stubbed"):
+                        comment=f"{name} · 받는 사람 {len(ids)}명 · {result.get('detail') or ''}")
+    observability.step("action", name, status=status, recipients=f"{len(ids)}명",
+                       reason=result.get("detail") if status != "sent" else None,
+                       level=logging.INFO if done else logging.WARNING)
+    if status == "scheduled":
+        return {"answer": f"{send_label}에 보내도록 예약했어요 — 받는 사람: {to}.",
+                "sources": [], "pending_action": None}
+    if send_at and status == "not_connected":
+        # 조용히 즉시 발송으로 바꾸지 않는다 — 직원은 예약했다고 믿는 쪽지가 이미 나간 상태가 된다.
+        return {"answer": SCHEDULE_OFF, "sources": [], "pending_action": None}
+    if not done:
         return {"answer": f"쪽지를 보내지 못했어요. {result.get('detail') or ''}".strip(),
                 "sources": [], "pending_action": None}
     return {"answer": f"쪽지를 보냈어요 — 받는 사람: {to}.",

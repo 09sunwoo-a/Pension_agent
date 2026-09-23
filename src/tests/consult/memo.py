@@ -536,3 +536,149 @@ def check_memo_edit() -> int:
     print(f"{'✓' if hit else '✗'} 짧은 승낙·거절만 코드가 바로 가른다(「앞에 --붙여서 보내줘」는 승낙이 아니다)")
     ok += hit
     return ok
+
+
+def check_memo_schedule() -> int:
+    """예약 쪽지(§10 「예약 발송」) — 발송 시각은 코드가 단서로 읽고, 맨 끝 실행기만 바뀐다.
+
+      ① 단서가 붙은 날짜만 발송일이다 — 「10월 5일 만기 고객」은 쪽지 내용이다
+      ② 후보가 둘이거나 지난 시각이면 초안은 세우되 «네»로 보내지 않고 언제인지 묻는다
+      ③ 발송 시각은 받는 사람처럼 수정 턴을 지나도 남고, 단서로 바뀌고, 「지금 보내줘」로 지워진다
+      ④ 실행기가 없으면 보내지 않는다(즉시 발송으로 접지 않는다)
+      ⑤ 시연 실행기는 접수와 동시에 한 통을 보내고 «예약했어요»라고 답한다. 보내지 못하면
+         «예약했어요»라고 말하지 않는다. 쪽지 본문에는 예약 표시가 없다
+    """
+    import os
+    import tempfile
+    from datetime import datetime
+    from pathlib import Path
+
+    from pension_agent import note, session_store
+    from pension_agent.consult_agent.effects import actions as REG
+    from pension_agent.consult_agent.effects import memo, schedule as S
+    from pension_agent.consult_agent.nodes import act
+
+    ok = 0
+    now = datetime(2026, 9, 23, 14, 0)     # 수요일 오후 2시
+    table = {
+        "10월 5일에 쪽지 보내줘": ("ok", "10월 5일(월) 오전 9시"),
+        "사번 3902173한테 10월 5일 오후 2시 반에 보내줘": ("ok", "10월 5일(월) 오후 2시 30분"),
+        "10/5 오전 10시에 발송해줘": ("ok", "10월 5일(월) 오전 10시"),
+        "내일 쪽지로 보내줘": ("ok", "9월 24일(목) 오전 9시"),
+        "다음 주 월요일에 보내줘": ("ok", "9월 28일(월) 오전 9시"),
+        "오후 3시에 보내줘": ("ok", "9월 23일(수) 오후 3시"),
+        "예약은 10월 7일": ("ok", "10월 7일(수) 오전 9시"),
+        "1월 5일에 보내줘": ("ok", "1월 5일(화) 오전 9시"),          # 지난 지 오래면 내년
+        "10월 5일 만기 고객 정리해서 쪽지 보내줘": ("none", ""),     # 쪽지 내용의 날짜
+        "쪽지 보내줘": ("none", ""),
+        "10월 5일이나 6일에 보내줘": ("many", ""),
+        "15일에 보내줘": ("many", ""),                                # 월 없는 날은 못 읽었다
+        "오후 1시에 보내줘": ("past", ""),
+        "9월 1일에 보내줘": ("past", ""),
+    }
+    misses = {q: (S.parse(q, now).kind, S.parse(q, now).label) for q, want in table.items()
+              if (S.parse(q, now).kind, S.parse(q, now).label) != want}
+    edit_ok = (S.parse("10월 6일로 바꿔줘", now, edit=True).label == "10월 6일(화) 오전 9시"
+               and S.parse("10월 6일로 바꿔줘", now).kind == "none"
+               and S.parse("그냥 지금 보내줘", now, edit=True).kind == "clear")
+    hit = not misses and edit_ok
+    print(f"{'✓' if hit else '✗'} 발송일은 단서가 붙은 날짜만 읽는다(내용 속 날짜·못 가르는 날·지난 시각)"
+          + (f" — {misses}" if misses else ""))
+    ok += hit
+
+    orig_gen, orig_sender, orig_draft = memo.generate, note.SENDER, memo.draft
+    orig_env = {k: os.environ.get(k) for k in (note.EMP_NO_ENV, REG.SCHEDULER_ENV)}
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    os.environ.pop(REG.SCHEDULER_ENV, None)
+    outbox: list[tuple] = []
+    fail = {"on": False}
+
+    async def _send(ids, title, body):
+        outbox.append((ids, title, body))
+        return '{"success": false, "error": "끊김"}' if fail["on"] else '{"success": true}'
+
+    base, _ = memo.assemble("과세이연 상담 정리", "과세이연 등록 절차를 확인했어요.", tail_html="",
+                            tail_note="", to="사번 3902173", recipients=["3902173"])
+    memo.draft = lambda state, **kw: (memo.readdress(base, kw["recipients"], kw["to"]), "")
+    note.use_sender(_send)
+    tmp = tempfile.TemporaryDirectory()
+    orig_dir = session_store.SESSION_DATA_DIR
+    session_store.SESSION_DATA_DIR = Path(tmp.name)
+
+    def _offer(q: str) -> dict:
+        return act._memo_offer({"question": q, "customer_id": "CM", "answer": "요약", "evidence": [{}]})
+
+    def _say(q: str, pending: dict) -> dict:
+        return act.confirm_action({"question": q, "customer_id": "CM",
+                                   "history": [{"question": "q", "pending_action": pending}]})
+
+    try:
+        o1 = _offer("사번 3902173한테 10월 5일에 쪽지 보내줘")
+        o2 = _offer("10월 5일 만기 고객 정리해서 쪽지 보내줘")
+        o3 = _offer("15일에 쪽지 보내줘")
+        p1, p3 = o1["pending_action"], o3["pending_action"]
+        yes_unclear = _say("네", p3)
+        sent_unclear = len(outbox)
+
+        memo.generate = lambda prompt, **kw: json.dumps({"edit": False})
+        r_move = _say("10월 6일로 바꿔줘", p1)
+        memo.generate = lambda prompt, **kw: json.dumps(
+            {"edit": True, "title": "과세이연 상담 정리", "body": "-- 과세이연 등록 절차를 확인했어요."},
+            ensure_ascii=False)
+        r_edit = _say("앞에 --를 붙여줘", p1)
+        r_now = _say("그냥 지금 보내줘", p1)
+        r_set = _say("10월 7일에 보내줘", p3)
+
+        sent_before = len(outbox)
+        off = _say("네", p1)
+        sent_off = len(outbox) - sent_before
+        os.environ[REG.SCHEDULER_ENV] = "demo"
+        on = _say("네", p1)
+        sent_on = outbox[sent_before:]
+        logged = [c for s2 in session_store.list_sessions("CM") for t in s2["turns"]
+                  for c in (t.get("tool_calls") or []) if c.get("name") == "schedule_memo"]
+        fail["on"] = True
+        broke = _say("네", p1)
+        fail["on"] = False
+        plain_send = _say("네", o2["pending_action"])
+    finally:
+        session_store.SESSION_DATA_DIR = orig_dir
+        tmp.cleanup()
+        memo.generate, note.SENDER, memo.draft = orig_gen, orig_sender, orig_draft
+        for k, v in orig_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    hit = (p1["send_at"] == "2026-10-05T09:00" and p1["recipients"] == ["3902173"]
+           and "10월 5일(월) 오전 9시에 보내도록 예약할까요" in o1["answer"]
+           and not o2["pending_action"]["send_at"] and "이대로 쪽지를 보낼까요" in o2["answer"]
+           and "10월 5일" not in p1["html"] and "예약" not in p1["html"])      # 본문에 예약 표시 없음
+    print(f"{'✓' if hit else '✗'} 발송일이 읽히면 예약 제안이 서고, 내용 속 날짜는 즉시 발송 그대로다")
+    ok += hit
+
+    hit = (p3["when_unclear"] and act.WHEN_MANY in o3["answer"] and act.WHEN_ASK in o3["answer"]
+           and yes_unclear["pending_action"]["when_unclear"] and sent_unclear == 0
+           and (r_set["pending_action"] or {}).get("send_at") == "2026-10-07T09:00"
+           and not r_set["pending_action"]["when_unclear"])
+    print(f"{'✓' if hit else '✗'} 발송일을 못 가르면 «네»로 보내지 않고 묻고, 날짜를 말하면 예약 제안이 선다")
+    ok += hit
+
+    pm, pe, pn = r_move["pending_action"], r_edit["pending_action"], r_now["pending_action"]
+    hit = (pm["send_at"] == "2026-10-06T09:00" and pm["body"] == p1["body"]
+           and pe["send_at"] == p1["send_at"] and pe["body"].startswith("-- ")
+           and pn["send_at"] == "" and "이대로 쪽지를 보낼까요" in r_now["answer"])
+    print(f"{'✓' if hit else '✗'} 발송 시각은 수정 턴을 지나도 남고, 단서로 바뀌고, 「지금 보내줘」로 지워진다(보내지 않고 다시 제안)")
+    ok += hit
+
+    hit = (off["answer"] == act.SCHEDULE_OFF and sent_off == 0
+           and on["answer"] == "10월 5일(월) 오전 9시에 보내도록 예약했어요 — 받는 사람: 사번 3902173."
+           and len(sent_on) == 1 and sent_on[0][0] == ["3902173"] and sent_on[0][2] == p1["html"]
+           and any((c["args"].get("executor") == "demo" and c["args"]["send_at"] == p1["send_at"])
+                   for c in logged)
+           and "예약했어요" not in broke["answer"] and "보내지 못했어요" in broke["answer"]
+           and "쪽지를 보냈어요" in plain_send["answer"])
+    print(f"{'✓' if hit else '✗'} 실행기가 없으면 보내지 않고, 시연 실행기는 즉시 한 통을 보내며 «예약했어요»·기록을 남긴다(실패면 말하지 않는다)")
+    ok += hit
+    return ok

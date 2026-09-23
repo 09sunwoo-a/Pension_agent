@@ -108,6 +108,10 @@ class Draft:
     body: str = ""
     tail_html: str = ""
     tail_note: str = ""       # 화면 미리보기에서 표 자리에 서는 한 줄(「(아래에 … 표가 붙습니다)」)
+    # 예약 발송 시각(ISO)과 화면 표기. 비어 있으면 즉시 발송이다(§10 「예약 발송」). 받는 사람과
+    # 같은 **실행 인자**라 코드가 정하고(`effects/schedule.py`), 쪽지 본문·제목에는 싣지 않는다.
+    send_at: str = ""
+    send_label: str = ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -328,7 +332,8 @@ def draft(state: AgentState, *, recipients: list[str], to: str,
 
 
 def assemble(title: str, body: str, *, tail_html: str, tail_note: str, to: str,
-             recipients: list[str]) -> tuple[Draft | None, str]:
+             recipients: list[str], send_at: str = "",
+             send_label: str = "") -> tuple[Draft | None, str]:
     """제목·본문 + 코드가 붙인 꼬리(값 표·꼬리말) → 초안 한 통. 길이 상한을 넘으면 `(None, 사유)`.
 
     처음 초안(`draft`)과 고친 초안(`revise`·`verbatim`)이 **같은 조립**을 거친다 — 두 벌이면
@@ -341,7 +346,8 @@ def assemble(title: str, body: str, *, tail_html: str, tail_note: str, to: str,
         return None, TOO_LONG.format(limit=note.MAX_CHARS)
     preview = f"{body}\n\n{tail_note}" if tail_note else body
     return Draft(title=title, text=preview, html=markup, to=to, recipients=list(recipients),
-                 body=body, tail_html=tail_html, tail_note=tail_note), ""
+                 body=body, tail_html=tail_html, tail_note=tail_note,
+                 send_at=send_at, send_label=send_label), ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -388,13 +394,20 @@ def from_pending(pending: dict) -> Draft:
                  html=pending.get("html") or "", to=pending.get("to") or "",
                  recipients=list(pending.get("recipients") or []),
                  body=body if body is not None else (pending.get("text") or ""),
-                 tail_html=pending.get("tail_html") or "", tail_note=pending.get("tail_note") or "")
+                 tail_html=pending.get("tail_html") or "", tail_note=pending.get("tail_note") or "",
+                 send_at=pending.get("send_at") or "", send_label=pending.get("send_label") or "")
 
 
 def readdress(found: Draft, recipients: list[str], to: str) -> Draft:
     """받는 사람만 바꾼다 — 본문은 한 글자도 안 바뀐다(§10 결정: 고친 글을 지킨다)."""
     from dataclasses import replace  # noqa: PLC0415
     return replace(found, recipients=list(recipients), to=to)
+
+
+def reschedule(found: Draft, send_at: str, send_label: str) -> Draft:
+    """발송 시각만 바꾼다(빈 값이면 즉시 발송으로 되돌린다). 본문은 그대로다."""
+    from dataclasses import replace  # noqa: PLC0415
+    return replace(found, send_at=send_at, send_label=send_label)
 
 
 def verbatim(found: Draft, body: str) -> tuple[Draft | None, str]:
@@ -404,7 +417,8 @@ def verbatim(found: Draft, body: str) -> tuple[Draft | None, str]:
     코드가 붙인 값 표·꼬리말은 그대로 두고, 더미 게이트·개인정보 마스킹·길이 상한은
     발송 경로가 그대로 건다(`actions.send_memo` · `note.py`)."""
     return assemble(found.title, body.strip(), tail_html=found.tail_html,
-                    tail_note=found.tail_note, to=found.to, recipients=found.recipients)
+                    tail_note=found.tail_note, to=found.to, recipients=found.recipients,
+                    send_at=found.send_at, send_label=found.send_label)
 
 
 def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revision:
@@ -451,7 +465,8 @@ def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revisi
     if faults:
         return Revision("screened", reason=" / ".join(faults[:3]))
     made, why = assemble(title, body, tail_html=found.tail_html, tail_note=found.tail_note,
-                         to=found.to, recipients=found.recipients)
+                         to=found.to, recipients=found.recipients,
+                         send_at=found.send_at, send_label=found.send_label)
     if made is None:
         return Revision("screened", reason=why)
     before, after = verify.numbers(f"{found.title}\n{found.body}"), verify.numbers(f"{title}\n{body}")
