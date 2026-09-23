@@ -36,6 +36,7 @@
                     MEMO_TABLE_BLOCK           코드가 값 표를 붙일 때
                     MEMO_EDIT_SYSTEM · MEMO_EDIT_PROMPT  걸려 있는 초안을 직원의 지시대로 고친다
                     MEMO_EDIT_RECIPIENT_BLOCK  받는 사람이 바뀌어 호칭을 맞출 때
+                    MEMO_EDIT_ECHO_BLOCK       고친 본문에 직원의 말이 통째로 들어갔을 때 다시 쓰기
 """
 
 from __future__ import annotations
@@ -93,4 +94,5 @@ from pension_agent.consult_agent.prompts.memo import (  # noqa: F401
     MEMO_EDIT_SYSTEM,
     MEMO_EDIT_PROMPT,
     MEMO_EDIT_RECIPIENT_BLOCK,
+    MEMO_EDIT_ECHO_BLOCK,
 )

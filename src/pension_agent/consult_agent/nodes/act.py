@@ -906,11 +906,20 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     if rev.kind == "edited" and rev.draft is not None:
         _record_staff(pasted=False, added=rev.added, removed=rev.removed)
         unknown = [c for c in rev.also if c not in memo.ALSO_LABELS]
+        # «호칭을 맞췄다»는 코드가 확인할 수 있을 때만 화면에 세운다 — 받는 사람이 이번에 바뀌었거나,
+        # 직전 초안이 사람을 부르던 호칭이 고친 초안에서 사라졌을 때. 받는 사람도 호칭도 그대로인데
+        # address 가 붙어 온 일이 있다(2026-09-23 행내 실측). 걸러낸 것은 기록에만 남는다.
+        shown = [c for c in rev.also
+                 if c != "address" or address or _called(found.body) - _called(rev.draft.body)]
         if rev.also:
+            dropped = [c for c in rev.also if c not in shown]
             observability.step("confirm", pending=pending.get("label"), reply="edited",
                                reason=f"함께 고친 것 {','.join(rev.also)}"
-                                      + (f" (목록 밖 {','.join(unknown)})" if unknown else ""))
-        return _memo_turn(rev.draft, state, note=memo.also_line(rev.also), unclear=unclear)
+                                      + (f" (목록 밖 {','.join(unknown)})" if unknown else "")
+                                      + (f" (확인 못 해 뺌 {','.join(dropped)})" if dropped else ""))
+        return _memo_turn(rev.draft, state, note=memo.also_line(shown), unclear=unclear)
+    if rev.kind == "echo":
+        return _memo_turn(found, state, head=memo.EDIT_ECHO, unclear=unclear)
     if rev.kind == "ask":
         # 초안은 그대로 걸어 둔다 — 다음 턴의 「5,300만원으로」가 이 초안을 고치는 말이다.
         # 제안은 다시 조립한다: 이번 말이 받는 사람을 바꿨으면 제안 문장도 그 사람이어야 한다.
@@ -1004,6 +1013,14 @@ def _untail(word: str) -> str:
         if cut == word or len(cut) < 2:
             return cut if len(cut) >= 2 else word
         word = cut
+
+
+#: 본문에서 사람을 부르는 호칭 — 「이선우 대리님」·「김국민 님」. 「고객님」은 받는 사람이 아니다.
+_CALLED = re.compile(r"[가-힣]{2,4}\s?(?:[가-힣]{1,4})?님")
+
+
+def _called(body: str) -> set[str]:
+    return {m.group() for m in _CALLED.finditer(body or "") if "고객" not in m.group()}
 
 
 #: 목록이 떠 있는데 짧은 답이 어느 후보와도 맞지 않을 때 — 새 질문으로 넘기지 않는다.
