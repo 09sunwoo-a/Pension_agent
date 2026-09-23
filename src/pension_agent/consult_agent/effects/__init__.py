@@ -16,6 +16,7 @@
 
     화면 연계
     screens.py   link · lms_screen          mystar-link:// 딥링크 · LMS 발송 화면번호 조회
+    messages.py  messages_in                답변이 인용한 고객 발송 문구 — 화면의 복사 블록 재료
 
     화면에 먼저 내미는 것 — 문구는 전부 코드가 조립한다
     suggest.py   history_chips              지난 상담이 있는 고객에게만

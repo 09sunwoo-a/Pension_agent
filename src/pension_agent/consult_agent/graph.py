@@ -37,7 +37,7 @@ from pension_agent.strategy_agent import customer as CUST
 
 from pension_agent.consult_agent import progress, tools
 from pension_agent.consult_agent.evidence import guard
-from pension_agent.consult_agent.effects import screens, suggest
+from pension_agent.consult_agent.effects import messages as lms_messages, screens, suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -279,6 +279,10 @@ def ask(
     if links is None:
         links = screens.links_in(out.get("answer") or "",
                                  screens.declared(evidence), screens.names(KB))
+    # 본문이 인용한 고객 발송 문구(LMS). 화면은 이 인용을 화법 블록이 아니라 «복사할 문구»
+    # 블록으로 그린다(effects/messages.py). links 와 같은 이유로 여기 한 곳에서 만든다.
+    messages = lms_messages.messages_in(out.get("answer") or "",
+                                        lms_messages.canonical(evidence))
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),
@@ -328,6 +332,9 @@ def ask(
         # 열 수 있는 링크로 감싼다 — 없으면 빈 목록이다(키가 있을 때와 없을 때를 프론트가
         # 갈라 처리하지 않게. `sources`·`followups` 와 같은 규약).
         "links": list(links or []),
+        # 본문 속 고객 발송 문구 — `{kind, label, text, copy}`. `text` 는 본문의 인용 내용
+        # 그대로라 화면이 그것으로 인용을 찾는다(links 의 screen 과 같은 규약). 없으면 [].
+        "messages": messages,
         # 추천질문만 따로 쓰고 싶은 프론트를 위해 리스트로도 준다 — answer 끝의 블록과
         # 같은 내용이다(프론트가 붙이면 answer 쪽 블록은 떼면 된다).
         "followups": followups,
