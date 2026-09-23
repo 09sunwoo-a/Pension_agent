@@ -57,8 +57,7 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
     {"type": "progress",  "text": "질문 내용을 파악하고 있어요"}            0개 이상 · 답변 전에
     {"type": "answer",    "text": "<본문>", "intent": "situation",
                           "links": [{"screen","url","label"}]}             1개 · links 는 항상(없으면 [])
-    {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용
-                                                                          (`options` 가 있으면 그 버튼으로 대신)
+    {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용.
                                                                           본문 끝의 제안 문장은 그대로 둔다
     {"type": "clarify",   "question": "...", "options": ["..."]}           되묻기 턴에만 — 선택지 버튼용
     {"type": "sources",   "items": [{"id","doc","title","url","score","page","role"}]}
@@ -262,9 +261,7 @@ def _strip_followups(answer: str) -> str:
 
 #: action 이벤트에 싣는 pending_action 의 키. html·recipients·params 같은 실행 인자는
 #: 화면이 알 필요가 없고(실행은 대화의 「네」가 한다), 쪽지 초안(title·text·to)은 미리보기용이다.
-#: `note` 는 초안 아래 작은 글씨로 세울 부기(«함께 고친 것»), `options` 는 네/아니오 대신 세울
-#: 선택 버튼(이름이 여러 명일 때의 후보)이다 — 둘 다 있을 때만 실린다.
-_ACTION_KEYS = ("kind", "label", "prompt", "title", "text", "to", "note", "options")
+_ACTION_KEYS = ("kind", "label", "prompt", "title", "text", "to")
 
 
 def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -280,7 +277,9 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
         "links": list(result.get("links") or []),
     }]
     action = result.get("pending_action")
-    if action:
+    # 동명이인 목록을 띄운 쪽지 턴(`candidates`)은 네/아니오로 답할 턴이 아니다 — 버튼을 그리게
+    # 하지 않으려고 action 을 내지 않는다. 고를 후보는 세션에 남고 직원은 번호·부서를 입력한다.
+    if action and not action.get("candidates"):
         ev = {k: action[k] for k in _ACTION_KEYS if action.get(k) is not None}
         # 본문에 붙는 문장과 버튼 위 문장은 **같은 함수가 만든 같은 문장**이다. 여기에
         # 폴백 문자열을 따로 적어 두면 제안 갈래가 하나 늘 때 두 곳이 어긋난다 — 버튼
