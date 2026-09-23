@@ -439,6 +439,36 @@ def check_screen_registry() -> int:
     print(f"{'✓' if hit else '✗'} 표A 「주요 기능」 칸이 둘째 검색 예시로 실려 화면명에 없는 말(해지)로도 닿는다")
     ok += hit
 
+    # «같은 말» — [06-12-610] 의 주요 기능 칸은 「사전지정운용제도 신청」이라고만 적는다.
+    # 직원은 「디폴트옵션 등록 화면」으로 묻고, 그 둘이 같은지를 LLM 이 턴마다 따로 판단해
+    # 답이 갈렸다(2026-09-23 — 첫 턴은 화면번호를 답하고, 다음 턴은 «자료로는 확인이
+    # 어려워요», 대화가 쌓인 턴은 그 화면을 빼고 되물었다). 원문(표B)이 두 이름을 괄호로
+    # 병기하므로 변환기가 파생 필드로 붙이고, 카드 선택·게이트·작성 재료가 전부 그것을 본다.
+    from pension_agent.consult_agent.tools.adequacy import _headline
+    dopt = by_screen.get("[06-12-610]")
+    alias = "사전지정운용 = 디폴트옵션"
+    hit = (bool(dopt) and alias in (dopt.get("aliases") or [])
+           and "디폴트옵션" in _card_line(dopt, 2)
+           and alias in tools._render_screen(dopt)
+           and alias in _headline(dopt))
+    print(f"{'✓' if hit else '✗'} 원문 표기만 있는 화면 카드에 «같은 말»이 붙어 카드 선택·게이트·재료에 보인다")
+    ok += hit
+
+    # 이미 직원이 부르는 이름을 쓰는 카드에는 붙이지 않는다 — [06-12-918] 디폴트옵션 대기자금 관리.
+    # 원문 summary 는 손대지 않는다(루트 CLAUDE.md 규칙 1) — 괄호 병기는 검색 예시에만 있다.
+    idle = by_screen.get("[06-12-918]")
+    hit = (bool(idle) and not idle.get("aliases") and bool(dopt)
+           and "디폴트옵션" not in (dopt.get("summary") or ""))
+    print(f"{'✓' if hit else '✗'} «같은 말»은 이름이 빠진 카드에만, 원문 칸은 그대로 둔다")
+    ok += hit
+
+    # 원문이 병기하지 않은 쌍은 붙이지 않는다 — 코드가 동의어를 지어내지 않는다.
+    from scripts.kb_build import procedures as _procs
+    hit = (_procs._attested_aliases("디폴트옵션(사전지정운용) 등록") == {"사전지정운용": "디폴트옵션"}
+           and _procs._attested_aliases("사전지정운용제도 신청 · 디폴트옵션 대기자금") == {})
+    print(f"{'✓' if hit else '✗'} 원문에 괄호 병기가 없는 «같은 말»은 붙이지 않는다")
+    ok += hit
+
     # 화면번호는 한 글자만 틀려도 없는 화면이라 원문 그대로 요구한다.
     hit = bool(found) and all(a.startswith("[") for a in found["atomic"])
     print(f"{'✓' if hit else '✗'} 화면번호는 원문 표기 그대로 요구한다(atomic)")

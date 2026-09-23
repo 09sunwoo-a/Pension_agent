@@ -49,7 +49,31 @@ _ITEM_REF = re.compile(r"\s*→\s*(?:관련 지식)?항목[^,;.]*")
 _SUMMARY_TRIGGER_CHARS = 60
 
 
-def _screen_triggers(title: str, summary: str) -> list[str]:
+def _attested_aliases(source: str) -> dict[str, str]:
+    """config.SCREEN_TERM_ALIASES 중 **원문이 괄호로 두 이름을 묶어 적은 것**만.
+
+    「디폴트옵션(사전지정운용)」·「사전지정운용제도(디폴트옵션)」처럼 한 이름 바로 뒤 괄호에
+    다른 이름이 오는 표기를 찾는다. 못 찾으면 그 쌍은 붙이지 않고 변환 알림을 낸다 — 원문이
+    같은 것이라고 적지 않은 두 말을 코드가 같다고 선언하지 않는다.
+    """
+    out: dict[str, str] = {}
+    for term, alias in config.SCREEN_TERM_ALIASES.items():
+        a, b = re.escape(term), re.escape(alias)
+        if re.search(rf"{a}[가-힣]*\s*\(\s*{b}|{b}[가-힣]*\s*\(\s*{a}", source):
+            out[term] = alias
+        else:
+            note(f"[같은말 근거없음] {term} = {alias} — 원문에 괄호 병기가 없어 화면 카드에 붙이지 않음")
+    return out
+
+
+def _screen_aliases(title: str, summary: str, attested: dict[str, str]) -> dict[str, str]:
+    """이 화면 카드에 붙일 «같은 말» — 원문 표기만 있고 직원이 부르는 이름이 없는 것."""
+    text = f"{title} {summary or ''}"
+    return {t: a for t, a in attested.items() if t in text and a not in text}
+
+
+def _screen_triggers(title: str, summary: str,
+                     aliases: dict[str, str] | None = None) -> list[str]:
     """screen 카드의 검색 예시 — 화면명 + **표A «주요 기능» 칸**.
 
     예전에는 화면명으로만 두 줄(「{화면명} 화면번호」·「{화면명} 어느 화면」)을 만들었다. 그러면
@@ -62,12 +86,17 @@ def _screen_triggers(title: str, summary: str) -> list[str]:
     늘리는 재료는 원문 본문의 절로 한정」). 항목 참조만 떼고 옮긴다 — 문장을 새로 만들지 않는다.
     둘째 칸에 두는 이유는 LLM 카드 목록 한 줄이 예상질문을 앞에서 2개만 싣기 때문이다
     (`consult_agent/evidence/kb_index.py::_card_line`) — 뒤에 붙이면 LLM 은 못 본다.
+
+    `aliases`(«같은 말»)가 있으면 그 칸의 원문 표기 뒤에 괄호로 직원이 부르는 이름을 붙인다
+    — 「사전지정운용제도(디폴트옵션) 신청」. 원문이 표B 에서 쓰는 병기 꼴 그대로다.
     """
     out = [f"{title} 화면번호"]
     text = " ".join(_ITEM_REF.sub("", summary or "").split()).strip(" .")
     if len(text) > _SUMMARY_TRIGGER_CHARS:
         cut = text.rfind(" ", _SUMMARY_TRIGGER_CHARS // 2, _SUMMARY_TRIGGER_CHARS + 1)
         text = text[:cut if cut > 0 else _SUMMARY_TRIGGER_CHARS].rstrip(" ,:;(·")
+    for term, alias in (aliases or {}).items():
+        text = re.sub(rf"({re.escape(term)}[가-힣]*)", rf"\1({alias})", text, count=1)
     if len(text) >= 4 and text != title:
         out.append(text)
     out.append(f"{title} 어느 화면")
@@ -77,7 +106,10 @@ def _screen_triggers(title: str, summary: str) -> list[str]:
 def build_screens(resolver: DocResolver) -> list[dict]:
     """표A 를 화면 레지스트리로 옮긴다. 표의 값을 그대로 싣고 새로 만들지 않는다."""
     src = EXTRACT / "05_업무처리절차.md"
-    lines = src.read_text(encoding="utf-8").splitlines()
+    text = src.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    # «같은 말»의 근거는 표A 가 아니라 같은 파일의 표B 병기다 — 파일 전체에서 찾는다.
+    attested = _attested_aliases(text)
     start = next(i for i, ln in enumerate(lines) if ln.startswith("### 표A."))
     end = next(i for i, ln in enumerate(lines[start:], start) if ln.startswith("### 표B."))
 
@@ -124,6 +156,7 @@ def build_screens(resolver: DocResolver) -> list[dict]:
         # 알아야 처리 전에 확인한다. "확인 필요"가 **해소됐다**고 적은 비고(04-12-640)까지
         # 부분문자열로 걸면 반대 뜻의 문장을 경고로 뒤집어 읽는다.
         stale = "확인 필요" in remark and "해소" not in remark
+        aliases = _screen_aliases(title, summary, attested)
 
         records.append(record(
             f"screen.{key.lower()}", "screen",
@@ -136,7 +169,9 @@ def build_screens(resolver: DocResolver) -> list[dict]:
              "status": "확인 필요" if stale else None,
              "volatile": (warn if stale else None),
              "tags": {"topics": [group]},
-             "trigger_examples": _screen_triggers(title, summary)},
+             # 파생 필드 — 원문 칸(summary)은 그대로 두고 옆에 적는다(루트 CLAUDE.md 규칙 1).
+             "aliases": [f"{t} = {a}" for t, a in aliases.items()] or None,
+             "trigger_examples": _screen_triggers(title, summary, aliases)},
             # 표A 의 원천은 화면번호 안내 문서다 — 06/05 는 그것을 업무 그룹별로 재배열한
             # 정리본이라, 출처는 원천 문서를 가리켜야 한다(§3 사내 파일명은 출처가 아니다).
             # 표 밖에서 온 번호는 비고가 "수록 범위 밖"이라고 적어두므로 거기서 갈린다.
