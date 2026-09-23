@@ -358,3 +358,181 @@ def check_memo() -> int:
     print(f"{'✓' if hit else '✗'} 발송이 레지스트리에 있고, 가이드라인이 받는 사람으로 갈린다")
     ok += hit
     return ok
+
+
+def check_memo_edit() -> int:
+    """쪽지 초안은 고칠 수 있다(§10 「쪽지 초안은 고칠 수 있다」 · 2026-09-23 실측).
+
+    실측: 초안이 선 뒤 「앞에 --를 붙여줘」·「줄 바꿈하고 잘 정리해서」 → 「웅 쪽지 보내줘」가
+    「직전에 제안드린 작업이 없어요」로 끝났고, 이어서 「저거 쪽지 내용 사번 …한테 쪽지 보내줘」는
+    고친 글이 아니라 새로 쓴 글을 내밀었다.
+
+      ① 초안이 걸려 있으면 분류와 무관하게 확인 노드로 간다
+      ② 고치라는 말이면 **그 초안을** 고치고 제안을 다시 건다 — 발송되는 것은 직전 턴의 초안
+      ③ 받는 사람은 말이 있을 때만 바뀐다(사번 · 본인을 가리키는 말). 본문은 그대로다
+      ④ 직원이 적은 값은 원장과 달라도 들어가고, 아무도 안 적은 값은 걸린다 — 걸리면 직전 초안을 둔다
+      ⑤ «이대로·똑같이» + 붙여넣은 글은 LLM·검사 없이 그대로 초안이 된다. «~식으로»는 다듬는다
+      ⑥ 새 질문이면 초안을 무효로 하고 계획 루프로 넘긴다. 「요약해줘」의 «해줘»를 승낙으로 읽지 않는다
+      ⑦ 짧은 승낙·거절은 LLM 을 부르지 않는다. 「아니 앞에 --」는 거절이 아니다
+    """
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from pension_agent import note, session_store
+    from pension_agent.consult_agent import routing as RT
+    from pension_agent.consult_agent.effects import memo
+    from pension_agent.consult_agent.nodes import act
+
+    ok = 0
+    orig_gen, orig_sender = memo.generate, note.SENDER
+    orig_env = os.environ.get(note.EMP_NO_ENV)
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    outbox: list[tuple] = []
+    calls: list[str] = []
+
+    async def _send(ids, title, body):
+        outbox.append((ids, title, body))
+        return '{"success": true}'
+
+    def _llm(obj: dict):
+        def gen(prompt, **kw):
+            calls.append(prompt)
+            return json.dumps(obj, ensure_ascii=False)
+        memo.generate = gen
+
+    def _say(question: str, history: list[dict]) -> dict:
+        return act.confirm_action({"question": question, "history": history, "customer_id": "CM"})
+
+    note.use_sender(_send)
+    # 발송 기록이 실제 상담이력 저장소에 남지 않게 한다(check_memo 와 같은 처리).
+    tmp = tempfile.TemporaryDirectory()
+    orig_dir = session_store.SESSION_DATA_DIR
+    session_store.SESSION_DATA_DIR = Path(tmp.name)
+    try:
+        table = "<table><tr><td>평가금액</td><td>5,200만원</td></tr></table>"
+        first, _ = memo.assemble("과세이연 상담 정리", "과세이연 등록 절차를 확인했어요.\n60일 내 입금",
+                                 tail_html=table, tail_note="(아래에 고객 주요 정보 표가 붙습니다)",
+                                 to="사번 3902173", recipients=["3902173"])
+        t1 = act._offer_draft(first, {"customer_id": "CM"})
+        hist = [{"question": "요약해서 사번 3902173한테 쪽지 보내줘", "pending_action": t1["pending_action"]}]
+
+        routed = RT.route_intent({"intent": "correction", "question": "앞에 --를 붙여줘", "history": hist})
+
+        _llm({"edit": True, "title": "과세이연 상담 정리",
+              "body": "-- 과세이연 등록 절차를 확인했어요.\n-- 60일 내 입금"})
+        t2 = _say("앞에 --를 붙여줘", hist)
+        hist2 = [*hist, {"question": "앞에 --를 붙여줘", "pending_action": t2.get("pending_action")}]
+        _llm({"edit": True, "title": "과세이연 상담 정리",
+              "body": "-- 과세이연 등록 절차를 확인했어요.\n\n-- 60일 내 입금"})
+        t3 = _say("줄 바꿈하고 잘 정리해서", hist2)
+        hist3 = [*hist2, {"question": "줄 바꿈하고 잘 정리해서", "pending_action": t3.get("pending_action")}]
+        # 「아니」로 시작해도 고치라는 말이면 고친다(짧은 거절만 거절이다).
+        t_no_edit = _say("아니 앞에 --를 붙여줘", hist)
+
+        before = len(calls)
+        t4 = _say("웅 쪽지 보내줘", hist3)
+        yes_calls = len(calls) - before
+        sent_after_yes = list(outbox)
+
+        _llm({"edit": False})
+        t5 = _say("저거 쪽지 내용 사번 3902175한테 쪽지 보내줘", hist3)
+        n_before_same = len(outbox)
+        t6 = _say("저거 쪽지 내용 사번 3902173한테 쪽지 보내줘", hist3)
+        sent_same = len(outbox) - n_before_same
+        t7 = _say("그냥 나한테 보내줘", hist3)
+        t_both = _say("나한테 말고 사번 3902175한테", hist3)
+
+        _llm({"edit": True, "title": "과세이연 상담 정리",
+              "body": "-- 과세이연 등록 절차를 확인했어요.\n\n-- 90일 내 입금"})
+        t8 = _say("60일 말고 90일로 고쳐줘", hist3)
+        _llm({"edit": True, "title": "과세이연 상담 정리",
+              "body": "-- 과세이연 등록 절차를 확인했어요.\n\n-- 70일 내 입금"})
+        t9 = _say("줄 간격 좀 넓혀줘", hist3)
+        _llm({"edit": True, "ask": "기한을 며칠로 고칠까요?"})
+        t10 = _say("기한 틀렸어 고쳐줘", hist3)
+
+        before = len(calls)
+        pasted = "오늘 과세이연 등록 건 확인 부탁드립니다. 60일 안에 입금돼야 해요."
+        t11 = _say(f"이렇게 보내줘: {pasted}", hist3)
+        paste_calls = len(calls) - before
+        _llm({"edit": True, "title": "과세이연 상담 정리", "body": "확인 부탁드려요. 60일 안에 입금돼야 해요."})
+        before = len(calls)
+        t12 = _say(f"이런 식으로 변경해서: {pasted}", hist3)
+        restyle_calls = len(calls) - before
+
+        _llm({"edit": False})
+        n_before_q = len(outbox)
+        t13 = _say("지난 상담 요약해줘", hist3)
+        sent_by_question = len(outbox) - n_before_q
+        t14 = _say("취소", hist3)
+    finally:
+        session_store.SESSION_DATA_DIR = orig_dir
+        tmp.cleanup()
+        memo.generate, note.SENDER = orig_gen, orig_sender
+        if orig_env is None:
+            os.environ.pop(note.EMP_NO_ENV, None)
+        else:
+            os.environ[note.EMP_NO_ENV] = orig_env
+
+    hit = routed == "confirm_action"
+    print(f"{'✓' if hit else '✗'} 쪽지 초안이 걸려 있으면 분류와 무관하게 확인 노드로 간다")
+    ok += hit
+
+    p2, p3 = t2.get("pending_action") or {}, t3.get("pending_action") or {}
+    hit = (p2.get("kind") == "memo" and p2["body"].startswith("-- ") and p3["body"].count("\n\n") == 1
+           and t2["answer"].startswith(memo.FENCE) and t2["answer"].endswith("(네 / 아니오)")
+           and table in p3["html"] and p3["tail_note"] == first.tail_note          # 값 표는 그대로
+           and (t_no_edit.get("pending_action") or {}).get("body", "").startswith("-- "))
+    print(f"{'✓' if hit else '✗'} 고치라는 말이면 그 초안을 고쳐 제안을 다시 건다(값 표는 그대로)")
+    ok += hit
+
+    hit = (yes_calls == 0 and "쪽지를 보냈어요" in t4["answer"] and len(sent_after_yes) == 1
+           and sent_after_yes[0][0] == ["3902173"] and sent_after_yes[0][2] == p3["html"])
+    print(f"{'✓' if hit else '✗'} 고친 뒤 「웅 쪽지 보내줘」는 LLM 없이 **고친 초안**을 보낸다")
+    ok += hit
+
+    p5, p7 = t5.get("pending_action") or {}, t7.get("pending_action") or {}
+    hit = (p5.get("recipients") == ["3902175"] and p5.get("body") == p3["body"]
+           and "사번 3902175" in p5.get("prompt", "") and sent_same == 1
+           and p7.get("recipients") == ["3902172"] and p7.get("body") == p3["body"]
+           and (t_both.get("pending_action") or {}).get("recipients") == ["3902173"]
+           and (p2.get("recipients") == ["3902173"]))            # 말이 없으면 직전 수신자를 둔다
+    print(f"{'✓' if hit else '✗'} 받는 사람만 바꾸면 고친 본문 그대로 다시 제안한다(같은 사번이면 보낸다 · 본인 전환 · 섞이면 안 바꾼다)")
+    ok += hit
+
+    p8, p9 = t8.get("pending_action") or {}, t9.get("pending_action") or {}
+    hit = ("90일" in p8.get("body", "") and "60일" not in p8.get("body", "")
+           and "반영하지 않았어요" in t9["answer"] and "70" in t9["answer"]
+           and p9.get("body") == p3["body"])
+    print(f"{'✓' if hit else '✗'} 직원이 적은 값은 들어가고, 아무도 안 적은 값은 걸려 직전 초안이 남는다")
+    ok += hit
+
+    hit = (t10["answer"] == "기한을 며칠로 고칠까요?"
+           and (t10.get("pending_action") or {}).get("body") == p3["body"])
+    print(f"{'✓' if hit else '✗'} 새 값 없이 고치라면 되묻고, 초안은 걸어 둔다")
+    ok += hit
+
+    p11, p12 = t11.get("pending_action") or {}, t12.get("pending_action") or {}
+    hit = (paste_calls == 0 and p11.get("body") == pasted and p11.get("title") == p3["title"]
+           and table in p11.get("html", "")
+           and restyle_calls == 1 and p12.get("body") == "확인 부탁드려요. 60일 안에 입금돼야 해요.")
+    print(f"{'✓' if hit else '✗'} «이렇게 보내줘: …»는 그대로, «이런 식으로 변경해서: …»는 다듬는다")
+    ok += hit
+
+    hit = (t13 == {"pending_action": None} and sent_by_question == 0
+           and RT.route_confirm(t13) == "plan"
+           and "취소" in t14["answer"] and t14["pending_action"] is None)
+    print(f"{'✓' if hit else '✗'} 새 질문이면 초안을 무효로 하고 계획 루프로 넘긴다 · 「취소」는 취소")
+    ok += hit
+
+    # 짧은 승낙·거절 판정 — 「보내」가 들어 있다고 승낙이 아니다.
+    yes = [act._norm(q) for q in ("네", "웅 쪽지 보내줘", "응, 보내줘", "이대로 보내줘", "좋아요", "보내")]
+    not_yes = [act._norm(q) for q in ("앞에 --붙여서 보내줘", "사번 3902173한테 보내줘", "지난 상담 요약해줘")]
+    no = [act._norm(q) for q in ("아니", "취소", "아니 괜찮아", "안 보내")]
+    hit = (all(act._PLAIN_YES.match(q) for q in yes) and not any(act._PLAIN_YES.match(q) for q in not_yes)
+           and all(act._PLAIN_NO.match(q) for q in no)
+           and not act._PLAIN_NO.match(act._norm("아니 앞에 --를 붙여줘")))
+    print(f"{'✓' if hit else '✗'} 짧은 승낙·거절만 코드가 바로 가른다(「앞에 --붙여서 보내줘」는 승낙이 아니다)")
+    ok += hit
+    return ok

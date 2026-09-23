@@ -152,6 +152,9 @@ STEP_VALUES: dict[Any, str] = {
     "not_connected": "미연결", "unknown": "미상",
     # 승낙 응답
     "accept": "승낙", "reject": "거절", "unclear": "불명확",
+    # 쪽지 초안이 걸린 턴(consult_agent/nodes/act._memo_reply)
+    "edited": "초안수정", "not_edit": "수정아님", "pasted": "붙여넣기", "screened": "검사걸림",
+    "down": "LLM실패",
     # 폴백
     "raw_evidence": "근거원문",
 }

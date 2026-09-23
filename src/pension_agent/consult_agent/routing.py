@@ -73,8 +73,16 @@ def route_intent(state: AgentState) -> str:
     # 그 답은 되묻기의 답이므로 계획 루프로 보낸다 — 이전 대화(되물음·선택지)가 계획·작성
     # 프롬프트에 실려 있어 그 갈래로 답을 만든다. 제안도 되묻기도 없었다면 confirm_action
     # 노드가 "제안이 없다"고 사실대로 안내하는 것이 맞으므로 그대로 둔다.
+    # 쪽지 초안이 걸려 있으면 분류와 무관하게 확인 노드로 간다(§10 「쪽지 초안은 고칠 수
+    # 있다」). 「앞에 --를 붙여줘」는 분류가 correction·situation 으로 읽고, 그러면 그 턴이 제안
+    # 없이 끝나 다음 턴의 「웅 쪽지 보내줘」가 «직전에 제안드린 작업이 없어요»로 끝났다
+    # (2026-09-23 실측). 초안이 걸려 있는지는 코드가 아는 값이다 — 그 말이 고치라는 것인지·
+    # 새 질문인지는 그 노드가 가르고, 새 질문이면 계획 루프로 넘긴다(route_confirm).
+    last = ((state.get("history") or [{}])[-1]) or {}
+    if (last.get("pending_action") or {}).get("kind") == "memo":
+        return "confirm_action"
+
     if state.get("intent") == "confirm_action":
-        last = ((state.get("history") or [{}])[-1]) or {}
         if not last.get("pending_action") and last.get("pending_clarify"):
             return "plan"
 
@@ -155,4 +163,8 @@ def route_confirm(state: AgentState) -> str:
     **승낙 턴에는 판정이 돌지 않는다**(clarify.applicable). 이번 턴의 입력은 "네" 한 글자라
     모호함을 판정할 질문 자체가 없고, 무엇을 보여주기로 했는지는 제안한 턴이 이미 정했다(§10).
     """
-    return "compose" if state.get("evidence") and not state.get("answer") else "__end__"
+    if state.get("answer"):
+        return "__end__"
+    # 답도 근거도 없는 승낙 턴은 하나뿐이다 — 쪽지 초안이 걸린 턴에 직원이 **새 질문**을 한
+    # 경우(`act._memo_reply` ⑥). 그 질문의 답은 계획 루프가 쓴다(답을 만드는 경로는 하나다).
+    return "compose" if state.get("evidence") else "plan"

@@ -90,8 +90,9 @@ def build_agent():
     # 승낙 턴 — 화면 연계는 URL 하나로 끝나고, 화법 제시는 근거만 실린 채 answer 로 간다.
     # 답변을 만드는 경로를 둘로 늘리지 않기 위해서다(routing.route_confirm). 그 턴에는
     # 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자다(clarify.applicable).
+    # 쪽지 초안이 걸린 턴에 새 질문이 오면 초안을 무효로 하고 계획 루프로 넘긴다(§10).
     g.add_conditional_edges("confirm_action", route_confirm,
-                            {"compose": "compose", "__end__": END})
+                            {"compose": "compose", "plan": "plan", "__end__": END})
     g.add_edge("offer", END)
     # 브리핑 수정 노드가 «이건 화면 문장이 아니라 방금 한 답변을 고쳐 달라는 것»이라고
     # 판정하면 답을 내지 않고 계획 루프로 넘긴다(routing.route_correction). 분류가 어긋나도

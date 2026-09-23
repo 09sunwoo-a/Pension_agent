@@ -47,8 +47,8 @@ from pension_agent import note
 from pension_agent.clock import today
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import (
-    COMPOSE_RETRY_BLOCK, MEMO_OTHER_GUIDE, MEMO_PROMPT, MEMO_SELF_GUIDE, MEMO_SYSTEM,
-    MEMO_TABLE_BLOCK,
+    COMPOSE_RETRY_BLOCK, MEMO_EDIT_PROMPT, MEMO_EDIT_SYSTEM, MEMO_OTHER_GUIDE, MEMO_PROMPT,
+    MEMO_SELF_GUIDE, MEMO_SYSTEM, MEMO_TABLE_BLOCK,
 )
 from pension_agent.consult_agent import state
 from pension_agent.consult_agent.state import AgentState, format_history
@@ -102,6 +102,12 @@ class Draft:
     html: str
     to: str
     recipients: list[str] = field(default_factory=list)
+    # 초안을 **다시 조립할 수 있게** 나눠 둔 것. 직원이 초안을 고쳐 달라고 하면(`revise`)
+    # 바뀌는 것은 LLM 이 쓴 본문뿐이고, 코드가 붙인 값 표·꼬리말(`tail_html`)은 그대로다 —
+    # 표는 원장 값이라 대화로 고칠 대상이 아니다(§3 「화면의 계산값은 대화로 고칠 수 없다」).
+    body: str = ""
+    tail_html: str = ""
+    tail_note: str = ""       # 화면 미리보기에서 표 자리에 서는 한 줄(「(아래에 … 표가 붙습니다)」)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -244,8 +250,10 @@ def _clean_body(body: str) -> str:
     걷어내는 이유는 그것이 WorkB 에서 렌더되지 않아 `| 항목 | 값 |` 이 글자 그대로 남기
     때문이다. 지시로만 막으면 어겼을 때 아무도 모른다.
     """
+    # 표 구분줄만 걷는다 — `|` 가 있는 줄이다. `-----` 만 있는 줄은 직원이 «줄 그어서
+    # 정리해줘»로 넣게 한 구분선일 수 있다(초안 수정 — `revise`).
     lines = [ln for ln in body.replace("\r\n", "\n").split("\n")
-             if not re.match(r"^\s*\|?\s*[-:|\s]{5,}\|?\s*$", ln)]
+             if not ("|" in ln and re.match(r"^\s*\|?\s*[-:|\s]{5,}\|?\s*$", ln))]
     out = []
     for ln in lines:
         if ln.strip().startswith("|") and ln.count("|") >= 2:
@@ -313,14 +321,140 @@ def draft(state: AgentState, *, recipients: list[str], to: str,
         # 머리말 — 화면 답변 쪽과 같은 규칙이고, 전문은 로그·트레이스에 남는다).
         return None, LLM_DOWN.format(reason=plan.short_reason(f"{type(exc).__name__}: {exc}"))
 
-    parts = [to_html(body)]
-    if table:
-        parts += [table, _footer_html(rule=listed)]
+    tail_html = "<br><br>".join([table, _footer_html(rule=listed)]) if table else ""
+    tail_note = f"(아래에 {what} 표가 붙습니다)" if table else ""
+    return assemble(title, body, tail_html=tail_html, tail_note=tail_note,
+                    to=to, recipients=recipients)
+
+
+def assemble(title: str, body: str, *, tail_html: str, tail_note: str, to: str,
+             recipients: list[str]) -> tuple[Draft | None, str]:
+    """제목·본문 + 코드가 붙인 꼬리(값 표·꼬리말) → 초안 한 통. 길이 상한을 넘으면 `(None, 사유)`.
+
+    처음 초안(`draft`)과 고친 초안(`revise`·`verbatim`)이 **같은 조립**을 거친다 — 두 벌이면
+    한쪽만 길이 상한을 보거나 한쪽만 표를 붙이는 식으로 곧 갈린다.
+    """
+    parts = [to_html(body)] + ([tail_html] if tail_html else [])
     markup = "<br><br>".join(parts)
     if len(markup) > note.MAX_CHARS:
         # 조용히 잘라내지 않는다 — 잘린 쪽지는 «전부인 줄» 읽힌다(note.MAX_CHARS 머리말).
         return None, TOO_LONG.format(limit=note.MAX_CHARS)
+    preview = f"{body}\n\n{tail_note}" if tail_note else body
+    return Draft(title=title, text=preview, html=markup, to=to, recipients=list(recipients),
+                 body=body, tail_html=tail_html, tail_note=tail_note), ""
 
-    preview = body if not table else f"{body}\n\n(아래에 {what} 표가 붙습니다)"
-    return Draft(title=title, text=preview, html=markup, to=to,
-                 recipients=list(recipients)), ""
+
+# ─────────────────────────────────────────────────────────────
+# 초안 고치기 — 직원이 읽은 초안을 직원의 지시대로 (§10 「쪽지 초안은 고칠 수 있다」)
+#
+# 초안이 걸린 다음 턴에 직원이 「앞에 --를 붙여줘」·「줄바꿈해서 정리해줘」라고 하면, 쪽지를
+# 처음부터 다시 쓰지 않고(`draft`) **그 초안을** 고친다. 처음부터 다시 쓰면 직원이 두세 번
+# 공들여 고친 문장이 매번 사라진다(2026-09-23 실측 — 「저거 쪽지 내용 사번 …한테 보내줘」가
+# 고친 글이 아니라 새로 쓴 글을 내밀었다).
+#
+#   재료        직전 초안 + 직원의 이번 말(+ 이전 대화) — 지식베이스를 다시 찾지 않는다
+#   검사        같은 `plan.screen`. 허용 범위는 «직전 초안 + 직원의 이번 말»이다
+#   직원이 적은 값  원장과 달라도 직원이 적은 대로 쓴다 — 직원이 직접 확인한 값이다
+# ─────────────────────────────────────────────────────────────
+
+#: 수정 지시를 처리하지 못했을 때 — 초안은 직전 것 그대로 남는다.
+EDIT_DOWN = "초안 수정 지시를 처리하지 못했어요 — {reason}. 직전 초안을 그대로 둡니다."
+#: 고친 초안이 검사에 걸렸을 때. 걸린 자리를 값까지 적는다(`SCREENED` 와 같은 이유).
+EDIT_SCREENED = ("고친 초안에 근거 밖 내용이 들어가서 반영하지 않았어요. 걸린 자리: {faults}. "
+                 "직전 초안을 그대로 둡니다.")
+
+
+@dataclass(frozen=True)
+class Revision:
+    """초안 고치기의 결과 하나.
+
+    kind      edited(고쳤다) · not_edit(고치라는 말이 아니다) · ask(새 값을 되묻는다) ·
+              screened(고친 것이 검사에 걸렸다) · down(LLM 이 죽었다)
+    """
+
+    kind: str
+    draft: Draft | None = None
+    ask: str = ""
+    reason: str = ""
+    added: list[str] = field(default_factory=list)     # 직원이 적어 새로 들어간 값
+    removed: list[str] = field(default_factory=list)   # 그 대신 빠진 직전 초안의 값
+
+
+def from_pending(pending: dict) -> Draft:
+    """걸려 있던 제안(`pending_action`)에서 초안을 되살린다. 조립한 값을 그대로 쓴다 —
+    여기서 다시 조립하면 직원이 읽은 것과 한 글자라도 다른 초안이 설 수 있다."""
+    body = pending.get("body")
+    return Draft(title=pending.get("title") or "", text=pending.get("text") or "",
+                 html=pending.get("html") or "", to=pending.get("to") or "",
+                 recipients=list(pending.get("recipients") or []),
+                 body=body if body is not None else (pending.get("text") or ""),
+                 tail_html=pending.get("tail_html") or "", tail_note=pending.get("tail_note") or "")
+
+
+def readdress(found: Draft, recipients: list[str], to: str) -> Draft:
+    """받는 사람만 바꾼다 — 본문은 한 글자도 안 바뀐다(§10 결정: 고친 글을 지킨다)."""
+    from dataclasses import replace  # noqa: PLC0415
+    return replace(found, recipients=list(recipients), to=to)
+
+
+def verbatim(found: Draft, body: str) -> tuple[Draft | None, str]:
+    """직원이 «이대로·똑같이» 보내라고 붙여넣은 글을 **그대로** 본문으로 삼는다.
+
+    LLM 을 거치지 않고 검사도 하지 않는다 — 글 전체가 직원이 직접 적은 것이다(§10 결정).
+    코드가 붙인 값 표·꼬리말은 그대로 두고, 더미 게이트·개인정보 마스킹·길이 상한은
+    발송 경로가 그대로 건다(`actions.send_memo` · `note.py`)."""
+    return assemble(found.title, body.strip(), tail_html=found.tail_html,
+                    tail_note=found.tail_note, to=found.to, recipients=found.recipients)
+
+
+def revise(found: Draft, instruction: str, history: list[dict] | None) -> Revision:
+    """직원의 지시로 초안을 고친다. 고치라는 말이 아니면 `not_edit` 을 돌려준다.
+
+    «고치라는 지시인가»의 판정과 고치기를 **한 번의 호출**로 한다 — 둘을 나누면 초안이 걸린
+    턴마다 LLM 왕복이 하나 는다. 판정이 애매하면 고치지 않는 쪽이다(프롬프트) — 새 질문을
+    초안 수정으로 읽으면 질문에 대한 답 대신 엉뚱한 초안이 서지만, 반대는 초안이 사라질 뿐
+    나가는 것이 없다.
+    """
+    from pension_agent import verify  # noqa: PLC0415
+    from pension_agent.consult_agent.nodes import plan  # noqa: PLC0415 — 순환 임포트 회피
+
+    prompt = MEMO_EDIT_PROMPT.format(
+        title=found.title, body=found.body, question=instruction,
+        history_block=format_history(history),
+        table_note=f"(본문 아래에 코드가 붙이는 표는 고칠 수 없다 — {found.tail_note})"
+        if found.tail_note else "")
+    try:
+        raw = generate(prompt, max_tokens=MAX_TOKENS, system=MEMO_EDIT_SYSTEM,
+                       name="consult.memo.edit")
+    except LLMError as exc:
+        return Revision("down", reason=plan.short_reason(f"{type(exc).__name__}: {exc}"))
+    obj = json_object(raw) or {}
+    if not obj.get("edit"):
+        return Revision("not_edit")
+    ask = " ".join(str(obj.get("ask") or "").split())
+    if ask:
+        return Revision("ask", ask=ask)
+    title = " ".join(str(obj.get("title") or "").split()) or found.title
+    body = _clean_body(str(obj.get("body") or ""))
+    if not body:
+        return Revision("down", reason="고친 본문을 규격대로 받지 못했어요")
+
+    # 허용 범위는 «직전 초안 + 직원의 이번 말»이다. 직전 초안은 이미 원장에 대고 검사를
+    # 통과한 글이고, 직원의 말에 적힌 값은 직원이 직접 확인한 값이다 — 원장 값과 달라도 이긴다.
+    # 그래서 관계 검사(값–조건 짝)도 여기서는 걸지 않는다: 재료에 관계 선언이 없다.
+    # 걸리는 것은 **둘 어디에도 없는** 값 — LLM 이 옮기다 틀리거나 지어낸 것이다.
+    allowed = f"{found.title}\n{found.body}\n{instruction}"
+    ledger = tools.Evidence(
+        tool="memo_draft", query="", text=allowed, atomic=[], notices=[], notice_scopes=[],
+        source_keys={}, allow=[allowed], related=[], marks=[], sources=[], meta={})
+    faults = plan.screen(f"{title}\n{body}", [ledger], instruction)
+    if faults:
+        return Revision("screened", reason=" / ".join(faults[:3]))
+    made, why = assemble(title, body, tail_html=found.tail_html, tail_note=found.tail_note,
+                         to=found.to, recipients=found.recipients)
+    if made is None:
+        return Revision("screened", reason=why)
+    before, after = verify.numbers(f"{found.title}\n{found.body}"), verify.numbers(f"{title}\n{body}")
+    said = verify.numbers(instruction)
+    return Revision("edited", draft=made,
+                    added=sorted((after - before) & said), removed=sorted(before - after))
