@@ -234,8 +234,13 @@ def send_memo_by_name(customer_id: str, text: str, *, title: str, user_name: str
 # 믿는 쪽지가 이미 나간 상태가 된다(쪽지는 되돌릴 수 없다 — 루트 규칙 5).
 # ─────────────────────────────────────────────────────────────
 
-#: 예약 실행기를 고르는 환경변수. `demo` 면 시연용 실행기(아래). 비어 있으면 «미연결».
+#: 예약 실행기를 고르는 환경변수. **비어 있으면 `demo`(시연용 — 접수 즉시 발송)** 이고, `off` 면
+#: «미연결»로 답하고 보내지 않는다(2026-09-23 결정 — 저장소가 시연 상태라 예약 요청은 일단
+#: 보내는 것까지 해야 한다). 실서비스로 옮길 때는 `off` 나 실제 실행기 이름을 넣는다 —
+#: 그 전환은 `docs/DEMO_STATUS.md` §5 가 적는다.
 SCHEDULER_ENV = "PENSION_MEMO_SCHEDULER"
+SCHEDULER_DEFAULT = "demo"
+SCHEDULER_OFF = "off"
 
 
 def _demo_scheduler(customer_id: str, text: str, *, send_at: str, **kw: Any) -> dict[str, Any]:
@@ -268,10 +273,14 @@ SCHEDULERS: dict[str, Callable[..., dict[str, Any]]] = {
 
 
 def scheduler_name() -> str:
-    """지금 고른 예약 실행기 이름. 표에 없는 값·빈 값은 ""(미연결)."""
+    """지금 고른 예약 실행기 이름. 비어 있으면 `SCHEDULER_DEFAULT`, `off`·표에 없는 값은 ""(미연결).
+
+    표에 없는 값을 기본값으로 떨어뜨리지 않는다 — 오타(`dmeo`)가 조용히 즉시 발송이 되면
+    «끄려고 넣은 값»이 켜는 쪽으로 틀린다.
+    """
     import os  # noqa: PLC0415
 
-    name = (os.getenv(SCHEDULER_ENV) or "").strip().lower()
+    name = (os.getenv(SCHEDULER_ENV) or "").strip().lower() or SCHEDULER_DEFAULT
     return name if name in SCHEDULERS else ""
 
 

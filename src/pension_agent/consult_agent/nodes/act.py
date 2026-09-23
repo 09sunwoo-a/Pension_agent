@@ -835,6 +835,13 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
         if plain and _PLAIN_YES.match(plain):
             return {"answer": _candidates_text(found.user_name, cands), "sources": [],
                     "pending_action": pending}
+        # 짧은 답이 어느 후보와도 안 맞으면 고르려던 말이다 — 목록을 다시 보이고 고르게 한다.
+        # 받는 사람·발송 시각을 바꾸는 말, 거절은 아래 갈래가 받는다.
+        if (len(question) <= PICK_SHORT and not employee_no(question)
+                and not recipient_name(question) and not any(w in question for w in _SELF_WORDS)
+                and schedule.parse(question, clock.now(), edit=True).kind == "none"):
+            return {"answer": f"{PICK_AGAIN}\n{_candidates_text(found.user_name, cands)}",
+                    "sources": [], "pending_action": pending}
 
     paste = _pasted(question)
     order = paste[0] if paste else question
@@ -884,15 +891,24 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
         _record_staff(pasted=True, added=[], removed=[], text=paste[1])
         return _memo_turn(made, state, unclear=unclear)
 
+    # 받는 사람이 바뀌었고 본문이 옛 받는 사람을 이름으로 부르고 있으면 호칭을 맞추게 알린다
+    # (§10 「함께 고친 것」 address). 이름을 모르면(사번·본인) 알리지 않는다 — 코드가 확인할 수
+    # 없는 호칭을 LLM 에게 찾게 하면 본문을 더 넓게 건드린다.
+    address = _address_change(pending, found) if moved else None
     with observability.span("consult.memo.edit", input={"instruction": question}) as span:
-        rev = memo.revise(found, question, state.get("history"))            # ⑤
+        rev = memo.revise(found, question, state.get("history"), recipient=address)  # ⑤
         span.update(output={"kind": rev.kind, "added": rev.added, "removed": rev.removed})
     observability.step("confirm", pending=pending.get("label"), reply=rev.kind,
                        recipients="변경" if moved else None, reason=rev.reason or None)
 
     if rev.kind == "edited" and rev.draft is not None:
         _record_staff(pasted=False, added=rev.added, removed=rev.removed)
-        return _memo_turn(rev.draft, state, unclear=unclear)
+        unknown = [c for c in rev.also if c not in memo.ALSO_LABELS]
+        if rev.also:
+            observability.step("confirm", pending=pending.get("label"), reply="edited",
+                               reason=f"함께 고친 것 {','.join(rev.also)}"
+                                      + (f" (목록 밖 {','.join(unknown)})" if unknown else ""))
+        return _memo_turn(rev.draft, state, head=memo.also_line(rev.also), unclear=unclear)
     if rev.kind == "ask":
         # 초안은 그대로 걸어 둔다 — 다음 턴의 「5,300만원으로」가 이 초안을 고치는 말이다.
         # 제안은 다시 조립한다: 이번 말이 받는 사람을 바꿨으면 제안 문장도 그 사람이어야 한다.
@@ -924,6 +940,22 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
     return {"pending_action": None}
 
 
+_ADDRESSEE = re.compile(r"([가-힣]{2,5}) 님")
+
+
+def _address_change(pending: dict, found: memo.Draft) -> tuple[str, str, str] | None:
+    """받는 사람이 바뀌었고 본문에 옛 받는 사람의 **이름**이 있으면 (옛 표기, 새 표기, 옛 이름).
+
+    옛 이름은 제안에 적힌 표기(「정석희 님」·「미아동지점 김국민 님(사번 …)」)에서 읽는다.
+    사번·본인으로 적힌 받는 사람은 이름을 모르므로 None — 본문의 호칭을 코드가 확인할 수 없다.
+    """
+    old_label = pending.get("to") or ""
+    m = _ADDRESSEE.search(old_label)
+    if not m or m.group(1) not in (found.body or "") or found.to == old_label:
+        return None
+    return old_label, found.to, m.group(1)
+
+
 _ORDINALS = ("첫", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열")
 
 
@@ -947,7 +979,35 @@ def _pick(text: str, cands: list[dict]) -> int | None:
     squash = re.sub(r"\s+", "", raw)
     groups = [i for i, c in enumerate(cands)
               if c.get("group_name") and (re.sub(r"\s+|\(.*?\)", "", c["group_name"]) in squash)]
-    return groups[0] if len(groups) == 1 else None
+    if len(groups) == 1:
+        return groups[0]
+    # 부서·직급의 **일부**만 말해도 고른 것이다 — 그 말이 든 후보가 한 명뿐이면. 행내 실측
+    # (2026-09-23): 「WM플랫폼부(P)」를 고르려고 「WM」이라고 했는데 부서 이름 전체만 인정해서
+    # 새 질문으로 넘어갔고, 계획 루프가 «WM»을 검색해 엉뚱한 답을 냈다. 대소문자는 가리지 않는다.
+    words = [_untail(w) for w in re.split(r"[\s,./]+", raw.casefold())]
+    words = [w for w in words if len(w) >= 2]
+    hits = {i for i, c in enumerate(cands) for w in words
+            if w in re.sub(r"\s+", "", c.get("group_name", "")).casefold()
+            or w in (c.get("dsgt") or "").casefold()}
+    return hits.pop() if len(hits) == 1 else None
+
+
+#: 고르는 말 끝에 붙는 조사·꼬리 — 「WM으로」·「대출센터 분께」·「수석이요」.
+_PICK_TAIL = r"(?:으로|로|에게|한테|께|분|님|쪽|꺼|거|이요|요|이|가)$"
+
+def _untail(word: str) -> str:
+    """꼬리를 여러 번 뗀다 — 「대리님께」는 «께»와 «님»이 겹쳐 붙는다."""
+    while True:
+        cut = re.sub(_PICK_TAIL, "", word)
+        if cut == word or len(cut) < 2:
+            return cut if len(cut) >= 2 else word
+        word = cut
+
+
+#: 목록이 떠 있는데 짧은 답이 어느 후보와도 맞지 않을 때 — 새 질문으로 넘기지 않는다.
+PICK_AGAIN = "목록에서 번호나 부서로 골라 주세요."
+#: 이보다 짧은 답은 «목록에서 고르려던 말»로 본다(새 질문은 대개 이보다 길다).
+PICK_SHORT = 10
 
 
 def _candidates_text(name: str, cands: list[dict]) -> str:
