@@ -518,7 +518,7 @@ try:
 
     # ── 계약 문서와 코드가 갈리지 않는다 — client/README.md 는 프론트가 읽는 계약이다 ──
     _readme = (_cfg.SRC_ROOT.parent / "client" / "README.md").read_text(encoding="utf-8")
-    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done"}
+    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done", "log"}
     _in_code = set(re.findall(r'"type":\s*"(\w+)"', Path(main.__file__).read_text(encoding="utf-8")))
     check(_in_code == _emitted,
           "main.py 가 내보내는 이벤트 type 목록이 테스트가 아는 것과 같다(새 type 은 여기와 문서에 등록)",
@@ -599,6 +599,50 @@ try:
     main.consult_graph.ask = _fake_ask
     _captured.clear()
 
+    # ── 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다(main.py 머리말 «로그 이벤트») ──
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
+    check("log" not in _types(_events(r)), "로그 이벤트는 기본으로 꺼져 있다", str(_types(_events(r))))
+
+    r = client.post("/chat", json=_body(message="로그 질문", x_client_user="emp-9",
+                                        customer_id="171203-4815062", log_events=True))
+    evs = _events(r)
+    _lg = [e for e in evs if e["type"] == "log"]
+    _texts = [e["text"] for e in _lg]
+    _lrid = next((t.split("[api] [")[1][:8] for t in _texts if "] request " in t), None)
+    check(bool(_lrid) and all(f"[{_lrid}]" in t for t in _texts),
+          "log_events 를 켜면 그 요청의 줄만 실린다", str(_texts[:2]))
+    check(any("[api]" in t and "] request " in t and "사용자=emp-9" in t for t in _texts)
+          and any("[agent]" in t and " fake " in t for t in _texts)
+          and any("[api]" in t and "] done " in t for t in _texts),
+          "log 이벤트에 api request · agent 단계 · api done 줄이 모두 실린다", str(_texts))
+    check(all(e.get("level") and e.get("logger") and t.startswith(f"{e['level']}:     [{e['logger']}]")
+              for e, t in zip(_lg, _texts)),
+          "log.text 는 stdout 줄과 같은 형식이고 level·logger 가 따로 실린다", str(_lg[:1]))
+    check(not any("171203-4815062" in t for t in _texts) and any("[개인정보 가림]" in t for t in _texts),
+          "log 이벤트는 고객 원장 표기를 가린다 — 게이트웨이 필터가 응답을 막지 않게", str(_texts[:1]))
+    check(any("171203-4815062" in rec.getMessage() for rec in _captured if rec.name == "api"),
+          "stdout 로그 줄은 가리지 않는다(사본만 가린다)")
+    _nolog = [e for e in evs if e["type"] != "log"]
+    check(_types(_nolog) == ["progress"] * 3 + ["answer", "sources", "followups", "done"]
+          and _types(evs)[-1] == "done",
+          "log 이벤트를 빼면 순서는 그대로이고 done 이 마지막이다", str(_types(evs)))
+    check(not main._log_tap._sinks, "요청이 끝나면 로그 가로채기를 뗀다", str(main._log_tap._sinks))
+
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-9", log_events=True),
+                    headers={"Accept": "application/json"})
+    _jevs = _events_in(r.json().get("content", ""))
+    _jt = _types(_jevs)
+    check(_jt[0] == "log" and "done" in _jt and _jt.index("answer") > max(i for i, x in enumerate(_jt) if x == "log")
+          and any("] done " in e["text"] for e in _jevs if e["type"] == "log"),
+          "비스트림은 log 이벤트를 content 앞에 모아 싣는다", str(_jt))
+
+    main.LOG_EVENTS = True
+    try:
+        r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
+        check("log" in _types(_events(r)), "CHAT_LOG_EVENTS=1 이면 모든 요청에 실린다", str(_types(_events(r))))
+    finally:
+        main.LOG_EVENTS = False
+
     # ── 실패해도 스트림은 끊지 않는다 ────────────────────────
     def _boom(*a, **k):
         raise llm.LLMError("LLM 미설정 — 테스트")
@@ -619,6 +663,12 @@ try:
           str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
     check(not any("] disconnect " in rec.getMessage() for rec in _captured),
           "정상 완료·실패 응답에는 «연결 끊김» 경고가 찍히지 않는다")
+    # 실패 줄(`[api] error`)은 이벤트 루프에서 찍힌다 — error 이벤트보다 먼저 실려야 한다.
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1", log_events=True))
+    evs = _events(r)
+    _err_log = next((i for i, e in enumerate(evs) if e["type"] == "log" and "] error " in e["text"]), None)
+    check(_err_log is not None and _err_log < _types(evs).index("error") and _types(evs)[-1] == "done",
+          "실패 턴도 error 로그 줄이 error 이벤트보다 먼저 실린다", str(_types(evs)))
 finally:
     main.consult_graph.ask = _saved_ask
 
