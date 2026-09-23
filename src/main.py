@@ -65,6 +65,7 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
     {"type": "followups", "items": ["..."]}                                항상 · 없으면 []
     {"type": "done"}                                                       항상 마지막
     {"type": "error",     "text": "LLMError: ..."}                         실패 시 answer 대신 · 그 뒤 done
+    {"type": "log",       "level", "logger", "text"}                        로그 이벤트를 켰을 때만 · 아무 자리
 
 answer.links 는 **본문이 인용한 단말 화면의 딥링크**다(`mystar-link://scnNo=…&mode=…`).
 프론트는 본문에서 `screen` 문자열(「04-12-642」)을 찾아 `url` 로 누를 수 있게 감싼다 — URL 을
@@ -134,6 +135,21 @@ pension_agent 의 로그는 **어디에도 나가지 않는다** — 행내에�
 
 진행 표시(progress.emit)는 로그에 싣지 않는다 — 화면(progress 이벤트)으로만 가고, 같은
 시점은 `[agent]` 단계 줄이 더 많은 정보로 찍는다.
+
+━━ 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다 ━━
+Grafana 가 불안정할 때 프론트의 개발자 콘솔에서 로그를 보려고 둔다. 켜면 이 요청의 로그 줄
+(`[api]`·`[agent]`·그 요청 안에서 찍힌 pension_agent 경고 등)이 stdout 에 찍히는 것과 **같은
+글자 그대로** `{"type": "log", "level": "INFO", "logger": "agent", "text": "INFO:     [agent] …"}`
+이벤트로도 나간다. stdout 로그는 그대로 찍힌다 — 응답에 싣는 것은 사본이다.
+
+  켜는 법   환경변수 `CHAT_LOG_EVENTS=1`(모든 요청) · 또는 input_value 에 `"log_events": true`
+            (그 요청만). 둘 다 없으면 끔 — 기본은 지금까지와 같은 응답이다.
+  순서      스트림은 찍히는 즉시 흘린다(progress 사이사이 · answer 앞뒤). 비스트림은 JSON 하나의
+            content 맨 앞에 모아 싣는다.
+  범위      요청 id 가 같은 줄만 싣는다. 다른 직원의 요청 줄은 섞이지 않는다. 422 로 거부된
+            요청은 스트림이 없으므로 싣지 않는다.
+  가림      개인정보 필터가 잡는 꼴(고객 원장 표기 등)은 `[개인정보 가림]` 으로 바꿔 싣는다 —
+            그대로 실으면 게이트웨이가 응답 전체를 막는다(privacy.py). stdout 줄은 원래대로다.
 """
 
 from __future__ import annotations
@@ -143,10 +159,11 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import socket
 import urllib.parse
@@ -155,7 +172,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from pension_agent import config, llm, mcp, observability
+from pension_agent import config, llm, mcp, observability, privacy
 from pension_agent.consult_agent import context_store
 from pension_agent.consult_agent import graph as consult_graph
 from pension_agent.consult_agent.nodes import act as consult_act
@@ -182,14 +199,72 @@ def _setup_logging() -> None:
     mcp.quiet_loggers()
     if logging.getLogger().handlers:
         return
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s:     [%(name)s] %(message)s",
-        stream=sys.stdout,
-    )
+    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT, stream=sys.stdout)
+
+
+#: stdout 로그 줄의 형식. 로그 이벤트(`_LogTap`)도 같은 형식으로 글자를 만든다 — 콘솔에서 보는
+#: 줄과 Grafana 에서 보는 줄이 같아야 둘을 나란히 대조할 수 있다.
+LOG_FORMAT = "%(levelname)s:     [%(name)s] %(message)s"
+
+
+class _LogTap(logging.Handler):
+    """요청 id 별로 로그 줄을 가로채 그 요청의 응답에 싣는다(머리말 «로그 이벤트»).
+
+    루트 로거에 붙는 핸들러 하나다. stdout 핸들러는 건드리지 않으므로 로그는 원래대로 찍히고,
+    여기서는 사본을 만든다. 어느 요청의 줄인지는 둘로 가린다:
+      · `[agent]` 줄과 에이전트 안의 다른 로거 — 워커 스레드가 연 `observability.request_id`
+      · `[api]` 줄 — 요청 코루틴에서 찍혀 위 컨텍스트 밖이다. 전부 `"[%s] …"` 에 요청 id 를
+        첫 인자로 넘기므로 그것을 읽는다.
+    """
+
+    #: 동시에 열어 둘 수 있는 요청 수. 스트림이 시작되기 전에 호출자가 끊으면 떼는 자리
+    #: (generate 의 finally)에 닿지 못한다 — 그렇게 남은 것이 쌓이지 않게 오래된 것부터 버린다.
+    MAX_SINKS = 200
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.setFormatter(logging.Formatter(LOG_FORMAT))
+        self._sinks: dict[str, Callable[[dict[str, Any]], None]] = {}
+
+    def attach(self, rid: str, sink: Callable[[dict[str, Any]], None]) -> None:
+        while len(self._sinks) >= self.MAX_SINKS:
+            self._sinks.pop(next(iter(self._sinks)), None)
+        self._sinks[rid] = sink
+
+    def detach(self, rid: str) -> None:
+        self._sinks.pop(rid, None)
+
+    @staticmethod
+    def _rid_of(record: logging.LogRecord) -> Optional[str]:
+        rid = observability.current_request_id()
+        if rid:
+            return rid
+        args = record.args
+        if isinstance(record.msg, str) and record.msg.startswith("[%s]") \
+                and isinstance(args, tuple) and args and isinstance(args[0], str):
+            return args[0]
+        return None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not self._sinks:
+            return
+        try:
+            rid = self._rid_of(record)
+            sink = self._sinks.get(rid) if rid else None
+            if sink is not None:
+                # 응답은 플랫폼 게이트웨이의 개인정보 필터를 지난다. 요청 줄의 `고객=` 은 원장
+                # 표기(주민등록번호 꼴)라 그대로 실으면 응답 전체가 FILTER_INVALID 로 막힌다
+                # (privacy.py 「나가는 길은 LLM 쪽만이 아니다」). stdout 줄은 가리지 않는다.
+                text, _ = privacy.mask(self.format(record))
+                sink({"type": "log", "level": record.levelname, "logger": record.name,
+                      "text": text})
+        except Exception:                                  # noqa: BLE001 — 기록은 흐름을 막지 않는다
+            self.handleError(record)
 
 
 _setup_logging()
+_log_tap = _LogTap()
+logging.getLogger().addHandler(_log_tap)
 #: HTTP 경계 로거. 이름은 고정 문자열이다(머리말 «로그»).
 log = logging.getLogger("api")
 
@@ -231,6 +306,15 @@ class ChatRequest(BaseModel):
 #: 스트림 프레이밍. 기본 SSE(`data: {...}\n\n`) — 머리말 «응답 프레이밍». 0 이면 문서의
 #: «줄마다 JSON» 으로 되돌린다.
 SSE_FRAMING = os.getenv("CHAT_SSE_FRAMING", "1").strip().lower() not in ("0", "false", "no")
+
+#: 로그 이벤트 — 모든 요청에 켠다(머리말 «로그 이벤트»). 꺼져 있어도 input_value 의
+#: `log_events` 로 요청마다 켤 수 있다.
+LOG_EVENTS = os.getenv("CHAT_LOG_EVENTS", "0").strip().lower() in ("1", "true", "yes")
+
+
+def _wants_logs(payload: dict[str, Any]) -> bool:
+    return LOG_EVENTS or payload.get("log_events") in (True, 1, "1", "true", "True")
+
 
 #: 비스트림 신호로 보는 키 이름들(본문 최상위 · input_value 안 어느 쪽이든).
 _STREAM_KEYS = ("stream", "isStream", "is_stream")
@@ -491,6 +575,26 @@ async def chat(req: ChatRequest, request: Request):
     question = args["question"]
     x_client_user, session_id = args["x_client_user"], args["session_id"]
     streaming = _wants_stream(request, req, args["payload"])
+    # 로그 이벤트 — 요청 줄보다 먼저 붙여야 첫 줄부터 실린다. 스트림은 진행 표시와 같은 큐로
+    # 흘리고(찍힌 순서대로 나간다), 비스트림은 모았다가 content 앞에 싣는다.
+    with_logs = _wants_logs(args["payload"])
+    log_events: list[dict[str, Any]] = []
+    if streaming:
+        loop = asyncio.get_running_loop()
+        loop_thread = threading.get_ident()
+        # 진행 표시·로그는 답변을 만드는 **워커 스레드**에서 나오고, 흘리는 것은 이벤트 루프다.
+        # 큐로 건네야 «기다리는 동안» 나간다 — 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
+        lines: asyncio.Queue = asyncio.Queue()
+
+        def _push(ev: dict[str, Any]) -> None:
+            # 루프 스레드에서 찍힌 줄(`[api]`)은 바로 넣는다 — call_soon 으로 미루면 뒤따르는
+            # 이벤트(error 등)보다 늦게 나간다.
+            if threading.get_ident() == loop_thread:
+                lines.put_nowait(ev)
+            else:
+                loop.call_soon_threadsafe(lines.put_nowait, ev)
+    if with_logs:
+        _log_tap.attach(rid, _push if streaming else log_events.append)
     # 대화 맥락 — 호출자가 Turn 형식으로 실어 보낸 것이 우선, 없으면 저장해 둔 것.
     if args["history"] is not None:
         history, history_from = args["history"], "호출자"
@@ -542,19 +646,25 @@ async def chat(req: ChatRequest, request: Request):
             _remember(result)
             _log_done(result)
             events = _turn_events(result)
+        finally:
+            _log_tap.detach(rid)
+        events = log_events + events
         return JSONResponse({"event": "CHUNK",
                              "content": "\n".join(_event_json(e) for e in events)})
 
     async def generate():
-        loop = asyncio.get_running_loop()
-        # 진행 표시는 답변을 만드는 **워커 스레드**에서 나오고, 흘리는 것은 이벤트 루프다.
-        # 큐로 건네야 «기다리는 동안» 나간다 — 다 끝난 뒤 몰아서 주면 진행 표시가 아니다.
-        lines: asyncio.Queue = asyncio.Queue()
         DONE = object()
 
         def on_progress(text: str) -> None:
             # 화면으로만 간다 — 로그의 같은 시점은 `[agent]` 단계 줄이 찍는다(머리말 «로그»).
-            loop.call_soon_threadsafe(lines.put_nowait, text)
+            loop.call_soon_threadsafe(lines.put_nowait, {"type": "progress", "text": text})
+
+        def _drain():
+            # 큐에 남은 이벤트(DONE 뒤에 찍힌 로그 줄)를 기다리지 않고 비운다.
+            while not lines.empty():
+                item = lines.get_nowait()
+                if item is not DONE:
+                    yield _event(item)
 
         def run() -> dict[str, Any]:
             try:
@@ -595,7 +705,7 @@ async def chat(req: ChatRequest, request: Request):
                 item = await lines.get()
                 if item is DONE:
                     break
-                yield _event({"type": "progress", "text": item})
+                yield _event(item)
 
             try:
                 result = await task
@@ -603,15 +713,20 @@ async def chat(req: ChatRequest, request: Request):
                 # 스트리밍이 이미 시작돼 상태코드를 바꿀 수 없다 — 실패도 이벤트로 나간다.
                 log.exception("[%s] error       시점=처리중 소요=%.1f초 사유=%r",
                               rid, time.monotonic() - started, f"{type(exc).__name__}: {exc}")
+                for chunk in _drain():
+                    yield chunk
                 for ev in _error_events(exc):
                     yield _event(ev)
                 finished = True
                 return
 
+            for chunk in _drain():
+                yield chunk
             for ev in _turn_events(result):
                 yield _event(ev)
             finished = True
         finally:
+            _log_tap.detach(rid)
             if not finished:
                 closed = True
                 # 호출자가 다 받기 전에 끊었다(게이트웨이 타임아웃 등). 접속 로그에는
