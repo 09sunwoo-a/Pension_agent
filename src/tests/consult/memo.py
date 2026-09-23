@@ -983,3 +983,54 @@ def check_memo_also() -> int:
     print(f"{'✓' if hit else '✗'} 함께 고친 것은 초안 위에 한 줄로 서고, 없으면 줄이 없으며, 쪽지에는 안 들어간다")
     ok += hit
     return ok
+
+
+def check_memo_pick_partial() -> int:
+    """이름 발송 목록에서 부서·직급의 일부로 고른다(2026-09-23 행내 실측 — 「WM」이 새 질문이 됐다).
+
+      ① 부서·직급의 일부(2자 이상, 대소문자 무시, 조사 떼고)가 한 후보에만 맞으면 그 후보다
+      ② 짧은 답이 어느 후보와도 안 맞으면 새 질문으로 넘기지 않고 목록을 다시 보인다
+    """
+    import os
+
+    from pension_agent import note
+    from pension_agent.consult_agent.effects import memo
+    from pension_agent.consult_agent.nodes import act
+
+    ok = 0
+    cands = [{"user_id": "3901317", "group_name": "WM플랫폼부(P)", "dsgt": "대리"},
+             {"user_id": "2768578", "group_name": "대출실행센터", "dsgt": "선임팀장"},
+             {"user_id": "2827375", "group_name": "재무기획부", "dsgt": "수석차장"}]
+    want = {"WM": 0, "wm": 0, "WM으로": 0, "대리님께": 0, "대출": 1, "수석이요": 2,
+            "재무기획부": 2, "1번": 0, "사번 2827375": 2, "지점": None, "보내줘": None, "부": None}
+    misses = {q: act._pick(q, cands) for q, w in want.items() if act._pick(q, cands) != w}
+    hit = not misses
+    print(f"{'✓' if hit else '✗'} 목록에서 부서·직급의 일부로 고를 수 있다(한 후보에만 맞을 때)"
+          + (f" — {misses}" if misses else ""))
+    ok += hit
+
+    orig_env = os.environ.get(note.EMP_NO_ENV)
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    try:
+        found, _ = memo.assemble("상담 공유", "본문", tail_html="", tail_note="", to="이선우 님",
+                                 recipients=[], user_name="이선우")
+        pending = {**act._offer_draft(found, {"customer_id": "CM"})["pending_action"],
+                   "candidates": cands}
+
+        def _say(q: str) -> dict:
+            return act.confirm_action({"question": q, "customer_id": "CM",
+                                       "history": [{"question": "q", "pending_action": pending}]})
+
+        picked, again = _say("WM"), _say("지점")
+    finally:
+        if orig_env is None:
+            os.environ.pop(note.EMP_NO_ENV, None)
+        else:
+            os.environ[note.EMP_NO_ENV] = orig_env
+    hit = (picked["pending_action"]["recipients"] == ["3901317"]
+           and "받는 사람은 WM플랫폼부(P) 이선우 님(사번 3901317)이에요" in picked["answer"]
+           and again["answer"].startswith(act.PICK_AGAIN)
+           and again["pending_action"].get("candidates") == cands)
+    print(f"{'✓' if hit else '✗'} 「WM」이면 그 후보로 다시 제안하고, 안 맞는 짧은 답이면 목록을 다시 보인다")
+    ok += hit
+    return ok
