@@ -372,13 +372,17 @@ WHEN_ASK = ("언제 보낼까요? «10월 5일 오전 9시에 보내줘»처럼 
 
 
 def _offer_draft(found: memo.Draft, state: AgentState, head: str = "",
-                 unclear: bool = False) -> dict[str, Any]:
+                 unclear: bool = False, note: str = "") -> dict[str, Any]:
     """초안 한 통을 화면에 세우고 «이대로 보낼까요?»를 건다. 처음 초안과 **고친 초안이 같은
     자리를 지난다** — 고칠 때마다 제안을 다시 거는 것이 «직전 한 턴의 제안만 실행한다»(§10)를
     지키면서 초안을 이어 가는 방법이다(발송되는 것은 늘 직전 턴에 화면에 선 초안이다).
 
     제안에는 초안을 다시 조립할 조각(`body`·`tail_html`·`tail_note`)도 싣는다 — 다음 턴이
     그 초안을 고칠 때 코드가 붙인 값 표는 건드리지 않고 본문만 바꾼다(`memo.revise`).
+
+    `head` 는 에이전트가 직원에게 하는 말이라 초안 **위**에 서고, `note`(«함께 고친 것»)는
+    초안에 딸린 부기라 초안 **아래**, 묻는 문장 바로 앞에 선다. 화면은 `note` 를 action
+    이벤트의 같은 이름 필드로 받아 작은 글씨로 그린다(client/README.md 「action」).
     """
     label = found.to
     if unclear:
@@ -399,11 +403,13 @@ def _offer_draft(found: memo.Draft, state: AgentState, head: str = "",
               "when_unclear": unclear,
               "to": label, "recipients": list(found.recipients),
               "params": {"customer_id": state.get("customer_id") or ""}}
+    if note:
+        action["note"] = note
     # 초안은 코드블록으로 감싸 «여기까지가 쪽지»를 화면에서 가른다 — 초안이 답변 자리를
     # 통째로 차지하므로, 표시가 없으면 에이전트가 하는 말과 구별되지 않는다. 펜스는 화면
     # 장치라 나가는 본문에는 없고, 세션 기록에서 재료를 만들 때도 뗀다(tools._strip_devices).
     draft = f"{memo.FENCE}\n[제목] {found.title}\n\n{found.text}\n{memo.FENCE}"
-    body = f"{draft}\n\n— {action['prompt']}"
+    body = f"{draft}\n\n{note}\n\n— {action['prompt']}" if note else f"{draft}\n\n— {action['prompt']}"
     return {"answer": f"{head}\n\n{body}" if head else body, "pending_action": action}
 
 
@@ -833,15 +839,13 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
             observability.step("confirm", pending=pending.get("label"), reply="accept")
             return _memo_turn(found, state, unclear=bool(pending.get("when_unclear")))
         if plain and _PLAIN_YES.match(plain):
-            return {"answer": _candidates_text(found.user_name, cands), "sources": [],
-                    "pending_action": pending}
+            return _pick_turn(found.user_name, cands, pending)
         # 짧은 답이 어느 후보와도 안 맞으면 고르려던 말이다 — 목록을 다시 보이고 고르게 한다.
         # 받는 사람·발송 시각을 바꾸는 말, 거절은 아래 갈래가 받는다.
         if (len(question) <= PICK_SHORT and not employee_no(question)
                 and not recipient_name(question) and not any(w in question for w in _SELF_WORDS)
                 and schedule.parse(question, clock.now(), edit=True).kind == "none"):
-            return {"answer": f"{PICK_AGAIN}\n{_candidates_text(found.user_name, cands)}",
-                    "sources": [], "pending_action": pending}
+            return _pick_turn(found.user_name, cands, pending, head=PICK_AGAIN)
 
     paste = _pasted(question)
     order = paste[0] if paste else question
@@ -908,7 +912,7 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
             observability.step("confirm", pending=pending.get("label"), reply="edited",
                                reason=f"함께 고친 것 {','.join(rev.also)}"
                                       + (f" (목록 밖 {','.join(unknown)})" if unknown else ""))
-        return _memo_turn(rev.draft, state, head=memo.also_line(rev.also), unclear=unclear)
+        return _memo_turn(rev.draft, state, note=memo.also_line(rev.also), unclear=unclear)
     if rev.kind == "ask":
         # 초안은 그대로 걸어 둔다 — 다음 턴의 「5,300만원으로」가 이 초안을 고치는 말이다.
         # 제안은 다시 조립한다: 이번 말이 받는 사람을 바꿨으면 제안 문장도 그 사람이어야 한다.
@@ -1010,18 +1014,37 @@ PICK_AGAIN = "목록에서 번호나 부서로 골라 주세요."
 PICK_SHORT = 10
 
 
-def _candidates_text(name: str, cands: list[dict]) -> str:
-    """여러 명일 때의 화면 문장 — 합의한 문장 그대로다."""
-    lines = [f"{name} 님이 {len(cands)}명 있어요. 어느 분께 보낼까요?"]
-    lines += [f"{i}. {c.get('group_name', '')} {c.get('dsgt', '')} · 사번 {c['user_id']}".replace("  ", " ")
-              for i, c in enumerate(cands, 1)]
-    return "\n".join(lines)
+#: 목록을 띄운 턴의 묻는 문장. 네/아니오로 답할 말이 아니다 — 화면은 이 문장 아래에
+#: 네/아니오 대신 후보 버튼(`options`)을 그린다(client/README.md 「action」).
+PICK_ASK = "어느 분께 보낼까요?"
+
+
+def _pick_options(cands: list[dict]) -> list[str]:
+    """후보 버튼 문구. 누르면 이 문장이 다음 턴 질문으로 오고, 안의 사번으로 후보가 정해진다(`_pick`)."""
+    return [f"{c.get('group_name', '')} {c.get('dsgt', '')} · 사번 {c['user_id']}".replace("  ", " ").strip()
+            for c in cands]
+
+
+def _pick_turn(name: str, cands: list[dict], pending: dict, head: str = "") -> dict[str, Any]:
+    """이름이 여러 명일 때의 턴 — 목록을 보이고 고르게 한다(보내지 않았다).
+
+    본문 순서는 다른 제안 턴과 같다: 하는 말 → 맨 끝에 `— {묻는 문장}`. 다만 이 턴은 네/아니오가
+    아니라 후보 중 하나를 고르는 턴이라, 묻는 문장 아래에 번호 목록이 이어지고 action 에
+    `options` 가 실린다. 화면은 `— 어느 분께…` 줄부터 끝까지를 떼고 그 자리에 버튼을 세운다.
+    직전 초안의 «함께 고친 것»은 이 턴의 것이 아니므로 싣지 않는다.
+    """
+    options = _pick_options(cands)
+    listed = "\n".join(f"{i}. {o}" for i, o in enumerate(options, 1))
+    text = f"{name} 님이 {len(cands)}명 있어요.\n\n— {PICK_ASK}\n{listed}"
+    action = {**{k: v for k, v in pending.items() if k != "note"},
+              "candidates": cands, "prompt": PICK_ASK, "options": options}
+    return {"answer": f"{head}\n{text}" if head else text, "sources": [], "pending_action": action}
 
 
 def _memo_turn(found: memo.Draft, state: AgentState, head: str = "",
-               unclear: bool = False) -> dict[str, Any]:
+               unclear: bool = False, note: str = "") -> dict[str, Any]:
     """초안이 걸린 턴에 초안을 (다시) 세운다. 이 턴은 근거를 모으지 않았으므로 출처는 비운다."""
-    return {**_offer_draft(found, state, head=head, unclear=unclear), "sources": []}
+    return {**_offer_draft(found, state, head=head, unclear=unclear, note=note), "sources": []}
 
 
 def _record_staff(*, pasted: bool, added: list[str], removed: list[str], text: str = "") -> None:
@@ -1091,15 +1114,13 @@ def _send_memo(pending: dict, state: AgentState) -> dict[str, Any]:
     if status == "candidates":
         # 여러 명 — 보내지 않았다. 목록을 보여주고 고르게 한다(고르면 사번으로 다시 제안).
         observability.step("action", name, status=status, recipients=f"후보 {len(result['candidates'])}명")
-        cands = result["candidates"]
-        return {"answer": _candidates_text(user_name, cands), "sources": [],
-                "pending_action": {**pending, "candidates": cands,
-                                   "prompt": _candidates_text(user_name, cands).split("\n")[0]}}
+        return _pick_turn(user_name, result["candidates"], pending)
     if status == "not_found":
         observability.step("action", name, status=status, reason=result.get("detail"))
         # 초안은 그대로 걸어 둔다 — 다음 말로 받는 사람만 바꿀 수 있다.
         return {"answer": NAME_NOT_FOUND.format(who=to), "sources": [],
-                "pending_action": {k: v for k, v in pending.items() if k != "candidates"}}
+                "pending_action": {k: v for k, v in pending.items()
+                                   if k not in ("candidates", "options", "note")}}
     if user_name and not ids and result.get("recipients"):
         # 이름으로 보낸 것 — 실제로 받은 사람의 사번을 결과 문장에 밝힌다.
         to = name_label(user_name, group_name, ", ".join(result["recipients"]))

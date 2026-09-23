@@ -330,7 +330,11 @@ def _render(ev: dict) -> None:
                   flush=True)
     elif t == "action":
         # 본문 끝에 제안 문장이 이미 있다. 여기서는 «버튼 자리»만 알린다 — 다음 턴에 네/아니오.
-        print(f"  [연계 제안 · {ev.get('label')}] — 다음 질문에 «네» 또는 «아니오»로 답합니다", flush=True)
+        if ev.get("options"):
+            # 네/아니오가 아니라 고르는 턴 — 항목 문자열을 그대로 다음 질문으로 보낸다.
+            print("  [선택지] " + " / ".join(ev["options"]), flush=True)
+        else:
+            print(f"  [연계 제안 · {ev.get('label')}] — 다음 질문에 «네» 또는 «아니오»로 답합니다", flush=True)
     elif t == "clarify":
         print("  [되묻기 선택지] " + " / ".join(ev.get("options") or []), flush=True)
     elif t == "sources":

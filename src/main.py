@@ -57,7 +57,8 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
     {"type": "progress",  "text": "질문 내용을 파악하고 있어요"}            0개 이상 · 답변 전에
     {"type": "answer",    "text": "<본문>", "intent": "situation",
                           "links": [{"screen","url","label"}]}             1개 · links 는 항상(없으면 [])
-    {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용.
+    {"type": "action",    "kind", "label", "prompt", ...}                  연계 제안 턴에만 — 네/아니오 버튼용
+                                                                          (`options` 가 있으면 그 버튼으로 대신)
                                                                           본문 끝의 제안 문장은 그대로 둔다
     {"type": "clarify",   "question": "...", "options": ["..."]}           되묻기 턴에만 — 선택지 버튼용
     {"type": "sources",   "items": [{"id","doc","title","url","score","page","role"}]}
@@ -261,7 +262,9 @@ def _strip_followups(answer: str) -> str:
 
 #: action 이벤트에 싣는 pending_action 의 키. html·recipients·params 같은 실행 인자는
 #: 화면이 알 필요가 없고(실행은 대화의 「네」가 한다), 쪽지 초안(title·text·to)은 미리보기용이다.
-_ACTION_KEYS = ("kind", "label", "prompt", "title", "text", "to")
+#: `note` 는 초안 아래 작은 글씨로 세울 부기(«함께 고친 것»), `options` 는 네/아니오 대신 세울
+#: 선택 버튼(이름이 여러 명일 때의 후보)이다 — 둘 다 있을 때만 실린다.
+_ACTION_KEYS = ("kind", "label", "prompt", "title", "text", "to", "note", "options")
 
 
 def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:

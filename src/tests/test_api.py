@@ -387,6 +387,21 @@ try:
     check(next(e for e in evs if e["type"] == "followups")["items"] == [],
           "연계 제안 턴에는 추천질문이 없다(빈 목록으로는 온다)")
 
+    # 쪽지 제안의 부기(note)와 후보 버튼(options)은 있을 때만 action 에 실린다 — 화면이
+    # note 를 초안 아래 작은 글씨로, options 를 네/아니오 대신 버튼으로 그린다(client/README.md).
+    memo_action = {"kind": "memo", "label": "이 쪽지 보내기(받는 사람: 이선우 님)",
+                   "prompt": "어느 분께 보낼까요?", "title": "t", "text": "b", "to": "이선우 님",
+                   "html": "<p>b</p>", "candidates": [{"user_id": "3901317"}],
+                   "note": "함께 고친 것: 말투 통일", "options": ["WM플랫폼부(P) 대리 · 사번 3901317"]}
+    ev = main._turn_events({"answer": "a", "pending_action": memo_action})
+    got = next(e for e in ev if e["type"] == "action")
+    check(got.get("note") == memo_action["note"] and got.get("options") == memo_action["options"]
+          and "candidates" not in got and "html" not in got,
+          "쪽지 action 에 note·options 가 실리고 실행 인자(candidates·html)는 빠진다", str(got))
+    plain = main._turn_events({"answer": "a", "pending_action": {**ACTION}})
+    got = next(e for e in plain if e["type"] == "action")
+    check("note" not in got and "options" not in got, "없으면 note·options 키 자체가 없다", str(got))
+
     # 되묻기 — 선택지가 clarify 이벤트로 간다.
     evs = _events(client.post("/chat", json=_body(message="되묻기", x_client_user="emp-1")))
     clar = next((e for e in evs if e["type"] == "clarify"), None)
