@@ -7,6 +7,8 @@
 
     단서(뒤)  날짜·시각 바로 뒤의 「에 보내·에 발송·에 쪽지·에 예약·에 맞춰 보내·까지 보내」
     단서(앞)  날짜·시각 바로 앞의 「예약·발송일·발송 시각」
+    단서(사이) 「날짜에 + 받는 사람(한테·에게·께) + 보내」 — 사이 말에 「만기·예정·되는」 같은
+             날짜를 꾸미는 말이 있으면 단서가 아니다
     고칠 때   초안이 걸린 턴(`edit=True`)에서는 「로 바꿔·로 변경·로 미뤄」도 단서다
 
 읽지 못하면 «발송일 없음»이고 그 쪽지는 지금처럼 즉시 발송이다. 후보가 둘 이상이거나 이미
@@ -49,6 +51,15 @@ _TIME = re.compile(
 _CUE_AFTER = re.compile(
     r"^\s*(?:에도|에는|에|까지|쯤에?|경에?)?\s*(?:맞춰서?\s*)?"
     r"(?:보내|발송|전송|쪽지|예약|전달)")
+#: 날짜와 «보내» 사이에 받는 사람이 끼어 있는 꼴 — 「10월 7일에 정석희 대리에게 쪽지로 보내줘」.
+#: 처음에는 날짜 바로 뒤만 봐서 이 말이 **즉시 발송**이 됐다(2026-09-23 행내 실측). 사이에
+#: 들어올 수 있는 것은 사람 조사로 끝나는 짧은 말 하나뿐이다.
+_CUE_VIA = re.compile(
+    r"^\s*(?:에|에는)\s+(?P<mid>[^\n.,!?]{1,25}?(?:한테|에게|께|앞으로))\s*"
+    r"(?:쪽지로?\s*|메모로?\s*)?(?:보내|발송|전송|전달|예약)")
+#: 그 사이 말에 이것이 있으면 받는 사람이 아니라 날짜를 꾸미는 말이다 — 「10월 5일에 만기되는
+#: 고객에게」의 10월 5일은 만기일(쪽지 내용)이다.
+_VIA_NOT = re.compile(r"만기|도래|예정|해지|가입|개시|되는|하는|있는|인\s|까지")
 _CUE_EDIT = re.compile(r"^\s*(?:으로|로)\s*(?:바꿔|변경|옮겨|미뤄|당겨|해\s*줘|해줘|예약)")
 _CUE_BEFORE = re.compile(r"(?:예약|발송일|발송\s*시각|발송\s*시간|보낼\s*날짜)\s*(?:은|는|을|를|:|：)?\s*$")
 
@@ -114,7 +125,9 @@ def _inside(m: re.Match, spans: list[tuple[int, int, date | None, time | None]])
 
 def _cued(text: str, start: int, end: int, edit: bool) -> bool:
     after = text[end:]
+    via = _CUE_VIA.match(after)
     return bool(_CUE_AFTER.match(after) or _CUE_BEFORE.search(text[:start])
+                or (via and not _VIA_NOT.search(via.group("mid")))
                 or (edit and _CUE_EDIT.match(after)))
 
 

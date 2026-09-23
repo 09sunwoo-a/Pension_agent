@@ -79,10 +79,27 @@ async def send_memo(recipients: list[str], title: str, body: str,
         TOOL, {ARG_RECIPIENT: ids, ARG_TITLE: title, ARG_BODY: body}, idempotent=False)
 
 
-#: 이름 발송 도구의 이름과 인자 이름. 규격 그대로다(user_name·group_name 은 소문자,
-#: TITLE·BODY 는 대문자 — 2026-09-23 명세).
+#: 이름 발송 도구의 이름과 인자 이름.
+#:
+#: **인자 이름은 소문자다.** 명세 예시에는 `"TITLE"`·`"BODY"` 가 대문자로 적혀 있어 처음에
+#: 그대로 보냈는데, 서버가 «Missing required parameters: user_name, title, body» 로 거부했다
+#: (2026-09-23 행내 실측). 명세 표의 필드명(user_name·title·body·group_name)이 맞았다.
+#: 그래서 부를 때 **도구가 스스로 밝힌 인자 이름**(`tool.args`)에 대소문자를 맞추고
+#: (`_declared`), 도구가 밝히지 않으면 아래 소문자를 쓴다 — 명세가 한 번 어긋났던 자리라
+#: 문서를 믿는 것보다 도구에게 묻는 쪽이 확실하다.
 NAME_TOOL = "search_emp_and_send_memo"
-ARG_NAME, ARG_GROUP = "user_name", "group_name"
+ARG_NAME, ARG_GROUP, ARG_NAME_TITLE, ARG_NAME_BODY = "user_name", "group_name", "title", "body"
+
+
+async def _declared(client: Any, tool: str, wanted: dict[str, Any]) -> dict[str, Any]:
+    """`wanted` 의 키를 도구가 밝힌 인자 이름의 대소문자로 옮긴다. 못 읽으면 그대로다."""
+    try:
+        found = await client.tool(tool)
+        declared = list((getattr(found, "args", None) or {}).keys())
+    except Exception:                       # noqa: BLE001 — 이름 맞추기가 발송을 막지 않는다
+        declared = []
+    by_lower = {k.lower(): k for k in declared}
+    return {by_lower.get(k.lower(), k): v for k, v in wanted.items()}
 
 
 async def search_emp_and_send_memo(user_name: str, group_name: str | None, title: str,
@@ -97,10 +114,12 @@ async def search_emp_and_send_memo(user_name: str, group_name: str | None, title
         raise mcp_client.MCPUnavailable(
             "쪽지를 보낼 직원 사번이 없습니다 — 로그인 사번이 넘어오지 않았고 "
             f"{note.EMP_NO_ENV} 환경변수도 비어 있습니다")
-    args: dict[str, Any] = {ARG_NAME: user_name, ARG_TITLE: title, ARG_BODY: body}
+    args: dict[str, Any] = {ARG_NAME: user_name, ARG_NAME_TITLE: title, ARG_NAME_BODY: body}
     if group_name:
         args[ARG_GROUP] = group_name
-    return await mcp_client.client_for(sender).call(NAME_TOOL, args, idempotent=False)
+    client = mcp_client.client_for(sender)
+    return await client.call(NAME_TOOL, await _declared(client, NAME_TOOL, args),
+                             idempotent=False)
 
 
 def install() -> bool:
