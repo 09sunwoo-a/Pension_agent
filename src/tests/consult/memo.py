@@ -1147,3 +1147,70 @@ def check_memo_echo_and_address() -> int:
     print(f"{'✓' if hit else '✗'} «호칭을 맞춤»은 받는 사람이 바뀌었거나 호칭이 사라졌을 때만 화면에 선다")
     ok += hit
     return ok
+
+
+def check_memo_title() -> int:
+    """받는 사람 호칭의 직급(§10 — 2026-09-28 결정).
+
+      ① 직원이 이름에 직급을 붙이면(「이선우 대리님께」) 초안 인사가 「이선우 대리님」이다 —
+         LLM 에게 호칭을 알리고, LLM 이 직급을 빼먹어도 코드가 맞춘다
+      ② 직급을 말하지 않으면 「이선우 님」이다(직급을 지어내지 않는다)
+      ③ 동명이인 목록에서 고르면 명부의 직급으로 본문 호칭을 바꾼다(직원이 말한 직급보다 우선)
+    """
+    import os
+
+    from pension_agent import note
+    from pension_agent.consult_agent.effects import memo
+    from pension_agent.consult_agent.nodes import act
+
+    ok = 0
+    table = {"이선우 대리님께 보내줘": "대리", "WM플랫폼부 이선우 과장님 앞으로": "과장",
+             "이선우(3901317) 대리한테": "대리", "이선우한테 보내줘": ""}
+    misses = {q: act.recipient_title(q, "이선우") for q, want in table.items()
+              if act.recipient_title(q, "이선우") != want}
+    hit = not misses and act.addressee("이선우", "대리") == "이선우 대리님" and act.addressee("이선우") == "이선우 님"
+    print(f"{'✓' if hit else '✗'} 이름 뒤의 직급을 읽는다" + (f" — {misses}" if misses else ""))
+    ok += hit
+
+    orig_draft, orig_env = memo.draft, os.environ.get(note.EMP_NO_ENV)
+    os.environ[note.EMP_NO_ENV] = "3902172"
+    told: list[str] = []
+
+    def _draft(state, **kw):
+        told.append(kw.get("addressee", ""))
+        # LLM 이 직급을 빼먹고 이름만 부른 초안
+        made, _ = memo.assemble("상담 공유", "안녕하세요, 이선우 님.\n오세훈 고객님 건 공유드립니다.",
+                                tail_html="", tail_note="", to=kw["to"], recipients=kw["recipients"])
+        return made, ""
+
+    memo.draft = _draft
+    try:
+        titled = act._memo_offer({"question": "이선우 대리님께 쪽지 보내줘", "customer_id": "CM",
+                                  "answer": "요약", "evidence": [{}]})
+        plain = act._memo_offer({"question": "이선우한테 쪽지 보내줘", "customer_id": "CM",
+                                 "answer": "요약", "evidence": [{}]})
+        cands = [{"user_id": "3901317", "group_name": "WM플랫폼부(P)", "dsgt": "대리"},
+                 {"user_id": "2768578", "group_name": "대출실행센터", "dsgt": "선임팀장"}]
+        pending = {**titled["pending_action"], "candidates": cands}
+        picked = act.confirm_action({"question": "대출", "customer_id": "CM",
+                                     "history": [{"question": "q", "pending_action": pending}]})
+    finally:
+        memo.draft = orig_draft
+        if orig_env is None:
+            os.environ.pop(note.EMP_NO_ENV, None)
+        else:
+            os.environ[note.EMP_NO_ENV] = orig_env
+
+    hit = (told == ["이선우 대리님", "이선우 님"]
+           and "이선우 대리님" in memo.MEMO_ADDRESSEE_LINE.format(addressee="이선우 대리님")
+           and titled["pending_action"]["body"].startswith("안녕하세요, 이선우 대리님.")
+           and "오세훈 고객님" in titled["pending_action"]["body"]                 # 고객 호칭은 그대로
+           and plain["pending_action"]["body"].startswith("안녕하세요, 이선우 님."))
+    print(f"{'✓' if hit else '✗'} 직원이 붙인 직급으로 인사하고, 직급이 없으면 「이름 님」이다")
+    ok += hit
+
+    hit = (picked["pending_action"]["recipients"] == ["2768578"]
+           and picked["pending_action"]["body"].startswith("안녕하세요, 이선우 선임팀장님."))
+    print(f"{'✓' if hit else '✗'} 동명이인 목록에서 고르면 명부의 직급으로 호칭을 바꾼다")
+    ok += hit
+    return ok

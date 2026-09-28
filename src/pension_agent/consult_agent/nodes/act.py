@@ -242,6 +242,44 @@ def name_label(name: str, group: str = "", emp_no: str = "") -> str:
     return f"{head}(사번 {emp_no})" if emp_no else head
 
 
+def recipient_title(text: str, name: str) -> str:
+    """직원이 받는 사람 이름 뒤에 붙인 직급 — 「이선우 대리님께」의 «대리». 없으면 "".
+
+    본문 인사에서 이 직급으로 부른다(`addressee`). 명부에서 고른 직급이 있으면 그쪽이
+    이긴다 — 직원이 말한 직급보다 명부가 정확하다(`_pick` 뒤의 `retitle`).
+    """
+    if not name:
+        return ""
+    m = re.search(rf"(?<![가-힣]){re.escape(name)}\s*(?:\(\s*{note.EMP_NO_PATTERN}\s*\))?\s*"
+                  rf"(?P<t>{'|'.join(_TITLES)})", text or "")
+    return m.group("t") if m else ""
+
+
+def addressee(name: str, title: str = "") -> str:
+    """본문에서 받는 사람을 부르는 말 — 「이선우 대리님」, 직급을 모르면 「이선우 님」."""
+    return f"{name} {title}님" if title else f"{name} 님"
+
+
+def retitle(found: memo.Draft, name: str, title: str) -> memo.Draft:
+    """본문에서 받는 사람을 부르는 호칭을 «이름 + 직급님»으로 맞춘다(§10 — 2026-09-28 결정).
+
+    직급은 직원이 말했거나(「이선우 대리님께」) 동명이인 목록에서 고른 명부의 직급이다.
+    LLM 에게 맡기지 않고 코드가 바꾼다 — 이름을 아는 사람의 호칭이라 바꿀 자리가 정해져 있다.
+    본문에 그 이름이 없으면(인사에 이름을 안 썼으면) 그대로 둔다.
+    """
+    if not (name and title and found.body):
+        return found
+    body = re.sub(rf"(?<![가-힣]){re.escape(name)}\s*(?:(?:{'|'.join(_TITLES)})\s*)?님",
+                  addressee(name, title), found.body)
+    if body == found.body:
+        return found
+    made, _ = memo.assemble(found.title, body, tail_html=found.tail_html, tail_note=found.tail_note,
+                            to=found.to, recipients=found.recipients, send_at=found.send_at,
+                            send_label=found.send_label, user_name=found.user_name,
+                            group_name=found.group_name)
+    return made or found
+
+
 class Recipient(dict):
     """받는 사람 판정 — ids(사번) · label(표기) · to_self · user_name · group_name · unclear."""
 
@@ -349,11 +387,18 @@ def _memo_offer(state: AgentState) -> dict[str, Any]:
         return {"answer": f"{head}\n\n— {who['unclear']}" if head else who["unclear"]}
     if not who["ids"] and not who.get("user_name"):
         return {"answer": f"{head}\n\n— {NO_RECIPIENT}" if head else NO_RECIPIENT}
-    found, why = memo.draft(state, recipients=who["ids"], to=who["label"], to_self=who["to_self"])
+    # 받는 사람의 이름을 알면 본문 인사에서 부를 호칭을 코드가 정해 알린다 — 직원이 직급을
+    # 붙였으면(「이선우 대리님께」) 그 직급까지. 사번·본인이면 이름을 모르므로 알리지 않는다.
+    named = recipient_name(state.get("question") or "")
+    name = named[0] if isinstance(named, tuple) and not who["to_self"] else ""
+    title = recipient_title(state.get("question") or "", name)
+    found, why = memo.draft(state, recipients=who["ids"], to=who["label"], to_self=who["to_self"],
+                            addressee=addressee(name, title) if name else "")
     if found is None:
         return {"answer": f"{head}\n\n— {why}" if head else why}
     if who.get("user_name"):
         found = memo.readdress(found, [], who["label"], who["user_name"], who.get("group_name", ""))
+    found = retitle(found, name, title)
     # 발송 시각 — 단서가 붙은 날짜만 읽는다(effects/schedule.py). 못 가르면 초안은 세우되
     # 승낙으로 보내지 않고 언제 보낼지 묻는다(`when_unclear`).
     timing = schedule.parse(state.get("question") or "", clock.now())
@@ -837,8 +882,11 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
         picked = _pick(question, cands)
         if picked is not None:
             c = cands[picked]
+            name = found.user_name
             found = memo.readdress(found, [c["user_id"]],
-                                   name_label(found.user_name, c.get("group_name", ""), c["user_id"]))
+                                   name_label(name, c.get("group_name", ""), c["user_id"]))
+            # 고른 사람의 명부 직급으로 본문 호칭을 맞춘다(「안녕하세요, 이선우 대리님.」).
+            found = retitle(found, name, (c.get("dsgt") or "").strip())
             observability.step("confirm", pending=pending.get("label"), reply="accept")
             return _memo_turn(found, state, unclear=bool(pending.get("when_unclear")))
         if plain and _PLAIN_YES.match(plain):
@@ -922,7 +970,10 @@ def _memo_reply(pending: dict, state: AgentState) -> dict[str, Any]:
                                reason=f"함께 고친 것 {','.join(rev.also)}"
                                       + (f" (목록 밖 {','.join(unknown)})" if unknown else "")
                                       + (f" (확인 못 해 뺌 {','.join(dropped)})" if dropped else ""))
-        return _memo_turn(rev.draft, state, note=memo.also_line(shown), unclear=unclear)
+        edited = rev.draft
+        if moved and moved[2]:
+            edited = retitle(edited, moved[2], recipient_title(order, moved[2]))
+        return _memo_turn(edited, state, note=memo.also_line(shown), unclear=unclear)
     if rev.kind == "echo":
         return _memo_turn(found, state, head=memo.EDIT_ECHO, unclear=unclear)
     if rev.kind == "ask":

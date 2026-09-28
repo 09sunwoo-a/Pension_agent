@@ -47,7 +47,8 @@ from pension_agent import note
 from pension_agent.clock import today
 from pension_agent.consult_agent import tools
 from pension_agent.consult_agent.prompts import (
-    COMPOSE_RETRY_BLOCK, MEMO_EDIT_ECHO_BLOCK, MEMO_EDIT_PROMPT, MEMO_EDIT_RECIPIENT_BLOCK, MEMO_EDIT_SYSTEM,
+    COMPOSE_RETRY_BLOCK, MEMO_ADDRESSEE_LINE, MEMO_EDIT_ECHO_BLOCK, MEMO_EDIT_PROMPT,
+    MEMO_EDIT_RECIPIENT_BLOCK, MEMO_EDIT_SYSTEM,
     MEMO_OTHER_GUIDE, MEMO_PROMPT, MEMO_SELF_GUIDE, MEMO_SYSTEM, MEMO_TABLE_BLOCK,
 )
 from pension_agent.consult_agent import state
@@ -298,8 +299,11 @@ def _generate(prompt: str, name: str) -> tuple[str, str]:
 
 
 def draft(state: AgentState, *, recipients: list[str], to: str,
-          to_self: bool) -> tuple[Draft | None, str]:
+          to_self: bool, addressee: str = "") -> tuple[Draft | None, str]:
     """쪽지 초안 하나. 만들지 못하면 `(None, 사유)` — 사유는 그대로 직원에게 나간다.
+
+    `addressee` 는 본문 인사에서 받는 사람을 부를 말(「이선우 대리님」)이다 — 코드가 직원의 말에서
+    읽은 이름·직급이고, 비어 있으면(사번·본인) 알리지 않는다.
 
     받는 사람은 **인자로 받는다.** 여기서 대화를 읽어 사번을 뽑아내면 LLM 이 쓴 문장 하나로
     수신자가 갈릴 수 있고, 그건 확인 절차로도 못 막는다(직원은 자기가 승낙한 게 누구 앞인지
@@ -316,7 +320,8 @@ def draft(state: AgentState, *, recipients: list[str], to: str,
         history_block=format_history(state.get("history")),
         question=state.get("question") or "",
         answer=(state.get("answer") or "").strip(),
-        guide=MEMO_SELF_GUIDE if to_self else MEMO_OTHER_GUIDE,
+        guide=MEMO_SELF_GUIDE if to_self else MEMO_OTHER_GUIDE
+        + (MEMO_ADDRESSEE_LINE.format(addressee=addressee) if addressee else ""),
         table_block=MEMO_TABLE_BLOCK.format(what=what) if table else "",
     )
 
