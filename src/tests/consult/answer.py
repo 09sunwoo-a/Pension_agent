@@ -1245,6 +1245,20 @@ def check_followups() -> int:
     print(f"{'✓' if hit else '✗'} 공백·물음표만 다른 같은 질문도 다시 제안하지 않는다")
     ok += hit
 
+    # 어미만 다른 같은 질문도 다시 서면 안 된다 — 칩 「…말하면 좋을까?」 를 직원이
+    # 「…말하면 좋을지 알려줘」 로 쳤는데 답변 끝에 칩 문구가 그대로 섰다(2026-09-28).
+    # 반대로 앞부분이 다른 질문은 같은 질문이 아니다.
+    n = suggest._norm
+    ending = suggest._same_question(n("지난 상담 내용 참고해서 오늘 뭐라고 말하면 좋을지 알려줘"),
+                                    n("지난 상담 내용 참고해서 오늘 뭐라고 말하면 좋을까?"))
+    distinct = not suggest._same_question(n("이 고객한테 안내할 만한 세미나나 이벤트 있어?"),
+                                          n("이 고객한테 안내할 수 있는 상품 범위는 뭐야?")) \
+        and not suggest._same_question(n("고객이 앱에서 직접 할 수 있어?"),
+                                       n("고객이 앱에서 직접 하려면 어떻게 안내하지?"))
+    hit = ending and distinct
+    print(f"{'✓' if hit else '✗'} 어미만 다른 같은 질문은 다시 제안하지 않고, 앞부분이 다른 질문은 가른다")
+    ok += hit
+
     # ⑨ ask() 배선 — 답변 끝에 머리말과 함께 붙고, 반환에 followups 가 따로 실린다.
     #    상담이력에는 **붙이기 전 원 답변**이 남는다(history 도구가 재료로 되읽는 텍스트다).
     orig_agent = G._AGENT
