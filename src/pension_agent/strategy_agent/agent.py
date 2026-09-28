@@ -46,6 +46,7 @@ from pension_agent.strategy_agent.prompts import (
     FALLBACK_SYSTEM,
     LMS_PROMPT,
     LMS_SYSTEM,
+    LMS_UNMATCHED_STATE,
     OUTREACH_SELECT_PROMPT,
     OUTREACH_SELECT_SYSTEM,
     SELECT_PROMPT,
@@ -462,14 +463,23 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
     """
     outreach = facts.get("outreach") or {}
     state = json.dumps(_customer_state(p), ensure_ascii=False)
+    # 이 고객 문제상황의 요건 — 콘텐츠가 «맞아서 고른 것»인지 가르는 축이다(support.relevant_outreach
+    # 와 같은 축). ⑨ 는 맞는 것이 없어도 날짜가 가까운 것을 세우는데(섹션을 비우지 않는 요건),
+    # 그 폴백의 문구에 고객 상태를 이유로 쓰게 두면 «만기예금을 보유 중이신 고객님께서…» 처럼
+    # 그 콘텐츠와 무관한 이유가 붙는다. 그 문장이 고객에게 그대로 나가고, 대화 쪽 답변은 그것을
+    # 적합성의 근거로 옮겨 «이 이벤트가 적합해요»라고 말했다(2026-09-28 실측 — 오세훈, 요건 무관
+    # 폴백 이벤트). 그래서 폴백에는 고객 상태를 아예 싣지 않는다 — 지시보다 재료가 확실하다.
+    wanted = {c for s in (facts.get("problem_situations") or []) for c in (s.get("conds") or [])}
     for key in ("event", "seminar"):
         item = outreach.get(key)
         if not item:
             continue
+        matched = bool(wanted & set(item.get("conds") or []))
         try:
             raw = llm.generate(
-                LMS_PROMPT.format(customer_state=state,
-                                  content=json.dumps(_lms_content(item), ensure_ascii=False)),
+                LMS_PROMPT.format(customer_state=state if matched else LMS_UNMATCHED_STATE,
+                                  content=json.dumps(_lms_content(item, matched=matched),
+                                                     ensure_ascii=False)),
                 system=LMS_SYSTEM, max_tokens=250, name="briefing.lms_message",
             )
         except Exception as e:
@@ -491,17 +501,22 @@ def _write_lms_messages(p: Profile, facts: dict) -> None:
                 else "LLM 응답에 body 없음 — 규칙 본문이 표시됨")
 
 
-def _lms_content(item: dict) -> dict:
+def _lms_content(item: dict, *, matched: bool = True) -> dict:
     """LMS 본문 생성에 싣는 콘텐츠 정보. **평가용 정답(golden)은 여기 없다.**
 
     콘텐츠 DB 문서 §4 원칙 7 이 golden_dataset 을 LLM 입력에서 제외하라고 정했고, 그래서
     정답 예시는 assets.json 이 아니라 data/outreach_golden.json 에 따로 있다. 이 함수가
     항목을 통째로 넘기지 않고 키를 골라 싣는 것은 그 분리를 한 번 더 붙잡아 두기 위해서다 —
     나중에 asset 에 어떤 필드가 붙어도 여기 적힌 것만 프롬프트로 나간다.
+
+    요건에 맞지 않는 콘텐츠(`matched=False`)는 대상 키워드·추천 사유도 뺀다. 키워드는 «이런
+    고객에게 맞는 콘텐츠»라는 뜻이라(`미운용현금자산` 등) 실으면 이 고객이 그 상태인 것처럼
+    쓰게 된다 — 고객 상태를 빼는 것(`_write_lms_messages`)과 같은 이유다.
     """
-    return {k: v for k, v in item.items()
-            if k in ("name", "content_type", "organizer", "schedule", "description",
-                     "keywords", "reason") and v}
+    keys = ("name", "content_type", "organizer", "schedule", "description")
+    if matched:
+        keys += ("keywords", "reason")
+    return {k: v for k, v in item.items() if k in keys and v}
 
 
 def _recommend(p: Profile, facts: dict) -> dict | None:

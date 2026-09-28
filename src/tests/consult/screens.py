@@ -256,6 +256,53 @@ def check_outreach() -> int:
     hit = bool(one) and _plan._span_verdict(ev, f"여기서 확인하세요 {forged}")[0] == _plan.DISCARD
     print(f"{'✓' if hit else '✗'} 원장에 없는 링크를 쓴 답은 버린다")
     ok += hit
+
+    # ⑧ 다른 후보 중 요건에 맞는 것은 요건을 표시하고, 요건 무관 폴백은 적합성 근거로 못 쓰게 한다.
+    #
+    # 회귀 대상(2026-09-28 실측, 오세훈): 만기예금 요건에 맞는 세미나가 «다른 세미나 후보»에
+    # 이름만 있어서, «다른 건 없어?»에 답변이 요건 무관 폴백 이벤트를 골랐고 그 발송 문구 속
+    # «만기예금을 보유 중이신 고객님께서…»를 근거로 «이 이벤트가 적합해요»라고 말했다.
+    # 요건 성립은 날짜에 따라 바뀐다(«만기 1개월 전»은 기준일이 움직이면 켜지고 꺼진다). 그래서
+    # 특정 고객·날짜를 박지 않고 **로스터 전체에서 성질을 잰다** — 표시가 붙는 후보는 요건 판정
+    # 함수(`relevant_outreach`)가 맞다고 한 것뿐이고, 요약 줄이 센 수와 표시 줄 수가 같아야 한다.
+    import re as _re2
+    marked_total, wrong = 0, []
+    for persona in PERSONAS:
+        p_ev = tools.run("outreach", {"customer_id": persona.id, "question": "다른 건 없어?"}, "다른 후보")
+        if not p_ev:
+            continue
+        p_facts = strategy_agent.propose(strategy_customer.get_profile(persona.id))["facts"]
+        relevant = {r["name"] for r in strategy_support.relevant_outreach(
+            p_facts.get("problem_situations") or [], name=persona.nm)}
+        cand = [ln.strip()[2:] for ln in p_ev["text"].splitlines()
+                if ln.startswith("  · ")]
+        marked = [c for c in cand if " · 요건 일치: " in c]
+        marked_total += len(marked)
+        wrong += [f"{persona.nm}: {c}" for c in cand
+                  if (" · 요건 일치: " in c) != (c.split(" — ")[0] in relevant)]
+        m = _re2.search(r"다른 후보 중 이 고객 요건에 맞는 것 (\d+)건", p_ev["text"])
+        if (int(m.group(1)) if m else 0) != len(marked):
+            wrong.append(f"{persona.nm}: 요약 수 {m.group(1) if m else 0} ≠ 표시 {len(marked)}")
+    hit = marked_total > 0 and not wrong
+    print(f"{'✓' if hit else '✗'} 다른 후보 중 이 고객 요건에 맞는 것만 요건 이름을 달고, 요약 줄이 그 수를 센다"
+          + (f" (표시 {marked_total}건)" if not wrong else f" (어긋남: {wrong[:3]})"))
+    ok += hit
+
+    # 요건 무관 폴백 — 오세훈은 어느 기준일에도 이벤트 쪽이 요건 무관 폴백이다.
+    osh = next((p for p in PERSONAS if p.nm == "오세훈"), None)
+    osh_ev = tools.run("outreach", {"customer_id": osh.id, "question": "다른 건 없어?"}, "다른 후보") \
+        if osh else None
+    osh_text = (osh_ev or {}).get("text", "")
+    hit = ("주의: 요건 무관 콘텐츠의 문구다" in osh_text
+           and "콘텐츠 대상 키워드(이 고객과 무관)" in osh_text
+           and osh_text.count("매칭 키워드:") == 1)
+    print(f"{'✓' if hit else '✗'} 요건 무관 폴백은 문구를 적합성 근거로 쓰지 말라고 적고, "
+          f"키워드를 «매칭»이라 부르지 않는다")
+    ok += hit
+    # 요건에 맞는 콘텐츠(PERSONAS[0])에는 그 주의가 붙지 않는다.
+    hit = "주의: 요건 무관" not in text
+    print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 요건 무관 주의가 붙지 않는다")
+    ok += hit
     return ok
 
 
