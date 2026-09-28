@@ -578,6 +578,17 @@ def check_screen_registry() -> int:
     print(f"{'✓' if hit else '✗'} 원문에 괄호 병기가 없는 «같은 말»은 붙이지 않는다")
     ok += hit
 
+    # 업무 묶음은 기능 설명이 아니다 — 화면명 뒤 괄호에 붙어 있던 동안 「[06-12-918] 디폴트옵션
+    # 대기자금 관리  (운용지시·상품변경)」이 설명처럼 읽혀, 답변이 «즉 운용지시나 상품변경을
+    # 처리하는 화면»으로 풀어 썼다(2026-09-28). 기능 칸이 화면명을 되풀이해도 그 줄은 남긴다 —
+    # 빼면 기능 설명이 없는 재료가 되어 출처 줄을 기능으로 풀어 썼다(같은 날 재실측).
+    idle_text = tools._render_screen(idle) if idle else ""
+    hit = (bool(idle) and idle_text.splitlines()[0] == f"■ {idle['screen']} {idle['title']}"
+           and f"· 표의 업무 묶음: {idle['group']}" in idle_text
+           and f"· 무슨 화면인지: {idle['summary']}" in idle_text)
+    print(f"{'✓' if hit else '✗'} 화면 재료가 업무 묶음을 기능 설명과 갈라 싣는다")
+    ok += hit
+
     # 화면번호는 한 글자만 틀려도 없는 화면이라 원문 그대로 요구한다.
     hit = bool(found) and all(a.startswith("[") for a in found["atomic"])
     print(f"{'✓' if hit else '✗'} 화면번호는 원문 표기 그대로 요구한다(atomic)")

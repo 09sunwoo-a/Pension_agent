@@ -105,9 +105,17 @@ def _procedure_decls(cards: list[dict]) -> tuple[list[str], list[str], list[dict
 
 
 def _render_screen(card: dict) -> str:
-    lines = [f"■ {card['screen']} {card['title']}  ({card.get('group')})"]
+    lines = [f"■ {card['screen']} {card['title']}"]
+    # 기능 칸이 화면명을 되풀이할 뿐인 카드([06-12-918] · [00-12-211])에도 이 줄은 싣는다.
+    # 한 번 뺐더니 기능 설명이 아예 없는 재료가 되어, 작성 LLM 이 출처 줄(「퇴직연금 주요거래
+    # 화면번호 안내」)을 «주요거래를 처리하는 화면»으로 풀어 채웠다(2026-09-28 실측).
     if card.get("summary"):
         lines.append(f"· 무슨 화면인지: {card['summary']}")
+    # 업무 묶음은 표A 의 그룹 이름이지 이 화면의 기능이 아니다. 한때 화면명 뒤 괄호에 붙어
+    # 있었는데(「디폴트옵션 대기자금 관리  (운용지시·상품변경)」) 설명처럼 읽혀, 답변이 «즉
+    # 운용지시나 상품변경을 처리하는 화면입니다»로 풀어 썼다(2026-09-28 실측). 이름을 달아 가른다.
+    if card.get("group"):
+        lines.append(f"· 표의 업무 묶음: {card['group']}")
     # «같은 말»은 판단이 아니라 재료로 준다. 이 줄이 없으면 「디폴트옵션 등록 화면」을 물었을 때
     # 「사전지정운용제도 신청」 화면이 같은 것인지를 되묻기 판정·작성 LLM 이 매번 따로 정하고,
     # 턴마다 «[06-12-610] 에서 하세요»와 «자료로는 확인이 어려워요»로 갈렸다(config.SCREEN_TERM_ALIASES).
