@@ -83,6 +83,7 @@ from tests.consult.index import (
     check_fact_in_index,
     check_hier_index,
     check_l0_skip,
+    check_procedure_axes,
     check_tool_axes,
     check_trigger_entrances,
 )
@@ -195,6 +196,7 @@ def main() -> int:
         check_compose_retry()
         check_graded_judge()
         check_tool_axes()
+        check_procedure_axes()
         check_rehearsal_expectations()
         check_notice_scope()
         check_guard()
