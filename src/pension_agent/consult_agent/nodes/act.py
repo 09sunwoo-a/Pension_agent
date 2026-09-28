@@ -189,9 +189,14 @@ _NAME = re.compile(
 
 
 #: 이름 둘을 이어 말한 꼴(「김국민이랑 이영희한테」) — 이름 발송은 한 사람만 받으므로 고르지 않는다.
+#: 이름 사이에 직급이 끼어도 두 사람이다(「김국민 차장이랑 정석희 대리한테」). 접속 조사
+#: 자리에서 직급이 시작하면 접속이 아니다 — 「이선우 과장님 앞으로」의 «과»를 «A과 B»로 읽어
+#: 「장님」을 두 번째 사람으로 잡았다(2026-09-28 표현 점검).
+_TITLE_ALT = "|".join(_TITLES)
 _NAME_AND = re.compile(
-    rf"(?<![가-힣])(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?\s*(?:님|씨)?\s*(?:이랑|랑|하고|와|과|,|및)\s*"
-    rf"(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?\s*(?:님|씨)?\s*(?:한테|에게|께|앞으로)")
+    rf"(?<![가-힣])(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?\s*(?:(?:{_TITLE_ALT})\s*)?(?:님|씨)?\s*"
+    rf"(?!(?:{_TITLE_ALT}))(?:이랑|랑|하고|와|과|,|및)\s*"
+    rf"(?:{'|'.join(_SURNAMES)})[가-힣]{{1,3}}?\s*(?:(?:{_TITLE_ALT})\s*)?(?:님|씨)?\s*(?:한테|에게|께|앞으로)")
 
 
 class _Many:
@@ -973,7 +978,8 @@ _ORDINALS = ("첫", "두", "세", "네", "다섯", "여섯", "일곱", "여덟",
 def _pick(text: str, cands: list[dict]) -> int | None:
     """후보 목록에서 직원이 고른 것의 번호(0부터). 못 고르거나 둘 이상이면 None.
 
-    받는 순서: 사번 → 「N번」·「N번째」·맨숫자 → 「첫 번째」 → 부서 이름. 사번이 목록에 없으면
+    받는 순서: 사번 → 「N번」·「N번째」·맨숫자 → 「첫 번째」 → 부서 이름 → 「마지막」 → 부서·직급의
+    일부 → 가운데를 뺀 부서 줄임말. 사번이 목록에 없으면
     고른 것이 아니다(목록 밖 사번은 받는 사람 바꾸기로 처리된다 — `_readdress`).
     """
     raw = text or ""
@@ -995,12 +1001,27 @@ def _pick(text: str, cands: list[dict]) -> int | None:
     # 부서·직급의 **일부**만 말해도 고른 것이다 — 그 말이 든 후보가 한 명뿐이면. 행내 실측
     # (2026-09-23): 「WM플랫폼부(P)」를 고르려고 「WM」이라고 했는데 부서 이름 전체만 인정해서
     # 새 질문으로 넘어갔고, 계획 루프가 «WM»을 검색해 엉뚱한 답을 냈다. 대소문자는 가리지 않는다.
+    if re.search(r"마지막|맨\s*끝|맨\s*아래", raw):
+        return len(cands) - 1
     words = [_untail(w) for w in re.split(r"[\s,./]+", raw.casefold())]
     words = [w for w in words if len(w) >= 2]
     hits = {i for i, c in enumerate(cands) for w in words
             if w in re.sub(r"\s+", "", c.get("group_name", "")).casefold()
             or w in (c.get("dsgt") or "").casefold()}
+    if not hits:
+        # 가운데를 빼고 줄인 부서 이름 — 「대출센터」는 「대출실행센터」다. 글자가 순서대로 다
+        # 들어 있어야 하고, 두 글자 줄임은 너무 느슨해서 세 글자 이상만 본다.
+        hits = {i for i, c in enumerate(cands) for w in words
+                if len(w) >= 3 and _in_order(w, re.sub(r"\s+", "", c.get("group_name", "")).casefold())}
     return hits.pop() if len(hits) == 1 else None
+
+
+def _in_order(short: str, full: str) -> bool:
+    """short 의 글자가 full 안에 순서대로 다 있나(첫 글자는 full 의 첫 글자와 같아야 한다)."""
+    if not short or not full or short[0] != full[0]:
+        return False
+    it = iter(full)
+    return all(ch in it for ch in short)
 
 
 #: 고르는 말 끝에 붙는 조사·꼬리 — 「WM으로」·「대출센터 분께」·「수석이요」.

@@ -579,6 +579,14 @@ def check_memo_schedule() -> int:
         "10월 7일에 상담 예정이라고 넣어줘": ("none", ""),            # 보내라는 말이 없다
         "10월 5일에 만기 예정인 상품 안내 쪽지 보내줘": ("none", ""),  # 상품의 일정은 내용이다
         "10월 7일 상담 내용 쪽지로 보내줘": ("none", ""),
+        # 2026-09-28 표현 점검
+        "10월 7일 날짜로 예약해줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일로 예약 걸어줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일 재접촉 예정인데 상담 내용 쪽지로 남겨줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일 고객 내점 예정이라 그날 쪽지 받게 해줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일 재접촉 일정이니까 그날 알림 쪽지 보내줘": ("ok", "10월 7일(수) 오전 9시"),
+        "재접촉은 10월 7일이야, 그날 쪽지 보내줘": ("ok", "10월 7일(수) 오전 9시"),
+        "10월 7일에 만기되는 예금 안내 쪽지 보내줘": ("none", ""),
         # «에» 없이 받는 사람이 오는 꼴(같은 날 두 번째 실측)
         "이 내용 요약해서 10월 7일 정석희 대리에게 쪽지로 보내줄래": ("ok", "10월 7일(수) 오전 9시"),
         "10월 5일 만기 고객에게 쪽지 보내줘": ("none", ""),
@@ -594,7 +602,9 @@ def check_memo_schedule() -> int:
               if (S.parse(q, now).kind, S.parse(q, now).label) != want}
     edit_ok = (S.parse("10월 6일로 바꿔줘", now, edit=True).label == "10월 6일(화) 오전 9시"
                and S.parse("10월 6일로 바꿔줘", now).kind == "none"
-               and S.parse("그냥 지금 보내줘", now, edit=True).kind == "clear")
+               and S.parse("그냥 지금 보내줘", now, edit=True).kind == "clear"
+               and S.parse("10월 8일 오후 2시로", now, edit=True).label == "10월 8일(목) 오후 2시"
+               and S.parse("10월 8일로 정리해줘", now, edit=True).kind == "none")
     hit = not misses and edit_ok
     print(f"{'✓' if hit else '✗'} 발송일은 단서가 붙은 날짜만 읽는다(내용 속 날짜·못 가르는 날·지난 시각)"
           + (f" — {misses}" if misses else ""))
@@ -745,6 +755,10 @@ def check_memo_by_name() -> int:
         "김대리한테 보내줘": None, "정리해서 쪽지 보내줘": None,
         f"{customer_nm}님께 보내줘": None,                                 # 시연 고객 이름
         "김국민이랑 이영희한테": act.NAME_MANY, "김국민한테, 이영희에게도": act.NAME_MANY,
+        # 2026-09-28 표현 점검 — 「과장」의 «과»는 접속이 아니고, 직급이 끼어도 두 사람이다
+        "이선우 과장님 앞으로 보내줘": ("이선우", ""),
+        "김국민 차장이랑 정석희 대리한테 보내줘": act.NAME_MANY,
+        "김국민 과장하고 정석희 과장한테": act.NAME_MANY,
     }
     misses = {q: act.recipient_name(q) for q, want in table.items() if act.recipient_name(q) != want}
     hit = not misses
@@ -1014,7 +1028,8 @@ def check_memo_pick_partial() -> int:
              {"user_id": "2768578", "group_name": "대출실행센터", "dsgt": "선임팀장"},
              {"user_id": "2827375", "group_name": "재무기획부", "dsgt": "수석차장"}]
     want = {"WM": 0, "wm": 0, "WM으로": 0, "대리님께": 0, "대출": 1, "수석이요": 2,
-            "재무기획부": 2, "1번": 0, "사번 2827375": 2, "지점": None, "보내줘": None, "부": None}
+            "재무기획부": 2, "1번": 0, "사번 2827375": 2, "지점": None, "보내줘": None, "부": None,
+            "마지막": 2, "맨 끝 분": 2, "대출센터": 1, "재무부": 2, "대센": None}
     misses = {q: act._pick(q, cands) for q, w in want.items() if act._pick(q, cands) != w}
     hit = not misses
     print(f"{'✓' if hit else '✗'} 목록에서 부서·직급의 일부로 고를 수 있다(한 후보에만 맞을 때)"
