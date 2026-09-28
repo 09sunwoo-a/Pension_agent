@@ -290,6 +290,44 @@ _probe_item = dict(FACTS[PERSONAS[0].nm]["outreach"]["seminar"], golden_dataset=
 check("정답이 새면 안 된다" not in json.dumps(agent_mod._lms_content(_probe_item), ensure_ascii=False),
       "⑨ LMS 프롬프트에 싣는 것은 화이트리스트 필드뿐이다")
 
+# 요건과 무관한 콘텐츠(⑨ 의 날짜순 폴백)의 문구에는 고객 상태를 이유로 쓸 재료를 주지 않는다.
+#
+# 회귀 대상(2026-09-28 실측 — 오세훈): 요건 무관 폴백 이벤트의 문구가 «만기예금을 보유 중이신
+# 고객님께서…»로 생성됐고, 대화 답변이 그 문장을 근거로 «이 이벤트가 적합해요»라고 말했다.
+_probe_item = dict(FACTS[PERSONAS[0].nm]["outreach"]["seminar"], reason="요건이 맞아서")
+_unmatched = agent_mod._lms_content(_probe_item, matched=False)
+check("keywords" not in _unmatched and "reason" not in _unmatched and _unmatched.get("name"),
+      "⑨ 요건 무관 콘텐츠의 LMS 입력에는 대상 키워드·추천 사유가 없다", str(list(_unmatched)))
+
+_osh = next((p for p in PERSONAS if p.nm == "오세훈"), None)
+check(_osh is not None, "⑨ 요건 무관 폴백이 있는 고객(오세훈)이 로스터에 있다")
+if _osh is not None:
+    _facts = json.loads(json.dumps(FACTS[_osh.nm], ensure_ascii=False, default=str))
+    _wanted = {c for s in _facts.get("problem_situations") or [] for c in s.get("conds") or []}
+    _fit = {k: bool(_wanted & set(v.get("conds") or []))
+            for k, v in (_facts.get("outreach") or {}).items() if v}
+    _prompts: dict[str, str] = {}
+    _real_generate = agent_mod.llm.generate
+
+    def _capture(prompt, **kw):
+        _prompts[next(k for k in ("event", "seminar")
+                      if (_facts["outreach"].get(k) or {}).get("name", "\0") in prompt)] = prompt
+        return '{"body": "안내드려요."}'
+
+    agent_mod.llm.generate = _capture
+    try:
+        agent_mod._write_lms_messages(_osh, _facts)
+    finally:
+        agent_mod.llm.generate = _real_generate
+    _state_mark = '"투자성향"'
+    check(any(_fit.values()) and not all(_fit.values()),
+          "⑨ 오세훈의 ⑨ 선정에 요건 일치 1건 · 무관 1건이 함께 있다", str(_fit))
+    check(all((_state_mark in _prompts.get(k, "")) == fit for k, fit in _fit.items()),
+          "⑨ 요건에 맞는 콘텐츠의 문구만 고객 상태를 받고, 무관 콘텐츠는 받지 않는다",
+          str({k: _state_mark in v for k, v in _prompts.items()}))
+    check(all((agent_mod.LMS_UNMATCHED_STATE in _prompts.get(k, "")) != fit for k, fit in _fit.items()),
+          "⑨ 무관 콘텐츠의 문구 프롬프트에는 «고객 상태를 이유로 쓰지 않는다»가 실린다")
+
 # 기준일 인자 — 과거 시점으로 물어보면 그때 열려 있던 콘텐츠가 나온다(선별 로직 자체의 검증).
 from datetime import date as _date
 
