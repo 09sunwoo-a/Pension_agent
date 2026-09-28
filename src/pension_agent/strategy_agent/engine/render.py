@@ -212,6 +212,11 @@ def _account_state(p: Profile) -> dict[str, Any]:
         "판매중단_보유상품": " · ".join(blocked) if blocked else "없음",
         "ISA_만기자금": "보유" if p.isa else "없음",
     }
+    # 연금저축 보유 여부는 **원장에 값이 있을 때만** 싣는다. 미확인을 «없음»으로 적으면 모르는
+    # 것을 아는 것처럼 말하게 되고, «미확인»으로 적으면 되묻기 판정이 그 축까지 정해진 것으로
+    # 읽는다(consult_agent/CLAUDE.md §5 「모르는 값은 블록에 넣지 않는다」).
+    if p.pension_savings is not None:
+        state["연금저축_보유"] = "보유" if p.pension_savings else "없음"
     # 부담금 재원별 구성 — 수수료율표(fact.k04.f50)가 「사용자부담금(퇴직금)」과 「가입자부담금」
     # 으로 행이 갈리는데, 그 갈래를 정하는 값이 **원장에 있으면서** 여기까지 오지 않아 대화형이
     # 직원에게 «어느 부담금이냐»를 되물었다(consult_agent/CLAUDE.md §12 지워진 gap 30).

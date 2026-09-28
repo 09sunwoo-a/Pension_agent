@@ -92,7 +92,7 @@ _NOT_SETTLING = frozenset({"playbook", "last_answer"})
 #: «이미 정해진 것» 블록에 싣는 계좌 상태 항목. `render._account_state` 의 키 중 되묻기가
 #: 갈래로 오독할 수 있는 축만 고른다 — 전부 원장 값이거나 코드가 이미 계산한 것이다.
 _SETTLED_STATE_KEYS = ("디폴트옵션", "연금개시", "연금개시요건", "세액공제_잔여한도",
-                       "판매중단_보유상품", "ISA_만기자금", "부담금별_구성")
+                       "판매중단_보유상품", "ISA_만기자금", "부담금별_구성", "연금저축_보유")
 
 
 def settled_block(state: AgentState) -> str:
