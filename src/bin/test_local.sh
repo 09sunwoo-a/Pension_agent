@@ -3,6 +3,10 @@
 #     bin/test_local.sh "IRP 수수료 부담된다고 하시는데 뭐라고 답하죠?"
 #     RAW=1 bin/test_local.sh "…"     # 그리지 않고 이벤트 JSON 을 한 줄씩 그대로 — 프론트가 받는 원문
 #     RAW=2 bin/test_local.sh "…"     # 게이트웨이 없이 에이전트가 내보내는 SSE 줄 그대로(data: …)
+#     LOG_EVENTS=1 bin/test_local.sh "…"   # 요청에 log_events 를 싣는다 — 서버 로그 줄(log)과
+#                                         # 턴 절차 기록(trace)이 응답에 함께 온다. log 는 [log] 줄로,
+#                                         # trace 는 «답변 근거» 요약으로 찍는다. RAW=1 과 함께 쓰면
+#                                         # trace JSON 전문이 그대로 나온다(client/README.md 「trace」)
 #
 # 게이트웨이가 보낸 것을 흉내 내기 — INPUT_VALUE_RAW 를 주면 JSON 으로 싸지 않고 그 문자열을
 # input_value 에 그대로 싣는다. 행내 실측(2026-09-10)에서 같은 세션 4턴째에 게이트웨이가
@@ -47,8 +51,10 @@ import json, sys
 payload = {"message": sys.argv[1], "x_client_user": sys.argv[2], "session_id": sys.argv[4] or "default"}
 if sys.argv[3]:
     payload["customer_id"] = sys.argv[3]
+if sys.argv[5] == "1":
+    payload["log_events"] = True
 print(json.dumps(payload, ensure_ascii=False))
-' "$MESSAGE" "$CLIENT_USER" "${CUSTOMER_ID:-}" "${SESSION_ID:-}")
+' "$MESSAGE" "$CLIENT_USER" "${CUSTOMER_ID:-}" "${SESSION_ID:-}" "${LOG_EVENTS:-}")
 fi
 
 # 응답은 CHUNK 마다 content 에 JSON 이벤트 하나다(main.py 머리말 «출력 형식»). type 별로 그린다 —
@@ -140,6 +146,25 @@ for line in sys.stdin:
                     print(f'  · {q}')
         elif t == 'error':
             print(f'[오류] {ev.get(\"text\")}', file=sys.stderr, flush=True)
+        elif t == 'log':
+            print(f'  [log] {ev.get(\"text\")}', file=sys.stderr, flush=True)
+        elif t == 'trace':
+            # 프론트의 «답변 근거» 패널이 그리는 재료 — 여기서는 요약만. 전문은 RAW=1.
+            print(f'\n─ 답변 근거 ({ev.get(\"started_at\")} → {ev.get(\"finished_at\")} · 의도 {ev.get(\"intent\")})')
+            for st in ev.get('timeline') or []:
+                if st.get('level') == 'DEBUG':
+                    continue
+                mark = '⚠' if st.get('level') == 'WARNING' else ' '
+                print(f'  {mark} {st.get(\"elapsed_ms\", 0):>6}ms {st.get(\"stage\", \"\"):<10} {st.get(\"text\", \"\")}')
+            for e in ev.get('evidence') or []:
+                cards = ', '.join(c['id'] + ('' if c.get('used') else '(안 씀)') for c in e.get('cards') or [])
+                print(f'  · 근거 {e.get(\"tool\")} «{e.get(\"query\")}» — {cards or \"카드 없음\"}')
+            for se in ev.get('sentences') or []:
+                if se.get('matches'):
+                    how = '; '.join(m['by'] + ' ' + (m.get('card') or m['tool']) + ' '
+                                    + (m.get('span') or ', '.join(m.get('values') or []))
+                                    for m in se['matches'])
+                    print(f'  ↳ {se[\"text\"][:40]} … ← {how}')
         elif t == 'done':
             print()
 "
