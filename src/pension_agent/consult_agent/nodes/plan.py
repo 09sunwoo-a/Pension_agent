@@ -944,11 +944,15 @@ def compose(state: AgentState) -> dict[str, Any]:
                     observability.step("verify", passed=False,
                                        attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}",
                                        fallback="raw_evidence", reason="; ".join(faults[:2]),
+                                       detail={"faults": faults[:FAULTS_SHOWN]},
                                        level=logging.WARNING)
                     break
+                # 로그에는 사유 두 건만, 응답의 절차 기록에는 전부(`detail`).
                 observability.step("verify", passed=False,
                                    attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}",
-                                   reason="; ".join(faults[:2]), level=logging.WARNING)
+                                   reason="; ".join(faults[:2]),
+                                   detail={"faults": faults[:FAULTS_SHOWN]},
+                                   level=logging.WARNING)
                 # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
                 progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
                 retry = prompt + COMPOSE_RETRY_BLOCK.format(

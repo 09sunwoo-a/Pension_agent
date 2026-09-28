@@ -35,7 +35,7 @@ from pension_agent import llm, observability, note
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
-from pension_agent.consult_agent import progress, tools
+from pension_agent.consult_agent import progress, tools, turn_trace
 from pension_agent.consult_agent.evidence import guard
 from pension_agent.consult_agent.effects import messages as lms_messages, screens, suggest
 
@@ -212,6 +212,7 @@ def ask(
     # 흘린다(llm.client_user 주석).
     # 단계 로그의 요청 id·경과초 시계를 여기서 (다시) 연다 — main.py 가 연 id 는 그대로 잇고
     # 시계만 턴 시작으로 맞춘다. CLI·화면(app.py)처럼 id 없이 부른 경우도 시계는 생긴다.
+    started_at = observability.wall_clock()
     with observability.request_id(observability.current_request_id()), \
             llm.client_user(x_client_user), observability.trace(
         "consult.turn", input=question, session_id=session_id,
@@ -262,6 +263,12 @@ def ask(
             verdict=out.get("judge_verdict"), llm=f"{tally['calls']}회",
             chars=f"{tally['chars'] / 1000:.1f}k자" if tally["chars"] else None,
             level=logging.WARNING if outcome in ("llm_down", "tool_failed") else logging.INFO)
+        # 단계 기록은 이 블록이 닫히면 사라진다(request_id) — 닫기 전에 거둔다.
+        journal = observability.journal()
+    # 이 턴의 절차 기록 — 응답의 `trace` 이벤트가 싣는다(turn_trace 머리말). 로그 이벤트를
+    # 켠 요청에만 나가지만 만드는 값은 코드가 이미 아는 것이라 매 턴 만든다.
+    trace = turn_trace.build(out, journal, started_at=started_at,
+                             finished_at=observability.wall_clock())
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가
@@ -345,4 +352,6 @@ def ask(
         # 이 턴이 답변 대신 판별 질문으로 끝났으면 그 질문과 선택지. 화면이 선택지를
         # 버튼으로 띄우고 싶을 때 쓴다.
         "clarify": out.get("clarify"),
+        # 절차 기록 — 근거 패널용(turn_trace). main.py 는 로그 이벤트를 켠 요청에만 싣는다.
+        "trace": trace,
     }

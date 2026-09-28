@@ -99,7 +99,7 @@ try:
                     and isinstance(_node.func.value, _ast.Name)
                     and _node.func.value.id == "observability"):
                 for _kw in _node.keywords:
-                    if _kw.arg and _kw.arg != "level":
+                    if _kw.arg and _kw.arg not in ("level", "detail"):
                         _used.setdefault(_kw.arg, set()).add(str(_file))
     _unknown = {k: sorted(v) for k, v in _used.items() if k not in _obs.STEP_KEYS}
     check(bool(_used) and not _unknown,

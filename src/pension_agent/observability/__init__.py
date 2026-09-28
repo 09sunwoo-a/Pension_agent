@@ -60,6 +60,8 @@ from pension_agent.observability._conf import (  # noqa: F401
 from pension_agent.observability._trace import (  # noqa: F401
     request_id,
     current_request_id,
+    journal,
+    wall_clock,
     tally_llm,
     llm_tally,
     Trace,
