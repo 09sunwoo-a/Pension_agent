@@ -34,6 +34,7 @@
     memo.py         MEMO_SYSTEM · MEMO_PROMPT  이번 턴의 재료로 제목·본문
                     MEMO_SELF_GUIDE · MEMO_OTHER_GUIDE   받는 사람이 본인 / 다른 직원
                     MEMO_TABLE_BLOCK           코드가 값 표를 붙일 때
+                    MEMO_ADDRESSEE_LINE        받는 사람을 부를 호칭(이름·직급)을 코드가 알 때
                     MEMO_EDIT_SYSTEM · MEMO_EDIT_PROMPT  걸려 있는 초안을 직원의 지시대로 고친다
                     MEMO_EDIT_RECIPIENT_BLOCK  받는 사람이 바뀌어 호칭을 맞출 때
                     MEMO_EDIT_ECHO_BLOCK       고친 본문에 직원의 말이 통째로 들어갔을 때 다시 쓰기
@@ -90,6 +91,7 @@ from pension_agent.consult_agent.prompts.memo import (  # noqa: F401
     MEMO_SELF_GUIDE,
     MEMO_OTHER_GUIDE,
     MEMO_TABLE_BLOCK,
+    MEMO_ADDRESSEE_LINE,
     MEMO_PROMPT,
     MEMO_EDIT_SYSTEM,
     MEMO_EDIT_PROMPT,
