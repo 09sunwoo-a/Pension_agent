@@ -225,6 +225,37 @@ def check_outreach() -> int:
     hit = (not none_cid) or bool(none_ev and none_ev["meta"]["messages"])
     print(f"{'✓' if hit else '✗'} 요건 무관 콘텐츠의 발송 문구도 재료가 원본을 싣는다")
     ok += hit
+
+    # ⑦ 링크는 식별자로 잰다 — 콘텐츠 링크끼리 꼬리 번호를 공유한다.
+    #
+    # 회귀 대상(2026-09-23 실측, 오세훈): 요건에 맞는 세미나 링크(`/seminar/irp-001`)만 정확히
+    # 인용한 답이, 일부러 뺀 폴백 이벤트 링크(`/event/irp-001`)와 숫자 `001` 이 겹친다는
+    # 이유로 «그대로 옮겨야 하는 문장을 풀어 씀»에 두 번 걸려 근거 원문이 덤프됐다.
+    from pension_agent.consult_agent.nodes import plan as _plan
+    from pension_agent.verify import numbers as _numbers
+    # 꼬리 번호가 겹치는 두 링크가 함께 실리는 고객을 로스터에서 찾는다(실측 고객이 그렇다).
+    twin_ev, one, twin = None, "", ""
+    for persona in PERSONAS:
+        cand = tools.run("outreach", {"customer_id": persona.id, "question": "이벤트 있어?"}, "이벤트")
+        urls = [a for a in (cand or {}).get("atomic", []) if a.startswith("http")]
+        pair = next(((a, b) for a in urls for b in urls
+                     if a != b and _numbers(a) & _numbers(b)), None)
+        if pair:
+            twin_ev, (one, twin) = cand, pair
+            break
+    answer = f"이 콘텐츠를 안내해보세요. ▶ {one}"
+    hit = (twin_ev is not None and _plan._span_verdict(twin_ev, answer)[0] != _plan.DISCARD
+           and _plan._span_verdict(twin_ev, answer + ".")[0] != _plan.DISCARD)
+    print(f"{'✓' if hit else '✗'} 링크 하나만 정확히 인용한 답은 번호가 겹치는 다른 링크가 있어도 "
+          f"버리지 않는다" + (f" ({one} · {twin})" if twin else " (겹치는 고객 없음)"))
+    ok += hit
+    urls = [a for a in ev["atomic"] if a.startswith("http")]
+    one = urls[-1] if urls else ""
+    # 원장에 없는 링크(한 글자 바꾼 것)는 그대로 걸린다 — 넓힌 것은 «안 부른 링크» 하나다.
+    forged = one[:-1] + ("9" if not one.endswith("9") else "8")
+    hit = bool(one) and _plan._span_verdict(ev, f"여기서 확인하세요 {forged}")[0] == _plan.DISCARD
+    print(f"{'✓' if hit else '✗'} 원장에 없는 링크를 쓴 답은 버린다")
+    ok += hit
     return ok
 
 

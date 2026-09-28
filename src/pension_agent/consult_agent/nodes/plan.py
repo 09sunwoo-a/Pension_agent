@@ -503,13 +503,28 @@ def _ledger_screens(evidence: Iterable[tools.Evidence]) -> set[str]:
     return screens.declared(evidence)
 
 
+#: 답변·원문 스팬 속 링크. 인용부호·괄호·공백에서 끊고, 문장부호 꼬리는 뒤에서 뗀다.
+_URL = re.compile(r"https?://[^\s\"'“”‘’«»<>()\[\]]+")
+
+
+def _urls_in(text: str) -> set[str]:
+    return {m.group().rstrip(".,;:!?…") for m in _URL.finditer(text or "")}
+
+
+def _ledger_urls(evidence: Iterable[tools.Evidence]) -> set[str]:
+    """이번 턴 원장 **전체**가 원문 스팬으로 선언한 링크. `_ledger_screens` 와 같은 이유로 합집합이다."""
+    return {u for e in evidence for span in e["atomic"] for u in _urls_in(span)
+            if _URL.fullmatch(span.strip())}
+
+
 def _span_verdict(found: tools.Evidence, answer: str,
-                  known_screens: set[str] | None = None) -> tuple[str, list[str]]:
+                  known_screens: set[str] | None = None,
+                  known_urls: set[str] | None = None) -> tuple[str, list[str]]:
     """이 근거의 원문 스팬이 답변에서 어떻게 어긋났는지 판정한다. 종류는 도구가 선언한다.
 
     `known_screens` — 화면번호 판정에 쓸 «원장이 아는 화면» 집합. 호출부(`_screen`)가
     원장 전체의 합집합(`_ledger_screens`)을 넘긴다. 넘기지 않으면 이 근거 것만 본다
-    (근거 하나로 재는 검사용).
+    (근거 하나로 재는 검사용). `known_urls` 는 링크에 대한 같은 것이다(`_ledger_urls`).
 
     · `atomic` — 값 + 조건이 붙은 한 덩이. 그 숫자를 쓰면서 원문을 안 실었다 → **DISCARD**.
       블록을 덧붙이는 복구로는 안 된다. 틀린 문장이 옳은 블록 옆에 그대로 남기 때문이다.
@@ -544,8 +559,24 @@ def _span_verdict(found: tools.Evidence, answer: str,
             if said not in known_screens:
                 return DISCARD, [(m.group(), [])]
 
+    # 링크도 **식별자**다 — 화면번호와 같은 규칙으로 잰다. 한 글자만 달라도 죽는 값이라
+    # 정확히 인용했거나 아예 안 불렀거나 둘 중 하나여야 하고, 흩어진 숫자로 재면 안 된다.
+    # 콘텐츠 링크끼리 꼬리 번호를 공유하기 때문이다(`/event/irp-001` · `/seminar/irp-001`).
+    # 예전 규칙(스팬이 답변에 없는데 숫자가 겹치면 폐기)은 그래서 **세미나 링크만 정확히
+    # 인용한 답을** «이벤트 링크를 풀어 썼다»로 버렸다 — 걸린 것은 요건과 무관해서 답변이
+    # 일부러 뺀 폴백 이벤트의 링크였다(2026-09-23 실측 — 오세훈, 안내 콘텐츠 질문).
+    #
+    # 지금 재는 것은 «답변의 링크가 이 턴 원장에 **없는** 링크인가» 하나다. 원장이 링크를
+    # 하나도 선언하지 않았으면 재지 않는다(그때 링크 속 숫자는 수치 검사가 본다).
+    if known_urls is None:
+        known_urls = _ledger_urls([found])
+    if known_urls:
+        for said in sorted(_urls_in(answer)):
+            if said not in known_urls:
+                return DISCARD, [(said, [])]
+
     for span in found["atomic"]:
-        if _SCREEN_SPAN.fullmatch(span.strip()):
+        if _SCREEN_SPAN.fullmatch(span.strip()) or _URL.fullmatch(span.strip()):
             continue                      # 위에서 식별자 규칙으로 이미 판정했다
         if span not in answer and (numbers(span) & numbers(answer)):
             # 걸린 스팬을 함께 돌려준다 — DISCARD 처분에는 안 쓰이지만, 계측(trace)이 이걸
@@ -758,7 +789,8 @@ def _screen(answer: str, evidence: list[tools.Evidence],
         return [f"자료가 「틀린 표현」으로 적어둔 것을 그대로 말함: {b}" for b in broken], []
 
     ledger_screens = _ledger_screens(evidence)
-    verdicts = [_span_verdict(e, answer, ledger_screens) for e in evidence]
+    ledger_urls = _ledger_urls(evidence)
+    verdicts = [_span_verdict(e, answer, ledger_screens, ledger_urls) for e in evidence]
     if any(v == DISCARD for v, _ in verdicts):
         spans = [span for e, (v, detail) in zip(evidence, verdicts) if v == DISCARD
                  for span, _ in detail]
