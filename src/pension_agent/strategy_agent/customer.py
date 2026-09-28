@@ -238,6 +238,10 @@ class Profile:
     own_contrib_amt: int = 0  # 개인부담금(가입자부담금) 몫(원)
     pension_paid_ytd: int = 0  # 당해 연금계좌 기납입액(원). 세액공제 잔여 한도 산출에 사용한다.
     paid_ytd_total: int = 0  # 당해 연금계좌 실납입액 합계(원) — IRP + 연금저축.
+    # 연금저축(연금저축펀드 포함) 계좌 보유 여부. None 은 «미확인»이다 — 원본 9Cases 에 없던
+    # 컬럼이라(tax_isa.연금저축보유여부, 데이터사전 21행) 값을 부여한 고객만 True/False 가 된다.
+    # 당해 연금저축 납입액 0원은 «올해 안 넣었다»일 뿐이라 이 값으로 대신 읽지 않는다.
+    pension_savings: bool | None = None
     # `pension_paid_ytd`(세액공제 **인정** 납입액)와 다른 값이다: 900만원을 넘겨 넣은 몫은
     # 인정액에 안 잡히지만 1,800만원 납입한도는 그만큼 쓴다. `deposit_room` 의 입력이다.
     balPct: int | None = None  # 평가금액(적립금) 백분위 — 값이 낮을수록 상위 구간이다(예:
@@ -738,6 +742,7 @@ def _to_profile(rec: dict) -> Profile:
         # 납입한도 여력의 입력. 인정액이 아니라 **실납입액**을 더한다 — 한도를 넘겨 넣은
         # 몫은 공제 인정액에서 빠지지만 1,800만원 한도는 그만큼 쓴다.
         paid_ytd_total=_paid_ytd_total(rec["tax_isa"]),
+        pension_savings={"Y": True, "N": False}.get(rec["tax_isa"].get("연금저축보유여부")),
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
         joined=rec["pension"].get("IRP가입일"),
         severance_amt=rec["pension"].get("퇴직급여금액") or 0,
