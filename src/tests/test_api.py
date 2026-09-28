@@ -120,7 +120,10 @@ def _fake_ask(question, history=None, **kw):
            + "\n".join(f"· {q}" for q in FOLLOWUPS),
            "sources": SOURCES, "followups": FOLLOWUPS, "intent": "situation",
            "pending_action": None, "clarify": None,
-           "history": [*(history or []), {"question": question, "tools": []}]}
+           "history": [*(history or []), {"question": question, "tools": []}],
+           # 절차 기록(consult_agent/turn_trace) — 모양만 흉내 낸다. 가림을 재려고 원장 표기를 싣는다.
+           "trace": {"intent": "situation", "timeline": [{"stage": "fake", "text": "고객=171203-4815062"}],
+                     "rounds": [], "evidence": [], "sources": SOURCES, "sentences": []}}
     if question == "연계":
         out.update(answer=ANSWER + "\n\n— " + ACTION["prompt"], followups=[], pending_action=ACTION)
     if question == "되묻기":
@@ -518,7 +521,8 @@ try:
 
     # ── 계약 문서와 코드가 갈리지 않는다 — client/README.md 는 프론트가 읽는 계약이다 ──
     _readme = (_cfg.SRC_ROOT.parent / "client" / "README.md").read_text(encoding="utf-8")
-    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done", "log"}
+    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done",
+                "log", "trace"}
     _in_code = set(re.findall(r'"type":\s*"(\w+)"', Path(main.__file__).read_text(encoding="utf-8")))
     check(_in_code == _emitted,
           "main.py 가 내보내는 이벤트 type 목록이 테스트가 아는 것과 같다(새 type 은 여기와 문서에 등록)",
@@ -601,7 +605,8 @@ try:
 
     # ── 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다(main.py 머리말 «로그 이벤트») ──
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
-    check("log" not in _types(_events(r)), "로그 이벤트는 기본으로 꺼져 있다", str(_types(_events(r))))
+    check("log" not in _types(_events(r)) and "trace" not in _types(_events(r)),
+          "로그 이벤트·절차 기록은 기본으로 꺼져 있다", str(_types(_events(r))))
 
     r = client.post("/chat", json=_body(message="로그 질문", x_client_user="emp-9",
                                         customer_id="171203-4815062", log_events=True))
@@ -623,9 +628,16 @@ try:
     check(any("171203-4815062" in rec.getMessage() for rec in _captured if rec.name == "api"),
           "stdout 로그 줄은 가리지 않는다(사본만 가린다)")
     _nolog = [e for e in evs if e["type"] != "log"]
-    check(_types(_nolog) == ["progress"] * 3 + ["answer", "sources", "followups", "done"]
+    check(_types(_nolog) == ["progress"] * 3 + ["answer", "sources", "followups", "trace", "done"]
           and _types(evs)[-1] == "done",
-          "log 이벤트를 빼면 순서는 그대로이고 done 이 마지막이다", str(_types(evs)))
+          "log 이벤트를 빼면 순서는 그대로이고 trace 가 done 바로 앞에 온다", str(_types(evs)))
+    _tr = next((e for e in evs if e["type"] == "trace"), {})
+    check(_tr.get("intent") == "situation" and _tr.get("sources") == SOURCES
+          and isinstance(_tr.get("timeline"), list),
+          "trace 이벤트가 ask() 의 절차 기록을 구조 그대로 싣는다", str(_tr)[:200])
+    check("171203-4815062" not in json.dumps(_tr, ensure_ascii=False)
+          and "[개인정보 가림]" in json.dumps(_tr, ensure_ascii=False),
+          "trace 이벤트도 고객 원장 표기를 가린다", str(_tr.get("timeline")))
     check(not main._log_tap._sinks, "요청이 끝나면 로그 가로채기를 뗀다", str(main._log_tap._sinks))
 
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-9", log_events=True),
@@ -635,6 +647,7 @@ try:
     check(_jt[0] == "log" and "done" in _jt and _jt.index("answer") > max(i for i, x in enumerate(_jt) if x == "log")
           and any("] done " in e["text"] for e in _jevs if e["type"] == "log"),
           "비스트림은 log 이벤트를 content 앞에 모아 싣는다", str(_jt))
+    check(_jt[-2:] == ["trace", "done"], "비스트림도 trace 가 done 바로 앞에 온다", str(_jt))
 
     main.LOG_EVENTS = True
     try:

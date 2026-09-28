@@ -76,6 +76,9 @@ DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여�
 # 를 거기에 맞췄으므로 기본은 스트림이다. 게이트웨이 status 가 SUCCESS 가 아니면 stderr 에
 # 찍는다 — 오류 문구 안에 답변처럼 보이는 글이 있어도 답변이 아니다.
 IS_STREAM = True             # True 면 SSE 로 받는다. False 면 응답 JSON 하나에서 content 를 읽는다
+LOG_EVENTS = False           # True 면 요청에 "log_events": true 를 싣는다 — 서버 로그 줄(`log`)과 턴의
+                             # 절차 기록(`trace`)이 응답에 함께 온다. log 는 stderr 에, trace 는 요약으로
+                             # 찍는다(client/README.md 「trace — 답변 근거 패널」)
 INNER_SHAPE = "agent"        # "agent": {"message", "x_client_user"} — src/main.py 규약
                              # "reference": 참고 파이프라인 형태 {"filtered_body": {...}, "file_objects": []}
                              #   게이트웨이가 contents[0] 를 그대로 넘기지 않고 이 형태를 기대할 때 확인용
@@ -114,6 +117,8 @@ def _inner(question: str, x_client_user: str, customer_id: str = "", session_id:
             "file_objects": [],
         }
     inner = {"message": question, "x_client_user": x_client_user, "session_id": session_id}
+    if LOG_EVENTS:
+        inner["log_events"] = True
     if customer_id:
         # `b64:` + base64(원장 표기)로 보낸다 — 원장 표기(`171203-4815062`)는 주민등록번호와
         # 같은 꼴이라 플랫폼 게이트웨이의 «기본필터»가 요청을 FILTER_INVALID 로 끊는다.
@@ -290,11 +295,15 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
 
         {"answer": str, "intent": str|None, "links": [..], "messages": [..], "sources": [..],
          "followups": [..],
-         "action": dict|None, "clarify": dict|None, "error": str|None, "progress": [..]}
+         "action": dict|None, "clarify": dict|None, "error": str|None, "progress": [..],
+         "logs": [..], "trace": dict|None}
+
+    logs·trace 는 LOG_EVENTS 를 켰을 때만 채워진다.
     """
     out: dict = {"answer": "", "intent": None, "links": [], "messages": [], "sources": [],
                  "followups": [],
-                 "action": None, "clarify": None, "error": None, "progress": [], "raw": []}
+                 "action": None, "clarify": None, "error": None, "progress": [], "raw": [],
+                 "logs": [], "trace": None}
     for ev in events(question, x_client_user, customer_id=customer_id, session_id=session_id):
         t = ev.get("type")
         if t == "progress":
@@ -316,7 +325,31 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
             out["error"] = ev.get("text")
         elif t == "raw":
             out["raw"].append(ev.get("text", ""))
+        elif t == "log":
+            out["logs"].append(ev.get("text", ""))
+        elif t == "trace":
+            out["trace"] = {k: v for k, v in ev.items() if k != "type"}
     return out
+
+
+def _render_trace(ev: dict) -> None:
+    """절차 기록을 터미널에 요약한다 — 프론트의 «답변 근거» 패널이 그리는 것과 같은 재료다."""
+    print(f"\n─ 답변 근거 ({ev.get('started_at')} → {ev.get('finished_at')} · 의도 {ev.get('intent')})",
+          file=sys.stderr)
+    for step in ev.get("timeline") or []:
+        if step.get("level") == "DEBUG":
+            continue                       # LLM 호출 한 건 한 건 — 패널도 기본으로 접는다
+        mark = "⚠" if step.get("level") == "WARNING" else " "
+        print(f"  {mark} {step.get('elapsed_ms', 0):>6}ms {step.get('stage', ''):<10} {step.get('text', '')}",
+              file=sys.stderr)
+    for e in ev.get("evidence") or []:
+        cards = ", ".join(f"{c['id']}{'' if c.get('used') else '(안 씀)'}" for c in e.get("cards") or [])
+        print(f"  · 근거 {e.get('tool')} «{e.get('query')}» — {cards or '카드 없음'}", file=sys.stderr)
+    for s in ev.get("sentences") or []:
+        if s.get("matches"):
+            how = "; ".join(f"{m['by']} {m.get('card') or m['tool']} {m.get('span') or ', '.join(m.get('values') or [])}"
+                            for m in s["matches"])
+            print(f"  ↳ {s['text'][:40]} … ← {how}", file=sys.stderr)
 
 
 def _render(ev: dict) -> None:
@@ -361,6 +394,11 @@ def _render(ev: dict) -> None:
         print(f"[오류] {ev.get('text')}", file=sys.stderr, flush=True)
     elif t == "raw":
         print(f"[이벤트가 아닌 응답] {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "log":
+        # 개발자 콘솔 자리 — 화면(본문)에는 그리지 않는다.
+        print(f"  [log] {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "trace":
+        _render_trace(ev)
     elif t == "done":
         print()
 

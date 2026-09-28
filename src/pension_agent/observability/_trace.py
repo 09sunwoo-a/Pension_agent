@@ -9,6 +9,7 @@ from typing import Any, Iterator
 import contextlib
 import contextvars
 import logging
+from datetime import datetime
 import time
 import uuid
 
@@ -48,21 +49,51 @@ _LLM_TALLY: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
     "observability_llm_tally", default=None)
 
 
+#: 지금 턴의 단계 기록 — `step()` 한 번이 항목 하나다. 로그 줄과 같은 사건을 **구조 그대로**
+#: (값을 글자로 접기 전, `detail` 까지) 담는다. 응답의 절차 기록(`trace` 이벤트 ·
+#: consult_agent/turn_trace.py)이 이것을 읽는다 — 로그로는 나가지 않는다. LLM 집계처럼
+#: 스레드로 갈라진 호출도 같은 list 객체를 본다.
+_JOURNAL: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "observability_journal", default=None)
+
+
 @contextlib.contextmanager
 def request_id(rid: str | None) -> Iterator[None]:
-    """이 블록 안의 단계 로그에 요청 id 를 붙이고 경과초 시계·LLM 집계를 연다.
+    """이 블록 안의 단계 로그에 요청 id 를 붙이고 경과초 시계·LLM 집계·단계 기록을 연다.
 
     main.py 가 ask() 를 부를 때 열고, graph.ask 가 같은 id 로 한 번 더 연다 — 그래서
     경과초는 «턴이 시작된 뒤»다(HTTP 파싱 시간은 안 들어간다).
     """
     tokens = (_REQUEST_ID.set(rid), _STARTED.set(time.monotonic()),
-              _LLM_TALLY.set({"calls": 0, "chars": 0}))
+              _LLM_TALLY.set({"calls": 0, "chars": 0}), _JOURNAL.set([]))
     try:
         yield
     finally:
         _REQUEST_ID.reset(tokens[0])
         _STARTED.reset(tokens[1])
         _LLM_TALLY.reset(tokens[2])
+        _JOURNAL.reset(tokens[3])
+
+
+def journal() -> list[dict]:
+    """이번 턴의 단계 기록(시간순). 턴 밖이면 빈 목록. 돌려주는 것은 사본이다."""
+    return list(_JOURNAL.get() or [])
+
+
+def wall_clock() -> str:
+    """지금 시각 — ISO 8601, 밀리초, 시간대 포함(`2026-09-28T10:58:09.405+09:00`)."""
+    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+
+
+def _plain_value(value: Any) -> Any:
+    """단계 기록에 담을 값 — JSON 으로 그대로 나갈 수 있는 꼴로."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple, set)):
+        return [_plain_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _plain_value(v) for k, v in value.items()}
+    return str(value)
 
 
 def current_request_id() -> str | None:
@@ -178,7 +209,7 @@ def _show(value: Any) -> str:
 
 
 def step(stage: str, ident: str | None = None, *, level: int = logging.INFO,
-         **facts: Any) -> None:
+         detail: dict[str, Any] | None = None, **facts: Any) -> None:
     """단계 한 줄을 남긴다. 값이 None 인 키는 찍지 않는다.
 
         observability.step("tool", "fact", result="found", candidates=3, picked=1)
@@ -186,6 +217,10 @@ def step(stage: str, ident: str | None = None, *, level: int = logging.INFO,
 
     `level` 은 호출부가 정한다 — 직원이 받는 답이 실패·축소로 바뀐 사실(검증 폐기·도구
     실패·연계 실패·LLM 다운·원문 폴백)만 WARNING 이다. 기록은 흐름을 막지 않는다.
+
+    `detail` 은 **로그 줄에 싣지 않고** 이번 턴의 단계 기록(`journal()`)에만 담는 값이다 —
+    로그에는 상한이 있는 요약(사유 두 건)만 남기고, 응답의 절차 기록에는 전부를 싣고 싶을 때
+    쓴다(검증 폐기 사유 목록이 그렇다).
     """
     try:
         started = _STARTED.get()
@@ -195,6 +230,18 @@ def step(stage: str, ident: str | None = None, *, level: int = logging.INFO,
         body = f"{ident} {pairs}".strip() if ident else pairs
         _step_log.log(level, "[%s] %s %-11s %s",
                       _REQUEST_ID.get() or "-", clock, stage, body)
+        record = _JOURNAL.get()
+        if record is not None:
+            # 로그 줄과 같은 사건을 구조 그대로 — 글자로 접기 전의 값과 `detail` 까지 담는다.
+            # 이 기록은 응답의 절차 기록으로만 나간다(_JOURNAL 주석).
+            record.append({
+                "at": wall_clock(),
+                "elapsed_ms": round((time.monotonic() - started) * 1000) if started is not None else None,
+                "stage": stage, "ident": ident, "level": logging.getLevelName(level),
+                "text": body,
+                "facts": {k: _plain_value(v) for k, v in {**facts, **(detail or {})}.items()
+                          if v is not None},
+            })
     except Exception:                                     # noqa: BLE001 — 기록은 흐름을 막지 않는다
         pass
 

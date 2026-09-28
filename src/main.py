@@ -67,6 +67,8 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
     {"type": "done"}                                                       항상 마지막
     {"type": "error",     "text": "LLMError: ..."}                         실패 시 answer 대신 · 그 뒤 done
     {"type": "log",       "level", "logger", "text"}                        로그 이벤트를 켰을 때만 · 아무 자리
+    {"type": "trace",     "timeline", "rounds", "evidence", "sources", "sentences", …}
+                                                                          로그 이벤트를 켰을 때만 · done 바로 앞
 
 answer.links 는 **본문이 인용한 단말 화면의 딥링크**다(`mystar-link://scnNo=…&mode=…`).
 프론트는 본문에서 `screen` 문자열(「04-12-642」)을 찾아 `url` 로 누를 수 있게 감싼다 — URL 을
@@ -155,6 +157,10 @@ Grafana 가 불안정할 때 프론트의 개발자 콘솔에서 로그를 보�
             요청은 스트림이 없으므로 싣지 않는다.
   가림      개인정보 필터가 잡는 꼴(고객 원장 표기 등)은 `[개인정보 가림]` 으로 바꿔 싣는다 —
             그대로 실으면 게이트웨이가 응답 전체를 막는다(privacy.py). stdout 줄은 원래대로다.
+  절차 기록 같은 스위치로 턴 끝에 `trace` 이벤트 하나가 `done` 바로 앞에 온다 — 발표용 «답변
+            근거» 패널의 재료다. 단계별 시각·도구 호출·근거 카드(답변이 썼나)·검증 판정과 사유·
+            코드가 증명한 문장–근거 대응을 구조 그대로 싣는다(consult_agent/turn_trace.py).
+            stdout 에는 싣지 않는다. 가림은 log 와 같다. 오류로 끝난 턴에는 오지 않는다.
 """
 
 from __future__ import annotations
@@ -353,8 +359,20 @@ def _strip_followups(answer: str) -> str:
 _ACTION_KEYS = ("kind", "label", "prompt", "title", "text", "to")
 
 
-def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
-    """ask() 결과를 이벤트 목록으로 — answer → (action | clarify) → sources → followups → done."""
+def _masked(value: Any) -> Any:
+    """이벤트 값 전체의 문자열에 개인정보 가림을 건다(privacy.mask) — 구조는 그대로 둔다."""
+    if isinstance(value, str):
+        return privacy.mask(value)[0]
+    if isinstance(value, list):
+        return [_masked(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _masked(v) for k, v in value.items()}
+    return value
+
+
+def _turn_events(result: dict[str, Any], *, with_trace: bool = False) -> list[dict[str, Any]]:
+    """ask() 결과를 이벤트 목록으로 — answer → (action | clarify) → sources → followups →
+    [trace] → done. trace 는 로그 이벤트를 켠 요청에만 싣는다(머리말 «로그 이벤트»)."""
     events: list[dict[str, Any]] = [{
         "type": "answer",
         "text": _strip_followups(result.get("answer", "")),
@@ -384,6 +402,10 @@ def _turn_events(result: dict[str, Any]) -> list[dict[str, Any]]:
                        "options": list(clarify.get("options") or [])})
     events.append({"type": "sources", "items": list(result.get("sources") or [])})
     events.append({"type": "followups", "items": list(result.get("followups") or [])})
+    if with_trace and result.get("trace") is not None:
+        # 절차 기록 — 근거 카드 원문이 실려 있어 개인정보 꼴을 가린다. log 이벤트와 같은
+        # 이유다(게이트웨이 필터가 응답 전체를 막는다 · _LogTap.emit 주석).
+        events.append({"type": "trace", **_masked(result["trace"])})
     events.append({"type": "done"})
     return events
 
@@ -653,7 +675,7 @@ async def chat(req: ChatRequest, request: Request):
         else:
             _remember(result)
             _log_done(result)
-            events = _turn_events(result)
+            events = _turn_events(result, with_trace=with_logs)
         finally:
             _log_tap.detach(rid)
         events = log_events + events
@@ -730,7 +752,7 @@ async def chat(req: ChatRequest, request: Request):
 
             for chunk in _drain():
                 yield chunk
-            for ev in _turn_events(result):
+            for ev in _turn_events(result, with_trace=with_logs):
                 yield _event(ev)
             finished = True
         finally:

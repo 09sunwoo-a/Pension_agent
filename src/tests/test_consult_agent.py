@@ -87,6 +87,7 @@ from tests.consult.index import (
     check_trigger_entrances,
 )
 from tests.consult.tax_credit import check_tax_credit_calc
+from tests.consult.turn_trace import check_turn_trace
 from tests.consult.memo import check_memo, check_memo_edit, check_memo_schedule, check_memo_by_name, check_memo_edit_material, check_memo_also, check_memo_pick_partial, check_memo_echo_and_address, check_memo_title
 from tests.consult.meta import (
     check_architecture_doc,
@@ -198,6 +199,7 @@ def main() -> int:
         check_notice_scope()
         check_guard()
         check_architecture_doc()
+        check_turn_trace()
         check_node_label_collision()
     finally:
         # 위 테스트들(특히 lms_link)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
