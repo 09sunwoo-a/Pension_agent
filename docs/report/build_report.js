@@ -98,9 +98,9 @@ function box(title, lines, fill = "FFF8E5", edge = "C9A227") {
               ...lines.map(
                 (l) =>
                   new Paragraph({
-                    numbering: { reference: "bul", level: 0 },
+                    numbering: { reference: "bul", level: l && l.lvl ? l.lvl : 0 },
                     spacing: { after: 60, line: 290 },
-                    children: (Array.isArray(l) ? l : [l]).map((r) => (typeof r === "string" ? t(r) : r)),
+                    children: ((l && l.runs) || (Array.isArray(l) ? l : [l])).map((r) => (typeof r === "string" ? t(r) : r)),
                   })
               ),
             ],
@@ -136,7 +136,9 @@ const summary = [
     [b("행내 환경에서 «AI 에이전트가 실제로 작동한다»는 것을 확인했다. "), t("기획 1명·개발 2명이 퇴직연금(개인형IRP) 사후관리 에이전트를 PoC 단계까지 구현해 스타뱅킹 개발서버에 배포했고, 행내 GenAI 플랫폼·WorkB 쪽지와 실제로 연동했다.")],
     [b("직원 누구나 일관된 고품질 사후관리 상담을 할 수 있게 된다. "), t("상담 준비시간은 42분에서 18분 수준으로 줄어드는 것으로 산정했다. 그러나 더 큰 효과는 그동안 사후관리를 하지 못하던 직원도 할 수 있게 되고, 직원마다 편차가 크던 상담 품질이 높은 수준으로 상향평준화된다는 점이다.")],
     [b("다만 운영 배포까지는 거리가 있다. "), t("고객 데이터는 시연용 목업(12명)이고, 일부 기능은 시연 수준이다. 실데이터 연동·지식 관리 체계·컴플라이언스 검토가 다음 관문이다.")],
-    [b("가장 큰 수확은 «무엇이 필요한지»를 알게 된 것이다. "), t("AI의 품질은 모델보다 지식데이터와 업무 설계가 결정한다. 이 교훈을 WM고객그룹의 대면·비대면·대직원·대고객·업무 자동화 영역으로 넓혀 가고자 한다.")],
+    [b("가장 큰 성과: AI의 현업 적용을 위한 선행 조건을 실증적으로 확인")],
+    { lvl: 1, runs: [t("답변 품질은 모델 자체보다 ① 행내 지식의 구조화 수준, ② 근거 범위 내 답변을 강제하는 통제 설계에 좌우됨 (동일 모델 기준)")] },
+    { lvl: 1, runs: [t("향후 AI 적용 시 지식 자산화 및 통제 체계 선(先)구축 필요")] },
   ]),
   gap(),
   table(
@@ -317,7 +319,7 @@ const s4 = [
 
 const s5 = [
   h1("5. 경험하고 배운 것"),
-  h2("5.1 AI의 품질은 모델이 아니라 «지식»이 결정한다"),
+  h2("5.1 동일 모델에서 품질을 좌우한 것은 «지식»과 «통제 설계»였다"),
   bullet("같은 모델이라도 지식카드가 정리된 질문은 정확하게, 지식이 비어 있거나 흩어진 질문은 엉뚱하게 답했다. 품질 개선 작업의 대부분은 프롬프트가 아니라 지식 정리였다."),
   bullet("행내 문서는 사람이 읽기 위한 형식(PPT·공문·게시글)이라 AI가 쓰려면 «추출 → 정규화 → 출처·기준시점 부여»가 필요하다. 이 작업에 개발보다 많은 시간이 들었다."),
   bullet("수치는 시효가 있다. 금리·수익률·한도 같은 숫자는 원문을 고치지 않고 «최신값 + 참고 표시»로 갈아 끼우는 구조가 필요했다. «출처는 진짜인데 수치는 낡은 카드»가 가장 위험하다."),
@@ -480,7 +482,7 @@ const doc = new Document({
       { reference: "bul", levels: [
         { level: 0, format: LevelFormat.BULLET, text: "•", alignment: AlignmentType.LEFT,
           style: { paragraph: { indent: { left: 400, hanging: 260 } } } },
-        { level: 1, format: LevelFormat.BULLET, text: "–", alignment: AlignmentType.LEFT,
+        { level: 1, format: LevelFormat.BULLET, text: "○", alignment: AlignmentType.LEFT,
           style: { paragraph: { indent: { left: 800, hanging: 260 } } } },
       ] },
     ],
