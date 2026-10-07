@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""질문 리스트를 실 LLM 으로 돌려 xlsx 의 「실측 답변」 칸을 채운다.
+"""질문 리스트를 실 LLM 으로 돌려 xlsx 의 「AI 답변」·「출처」·「앞 질문과 답」 칸을 채운다.
 
     cd src
     python -m scripts.run_question_map --new --grade ◎        # 기존 대본에 없던 1순위 전부
@@ -18,9 +18,9 @@
 함께 남기고 싶으면 `--full`(근거+화면링크) · `--sources`(근거만) · `--links`(화면만).
 
 읽고 쓰는 파일은 `docs/QUESTION_MAP.xlsx` 하나다. 질문·대상 고객·선행 질문을 그 표에서
-읽고, 같은 행의 「실측 답변」 칸에 답을 써서 다시 저장한다. **질문 자체를 고치려면 여기가
+읽고, 같은 행의 「AI 답변」 칸에 답을 써서 다시 저장한다(출처·앞 질문과 답도 함께). **질문 자체를 고치려면 여기가
 아니라 `scripts/question_map.py` 다**(xlsx 는 산출물이다 — 루트 CLAUDE.md 규칙 3).
-생성기는 실측 답변을 보존하므로 이 순서로 섞어 써도 된다.
+생성기는 그 세 칸을 보존하므로 이 순서로 섞어 써도 된다.
 
     python -m scripts.run_question_map ...     # 답을 채우고
     python -m scripts.question_map             # 질문을 고쳐 다시 만들어도 답은 남는다
@@ -71,8 +71,8 @@ XLSX = QM.XLSX
 
 #: 표에서 읽는 열. 없으면 그 자리에서 멈춘다 — 열 이름이 바뀐 것을 조용히 넘기면
 #: 엉뚱한 칸에 답을 쓴다.
-COLS = ("항목", QM.NUM_COL, "질문", QM.PRE_COL, "실측 답변", "시연", "대상 고객",
-        "선행 질문")
+COLS = ("항목", QM.NUM_COL, "질문", QM.PRE_COL, QM.ANS_COL, QM.SRC_COL,
+        "시연", "대상 고객", "선행 질문")
 
 #: 실행이 죽은 칸의 머리말. 이 글로 시작하는 칸은 «채워진 것»으로 세지 않는다 — 그래야
 #: 다음 실행에서 다시 집히고(`--retry-failed`), 성공한 답을 덮어쓰지 않는다.
@@ -202,7 +202,7 @@ def _select(ws, idx, args, first_row: int) -> list[int]:
         item = items[r]
         demo = str(ws.cell(r, idx["시연"]).value or "")
         pre_cell = str(ws.cell(r, idx["선행 질문"]).value or "")
-        done = ws.cell(r, idx["실측 답변"]).value
+        done = ws.cell(r, idx[QM.ANS_COL]).value
 
         if want_rows is not None and num not in want_rows:
             continue
@@ -284,10 +284,38 @@ def _answer_text(res: dict, args) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+def _source_text(res: dict) -> str:
+    """「출처」 칸 — 그 답이 무엇을 보고 나왔나.
+
+    답변 칸에 섞지 않는 이유는 `_answer_text` 머리말에 있다(셀 하나가 근거 덤프로 길어지면
+    표를 읽을 수 없다). 열을 따로 두면 둘 다 읽힌다 — 보고 자료에서 «무엇을 보고 답했나»는
+    답변만큼 중요한 칸이고, 전에는 `--sources` 를 붙인 사람만 볼 수 있었다.
+    """
+    from pension_agent.consult_agent.tools import source_lines
+    lines = [ln for s in res.get("sources") or [] for ln in source_lines(s)]
+    return "\n".join(lines)
+
+
+def _pre_text(res: dict, args) -> str:
+    """앞 턴 칸에 적을 글 — 답변 본문 **+ 제안 문구**.
+
+    `_body` 는 「… (네 / 아니오)」 제안 문구를 일부러 뗀다(그 머리말) — 답변 칸에서는 화면
+    장치라 표를 어지럽히기 때문이다. **앞 턴 칸에서는 그것이 요점이다.** 다음 턴이 승낙
+    ("네, 보여줘")인데 무엇을 제안했는지가 빠지면 그 승낙을 읽을 수 없다. 실측에서
+    48번이 정확히 그 상태였다 — 화법 본문만 있고 「보여드릴까요?」가 없었다.
+
+    문구는 지어내지 않고 `pending_action["prompt"]` 를 쓴다 — `act.offer_prompt()` 가
+    본문 끝 줄·버튼 위 문구·다시 묻는 문장에 쓰는 **그 문장 하나**다.
+    """
+    text = _answer_text(res, args)
+    ask = ((res.get("pending_action") or {}).get("prompt") or "").strip()
+    return f"{text}\n— {ask}" if ask and ask not in text else text
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m scripts.run_question_map",
-        description="질문 리스트를 돌려 docs/QUESTION_MAP.xlsx 의 「실측 답변」을 채운다.")
+        description="질문 리스트를 돌려 docs/QUESTION_MAP.xlsx 의 「AI 답변」을 채운다.")
     pick = ap.add_argument_group("돌릴 행 고르기")
     pick.add_argument("--rows", help="번호 목록·구간 (예: 17,54,62 · 10-20 · 1-9,13)")
     pick.add_argument("--grade", choices=["◎", "○", "–"], help="등급으로")
@@ -352,7 +380,7 @@ def main(argv: list[str]) -> int:
         pre = [x.strip() for x in str(ws.cell(r, idx["선행 질문"]).value or "").split("→") if x.strip()]
         pins = _pins(who) or [None]
 
-        chunks, pre_chunks = [], []
+        chunks, pre_chunks, src_chunks = [], [], []
         for cid in pins:
             label = _NAME_OF.get(cid, cid or "") if cid and len(pins) > 1 else ""
             tag = f"[{i}/{len(picked)}] {num} {q[:40]}" + (f" ({label})" if label else "")
@@ -366,15 +394,16 @@ def main(argv: list[str]) -> int:
                     log = []
                     for n, p in enumerate(pre, 1):
                         print(f"    (앞 턴 {n}) {p[:40]}")
-                        log.append(f"{n}. {p}\n→ {_answer_text(ask(p), args)}")
+                        log.append(f"{n}. {p}\n→ {_pre_text(ask(p), args)}")
                     res = ask(q)
                     down = _llm_down(tr)
                 text = _answer_text(res, args)
                 pre_log = "\n\n".join(log)
+                src_log = _source_text(res)
             except Exception as e:                     # noqa: BLE001 — 한 행이 죽어도 계속
                 failed += 1
                 text = f"{FAILED} {type(e).__name__}: {e}"
-                pre_log = ""
+                pre_log = src_log = ""
                 print(f"    ✗ {text}")
             else:
                 # LLM 이 죽은 턴은 **답이 아니다.** 그래프가 예외를 삼키고 안내 문장으로
@@ -395,13 +424,17 @@ def main(argv: list[str]) -> int:
             chunks.append(f"● {label}\n{text}" if label else text)
             if pre_log:
                 pre_chunks.append(f"● {label}\n{pre_log}" if label else pre_log)
+            if src_log:
+                src_chunks.append(f"● {label}\n{src_log}" if label else src_log)
             if args.pause:
                 time.sleep(args.pause)
 
-        ws.cell(r, idx["실측 답변"]).value = "\n\n".join(chunks)
+        ws.cell(r, idx[QM.ANS_COL]).value = "\n\n".join(chunks)
         # 앞 턴이 없는 행은 **덮지 않는다** — 빈 문자열로 쓰면 옛 기록을 지운다.
         if pre_chunks:
             ws.cell(r, idx[QM.PRE_COL]).value = "\n\n".join(pre_chunks)
+        if src_chunks:
+            ws.cell(r, idx[QM.SRC_COL]).value = "\n\n".join(src_chunks)
         filled += 1
         wb.save(XLSX)                                  # 턴마다 저장 — 중간에 끊겨도 남는다
 
