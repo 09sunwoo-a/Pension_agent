@@ -163,6 +163,25 @@ def _as_mark(text: str) -> str:
     return text if text.startswith(_MARK_HEADS) else f"※ {text}"
 
 
+def _already_said(mark: str, body: str) -> bool:
+    """답변이 이 표시를 **이미 말했나.** 글자 그대로 견주지 않는다.
+
+    전에는 `mark not in body` 로 글자를 그대로 봤는데, LLM 이 표시를 옮기면서 **끝을 조금
+    흘리면** 겹침을 못 잡고 같은 문장이 두 번 섰다. 2026-10-07 실측(질문 리스트 99번
+    「8월 추천펀드」)에서 두 줄이 마지막 네 글자만 달랐다 —
+
+        본문  … ⏳ 시효 민감 표기와 함께 사용하세요. — 2026.08 (…) 기준 표기
+        표시  … ⏳ 시효 민감 표기와 함께 사용하세요. — 2026.08 (…) 기준 표기입니다.
+
+    그래서 **기준시점 꼬리를 뗀 경고 문장 본체**로 견준다. 그 꼬리(`market.stale_marks` 가
+    「 — … 기준 표기입니다.」로 붙인다)는 카드의 as_of 를 적은 것이라 실행마다·카드 묶음마다
+    달라지고, 변하지 않는 것은 앞의 경고 문장이다. 본체는 100자가 넘는 한 문장이라 우연히
+    겹칠 일은 없다.
+    """
+    core = mark.split(" — ", 1)[0].strip()
+    return bool(core) and (core in body or mark in body)
+
+
 #: 본문 한 줄 안에서 앞 문장에 이어 붙은 표시(※·⚠·⚖). 표시는 «그대로 옮겨 적을 문장»이라
 #: LLM 이 앞 문장 뒤에 한 칸 띄고 붙이는 일이 잦다 — 「…밝히신 적이 있어요. ※ 지난 상담
 #: 기록입니다 — …」(2026-09-29 행내 실측, 질문 리스트 29번). 표시가 문장의 일부로 읽힌다.
@@ -990,7 +1009,7 @@ def compose(state: AgentState) -> dict[str, Any]:
     # 세우지 않는다. 근거 원문을 그대로 내보낸 경우에도 붙는다 — 표시는 문장이 아니라
     # **재료**에 걸리는 것이라, 누가 문장을 썼는지와 무관하다.
     body = "\n\n".join(parts)
-    seen = [m for m in tools.ledger_marks(evidence) if m not in body]
+    seen = [m for m in tools.ledger_marks(evidence) if not _already_said(m, body)]
     if seen:
         parts.append(MATERIAL_MARKS + "\n" + "\n".join(f"· {m}" for m in seen))
 
