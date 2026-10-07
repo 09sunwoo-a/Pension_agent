@@ -279,6 +279,19 @@ for nm, f in FACTS.items():
           bf.get("보유구성", ""))
     check(bool(bf.get("운용수익률")), f"{nm}: 수익률이 briefing 에 제시됨")
     check(("만기도래" in bf) == (p_.matDD is not None), f"{nm}: 만기 정보 조건부 표기")
+    # 펀드·ETF 경험 — **지식베이스가 이 값으로 화법을 가른다**(pitch.k03.025 「펀드 경험이
+    # 전무한 고객」 ↔ k03.026 「펀드 경험이 있는 고객」). 원장에 있는데 재료까지 오지 않아
+    # 그 갈림이 한 번도 쓰이지 않았고, 성향이 정반대인 두 고객에게 같은 화법이 나왔다
+    # (2026-10-07 실측: 정민석 공격투자형 · 김현수 위험중립형). 여기서 고정하는 것 둘 —
+    # ① 재료에 실린다 ② **「없음」을 빼먹지 않는다**(025 의 방아쇠는 «없다»다. 빠진 칸과
+    # 「없음」이 같아지면 그 카드가 걸릴 길이 없다).
+    _a = p_.activity or {}
+    if _a.get("holds_fund") is not None or _a.get("traded_fund") is not None:
+        _exp = bf.get("펀드·ETF 경험", "")
+        check("펀드" in _exp, f"{nm}: 펀드 경험이 재료에 실림", _exp)
+        _want = ("보유 중" if _a.get("holds_fund")
+                 else "과거 매매 이력" if _a.get("traded_fund") else "경험 없음")
+        check(_want in _exp, f"{nm}: 펀드 경험 표기가 원장과 맞음({_want})", _exp)
     # retPct 는 새 데이터에 모수가 없어 전원 None — 화면 문자열로 새지 않아야 한다.
     check(p_.retPct is None and "None" not in str(f["customer"].get("수익률", "")),
           f"{nm}: retPct=None 그레이스풀", str(f["customer"].get("수익률")))

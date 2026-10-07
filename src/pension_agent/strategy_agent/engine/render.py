@@ -279,6 +279,21 @@ def _why_this_customer(p: Profile, conds: list[str]) -> list[str]:
     return lines[:3]
 
 
+def _experience(name: str, holds, traded) -> str:
+    """「펀드 보유 중」·「펀드 과거 매매 이력 있음(현재 미보유)」·「펀드 경험 없음」.
+
+    **원장이 모르는 것과 없는 것을 가른다.** 두 값이 모두 None 이면 원장에 그 칸이 안 온 것이라
+    아무것도 적지 않는다 — 「없음」으로 적으면 모르는 것을 사실로 바꾼다.
+    """
+    if holds is None and traded is None:
+        return ""
+    if holds:
+        return f"{name} 보유 중"
+    if traded:
+        return f"{name} 과거 매매 이력 있음(현재 미보유)"
+    return f"{name} 경험 없음"
+
+
 def _briefing(p: Profile) -> dict:
     """상담 준비용 보유 현황 스냅샷.
 
@@ -367,6 +382,25 @@ def _briefing(p: Profile) -> dict:
             bits.append(f"최근 1개월 고유계정대 증감 {won(a['cash_delta_1m'])}")
         if bits:
             snap["거래활동"] = " · ".join(bits)
+        # 펀드·ETF 경험 — **지식베이스가 이 값으로 화법을 가른다.** 정기예금 만기 고객의
+        # 화법 카드가 둘인데, 가르는 기준이 투자성향이 아니라 경험이다 —
+        # pitch.k03.025 「**펀드 경험이 전무한** 고객을 '안전자산 선호'로 판별하고, 원금보장을
+        # 유지하면서 금리만 올리는 제안(저축은행 정기예금)을 한다」 ↔ pitch.k03.026
+        # 「**펀드 경험이 있는** 고객에게는 일부 금액만 포트폴리오 차원으로 운용하도록 권한다」.
+        #
+        # 값은 원장에 있었는데(`customer.py` 가 수익증권현재보유여부·과거매매이력여부를
+        # 매핑한다) **재료에 올라오지 않아 그 갈림이 한 번도 쓰이지 않았다** — 성향이 정반대인
+        # 두 고객에게 같은 화법이 나왔고(2026-10-07 실측: 정민석 공격투자형 · 김현수
+        # 위험중립형), 재료에 없으니 LLM 이 볼 수도 없고 봤다 해도 verify() 가 잘랐다.
+        #
+        # **없음을 빼지 않고 적는다.** 025 의 방아쇠는 경험이 «있다»가 아니라 «없다»다 —
+        # 빠진 칸과 「없음」이 화면에서 같아지면 그 카드가 걸릴 길이 없다.
+        # **보유와 매매 이력을 가른다.** 「현재 미보유 + 과거 매매 이력」은 둘 중 어느 쪽도
+        # 아닌 상태이고(정민석이 그렇다), 뭉개면 경험 없는 고객으로 읽힌다.
+        exp = [t for t in (_experience("펀드", a.get("holds_fund"), a.get("traded_fund")),
+                           _experience("ETF", a.get("holds_etf"), a.get("traded_etf"))) if t]
+        if exp:
+            snap["펀드·ETF 경험"] = " · ".join(exp)
 
     # ISA 만기자금 — **IRP 계좌 밖의 돈**이라 보유 현황과 갈라 적는다. 추가납입 상담의
     # 재원 후보이고, 만기가 임박하면 그 시점이 상담 창구가 된다(시연 케이스 2건).
