@@ -249,6 +249,13 @@ def check_no_material_tone() -> int:
     hit = "공손" in COMPOSE_SYSTEM and "공손" in COMPOSE_MISSING_BLOCK
     print(f"{'✓' if hit else '✗'} 자료가 없는 턴의 말투를 작성 프롬프트가 지시한다(둘 다)")
     ok += hit
+
+    # «대신 답하지 마라»만 있으면 물은 대상의 상태 값까지 삼킨다 — 「ISA에는 뭐 있으셔」에
+    # 원장의 «ISA 만기자금 없음»을 두고 «확인이 어려워요» 한 문장만 나갔다(2026-10 오세훈
+    # 실측). 블록이 상태 값은 함께 알려줄 사실이라고 밝혀야 한다.
+    hit = "대신 답해 주지 마라" in COMPOSE_MISSING_BLOCK and "함께 알려줄 사실" in COMPOSE_MISSING_BLOCK
+    print(f"{'✓' if hit else '✗'} 핵심 대상이 없는 턴도 물은 대상의 원장 상태 값은 함께 적게 한다")
+    ok += hit
     return ok
 
 

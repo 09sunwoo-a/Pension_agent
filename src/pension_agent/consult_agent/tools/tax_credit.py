@@ -169,6 +169,13 @@ def _tax_credit(state: AgentState, query: str) -> Evidence | None:
                      f"더 납입해도 올해 세액공제로 돌아오는 금액은 늘지 않는다 "
                      f"(세액공제 한도 {_won(cap)}은 연금저축과 함께 쓴다. 납입 자체는 "
                      f"연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)}까지 가능하다)")
+        # 한도만 적으면 «얼마 더 넣을 수 있나»는 재료에 없다 — 1,800만원에서 당해 납입을 빼는
+        # 것은 계산이라 LLM 이 쓸 수 없다(COMPOSE_SYSTEM 1번). 원장 값(`deposit_room`)을 싣는다.
+        # 연금수령 개시 계좌는 납입 자체가 안 되므로 싣지 않는다(방법론 59).
+        if not p.pension_started:
+            lines.append(f"· 올해 더 납입할 수 있는 금액 {_won(p.deposit_room)} "
+                         f"(연 납입한도 {_won(CUST.DEPOSIT_CAP_WON)} − 당해 납입 "
+                         f"{_won(p.paid_ytd_total)}) — 이 금액은 세액공제 대상이 아니다")
     else:
         lines.append(f"· 공제 대상 {_won(min(paid, cap))} → {_won(min(target, cap))} "
                      f"(잔여한도 {_won(room)}까지)")
