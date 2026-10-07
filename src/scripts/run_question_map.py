@@ -71,7 +71,7 @@ XLSX = QM.XLSX
 
 #: 표에서 읽는 열. 없으면 그 자리에서 멈춘다 — 열 이름이 바뀐 것을 조용히 넘기면
 #: 엉뚱한 칸에 답을 쓴다.
-COLS = ("항목", "번호", "질문", "실측 답변", "시연", "대상 고객", "선행 질문")
+COLS = ("항목", QM.NUM_COL, "질문", "실측 답변", "시연", "대상 고객", "선행 질문")
 
 #: 실행이 죽은 칸의 머리말. 이 글로 시작하는 칸은 «채워진 것»으로 세지 않는다 — 그래야
 #: 다음 실행에서 다시 집히고(`--retry-failed`), 성공한 답을 덮어쓰지 않는다.
@@ -196,7 +196,7 @@ def _select(ws, idx, args) -> list[int]:
     # 손으로 돌리는 행(137)을 지목한 사람이 실행기가 고장난 줄 안다(2026-09-22 실측).
     skipped: dict = {}
     for r in range(2, ws.max_row + 1):
-        num = ws.cell(r, idx["번호"]).value
+        num = ws.cell(r, idx[QM.NUM_COL]).value
         item = items[r]
         demo = str(ws.cell(r, idx["시연"]).value or "")
         pre_cell = str(ws.cell(r, idx["선행 질문"]).value or "")
@@ -241,7 +241,7 @@ def _select(ws, idx, args) -> list[int]:
     # 번호를 포함하기가 쉬워졌는데, 그냥 빠지면 화면에는 「돌릴 행이 없다」만 남아
     # «왜 안 돌지»의 답이 어디에도 없다. 끝 번호는 여기 적지 않는다 — 질문을 더하면 바뀐다.
     if want_rows is not None:
-        have = {ws.cell(r, idx["번호"]).value for r in range(2, ws.max_row + 1)}
+        have = {ws.cell(r, idx[QM.NUM_COL]).value for r in range(2, ws.max_row + 1)}
         missing = sorted(n for n in want_rows if n not in have)
         if missing:
             shown = ", ".join(str(n) for n in missing[:12])
@@ -331,7 +331,7 @@ def main(argv: list[str]) -> int:
 
     if args.dry_run:
         for r in picked:
-            n = ws.cell(r, idx["번호"]).value
+            n = ws.cell(r, idx[QM.NUM_COL]).value
             q = qs[r]
             who = ws.cell(r, idx["대상 고객"]).value or ""
             pre = ws.cell(r, idx["선행 질문"]).value or ""
@@ -343,7 +343,7 @@ def main(argv: list[str]) -> int:
 
     filled = failed = 0
     for i, r in enumerate(picked, 1):
-        num = ws.cell(r, idx["번호"]).value
+        num = ws.cell(r, idx[QM.NUM_COL]).value
         q = qs[r]
         who = str(ws.cell(r, idx["대상 고객"]).value or "")
         pre = [x.strip() for x in str(ws.cell(r, idx["선행 질문"]).value or "").split("→") if x.strip()]
