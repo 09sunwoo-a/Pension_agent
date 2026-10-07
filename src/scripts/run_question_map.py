@@ -372,7 +372,7 @@ def main(argv: list[str]) -> int:
 
     from tests.debug.runner import session   # 운영 진입점(graph.ask)을 그대로 쓴다
 
-    filled = failed = 0
+    filled = failed = kept = 0
     for i, r in enumerate(picked, 1):
         num = ws.cell(r, idx[QM.NUM_COL]).value
         q = qs[r]
@@ -429,7 +429,20 @@ def main(argv: list[str]) -> int:
             if args.pause:
                 time.sleep(args.pause)
 
-        ws.cell(r, idx[QM.ANS_COL]).value = "\n\n".join(chunks)
+        # **실패가 멀쩡한 답을 덮지 않는다.** 머리말이 「성공한 답을 덮어쓰지 않는다」고
+        # 적어 놨는데 실제로는 덮고 있었다 — `--redo` 로 돌리다 쿼터가 끊기면 그 순간부터
+        # 모든 행이 「[실행 실패] LLM 다운 — …」으로 바뀐다. 110행을 돌리면 호출이 400~500
+        # 회라 하루 한도에 걸리므로, 가능성이 아니라 거의 확실한 사고였다.
+        # 이 행의 모든 갈래가 실패했고 **그 칸에 이미 답이 있으면** 덮지 않고 둔다 —
+        # 다음 실행이 다시 집도록 실패는 화면과 종료코드로만 알린다(`--retry-failed` 는
+        # 칸의 실패 머리말을 보므로, 덮지 않은 행은 그 대상이 아니라 그냥 옛 답이 남는다).
+        fresh = "\n\n".join(chunks)
+        had = ws.cell(r, idx[QM.ANS_COL]).value
+        if FAILED in fresh and had and FAILED not in str(had):
+            kept += 1
+            print(f"    ↩ 실패 — 이미 있던 답을 그대로 둔다 ({len(str(had))}자)")
+        else:
+            ws.cell(r, idx[QM.ANS_COL]).value = fresh
         # 앞 턴이 없는 행은 **덮지 않는다** — 빈 문자열로 쓰면 옛 기록을 지운다.
         if pre_chunks:
             ws.cell(r, idx[QM.PRE_COL]).value = "\n\n".join(pre_chunks)
@@ -439,6 +452,7 @@ def main(argv: list[str]) -> int:
         wb.save(XLSX)                                  # 턴마다 저장 — 중간에 끊겨도 남는다
 
     print(f"\n■ {filled}행 기록" + (f" · {failed}건 실패" if failed else "")
+          + (f" · {kept}행은 옛 답을 지켰다" if kept else "")
           + f" → {XLSX.relative_to(config.REPO_ROOT)}")
     return 1 if failed else 0
 
