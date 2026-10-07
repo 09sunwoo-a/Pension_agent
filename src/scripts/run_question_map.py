@@ -71,7 +71,8 @@ XLSX = QM.XLSX
 
 #: 표에서 읽는 열. 없으면 그 자리에서 멈춘다 — 열 이름이 바뀐 것을 조용히 넘기면
 #: 엉뚱한 칸에 답을 쓴다.
-COLS = ("항목", QM.NUM_COL, "질문", "실측 답변", "시연", "대상 고객", "선행 질문")
+COLS = ("항목", QM.NUM_COL, "질문", QM.PRE_COL, "실측 답변", "시연", "대상 고객",
+        "선행 질문")
 
 #: 실행이 죽은 칸의 머리말. 이 글로 시작하는 칸은 «채워진 것»으로 세지 않는다 — 그래야
 #: 다음 실행에서 다시 집히고(`--retry-failed`), 성공한 답을 덮어쓰지 않는다.
@@ -351,7 +352,7 @@ def main(argv: list[str]) -> int:
         pre = [x.strip() for x in str(ws.cell(r, idx["선행 질문"]).value or "").split("→") if x.strip()]
         pins = _pins(who) or [None]
 
-        chunks = []
+        chunks, pre_chunks = [], []
         for cid in pins:
             label = _NAME_OF.get(cid, cid or "") if cid and len(pins) > 1 else ""
             tag = f"[{i}/{len(picked)}] {num} {q[:40]}" + (f" ({label})" if label else "")
@@ -359,15 +360,21 @@ def main(argv: list[str]) -> int:
             on_progress = None if args.quiet else (lambda line: print(f"    · {line}"))
             try:
                 with session(customer_id=cid, on_progress=on_progress) as (ask, tr):
-                    for p in pre:                      # 앞 턴들 — 답은 버린다
-                        print(f"    (앞 턴) {p[:40]}")
-                        ask(p)
+                    # **앞 턴의 답을 버리지 않는다.** 승낙 턴("네, 보여줘")은 앞 턴에서
+                    # 에이전트가 무엇을 제안했는지 없이는 읽을 수 없다 — 제안은 앞 턴
+                    # 답변의 마지막 줄이다. 「앞 턴」 칸(QM.PRE_COL)에 함께 적는다.
+                    log = []
+                    for n, p in enumerate(pre, 1):
+                        print(f"    (앞 턴 {n}) {p[:40]}")
+                        log.append(f"{n}. {p}\n→ {_answer_text(ask(p), args)}")
                     res = ask(q)
                     down = _llm_down(tr)
                 text = _answer_text(res, args)
+                pre_log = "\n\n".join(log)
             except Exception as e:                     # noqa: BLE001 — 한 행이 죽어도 계속
                 failed += 1
                 text = f"{FAILED} {type(e).__name__}: {e}"
+                pre_log = ""
                 print(f"    ✗ {text}")
             else:
                 # LLM 이 죽은 턴은 **답이 아니다.** 그래프가 예외를 삼키고 안내 문장으로
@@ -386,10 +393,15 @@ def main(argv: list[str]) -> int:
                     print(f"    │ {line}")
                 print("    └")
             chunks.append(f"● {label}\n{text}" if label else text)
+            if pre_log:
+                pre_chunks.append(f"● {label}\n{pre_log}" if label else pre_log)
             if args.pause:
                 time.sleep(args.pause)
 
         ws.cell(r, idx["실측 답변"]).value = "\n\n".join(chunks)
+        # 앞 턴이 없는 행은 **덮지 않는다** — 빈 문자열로 쓰면 옛 기록을 지운다.
+        if pre_chunks:
+            ws.cell(r, idx[QM.PRE_COL]).value = "\n\n".join(pre_chunks)
         filled += 1
         wb.save(XLSX)                                  # 턴마다 저장 — 중간에 끊겨도 남는다
 
