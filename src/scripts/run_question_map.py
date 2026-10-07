@@ -46,12 +46,15 @@
    로그인 사번을 넘기지만 이 실행기는 안 넘긴다 — 그러면 에이전트는 받을 사람을 모르고,
    기준서 §10 「받을 사람을 모르면 묻지 않는다」대로 **제안 자체를 하지 않는다.** 그게
    올바른 동작이라 화면에는 오류가 안 뜨고, 칸만 「쪽지를 보낼 받는 사람을 알 수 없어요」로
-   채워진다(108·109 가 그렇게 채워져 있었다). 폴백 환경변수로 준다.
+   채워진다(그렇게 채워진 적이 있다). 폴백 환경변수로 준다.
 
-       WORKB_EMP_NO=3902172 PENSION_TODAY=2026-09-29 python -m scripts.run_question_map --rows 108,109
+       WORKB_EMP_NO=3902172 PENSION_TODAY=2026-09-29 python -m scripts.run_question_map --item 쪽지
+
+   **번호로 부르지 않는다** — 질문을 더하면 그 아래 번호가 전부 밀린다(실제로 밀렸다).
+   항목 이름은 안 밀리므로 `--item` 으로 고른다.
 
    **발송까지 가지는 않는다** — `MCP_*` 가 없으면 WorkB 클라이언트가 안 붙어 「미연결」로
-   답한다(109 의 확인 포인트가 재는 것이 그 자리다).
+   답한다(그 항목의 「(쪽지 초안 뒤) 응, 보내줘」 행이 재는 것이 그 자리다).
 """
 
 from __future__ import annotations
@@ -225,7 +228,7 @@ def _select(ws, idx, args) -> list[int]:
 
     # 표에 없는 번호를 달라고 했으면 **말한다.** 구간을 받게 되면서(`parse_rows`) 없는
     # 번호를 포함하기가 쉬워졌는데, 그냥 빠지면 화면에는 「돌릴 행이 없다」만 남아
-    # «왜 안 돌지»의 답이 어디에도 없다. 표 번호는 164까지다.
+    # «왜 안 돌지»의 답이 어디에도 없다. 끝 번호는 여기 적지 않는다 — 질문을 더하면 바뀐다.
     if want_rows is not None:
         have = {ws.cell(r, idx["번호"]).value for r in range(2, ws.max_row + 1)}
         missing = sorted(n for n in want_rows if n not in have)
