@@ -154,6 +154,17 @@ def check_tax_credit_calc() -> int:
     hit = f"{now // 10_000:,}만원" in shown or f"{now:,}" in shown
     print(f"{'✓' if hit else '✗'} 화면의 예상 세액공제액과 같은 산식을 쓴다 ({shown})")
     ok += hit
+
+    # 잔여한도를 다 쓴 고객에게도 «얼마 더 넣을 수 있나»가 재료에 있다. 한도(1,800만원)만
+    # 적혀 있던 동안 답변은 「1,800만원까지 납입 가능」에서 멈췄다 — 1,800 − 당해 납입은
+    # 계산이라 LLM 이 쓸 수 없다(2026-10 오세훈 실측).
+    nopen = next(p for p in CUST.PERSONAS
+                 if p.room == 0 and not p.pension_started and p.deposit_room > 0)
+    ev = tools.TOOLS["tax_credit"].run(
+        {"customer_id": nopen.id, "question": "올해 절세 가능 금액은?"}, "q")
+    hit = ev is not None and f"더 납입할 수 있는 금액 {nopen.deposit_room // 10_000:,}만원" in ev["text"]
+    print(f"{'✓' if hit else '✗'} 잔여한도 0 고객에게도 더 납입할 수 있는 금액(1,800만원 − 당해 납입)을 싣는다")
+    ok += hit
     return ok + check_tax_credit_isa()
 
 

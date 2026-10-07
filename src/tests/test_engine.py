@@ -545,6 +545,26 @@ check("1,400만원" in _rb["납입여력"] and "500만원" in _rb["납입여력"
       "브리핑이 두 축을 한 줄에서 갈라 적는다 (납입 가능액 · 그중 공제 대상)", _rb["납입여력"])
 check(_rb["납입여력"].split("(")[0].strip() != f"{_room.room:,}만원",
       "납입여력의 값이 세액공제 잔여한도와 같은 수가 아니다", _rb["납입여력"])
+# 잔여한도를 다 쓴 고객 — 브리핑(화면)에는 납입여력이 없고, 대화형 재료(account_state)에만
+# 있다. 그 필터가 대화형까지 넘어오던 동안 「여유자금 있어?」에 납입 가능액이 재료에 없었다
+# (2026-10 오세훈 실측). 브리핑에 이미 있는 고객에게는 다시 싣지 않는다(한 값을 두 줄로).
+_full = Profile(id="T4", nm="T4", ag=61, bal=165_000_000, rk="안정추구형", grade="낮은위험",
+                port=[69, 0, 21, 10], ret=6.2, retPct=50, dopt="미설정", room=0, dorm=0,
+                nchM=0, pension_paid_ytd=9_000_000, paid_ytd_total=9_000_000)
+_fp = engine.prepare(_full)
+check("납입여력" not in _fp["briefing"] and "900만원" in _fp["account_state"].get("납입여력", ""),
+      "잔여한도 0 고객: 화면엔 납입여력 없음 · 대화형 재료엔 납입 가능액 900만원",
+      str(_fp["account_state"].get("납입여력")))
+check("납입여력" not in engine.prepare(_room)["account_state"],
+      "잔여한도가 남은 고객: 납입여력은 브리핑 한 곳에만 있다")
+_full.pension_started = True
+check("납입여력" not in engine.prepare(_full)["account_state"],
+      "연금개시 계좌: 대화형 재료에도 납입여력 미노출")
+# «ISA 만기자금 없음»이 «ISA 계좌 없음»으로 읽히지 않게 판정 범위를 함께 싣는다. 값 안에
+# `·` 를 쓰지 않는다 — 되묻기 판정 블록이 계좌 상태 항목을 `·` 로 잇는다.
+_isa = _fp["account_state"]["ISA_만기자금"]
+check(_isa.startswith("없음") and "ISA 계좌" in _isa and "·" not in _isa,
+      "ISA 만기자금 없음에 판정 범위(만기 예정 자금 기준 · 계좌 내역은 원장 밖)가 붙는다", _isa)
 # 실납입액 컬럼이 없으면 인정액으로 떨어진다 — 여력을 과대 산출하지 않는 방향이다.
 check(Profile(id="T3", nm="T3", ag=50, bal=1, rk="안정형", grade="낮은위험",
               port=[100, 0, 0, 0], ret=0.0, retPct=50, dopt="설정", room=0, dorm=0,
