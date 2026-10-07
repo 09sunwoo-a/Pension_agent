@@ -1101,20 +1101,33 @@ NUM_COL = "번호(전체 표 기준)"
 #: 보이는 쪽은 이름만 남긴다. 같은 질문이 두 줄 서는 대조 짝에서 질문 칸은 세로로 합쳐지는데
 #: (to_xlsx), 그러면 두 줄이 **무엇으로 갈리는지**가 화면에서 사라진다 — 그 자리를 이 열이
 #: 채운다. 한 열에 pin 까지 싣고 보이게 하면 질문·답변이 화면 밖으로 밀린다.
-#: 「앞 턴」 — 그 질문 **앞에서 실제로 오간 것**(먼저 물은 말 + 에이전트가 한 답).
+#: 앞 턴을 **질문 칸 안에** 붙이는 표지. 처음에는 별도 열(「앞 질문과 답」)이었는데
+#: 보이는 110행 중 4행만 차고 106행에서 폭만 잡았다 — 열 하나를 비워 두는 값이 아니다.
 #:
-#: 「선행 질문」(숨김)과 다른 열이다. 소유가 다르다 —
-#:   선행 질문   무엇을 먼저 물어야 하나. **사양**이고 생성기가 쓴다(PRE 표).
-#:   앞 턴       그 턴에서 실제로 무엇이 오갔나. **실측**이고 실행기가 쓴다.
+#: 붙이는 이유는 승낙 턴이 앞 턴 없이 읽히지 않기 때문이다. 「(화법 제안 뒤) 네, 보여줘」의
+#: 답만 놓고 보면 **무엇에 대한 승낙인지** 알 수 없고, 질문만 적어도 «에이전트가 무엇을
+#: 제안했는지»는 빠진다 — 제안은 앞 턴 **답변**의 마지막 줄이다.
 #:
-#: 이 열을 세운 이유는 승낙 턴이 그것 없이는 읽히지 않기 때문이다 — 「(화법 제안 뒤) 네,
-#: 보여줘」의 답만 놓고 보면 **무엇을 보여 달라고 한 것인지** 알 수 없다. 전에는 md 가
-#: 「↑ 앞 턴: …」으로 질문만 적었는데 md 를 없앴고, 질문만 적어도 «에이전트가 무엇을
-#: 제안했는지»는 여전히 빠진다 — 제안은 앞 턴 **답변**의 마지막 줄이다.
+#: ━━ 붙이면 읽는 쪽이 둘이라는 것 ━━
+#: 질문 칸은 두 곳이 읽는다. ① 실행기가 그 글을 에이전트에 넣는다 ② 생성기가 그 글자로
+#: 실측 보존 키를 만든다(`_key`). 앞 턴 답변은 실행마다 글자가 달라지므로 그대로 붙이면
+#: **키가 매번 바뀌어 답이 매번 떨어진다.** 머리글 자리를 옮겼을 때와 항목 이름을 바꿨을
+#: 때 실제로 그렇게 날아갔다(192건 · 18건).
 #:
-#: **질문 칸에 넣지 않는다.** 실행기가 그 칸을 읽어 에이전트에 그대로 넣으므로, 앞 턴을
-#: 거기 적으면 질문이 그 덩어리 전체가 된다.
-PRE_COL = "앞 질문과 답"
+#: 그래서 읽는 두 곳이 **같은 함수로 잘라낸다** — `bare_question()`. 표지를 바꾸려면
+#: 그 함수만 고치면 된다. 두 곳에 각자 자르는 규칙을 두면 한쪽만 고쳐지는 자리가 생긴다.
+PRE_MARK = "\n\n──── 앞서 오간 말 ────\n"
+
+
+def bare_question(text) -> str:
+    """질문 칸에서 **질문만** 떼어 온다. 앞 턴이 붙어 있으면 그 앞까지다."""
+    return str(text or "").split(PRE_MARK)[0].strip()
+
+
+def _pre_in_cell(text) -> str:
+    """질문 칸에 붙어 있는 앞 턴. 없으면 빈 글."""
+    parts = str(text or "").split(PRE_MARK, 1)
+    return parts[1].strip() if len(parts) > 1 else ""
 
 #: 답변 열 — 「실측 답변」이었다. 보고 자료를 읽는 사람에게 «실측»은 우리 쪽 말이다.
 ANS_COL = "AI 답변"
@@ -1123,7 +1136,7 @@ ANS_COL = "AI 답변"
 #: 섞으면 표가 안 읽혀 따로 뗀 자리다(`_answer_text` 머리말의 그 이유).
 SRC_COL = "출처"
 
-HEAD = ("구분", "항목", NUM_COL, "질문", PRE_COL, "고객", ANS_COL, SRC_COL,
+HEAD = ("구분", "항목", NUM_COL, "질문", "고객", ANS_COL, SRC_COL,
         "시연", "대상 고객", "확인 포인트", "선행 질문")
 
 #: 「실측 답변」을 다시 만들 때 따라오게 하는 키. 번호는 행이 늘면 밀리므로 쓰지 않는다.
@@ -1173,14 +1186,19 @@ def _carry_answers(path):
     except (ValueError, StopIteration):
         return {}
     si = head.index(SRC_COL) if SRC_COL in head else None
-    pi = next((head.index(x) for x in (PRE_COL, "앞 턴") if x in head), None)
+    pi = next((head.index(x) for x in ("앞 질문과 답", "앞 턴") if x in head), None)
     # 항목·질문 칸은 **세로 병합**이라 묶음의 첫 행에만 값이 있다 — 앞 값을 이어 읽지
     # 않으면 둘째 행부터 None 이 되어 키가 어긋나고 답이 조용히 사라진다(실제로 그랬다).
     out, item, q = {}, "", ""
     for r in ws.iter_rows(min_row=head_row + 1, values_only=True):
         item = str(r[ci]) if r[ci] else item
-        q = str(r[qi]) if r[qi] else q
-        pre = (r[pi] or "") if pi is not None and pi < len(r) else ""
+        if r[qi]:
+            # 질문 칸에 앞 턴이 붙어 있으면 **잘라서** 키로 쓴다 — 안 자르면 앞 턴 답변이
+            # 실행마다 달라져 키가 매번 바뀐다(PRE_MARK 머리말).
+            q, cell_pre = bare_question(r[qi]), _pre_in_cell(r[qi])
+        else:
+            cell_pre = ""
+        pre = cell_pre or ((r[pi] or "") if pi is not None and pi < len(r) else "")
         src = (r[si] or "") if si is not None and si < len(r) else ""
         if r[ai] or pre or src:
             out[_key(item, q, str(r[wi]))] = (r[ai] or "", pre, src)
@@ -1291,10 +1309,10 @@ _LINE_PT, _MIN_LINES, _MAX_LINES = 13.5, 2, 80
 #: 어긋나면 줄 수를 잘못 세어 다시 잘린다. 1.08 은 한글이 열 너비(반각 기준)보다 적게
 #: 들어가는 몫이다(«폭 68 칸에 한글 63자»가 한 줄).
 _W_FUDGE = 1.08
-_ANSWER_W, _QUESTION_W, _PRE_W, _SRC_W = 68, 36, 44, 30
+_ANSWER_W, _QUESTION_W, _SRC_W = 72, 52, 30
 
 
-def _row_height(question: str, answer: str, pre: str = "", src: str = "") -> float:
+def _row_height(question: str, answer: str, src: str = "") -> float:
     def lines(text: str, width: int) -> int:
         w = max(8, int(width / _W_FUDGE))
         n = 0
@@ -1302,7 +1320,7 @@ def _row_height(question: str, answer: str, pre: str = "", src: str = "") -> flo
             n += max(1, -(-len(part) // w))         # 올림 나눗셈
         return n
     need = max(lines(answer, _ANSWER_W), lines(question, _QUESTION_W),
-               lines(pre, _PRE_W), lines(src, _SRC_W))
+               lines(src, _SRC_W))
     return round(min(max(need, _MIN_LINES), _MAX_LINES) * _LINE_PT, 1)
 
 
@@ -1367,7 +1385,8 @@ def to_xlsx(path=XLSX):
         for num, r in rows:
             ok, why = runnable(item, r[1], r[2])
             answer, pre_log, src = carried.get(_key(item, r[1], r[2]), ("", "", ""))
-            ws.append((sec, item, num, r[1], pre_log, _who_short(r[2]), answer, src,
+            shown_q = f"{r[1]}{PRE_MARK}{pre_log}" if pre_log else r[1]
+            ws.append((sec, item, num, shown_q, _who_short(r[2]), answer, src,
                        demo_cell(r[4], r[5]), pin(r[2]),
                        point_of(item, r[1], r[2], r[3]),
                        " → ".join(pre_of(item, r[1])) if ok else f"[{why}]"))
@@ -1377,24 +1396,25 @@ def to_xlsx(path=XLSX):
             ws.cell(r_i, 3).alignment = Alignment(vertical="center", horizontal="center")
             ws.cell(r_i, 3).font = Font(size=10, color=GRAY)
             ws.cell(r_i, 4).font = Font(size=10, bold=True)
-            ws.cell(r_i, 5).font = Font(size=10, color=GRAY)      # 앞 턴
-            ws.cell(r_i, 6).font = Font(size=10, color=GRAY)      # 고객
-            ws.cell(r_i, 6).alignment = Alignment(vertical="top", wrap_text=True,
+            ws.cell(r_i, 5).font = Font(size=10, color=GRAY)      # 고객
+            ws.cell(r_i, 5).alignment = Alignment(vertical="top", wrap_text=True,
                                                   horizontal="center")
             if r[4] == "◎":
-                ws.cell(r_i, 9).font = Font(size=10, bold=True, color="1F6F3F")
+                ws.cell(r_i, 8).font = Font(size=10, bold=True, color="1F6F3F")
             elif r[4] == "–":
-                ws.cell(r_i, 9).font = Font(size=10, color="808080")
+                ws.cell(r_i, 8).font = Font(size=10, color="808080")
             if not r[5]:
-                ws.cell(r_i, 9).font = Font(size=10, bold=(r[4] == "◎"), color="C00000")
+                ws.cell(r_i, 8).font = Font(size=10, bold=(r[4] == "◎"), color="C00000")
             if not shown(item, r[1]):
                 ws.row_dimensions[r_i].hidden = True
             else:
-                ws.row_dimensions[r_i].height = _row_height(r[1], answer, pre_log, src)
-            qrows.append((r_i, r[1]))
+                ws.row_dimensions[r_i].height = _row_height(shown_q, answer, src)
+            qrows.append((r_i, shown_q))
             r_i += 1
-        # 갈래 행 — 한 항목 안에서 **글자가 같은 질문**이 잇달아 서면 질문 칸을 세로로
-        # 합친다. 갈리는 것은 질문이 아니라 고객이고, 그것은 「고객」 열이 담는다.
+        # 갈래 행 — 한 항목 안에서 **칸의 글자가 같은 질문**이 잇달아 서면 질문 칸을
+        # 세로로 합친다. 갈리는 것은 질문이 아니라 고객이고, 그것은 「고객」 열이 담는다.
+        # **칸 글자로 견준다**(raw 질문이 아니다) — 앞 턴이 붙어 두 칸이 달라졌으면 합치면
+        # 한쪽이 가려진다.
         j = 0
         while j < len(qrows):
             k = j
@@ -1422,7 +1442,7 @@ def to_xlsx(path=XLSX):
         for cc in range(1, len(HEAD) + 1):
             ws.cell(a, cc).border = top_rule
 
-    for i, w in enumerate((15, 17, 7, 36, 44, 13, 68, 30, 20, 34, 72, 40), 1):
+    for i, w in enumerate((15, 17, 7, 52, 13, 72, 30, 20, 34, 72, 40), 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     # 운영 열은 숨긴다 — 이 표를 **읽는 사람**(개발 부서장·비즈 직원)에게는 읽을 이유가
     # 없는 칸이고, 네 열이 더 서면 질문과 답변이 화면 밖으로 밀린다. 지우지는 않는다:

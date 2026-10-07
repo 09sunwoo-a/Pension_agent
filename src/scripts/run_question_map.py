@@ -71,7 +71,7 @@ XLSX = QM.XLSX
 
 #: 표에서 읽는 열. 없으면 그 자리에서 멈춘다 — 열 이름이 바뀐 것을 조용히 넘기면
 #: 엉뚱한 칸에 답을 쓴다.
-COLS = ("항목", QM.NUM_COL, "질문", QM.PRE_COL, QM.ANS_COL, QM.SRC_COL,
+COLS = ("항목", QM.NUM_COL, "질문", QM.ANS_COL, QM.SRC_COL,
         "시연", "대상 고객", "선행 질문")
 
 #: 실행이 죽은 칸의 머리말. 이 글로 시작하는 칸은 «채워진 것»으로 세지 않는다 — 그래야
@@ -350,7 +350,9 @@ def main(argv: list[str]) -> int:
 
     wb, ws, idx, head_row = _load()
     first_row = head_row + 1
-    qs = _filled(ws, idx["질문"], first_row)   # 갈래 행은 질문 칸이 세로 병합이다
+    # 갈래 행은 질문 칸이 세로 병합이다. 그리고 그 칸에는 **앞 턴이 붙어 있을 수 있다** —
+    # 에이전트에 넣는 것은 질문뿐이므로 생성기와 같은 함수로 잘라낸다(QM.bare_question).
+    qs = {r: QM.bare_question(v) for r, v in _filled(ws, idx["질문"], first_row).items()}
     picked = _select(ws, idx, args, first_row)
     if not picked:
         print("돌릴 행이 없다. 조건을 넓히거나 --redo 를 붙인다.")
@@ -444,8 +446,12 @@ def main(argv: list[str]) -> int:
         else:
             ws.cell(r, idx[QM.ANS_COL]).value = fresh
         # 앞 턴이 없는 행은 **덮지 않는다** — 빈 문자열로 쓰면 옛 기록을 지운다.
+        # 앞 턴은 **질문 칸에 붙인다**(QM.PRE_MARK). 열을 따로 두면 110행 중 106행이 빈
+        # 칸인데 폭은 모든 행에서 잡는다 — 그 값이 아니었다.
         if pre_chunks:
-            ws.cell(r, idx[QM.PRE_COL]).value = "\n\n".join(pre_chunks)
+            ws.cell(r, idx["질문"]).value = (
+                QM.bare_question(ws.cell(r, idx["질문"]).value)
+                + QM.PRE_MARK + "\n\n".join(pre_chunks))
         if src_chunks:
             ws.cell(r, idx[QM.SRC_COL]).value = "\n\n".join(src_chunks)
         filled += 1
