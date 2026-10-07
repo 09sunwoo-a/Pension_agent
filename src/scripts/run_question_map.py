@@ -46,12 +46,15 @@
    로그인 사번을 넘기지만 이 실행기는 안 넘긴다 — 그러면 에이전트는 받을 사람을 모르고,
    기준서 §10 「받을 사람을 모르면 묻지 않는다」대로 **제안 자체를 하지 않는다.** 그게
    올바른 동작이라 화면에는 오류가 안 뜨고, 칸만 「쪽지를 보낼 받는 사람을 알 수 없어요」로
-   채워진다(108·109 가 그렇게 채워져 있었다). 폴백 환경변수로 준다.
+   채워진다(그렇게 채워진 적이 있다). 폴백 환경변수로 준다.
 
-       WORKB_EMP_NO=3902172 PENSION_TODAY=2026-09-29 python -m scripts.run_question_map --rows 108,109
+       WORKB_EMP_NO=3902172 PENSION_TODAY=2026-09-29 python -m scripts.run_question_map --item 쪽지
+
+   **번호로 부르지 않는다** — 질문을 더하면 그 아래 번호가 전부 밀린다(실제로 밀렸다).
+   항목 이름은 안 밀리므로 `--item` 으로 고른다.
 
    **발송까지 가지는 않는다** — `MCP_*` 가 없으면 WorkB 클라이언트가 안 붙어 「미연결」로
-   답한다(109 의 확인 포인트가 재는 것이 그 자리다).
+   답한다(그 항목의 「(쪽지 초안 뒤) 응, 보내줘」 행이 재는 것이 그 자리다).
 """
 
 from __future__ import annotations
@@ -68,7 +71,7 @@ XLSX = QM.XLSX
 
 #: 표에서 읽는 열. 없으면 그 자리에서 멈춘다 — 열 이름이 바뀐 것을 조용히 넘기면
 #: 엉뚱한 칸에 답을 쓴다.
-COLS = ("항목", "번호", "질문", "실측 답변", "시연", "대상 고객", "선행 질문")
+COLS = ("항목", QM.NUM_COL, "질문", "실측 답변", "시연", "대상 고객", "선행 질문")
 
 #: 실행이 죽은 칸의 머리말. 이 글로 시작하는 칸은 «채워진 것»으로 세지 않는다 — 그래야
 #: 다음 실행에서 다시 집히고(`--retry-failed`), 성공한 답을 덮어쓰지 않는다.
@@ -90,17 +93,18 @@ def _load():
         raise SystemExit(f"{XLSX} 가 없다. 먼저: python -m scripts.question_map")
     wb = load_workbook(XLSX)
     ws = wb.active
-    head = [c.value for c in next(ws.rows)]
+    # 머리글은 1행이 아니다 — 제목·설명 블록이 위에 있다(QM.find_head 머리말).
+    head_row, head = QM.find_head(ws)
     idx = {}
     for name in COLS:
         if name not in head:
             raise SystemExit(f"xlsx 에 「{name}」 열이 없다 — 표를 다시 만든다: "
                              "python -m scripts.question_map")
         idx[name] = head.index(name) + 1
-    return wb, ws, idx
+    return wb, ws, idx, head_row
 
 
-def _filled(ws, col: int) -> dict[int, str]:
+def _filled(ws, col: int, first_row: int) -> dict[int, str]:
     """세로 병합된 칸을 앞 값으로 이어 읽는다 — {엑셀 행: 값}.
 
     병합 칸은 **묶음의 첫 행에만** 값이 있고 나머지는 None 이다. 「항목」은 처음부터
@@ -108,7 +112,7 @@ def _filled(ws, col: int) -> dict[int, str]:
     빈 문자열이라 `--item` 이 조용히 그 행들을 버리고, 질문은 빈 채로 에이전트에 들어간다.
     """
     out, cur = {}, ""
-    for r in range(2, ws.max_row + 1):
+    for r in range(first_row, ws.max_row + 1):
         v = ws.cell(r, col).value
         if v not in (None, ""):
             cur = str(v)
@@ -184,16 +188,16 @@ def parse_rows(spec: str) -> set[int]:
     return want
 
 
-def _select(ws, idx, args) -> list[int]:
+def _select(ws, idx, args, first_row: int) -> list[int]:
     """돌릴 행 번호(엑셀 행 인덱스)를 고른다."""
     want_rows = parse_rows(args.rows) if args.rows else None
-    items = _filled(ws, idx["항목"])          # 둘 다 세로 병합이다 — _filled 머리말
+    items = _filled(ws, idx["항목"], first_row)   # 둘 다 세로 병합이다 — _filled 머리말
     picked = []
     # 번호로 지목했는데 빠진 행은 **왜 빠졌는지** 모아 둔다. 「돌릴 행이 없다」만 남으면
     # 손으로 돌리는 행(137)을 지목한 사람이 실행기가 고장난 줄 안다(2026-09-22 실측).
     skipped: dict = {}
-    for r in range(2, ws.max_row + 1):
-        num = ws.cell(r, idx["번호"]).value
+    for r in range(first_row, ws.max_row + 1):
+        num = ws.cell(r, idx[QM.NUM_COL]).value
         item = items[r]
         demo = str(ws.cell(r, idx["시연"]).value or "")
         pre_cell = str(ws.cell(r, idx["선행 질문"]).value or "")
@@ -236,9 +240,9 @@ def _select(ws, idx, args) -> list[int]:
 
     # 표에 없는 번호를 달라고 했으면 **말한다.** 구간을 받게 되면서(`parse_rows`) 없는
     # 번호를 포함하기가 쉬워졌는데, 그냥 빠지면 화면에는 「돌릴 행이 없다」만 남아
-    # «왜 안 돌지»의 답이 어디에도 없다. 표 번호는 164까지다.
+    # «왜 안 돌지»의 답이 어디에도 없다. 끝 번호는 여기 적지 않는다 — 질문을 더하면 바뀐다.
     if want_rows is not None:
-        have = {ws.cell(r, idx["번호"]).value for r in range(2, ws.max_row + 1)}
+        have = {ws.cell(r, idx[QM.NUM_COL]).value for r in range(first_row, ws.max_row + 1)}
         missing = sorted(n for n in want_rows if n not in have)
         if missing:
             shown = ", ".join(str(n) for n in missing[:12])
@@ -315,9 +319,10 @@ def main(argv: list[str]) -> int:
     from pension_agent import env as _env
     _env.load()
 
-    wb, ws, idx = _load()
-    qs = _filled(ws, idx["질문"])             # 갈래 행은 질문 칸이 세로 병합이다
-    picked = _select(ws, idx, args)
+    wb, ws, idx, head_row = _load()
+    first_row = head_row + 1
+    qs = _filled(ws, idx["질문"], first_row)   # 갈래 행은 질문 칸이 세로 병합이다
+    picked = _select(ws, idx, args, first_row)
     if not picked:
         print("돌릴 행이 없다. 조건을 넓히거나 --redo 를 붙인다.")
         return 0
@@ -328,7 +333,7 @@ def main(argv: list[str]) -> int:
 
     if args.dry_run:
         for r in picked:
-            n = ws.cell(r, idx["번호"]).value
+            n = ws.cell(r, idx[QM.NUM_COL]).value
             q = qs[r]
             who = ws.cell(r, idx["대상 고객"]).value or ""
             pre = ws.cell(r, idx["선행 질문"]).value or ""
@@ -340,7 +345,7 @@ def main(argv: list[str]) -> int:
 
     filled = failed = 0
     for i, r in enumerate(picked, 1):
-        num = ws.cell(r, idx["번호"]).value
+        num = ws.cell(r, idx[QM.NUM_COL]).value
         q = qs[r]
         who = str(ws.cell(r, idx["대상 고객"]).value or "")
         pre = [x.strip() for x in str(ws.cell(r, idx["선행 질문"]).value or "").split("→") if x.strip()]
