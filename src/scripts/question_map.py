@@ -46,9 +46,15 @@ PIN = {
 
 ALL = "누구나 — 예: 송도윤"
 NONE_ = "고객 없이"
-ISA = "ISA 3명 — 김서연 · 한지우 · 송도윤"
+# ━━ 한 질문에 맞세우는 고객은 **둘까지**다(2026-10-07) ━━
+# 전에는 셋을 적은 자리가 있었다(ISA 3명 · 기록 없는 3명 · 만기 0/1/2건). 한 칸에 답이
+# 세 덩이 들어가면 읽는 사람이 **무엇과 무엇을 견주는지** 못 고른다 — 대조는 둘일 때만
+# 눈에 들어온다. 셋째를 적어 얻는 것은 «또 하나의 사례»이지 «또 하나의 축»이 아니다.
+# 고르는 기준은 **그 질문이 갈리는 축의 양 끝**이다 — ISA 는 공제율이 갈리는 두 끝
+# (김서연 5500이하 · 한지우 5500초과), 기록은 있는 쪽과 없는 쪽.
+ISA = "ISA 보유 — 김서연(5500이하) ↔ 한지우(5500초과)"
 LOG = "기록 있는 9명 — 예: 송도윤"
-NOLOG = "기록 없는 3명 — 김현수 · 김서연 · 이수민"
+NOLOG = "기록 없는 쪽 — 김현수 ↔ 기록 있는 쪽 송도윤"
 ROOM = "한도 남은 5명 — 예: 이수민(900만)"
 NOROOM = "한도 0인 7명 — 예: 송도윤"
 NOD = "미설정 4명 — 예: 이수민"
@@ -69,7 +75,7 @@ def pre_of(item, q):
 
 # ═══ 타겟 선정 근거 ═══════════════════════════════════════════
 I = "타겟 선정 근거"
-row(I, "이 고객 왜 관리 대상으로 떴어?", "송도윤·정민석·이수민",
+row(I, "이 고객 왜 관리 대상으로 떴어?", "송도윤(요건 6개) ↔ 정민석(요건 2개)",
     "성립 요건 **전부** + 왜 문제인지 ↔ 요건 하나만 말하거나 고객군 일반 정의로 샌다", "◎", "라이브러리")
 row(I, "이 고객 왜 관리 대상으로 떴어?", "이준호",
     "9/29 기준 요건 0개 — 「타겟이 아니다」 ↔ 요건을 지어내거나 지난 만기를 「곧 만기」로 말한다", "◎")
@@ -634,8 +640,8 @@ row(I, "이 고객한테 뭘 권할 수 있어?", "송도윤 ↔ 정민석",
     "성향이 다르면 상한·목록·제외가 다르다 ↔ 두 고객에게 같은 목록", "◎", "라이브러리")
 row(I, "이 고객 디폴트옵션 설정돼 있어?", "박정호 ↔ 이수민",
     "설정/미설정 **양쪽 다** 답이 나온다 ↔ 설정된 쪽이 「자료가 없습니다」", "◎")
-row(I, "이 고객 만기 뭐뭐 있어?", "오세훈2 ↔ 이수민1 ↔ 송도윤0",
-    "0건은 「없다」, 2건은 둘 다 ↔ 2건에 한 건만 · 0건에 ISA 만기를 답한다", "◎")
+row(I, "이 고객 만기 뭐뭐 있어?", "오세훈2 ↔ 송도윤0",
+    "2건은 둘 다, 0건은 「없다」 ↔ 2건에 한 건만 · 0건에 ISA 만기를 답한다", "◎")
 row(I, "이 고객 왜 관리 대상이야?", "송도윤6 ↔ 이준호0",
     "요건 6개 ↔ 「오늘 기준 타겟 아님」 · 0개 고객에게 요건을 지어낸다", "○")
 row(I, "지난 상담에서 무슨 얘기 했지?", "송도윤 ↔ 김서연",
@@ -802,7 +808,12 @@ SECTIONS = (
         # 대화로 화면을 고치라는 요청이라 자리는 여기다.
         "브리핑 수정",
     )),
-    ("Ⅶ. 품질 — 시연엔 안 올려도 보는 것", (
+    # 이 구분은 **통째로 가려져 있다**(SHOWCASE_SKIP_ITEMS) — 읽는 사람이 아니라 개발이
+    # 보는 축이다. 이름을 「품질」에서 바꾼 이유는 그 말이 세 항목을 덮지 못해서다.
+    # 「고객별 대조」는 품질 점검이 아니라 **같은 질문을 고객 둘씩 묶어 다시 적어둔 것**이고,
+    # 12행 중 11행이 본문에 이미 있는 질문이다(2026-10-07 대조). 본문 쪽이 이미 대조 짝으로
+    # 돌고 있어서(디폴트옵션·연금개시·관리 대상·수수료가 그렇다) 꺼내면 중복만 늘어난다.
+    ("Ⅶ. 개발 회귀 — 도구 선택 · 실패 처리 · 고객별 대조", (
         "도구 경계 혼동", "실패·경계 처리", "고객별 대조",
     )),
 )
@@ -917,8 +928,68 @@ HIDDEN: dict[tuple[str, str], str] = {
 #:
 #: HIDDEN 과 가르는 이유는 **고칠 것이 있느냐**다. HIDDEN 은 고치면 표에서 빠지는 목록이고,
 #: 여기는 고칠 것이 없다 — 답은 이미 나온다. 실행기는 둘 다 그대로 돌리므로 회귀는 남는다.
+def _same_shape(pairs: dict[str, tuple[str, ...]]) -> dict[tuple[str, str], str]:
+    return {(item, q): why for item, (why, *qs) in pairs.items() for q in qs}
+
+
+#: 모양이 겹쳐 뺀 것 — 항목마다 «왜 겹치나» 한 줄과 뺀 질문들.
+_SHAPE = {
+    "고객군·관리 기준": (
+        "현금성자산 임계값을 묻는 줄이 둘 — 같은 재료를 본다",
+        "미운용 현금성자산 고객은 몇 퍼센트부터 대상이야?",
+    ),
+    "고객 현황 확인": (
+        "만기를 묻는 줄이 넷 — 「언제+금액」 한 줄이 나머지를 덮는다",
+        "이 고객 만기 뭐뭐 있어?",
+        "이 고객 만기 언제야?",
+    ),
+    "고객 계좌 상태 확인": (
+        "잔여한도를 묻는 줄이 둘 — 같은 원장 값을 본다",
+        "이 고객 세액공제 더 받을 수 있어?",
+    ),
+    "금지·주의 안내": (
+        "디폴트옵션 등록 여부는 계좌 상태 쪽에 같은 질문이 있다",
+        "이 고객 디폴트옵션 등록됐어?",
+    ),
+    "단말 화면번호": (
+        "여섯 줄이 전부 «이 업무는 몇 번 화면인가» 하나다 — 카드만 다르다. "
+        "처리 한 줄 · 조회 한 줄 · 세액공제로 이어지는 한 줄만 남긴다",
+        "포트폴리오 운용현황 조회는 화면번호가 뭐야?",
+        "수수료 예상조회 화면번호 알려줘",
+        "고객 거래내역은 어느 화면에서 봐?",
+    ),
+    "비대면 채널 경로": (
+        "추가납입을 묻는 줄이 둘 · 조회를 묻는 줄이 둘",
+        "고객이 추가입금 예약을 직접 걸 수 있어?",
+        "고객이 앱에서 운용상품을 직접 찾아볼 수 있어?",
+    ),
+    "적합성 범위 안내": (
+        "«뭘 권할 수 있나»가 둘 · «상한이 어디까지»가 둘",
+        "이 고객한테는 뭘 권할 수 있어?",
+        "이 고객 위험등급 상한이 어디까지야?",
+    ),
+    "세액공제 계산": (
+        "«300만원 더 넣으면 얼마»가 셋 — 글자만 다르다. 되묻기 답도 양쪽 중 한쪽만",
+        "이 고객 300만원 더 넣으면 얼마 돌려받는지 계산해줘",
+        "300 넣으면 얼마 받아?",
+        "(총급여 구간 되묻기 뒤) 5,500 이하야",
+    ),
+    "복합·연쇄 턴": (
+        "«되묻기에 갈래를 골라 답한다»가 셋 · «제안을 물린다»가 둘",
+        "(되묻기 뒤) 2번째꺼",
+        "(채널 되묻기 뒤) ETF 상품",
+        "(제안 뒤) 아니, 됐어",
+    ),
+    "답변 다듬기·되짚기": (
+        "«직전 답변을 다시 쓴다»가 셋 — 줄이기 한 줄이면 보인다",
+        "방금 답변에서 고객한테 그대로 읽어줄 대사만 뽑아줘",
+        "아까 그 답변에 수수료 얘기도 넣어서 다시 써줘",
+    ),
+}
+
 TRIMMED: dict[tuple[str, str], str] = {
-    ("상담 화법·반론 대응", q): "같은 모양 — 반론 문구로 화법 카드를 찾는 질문" for q in (
+    **_same_shape(_SHAPE),
+    **{("상담 화법·반론 대응", q): "같은 모양 — 반론 문구로 화법 카드를 찾는 질문" for q in (
         "고객이 IRP에 넣으면 55세까지 못 빼는 거 아니냐고 걱정하는데, 중간에 뺄 수 있어?",
         "고객이 '금액도 얼마 안 되는데 그냥 두면 안 되나요' 하면 뭐라고 하지?",
         "고객이 '손실 난 걸 지금 팔라는 거냐'고 하면 뭐라고 하지?",
@@ -930,7 +1001,7 @@ TRIMMED: dict[tuple[str, str], str] = {
         "고객이 '나중에 돈 못 빼는 거 아니에요?' 하는데 뭐라고 설명하지?",
         "고객이 '직접 관리하기 귀찮다'고 하는데 뭐라고 하지?",
         "고객이 '수익률은 다른 은행이 더 좋던데요' 하면 뭐라고 답해?",
-    )
+    )},
 }
 
 
@@ -999,14 +1070,38 @@ def demo_cell(grade, src):
 #: 글자를 따로 적으면 한쪽만 고쳐질 때 실행기가 «열 이름이 바뀌었다»로 멈춘다.
 NUM_COL = "번호(전체 표 기준)"
 
-HEAD = ("구분", "항목", NUM_COL, "질문", "실측 답변", "시연", "대상 고객", "확인 포인트",
-        "선행 질문")
+#: 「고객」은 보이는 열, 「대상 고객」은 숨은 열이다. 같은 값의 두 꼴을 둔 이유 —
+#: 숨은 쪽은 실행기가 읽는 원본이라 kb-pin 이 붙어 길고(「송도윤 188406-7352194」),
+#: 보이는 쪽은 이름만 남긴다. 같은 질문이 두 줄 서는 대조 짝에서 질문 칸은 세로로 합쳐지는데
+#: (to_xlsx), 그러면 두 줄이 **무엇으로 갈리는지**가 화면에서 사라진다 — 그 자리를 이 열이
+#: 채운다. 한 열에 pin 까지 싣고 보이게 하면 질문·답변이 화면 밖으로 밀린다.
+HEAD = ("구분", "항목", NUM_COL, "질문", "고객", "실측 답변", "시연", "대상 고객",
+        "확인 포인트", "선행 질문")
 
 #: 「실측 답변」을 다시 만들 때 따라오게 하는 키. 번호는 행이 늘면 밀리므로 쓰지 않는다.
 #: 대상 고객은 **kb-pin 이 붙은 꼴**로 맞춘다 — xlsx 에 그 꼴로 적히기 때문이다. 한쪽만
 #: 원본을 쓰면 키가 어긋나 답이 조용히 사라진다(실제로 그랬다).
 def _key(item, q, who):
     return (item.split(". ", 1)[-1], q, pin(who))
+
+
+#: 머리글이 몇 행인가. **1행이라고 가정하지 않는다.** 2026-10-07 에 제목·설명 블록을 얹으면서
+#: 머리글이 4행으로 내려갔는데, 1행을 머리글로 읽던 자리가 둘 있었다 — 이 파일의
+#: `_carry_answers` 는 조용히 빈 표를 돌려줘 **실측 192건을 한 번에 날렸고**(커밋에서
+#: 되살렸다), 실행기(`run_question_map._load`)는 「항목 열이 없다」로 멈췄다. 조용히 지는
+#: 쪽이 더 나빴다. 두 자리가 같은 규칙을 쓰도록 여기 한 번만 둔다.
+#:
+#: 「항목」이 있는 줄을 머리글로 삼는다 — 옛 꼴(1행)도 새 꼴(4행)도 그대로 읽는다.
+HEAD_SEARCH_ROWS = 8
+
+
+def find_head(ws, key: str = "항목") -> tuple[int, list]:
+    """(머리글 행 번호, 머리글 값들). 못 찾으면 (0, [])."""
+    for n, row in enumerate(ws.iter_rows(min_row=1, max_row=HEAD_SEARCH_ROWS,
+                                         values_only=True), 1):
+        if row and key in row:
+            return n, list(row)
+    return 0, []
 
 
 def _carry_answers(path):
@@ -1018,7 +1113,9 @@ def _carry_answers(path):
     except ModuleNotFoundError:
         return {}
     ws = load_workbook(path, read_only=True).active
-    head = [c.value for c in next(ws.rows)]
+    head_row, head = find_head(ws)
+    if not head:
+        return {}
     try:
         ci, qi, ai, wi = (head.index(x) for x in ("항목", "질문", "실측 답변", "대상 고객"))
     except ValueError:
@@ -1026,7 +1123,7 @@ def _carry_answers(path):
     # 항목·질문 칸은 **세로 병합**이라 묶음의 첫 행에만 값이 있다 — 앞 값을 이어 읽지
     # 않으면 둘째 행부터 None 이 되어 키가 어긋나고 답이 조용히 사라진다(실제로 그랬다).
     out, item, q = {}, "", ""
-    for r in ws.iter_rows(min_row=2, values_only=True):
+    for r in ws.iter_rows(min_row=head_row + 1, values_only=True):
         item = str(r[ci]) if r[ci] else item
         q = str(r[qi]) if r[qi] else q
         if r[ai]:
@@ -1100,7 +1197,61 @@ def counts():
             Counter(r[4] for r in R))
 
 
+#: 보이는 「고객」 열에 적을 글. 숨은 「대상 고객」에서 kb-pin 과 군 설명을 떼고 이름만 남긴다.
+#:
+#: 「ISA 보유 — 김서연(5500이하) ↔ 한지우(5500초과)」 → 「김서연(5500이하) ↔ 한지우(5500초과)」
+#: 「누구나 — 예: 송도윤」                              → 「누구나」
+#: 「한도 남은 5명 — 예: 이수민(900만)」                  → 「한도 남은 5명」
+#: 괄호 안의 값은 **남긴다** — 대조 짝에서 무엇으로 갈리는지가 거기 있다(공제율·요건 수).
+def _who_short(who: str) -> str:
+    text = _re.sub(r"\s*\d{6}-\d{7}", "", str(who or "")).strip()
+    if " — " in text:
+        head, _, tail = text.partition(" — ")
+        tail = tail.strip()
+        # 「… — 예: 이름」은 군 이름이 본질이고, 「… — A ↔ B」는 맞세운 둘이 본질이다.
+        return head.strip() if tail.startswith("예:") else tail
+    return text
+
+
+#: 행 높이(pt). 엑셀은 **병합된 칸이 있는 행의 높이를 자동으로 맞추지 않는다** — 이 표는
+#: 구분·항목·질문을 세로로 합치므로 거의 모든 행이 그렇고, 그래서 500자 답변이 기본 15pt
+#: 한 줄에 눌려 있었다. 글자 수를 열 너비로 나눠 줄 수를 세고 직접 넣는다.
+#:
+#: 상한을 두는 이유 — 1,200자 답변에 맞추면 한 행이 화면을 다 먹어 표가 아니라 문서가 된다.
+#: 상한을 **10줄로 잡은 근거**(2026-10-07 실측, 보이는 112행): 필요한 줄 수가 7줄 이하인
+#: 행이 69개이고 나머지는 15~30줄로 길게 벌어진다. 긴 꼬리에 맞추면(20줄·270pt) 평균이
+#: 두 배가 되어 표를 훑을 수 없고, 10줄이면 69행이 온전히 보이고 34행이 잘린다. 잘린 글은
+#: 잃은 것이 아니다 — 칸을 누르면 수식 입력줄에 전문이 있고, 긴 답은 대조 행(한 칸에 고객
+#: 둘)이 대부분이다. 하한은 두 줄이다(한 줄짜리 행이 섞이면 눈이 표를 훑지 못한다).
+_LINE_PT, _MIN_LINES, _MAX_LINES = 13.5, 2, 10
+_ANSWER_W, _QUESTION_W = 84, 46
+
+
+def _row_height(question: str, answer: str) -> float:
+    def lines(text: str, width: int) -> int:
+        n = 0
+        for part in str(text or "").split("\n"):
+            n += max(1, -(-len(part) // width))     # 올림 나눗셈
+        return n
+    need = max(lines(answer, _ANSWER_W), lines(question, _QUESTION_W))
+    return round(min(max(need, _MIN_LINES), _MAX_LINES) * _LINE_PT, 1)
+
+
 def to_xlsx(path=XLSX):
+    """보고용 표 — `docs/QUESTION_MAP.xlsx`.
+
+    ━━ 읽히게 만드는 것이 이 함수의 일이다(2026-10-07 전면 수정) ━━
+    그전 표는 모든 칸에 테두리를 두르고 항목마다 배경색을 번갈아 칠했는데, 정작 **긴 글이
+    잘려 보였다.** 원인은 색이 아니라 **합친 칸**이다 — 엑셀은 줄바꿈 칸의 행 높이를 자동으로
+    맞추지만 **병합된 칸이 있는 행에서는 맞추지 않는다.** 이 표는 구분·항목·질문을 세로로
+    합치므로 거의 모든 행이 그 경우고, 500자 답변이 기본 높이 15pt 한 줄에 눌려 있었다.
+    그래서 **행 높이를 글자 수로 계산해 직접 넣는다**(`_row_height`).
+
+    나머지는 같은 저장소의 보고 자료(`claude/answer-flow-xlsx` 브랜치)가 쓰는 꼴을 따랐다 —
+    머리 블록(제목 14pt · 설명 한 줄 회색 10pt · 빈 줄) · 금색 머리글 11pt · 본문 10pt 위쪽
+    정렬 · **테두리와 배경 밴딩 없음**. 칸마다 선을 그으면 글자가 선과 다투고, 두 색을 번갈아
+    칠하면 눈이 색을 먼저 읽는다. 구분이 바뀌는 자리에만 굵은 윗선을 남긴다.
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
@@ -1109,59 +1260,71 @@ def to_xlsx(path=XLSX):
     ws = wb.active
     ws.title = "질문리스트"
 
-    head_fill = PatternFill("solid", fgColor="BFA55A")
-    sec_fill = PatternFill("solid", fgColor="D9D2C0")
-    thin = Side(style="thin", color="A6A6A6")
-    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    gold = PatternFill("solid", fgColor="BFA55A")
+    sec_fill = PatternFill("solid", fgColor="F2EEE2")
+    top_rule = Border(top=Side(style="medium", color="BFA55A"))
+    GRAY = "5A6663"
 
-    ws.append(HEAD)
-    for c in ws[1]:
+    # 머리 블록 — 제목 · 설명 · 빈 줄. 머리글은 4행이고 표는 5행부터다.
+    ws["A1"] = "퇴직연금 사후관리 에이전트(대화형) — 답하는 질문"
+    ws["A1"].font = Font(size=14, bold=True)
+    ws["A2"] = ("영업점 직원이 상담 전·중·후에 물을 수 있는 질문과, 실제로 돌려 받은 답변입니다. "
+                "에이전트는 행내 지식베이스와 열려 있는 고객의 자료만을 근거로 답하고, "
+                "근거에 없는 수치·상품·요건은 지어내지 않습니다.")
+    ws["A2"].font = Font(size=10, color=GRAY)
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 15
+    ws.row_dimensions[3].height = 8
+
+    # **append 를 쓰지 않는다.** append 는 «값이 있는 마지막 행» 다음에 붙으므로 설명(2행)
+    # 바로 아래 3행에 머리글이 들어가 빈 줄이 뒤로 밀렸다. 자리를 숫자로 지정한다.
+    for ci, name in enumerate(HEAD, 1):
+        ws.cell(4, ci, name)
+    for c in ws[4]:
         c.font = Font(bold=True, size=11)
-        c.fill = head_fill
+        c.fill = gold
         c.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
-        c.border = box
+    ws.row_dimensions[4].height = 26
 
-    band = ("EEF3FA", "F5F1E8")
-    r_i, gi = 2, 0
-    spans, cur, sec_start = [], None, 2
+    r_i = 5
+    spans, cur, sec_start = [], None, r_i
     for sec, item, rows in _groups():
         if sec != cur:
             if cur is not None:
                 spans.append((sec_start, r_i - 1))
             cur, sec_start = sec, r_i
-        fill = PatternFill("solid", fgColor=band[gi % 2])
-        gi += 1
         start = r_i
         qrows = []
         for num, r in rows:
             ok, why = runnable(item, r[1], r[2])
-            ws.append((sec, item, num, r[1],
-                       carried.get(_key(item, r[1], r[2]), ""),
+            answer = carried.get(_key(item, r[1], r[2]), "")
+            ws.append((sec, item, num, r[1], _who_short(r[2]), answer,
                        demo_cell(r[4], r[5]), pin(r[2]),
                        point_of(item, r[1], r[2], r[3]),
                        " → ".join(pre_of(item, r[1])) if ok else f"[{why}]"))
             for c in ws[r_i]:
                 c.alignment = Alignment(vertical="top", wrap_text=True)
-                c.fill = fill
-                c.border = box
+                c.font = Font(size=10)
             ws.cell(r_i, 3).alignment = Alignment(vertical="center", horizontal="center")
-            ws.cell(r_i, 4).font = Font(bold=True)
-            ws.cell(r_i, 6).alignment = Alignment(vertical="center", wrap_text=True)
+            ws.cell(r_i, 3).font = Font(size=10, color=GRAY)
+            ws.cell(r_i, 4).font = Font(size=10, bold=True)
+            ws.cell(r_i, 5).font = Font(size=10, color=GRAY)
+            ws.cell(r_i, 5).alignment = Alignment(vertical="top", wrap_text=True,
+                                                  horizontal="center")
             if r[4] == "◎":
-                ws.cell(r_i, 6).font = Font(bold=True, color="1F6F3F")
+                ws.cell(r_i, 7).font = Font(size=10, bold=True, color="1F6F3F")
             elif r[4] == "–":
-                ws.cell(r_i, 6).font = Font(color="808080")
+                ws.cell(r_i, 7).font = Font(size=10, color="808080")
             if not r[5]:
-                ws.cell(r_i, 6).font = Font(
-                    bold=(r[4] == "◎"), color="C00000")
+                ws.cell(r_i, 7).font = Font(size=10, bold=(r[4] == "◎"), color="C00000")
             if not shown(item, r[1]):
                 ws.row_dimensions[r_i].hidden = True
+            else:
+                ws.row_dimensions[r_i].height = _row_height(r[1], answer)
             qrows.append((r_i, r[1]))
             r_i += 1
         # 갈래 행 — 한 항목 안에서 **글자가 같은 질문**이 잇달아 서면 질문 칸을 세로로
-        # 합친다. 갈리는 것은 질문이 아니라 고객 상태이고(대상 고객·확인 포인트가 그것을
-        # 담는다), 같은 글자가 두 줄 서 있으면 중복으로 읽힌다 — 실제로 두 번 지적받았다.
-        # 항목 칸을 합치는 것과 같은 이유다: 합쳐진 칸은 «이 아래가 한 묶음»이라고 말한다.
+        # 합친다. 갈리는 것은 질문이 아니라 고객이고, 그것은 「고객」 열이 담는다.
         j = 0
         while j < len(qrows):
             k = j
@@ -1176,7 +1339,7 @@ def to_xlsx(path=XLSX):
         ws.merge_cells(start_row=start, start_column=2, end_row=r_i - 1, end_column=2)
         a = ws.cell(start, 2)
         a.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
-        a.font = Font(bold=True, size=11)
+        a.font = Font(bold=True, size=10)
     spans.append((sec_start, r_i - 1))
     for a, b in spans:
         ws.merge_cells(start_row=a, start_column=1, end_row=b, end_column=1)
@@ -1185,41 +1348,70 @@ def to_xlsx(path=XLSX):
         c.font = Font(bold=True, size=11)
         for rr in range(a, b + 1):
             ws.cell(rr, 1).fill = sec_fill
+        # 구분이 바뀌는 자리에만 선을 남긴다 — 칸마다 두르면 글자가 선과 다툰다.
+        for cc in range(1, len(HEAD) + 1):
+            ws.cell(a, cc).border = top_rule
 
-    for i, w in enumerate((16, 20, 6, 52, 90, 20, 34, 72, 40), 1):
+    for i, w in enumerate((15, 17, 7, 46, 15, 84, 20, 34, 72, 40), 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     # 운영 열은 숨긴다 — 이 표를 **읽는 사람**(개발 부서장·비즈 직원)에게는 읽을 이유가
-    # 없는 칸이고, 다섯 열이 더 서면 질문과 답변이 화면 밖으로 밀린다. 지우지는 않는다:
+    # 없는 칸이고, 네 열이 더 서면 질문과 답변이 화면 밖으로 밀린다. 지우지는 않는다:
     # 실행기가 「대상 고객」·「선행 질문」으로 돌리고(run_question_map), 「확인 포인트」는
     # «무엇이 나와야 맞는가»의 유일한 기록이다. 보려면 엑셀에서 열 숨기기를 풀면 된다.
     for i in range(HEAD.index("시연") + 1, len(HEAD) + 1):
         ws.column_dimensions[get_column_letter(i)].hidden = True
-    ws.row_dimensions[1].height = 28
-    ws.freeze_panes = "D2"
+    ws.freeze_panes = "D5"
+    ws.auto_filter.ref = f"A4:{get_column_letter(len(HEAD))}{r_i - 1}"
 
     ws2 = wb.create_sheet("고객축_20260929")
-    ws2.append(("고객", "kb-pin", "나이", "성향", "ISA", "상담기록", "잔여한도", "디폴트옵션", "만기건수", "성립 요건"))
-    for c in CUSTOMERS:
-        ws2.append(c)
-    for c in ws2[1]:
-        c.font = Font(bold=True)
-        c.fill = head_fill
-        c.border = box
+    ws2["A1"] = "질문의 「이 고객」이 누구인가"
+    ws2["A1"].font = Font(size=14, bold=True)
+    ws2["A2"] = "상태가 서로 달라 같은 질문에 다른 답이 나옵니다. 기준일 2026-09-29."
+    ws2["A2"].font = Font(size=10, color=GRAY)
+    ws2.row_dimensions[1].height = 24
+    ws2.row_dimensions[3].height = 8
+    for ci, name in enumerate(("고객", "kb-pin", "나이", "성향", "ISA", "상담기록",
+                               "잔여한도", "디폴트옵션", "만기건수", "성립 요건"), 1):
+        ws2.cell(4, ci, name)
+    for c in ws2[4]:
+        c.font = Font(bold=True, size=11)
+        c.fill = gold
+        c.alignment = Alignment(vertical="center", horizontal="center", wrap_text=True)
+    ws2.row_dimensions[4].height = 26
+    for ri, cust in enumerate(CUSTOMERS, 5):
+        for ci, v in enumerate(cust, 1):
+            ws2.cell(ri, ci, v)
+    for rr in range(5, 5 + len(CUSTOMERS)):
+        for cc in range(1, 11):
+            ws2.cell(rr, cc).font = Font(size=10)
+            ws2.cell(rr, cc).alignment = Alignment(vertical="center", wrap_text=True)
+        ws2.cell(rr, 1).font = Font(size=10, bold=True)
+        ws2.row_dimensions[rr].height = 20
     for i, w in enumerate((10, 18, 6, 12, 6, 10, 10, 12, 10, 34), 1):
         ws2.column_dimensions[get_column_letter(i)].width = w
+    ws2.freeze_panes = "A5"
     wb.save(path)
 
 
 def main():
     shown_n, new, demo = counts()
-    kept = len(_carry_answers(XLSX))
+    # **«읽은 수»가 아니라 «따라온 수»를 센다.** 전에는 `len(_carry_answers(...))` 를 그대로
+    # 「보존」으로 찍었는데, 그건 옛 파일에서 걷은 수일 뿐 새 표의 키와 맞았는지는 보지
+    # 않는다. 머리글 자리가 바뀌어 실측 192건이 전부 날아간 날에도 화면은 「192건 보존」을
+    # 찍었다(2026-10-07). 대상 고객을 고치면 키가 바뀌어 답이 떨어지는 일이 실제로 생기므로,
+    # 떨어진 수를 화면이 말해야 한다.
+    before = _carry_answers(XLSX)
+    keys = {_key(item, r[1], r[2]) for _, item, rows in _groups() for _, r in rows}
+    kept = sum(1 for k in before if k in keys)
+    lost = len(before) - kept
     to_xlsx(XLSX)
     print(f"[question_map] {XLSX.relative_to(config.REPO_ROOT)} 갱신 — "
           f"구분 {len(SECTIONS)} · 항목 {len(_groups())} · "
           f"전체 {len(R)} · 보여주기 {shown_n} · "
           f"신규 {new.get('신규', 0)} · "
           f"◎{demo.get('◎', 0)} ○{demo.get('○', 0)} –{demo.get('–', 0)}"
-          + (f" · 실측 답변 {kept}건 보존" if kept else ""))
+          + (f" · 실측 답변 {kept}건 보존" if kept else "")
+          + (f" · ⚠ {lost}건 떨어졌다(키가 바뀐 행)" if lost else ""))
 
 
 if __name__ == "__main__":
