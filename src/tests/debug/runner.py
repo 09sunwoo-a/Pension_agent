@@ -25,6 +25,7 @@ def session(*, customer_id: str | None = None,
             on_progress: Callable[[str], None] | None = None,
             history: list[dict] | None = None,
             session_id: str | None = None,
+            employee_id: str | None = None,
             ) -> Iterator[tuple[Callable[[str], dict], TR.Trace]]:
     """계측을 걸어둔 채 여러 턴을 이어 묻는다. 반환: (ask 함수, 트레이스).
 
@@ -62,8 +63,11 @@ def session(*, customer_id: str | None = None,
             def ask(question: str) -> dict:
                 nonlocal turns
                 tr.begin_turn(question)
+                # employee_id: 이 상담을 하는 직원의 사번 — 쪽지의 받는 사람 기본값이자 보내는
+                # 주체(운영 CLI 의 -e · 행내 API 의 x_client_user 자리). 없으면 환경변수로 떨어진다.
                 r = G.ask(question, history=turns, customer_id=customer_id,
-                          session_id=session_id, on_progress=on_progress)
+                          session_id=session_id, on_progress=on_progress,
+                          employee_id=employee_id)
                 turns = r["history"]
                 return r
 

@@ -10,7 +10,8 @@
                     llm_down        LLM 미연결 턴 — 답 대신 원인을 말한다
     answer.py       answer          clarify 와 compose 를 동시에 돌리고 하나를 고른다 [LLM×2]
     clarify.py      clarify         답의 형태 — 답한다·전제를 밝힌다·되묻는다·없다 [LLM]
-    meta.py         agent_help      「뭘 도와줄 수 있어」 — KB 메타데이터로 답한다
+    meta.py         agent_help      「뭘 도와줄 수 있어」·「기억해」·「문자 보내줄 수 있어」 — 코드가 만든
+                                    «나에 대한 사실» 안에서 질문에 맞춰 쓴다 [LLM]
     lms.py          lms_link        인용된 문구로 LMS 발송 화면 연계를 제안한다. 보내지 않는다
     correction.py   correction      브리핑 산문 수정. 편집 불가 필드면 거절 [LLM]
     act.py          offer           답변이 가리키는 화면이 있으면 「연계해드릴까요」

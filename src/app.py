@@ -558,7 +558,8 @@ with tab_chat:
             return st.popover(label)
         return st.expander(label)
 
-    def render_answer(text: str, links: list | None = None) -> None:
+    def render_answer(text: str, links: list | None = None,
+                      messages: list | None = None) -> None:
         """답변을 그리고, 답변이 가리킨 단말 화면을 누를 수 있는 버튼으로 띄운다.
 
         **링크는 `ask()` 가 준다**(`links` — `{screen, url, label}`). 예전에는 본문에 박힌
@@ -570,6 +571,11 @@ with tab_chat:
         개발 PC 에서는 눌러도 열리지 않으므로 URL 자체를 캡션으로 남긴다.
         """
         st.markdown(text)
+        # 본문이 인용한 고객 발송 문구(LMS) — 화법과 갈라 복사 블록으로 한 번 더 세운다.
+        # 실서비스 프론트는 본문의 그 인용 자리를 이 블록으로 바꿔 그린다(client/README.md).
+        for item in messages or []:
+            st.caption(f"📨 {item.get('label') or '고객 발송 문구'}")
+            st.code(item.get("copy") or item.get("text") or "", language="text")
         for item in links or []:
             st.link_button(f"🔗 {item.get('label') or item.get('screen')} 열기", item["url"])
             st.caption(item["url"])
@@ -630,7 +636,7 @@ with tab_chat:
     def render_assistant(msg: dict, idx: int) -> None:
         """답변 한 건 — 본문 · 출처 · 추천질문 · 트레이스 · 신고. 새 답과 지난 답이
         같은 함수를 지나야 화면이 갈리지 않는다."""
-        render_answer(msg["text"], msg.get("links") or [])
+        render_answer(msg["text"], msg.get("links") or [], msg.get("messages") or [])
         render_sources(msg.get("sources") or [])
 
         # 되묻기로 끝난 턴이면 선택지를 버튼으로도 세운다. 본문에도 같은 선택지가
@@ -730,6 +736,7 @@ with tab_chat:
             "customer": chat_customer,
             "sources": result.get("sources") or [],
             "links": result.get("links") or [],
+            "messages": result.get("messages") or [],
             "followups": result.get("followups") or [],
             "clarify": result.get("clarify"),
             "intent": result.get("intent"),

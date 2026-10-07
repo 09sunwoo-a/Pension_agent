@@ -373,6 +373,16 @@ def first_measure(text: str) -> tuple[str, set[str]] | None:
     return None
 
 
+def measures(text: str) -> list[tuple[str, set[str]]]:
+    """텍스트의 수치 덩이 전부 — (원표기, 허용 형태), 나온 순서대로. `first_measure` 의 전체판.
+
+    답변 문장의 수치가 어느 근거에 있는지를 **원표기로** 보여주려는 호출부(consult_agent/
+    turn_trace.py)를 위해 있다 — `numbers()` 는 정규형(`9000000`)을 섞어 내서 화면에 그대로
+    세우면 문장에 없는 숫자로 보인다.
+    """
+    return [((date or " ".join(toks)), forms) for toks, forms, date in _measures(text)]
+
+
 def first_amount(text: str) -> tuple[str, int] | None:
     """텍스트에 처음 나오는 **금액**과 그 값(원). 금액이 없으면 None.
 

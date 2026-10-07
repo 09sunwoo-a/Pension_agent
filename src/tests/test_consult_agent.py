@@ -13,7 +13,7 @@ from __future__ import annotations
 from pension_agent import config
 from pension_agent.consult_agent import graph as G
 from pension_agent.consult_agent import tools
-from pension_agent.consult_agent.nodes import plan
+from pension_agent.consult_agent.nodes import meta, plan
 from pension_agent.consult_agent.evidence import pitch_slots
 
 from tests.consult._common import (  # noqa: A001 — 집계용 print
@@ -37,6 +37,7 @@ from tests.consult.material import (
     check_history_selection,
     check_market_material,
     check_material_marks,
+    check_no_card_ids_in_material,
     check_origin,
     check_playbook_material,
     check_relations,
@@ -62,6 +63,7 @@ from tests.consult.plan_loop import (
     check_plan_failure,
     check_progress,
     check_replan_on_empty,
+    check_tone_and_marks,
     check_tool_loop,
     check_turn_cost,
 )
@@ -81,11 +83,13 @@ from tests.consult.index import (
     check_fact_in_index,
     check_hier_index,
     check_l0_skip,
+    check_procedure_axes,
     check_tool_axes,
     check_trigger_entrances,
 )
 from tests.consult.tax_credit import check_tax_credit_calc
-from tests.consult.memo import check_memo
+from tests.consult.turn_trace import check_turn_trace
+from tests.consult.memo import check_memo, check_memo_edit, check_memo_schedule, check_memo_by_name, check_memo_edit_material, check_memo_also, check_memo_pick_partial, check_memo_echo_and_address, check_memo_title
 from tests.consult.meta import (
     check_architecture_doc,
     check_node_label_collision,
@@ -108,6 +112,7 @@ def main() -> int:
     G.understand = stub_understand
     G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
     plan.generate = stub_talk              # compose 의 화법 생성
+    meta.generate = stub_talk              # agent_help 의 능력 안내 작성
     tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     agent = G.build_agent()
 
@@ -135,6 +140,7 @@ def main() -> int:
         check_briefing_shared()
         check_customer_material()
         check_playbook_material()
+        check_no_card_ids_in_material()
         check_context_and_clarify()
         check_adequacy_and_shape()
         check_material_marks()
@@ -160,6 +166,14 @@ def main() -> int:
         check_suitable_shape()
         check_history_material()
         check_memo()
+        check_memo_edit()
+        check_memo_schedule()
+        check_memo_by_name()
+        check_memo_edit_material()
+        check_memo_also()
+        check_memo_pick_partial()
+        check_memo_echo_and_address()
+        check_memo_title()
         check_today_material()
         check_account_state()
         check_labeled_pairs()
@@ -175,16 +189,19 @@ def main() -> int:
         check_all_kinds_reachable()
         check_trigger_entrances()
         check_atomic_spans()
+        check_tone_and_marks()
         check_origin()
         check_plan_failure()
         check_llm_down()
         check_compose_retry()
         check_graded_judge()
         check_tool_axes()
+        check_procedure_axes()
         check_rehearsal_expectations()
         check_notice_scope()
         check_guard()
         check_architecture_doc()
+        check_turn_trace()
         check_node_label_collision()
     finally:
         # 위 테스트들(특히 lms_link)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든

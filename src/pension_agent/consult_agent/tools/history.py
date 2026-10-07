@@ -22,9 +22,16 @@ from pension_agent.consult_agent.evidence.record import Evidence, _ev
 # 지식 카드가 아니라 **운영 기록**이라 kinds.json 에 등록하지 않는다(session_store 참고).
 # ─────────────────────────────────────────────────────────────
 
-#: 상담 기록 재료에 항상 붙는 표시. `notices` 라서 답변에서 빠지면 코드가 채워 넣는다.
-#: 지난 상담의 안내가 지금도 맞다는 보장은 없다 — 기록은 "그때 무슨 얘기를 했나"의
-#: 근거이지 현재 기준 값의 근거가 아니고, 둘을 섞으면 낡은 값이 오늘의 답으로 나간다.
+#: 상담 기록 재료에 항상 붙는 표시. 지난 상담의 안내가 지금도 맞다는 보장은 없다 — 기록은
+#: "그때 무슨 얘기를 했나"의 근거이지 현재 기준 값의 근거가 아니고, 둘을 섞으면 낡은 값이
+#: 오늘의 답으로 나간다.
+#:
+#: **재료 성격 표시(`marks`)다 — `notices` 가 아니다**(2026-09-22 변경). `notices` 이던 동안
+#: 이 문장은 <필수 인용> 으로 작성 LLM 에 넘어가 **본문 아무 자리에나** 섰다 — 첫 문장 뒤에
+#: 서서 그 아래 여섯 문단이 전부 지난 상담 얘기로 읽혔다(질문 리스트 28번, 송도윤). 표시는
+#: 이 재료의 성격(시효 민감 — §7 「재료 성격 표시」)이지 본문 문장이 아니라, 신뢰 등급과
+#: 같은 자리(답변 끝 「── 참고한 자료」)에 코드가 세운다. 본문에서 «어디까지가 지난 상담인가»는
+#: 답변 형태 요구가 맡는다(`ANSWER_SHAPES["history"]` — 날짜를 앞세운 한 문단).
 HISTORY_MARK = "※ 지난 상담 기록입니다 — 그때 나눈 이야기이지 지금 기준 값이 아닐 수 있습니다."
 
 #: 기록이 0건일 때 싣는 줄. **없다는 것도 이 도구가 확인한 값이다**(_history 머리말) —
@@ -55,8 +62,8 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     에이전트 답변은 **발췌만** 싣는다. 통째로 실으면 원장이 지난 상담의 문장으로 뒤덮여
     이번 질문과 무관한 수치까지 검증을 통과하게 된다. 발췌라도 그 안의 값은 원장에
-    들어가므로, 재료가 시효 표시를 달고 나온다(HISTORY_MARK) — 답변이 그 값을 '지금
-    기준'으로 말하지 않게 하는 것은 그 표시다.
+    들어가므로, 재료가 시효 표시를 달고 나온다(HISTORY_MARK — 답변 끝에 코드가 세운다).
+    답변이 그 값을 '지금 기준'으로 말하지 않게 하는 것은 형태 요구다(날짜를 앞세운 한 문단).
 
     계획 루프가 정한 `query` 는 **선별에만** 쓴다: 질의어가 걸리는 과거 상담을 최신순보다
     앞세운다(코드 매칭 — LLM 아님). 매칭 0건은 이력 0건이 아니므로 최신순 그대로 싣는다 —
@@ -142,7 +149,11 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     # 구획을 나눠 싣는다 — 오늘 나눈 대화가 「과거 상담」으로 오독되면 방금 한 말이
     # 지난 상담의 근거처럼 인용된다.
-    lines = [f"■ 고객 {customer_id} — 상담 이력 기록"]
+    # 머리줄에 고객 식별번호를 싣지 않는다 — 행내 개인정보 필터가 KB-PIN 을 주민등록번호로
+    # 보고 요청을 400 으로 끊는다(`pension_agent/privacy.py`). 한 턴에 열려 있는 고객은
+    # 하나라 «지금 열려 있는 고객»으로 갈린다(이 도구는 이름을 쓰려고 브리핑을 부르지
+    # 않는다 — 기록 한 줄 때문에 고객 한 명의 판정을 통째로 돌릴 이유가 없다).
+    lines = ["■ 지금 열려 있는 고객 — 상담 이력 기록"]
     if records:
         lines.append("[과거 상담 기록]")
         for session in records[:HISTORY_SESSIONS]:
@@ -156,12 +167,16 @@ def _history(state: AgentState, query: str) -> Evidence | None:
 
     # 시효 표시는 **과거 상담이 실제로 실렸을 때만** 단다. 방금 나눈 대화에 "지난 상담
     # 기록입니다"를 붙이면 표시가 거짓말을 하고, 매번 붙는 표시는 읽히지 않는다 —
-    # 정작 낡은 값이 실린 턴에서도 그냥 지나가게 된다.
+    # 정작 낡은 값이 실린 턴에서도 그냥 지나가게 된다. `marks` 라 본문이 아니라 답변 끝
+    # 「── 참고한 자료」 블록에 선다(HISTORY_MARK 주석).
     return _ev("history", query, "\n".join(lines),
-               [{"id": f"session.{customer_id}", "title": f"고객 {customer_id} 상담 이력",
+               # 제목은 화면뿐 아니라 계획 프롬프트의 「이미 모은 재료」로도 나간다
+               # (`evidence/ledger.py::summarize`) — 여기에도 KB-PIN 을 넣지 않는다. id 도 같다:
+               # 응답의 sources 이벤트로 프론트까지 나가는 값이다(briefing.py 와 같은 자리).
+               [{"id": "session", "title": "이 고객의 상담 이력",
                  "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],
-               notices=[HISTORY_MARK] if records else [])
+               marks=[HISTORY_MARK] if records else None)
 
 
 #: 이번 상담 대화 재료의 범위 — 실을 턴 수와 발화 한 건의 길이. `history` 의 발췌(120자)보다
@@ -228,6 +243,8 @@ def _transcript(state: AgentState, query: str) -> Evidence | None:
     if len(lines) == 1:
         lines.append(TRANSCRIPT_NONE)
     return _ev("transcript", query, "\n".join(lines),
-               [{"id": f"session.{customer_id}.{session_id}", "title": "이번 상담 대화 기록",
+               # id 에 KB-PIN 을 넣지 않는다(위 `history` 와 같은 이유). 세션 구분자만 남긴다 —
+               # 같은 턴에 `history`(id "session")와 함께 실려도 중복 제거에서 갈려야 한다.
+               [{"id": f"session.{session_id}", "title": "이번 상담 대화 기록",
                  "doc": "상담 세션 기록(에이전트가 턴마다 남긴 이번 상담의 대화)",
                  "score": None, "page": None}])

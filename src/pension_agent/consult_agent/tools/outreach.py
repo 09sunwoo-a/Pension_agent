@@ -68,18 +68,36 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
     n_fallback = sum(1 for key in ("event", "seminar") if picked.get(key) and not matched[key])
     n_other = {key: max(len(pools.get(key) or []) - (1 if picked.get(key) else 0), 0)
                for key in ("event", "seminar")}
-    lines = [f"■ 고객 {customer_id} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
+    # 다른 후보 중 이 고객 요건에 맞는 것 — 선정은 종류마다 한 건이라, 요건에 맞는 세미나가
+    # 둘이면 하나는 «다른 후보»로 밀린다. 거기서 요건 표시 없이 이름만 실리면 답변이 그것을
+    # 맞는 콘텐츠로 알아볼 수 없다. 실측(2026-09-28 오세훈): 만기예금 요건에 맞는 세미나가 후보
+    # 목록에 이름만 있었고, «다른 건 없어?»에 답변이 요건 무관 폴백 이벤트를 «적합»으로 세웠다.
+    n_other_fit = {key: sum(1 for c in (pools.get(key) or [])
+                            if c["id"] in relevant_ids and c["id"] != (picked.get(key) or {}).get("id"))
+                   for key in ("event", "seminar")}
+    wanted = {c for s in (facts.get("problem_situations") or []) for c in (s.get("conds") or [])}
+
+    def _fit_names(item: dict) -> list[str]:
+        """이 콘텐츠가 맞는 이 고객의 요건 이름(CONDS). 맞댄 축은 `relevant_outreach` 와 같다."""
+        return [strategy_customer.CONDS.get(c, c) for c in (item.get("conds") or []) if c in wanted]
+    # 고객 식별번호 대신 이름으로 부른다 — 행내 개인정보 필터가 KB-PIN 을 주민등록번호로
+    # 보고 요청을 400 으로 끊는다(`pension_agent/privacy.py` · briefing.py 의 같은 자리).
+    lines = [f"■ 고객 {profile.nm} — 안내할 이벤트·세미나 (브리핑 ⑨ 와 같은 선정)",
              f"· 지금 안내할 것 {n_picked}건 — "
              + " · ".join(f"{label} {1 if matched[key] else 0}건"
                           for key, label in (("event", "이벤트"), ("seminar", "세미나")))
              + (f" · 이 고객 요건과 무관한 것 {n_fallback}건" if n_fallback else "")
              + f" · 아직 열려 있는 다른 후보 이벤트 {n_other['event']}건 · "
-               f"세미나 {n_other['seminar']}건"]
+               f"세미나 {n_other['seminar']}건"
+             + (f" · 다른 후보 중 이 고객 요건에 맞는 것 "
+                f"{n_other_fit['event'] + n_other_fit['seminar']}건"
+                if n_other_fit["event"] or n_other_fit["seminar"] else "")]
     if n_picked == 0:
         lines.append("· 이 고객 요건에 맞는 콘텐츠는 없다. 아래는 열려 있는 콘텐츠 중 날짜가 "
                      "가까운 것이며, 이 고객에게 맞는 것으로 안내하지 않는다")
     atomic: list[str] = []
     lms: dict[str, dict] = {}
+    messages: list[str] = []
     for key, label in (("event", "이벤트"), ("seminar", "세미나")):
         item = picked.get(key)
         if not item:
@@ -89,21 +107,30 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
             lines.append(f"  내용: {item['description']}")
         if matched[key]:
             # 맞댄 축은 문제상황의 요건이다(`relevant_outreach` 와 같은 축). 이름은 CONDS 에서.
-            wanted = {c for s in (facts.get("problem_situations") or []) for c in (s.get("conds") or [])}
-            hits = [strategy_customer.CONDS.get(c, c) for c in (item.get("conds") or []) if c in wanted]
-            lines.append(f"  요건 일치: {', '.join(hits) or '있음'}")
+            lines.append(f"  요건 일치: {', '.join(_fit_names(item)) or '있음'}")
             if item.get("reason"):
                 lines.append(f"  추천 사유: {item['reason']}")
         else:
             # 폴백은 사유를 싣지 않는다 — 사유 문장이 있으면 답변이 그것을 «맞춤»의 근거로 쓴다.
             lines.append("  요건 일치: 없음 — 이 고객 요건과 무관. 열려 있는 콘텐츠 중 날짜가 가까운 것")
         if item.get("keywords"):
-            lines.append(f"  매칭 키워드: {', '.join(item['keywords'])}")
+            # 폴백의 키워드는 «이런 고객에게 맞는 콘텐츠»라는 뜻이지 이 고객과 맞은 것이 아니다 —
+            # «매칭»이라고 적으면 답변이 이 고객이 그 상태인 것처럼 옮긴다.
+            lines.append(f"  매칭 키워드: {', '.join(item['keywords'])}" if matched[key]
+                         else f"  콘텐츠 대상 키워드(이 고객과 무관): {', '.join(item['keywords'])}")
         if item.get("url"):
             lines.append(f"  안내 링크: {item['url']}")
             # 링크는 한 글자만 달라도 죽는다 — 답변이 이 값을 말하면 원문 그대로여야 한다.
             atomic.append(item["url"])
         lines.append(f"  발송 문구: {item['lms_message']}")
+        if not matched[key]:
+            # 폴백 문구에 고객 상태가 섞여 있을 수 있다(예전 브리핑 · 규칙 밖 생성). 그 말을
+            # 적합성의 근거로 옮기면 «요건 일치: 없음»이 답변에서 뒤집힌다.
+            lines.append("  주의: 요건 무관 콘텐츠의 문구다 — 문구 안의 말을 이 고객에게 "
+                         "맞는다는 근거로 쓰지 않는다")
+        # 답변이 인용한 발송 문구를 화면이 «복사할 문구»로 가를 때 원본으로 쓴다
+        # (effects/messages.py). 요건 일치와 무관하다 — 폴백 문구도 답변에 인용되면 같은 꼴로 선다.
+        messages.append(item["lms_message"])
         # 발송 화면 제안(act._propose_lms)은 요건에 맞는 것에만 붙는다 — 폴백 문구가 나가면
         # 그 고객과 무관한 문자가 나간다.
         if matched[key]:
@@ -116,7 +143,9 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
         if others:
             lines.append(f"  다른 {label} 후보 {len(others)}건:")
         for other in others:
-            lines.append(f"  · {other['name']} — {other['schedule']}")
+            fit = _fit_names(other) if other["id"] in relevant_ids else []
+            lines.append(f"  · {other['name']} — {other['schedule']}"
+                         + (f" · 요건 일치: {', '.join(fit)}" if fit else ""))
 
     for label, values in (("문제상황", [s["title"] for s in facts.get("problem_situations") or []]),
                           ("성립 요건", _cond_labels(facts.get("conditions") or []))):
@@ -129,11 +158,12 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
             lines.append(f"· 참고: {key} — {why}")
 
     return _ev("outreach", query, "\n".join(lines),
-               [{"id": f"outreach.{customer_id}",
+               # id 에 KB-PIN 을 넣지 않는다(briefing.py 와 같은 자리) — 응답의 sources 이벤트로 나간다.
+               [{"id": "outreach",
                  "title": "고객님께 안내해보세요 — 열려 있는 이벤트·세미나",
                  "doc": "안내 콘텐츠 레지스트리 (브리핑 ⑨ 와 같은 산출)",
                  "score": None, "page": None}],
                atomic=atomic,
                # 발송 화면 연계(act.py)가 쓰는 문구. 승낙 턴이 문구를 다시 만들지 않도록
                # 이번 턴의 산출을 그대로 들려 보낸다(CLAUDE.md §10 「제안한 턴이 남긴 것으로 정한다」).
-               meta={"lms": lms})
+               meta={"lms": lms, "messages": messages})

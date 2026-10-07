@@ -120,7 +120,10 @@ def _fake_ask(question, history=None, **kw):
            + "\n".join(f"· {q}" for q in FOLLOWUPS),
            "sources": SOURCES, "followups": FOLLOWUPS, "intent": "situation",
            "pending_action": None, "clarify": None,
-           "history": [*(history or []), {"question": question, "tools": []}]}
+           "history": [*(history or []), {"question": question, "tools": []}],
+           # 절차 기록(consult_agent/turn_trace) — 모양만 흉내 낸다. 가림을 재려고 원장 표기를 싣는다.
+           "trace": {"intent": "situation", "timeline": [{"stage": "fake", "text": "고객=171203-4815062"}],
+                     "rounds": [], "evidence": [], "sources": SOURCES, "sentences": []}}
     if question == "연계":
         out.update(answer=ANSWER + "\n\n— " + ACTION["prompt"], followups=[], pending_action=ACTION)
     if question == "되묻기":
@@ -272,6 +275,8 @@ try:
     # (`sources`·`followups` 가 0건에도 빈 목록을 보내는 것과 같은 규약).
     check("links" in answer and isinstance(answer["links"], list),
           "answer 에 links 가 항상 있다 — 링크가 없으면 빈 목록", str(answer.get("links")))
+    check("messages" in answer and isinstance(answer["messages"], list),
+          "answer 에 messages 가 항상 있다 — 발송 문구가 없으면 빈 목록", str(answer.get("messages")))
     check(next(e for e in evs if e["type"] == "followups")["items"] == FOLLOWUPS,
           "추천질문은 followups.items 로 따로 간다", str(evs[-2]))
     src = next(e for e in evs if e["type"] == "sources")
@@ -303,6 +308,11 @@ try:
           "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
     check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",
           str(logging.getLogger().handlers))
+    # httpx 는 요청마다 주소를 INFO 로 찍고 MCP 주소에는 클라이언트 id 가 경로에 있다 —
+    # 루트가 INFO 여도 그 줄은 나가지 않아야 한다(main._QUIET_LOGGERS).
+    check(all(logging.getLogger(n).level >= logging.WARNING for n in main._QUIET_LOGGERS),
+          "바깥 라이브러리(httpx·MCP SDK)의 INFO 는 stdout 으로 나가지 않는다",
+          str({n: logging.getLogger(n).level for n in main._QUIET_LOGGERS}))
     check(_seen.get("x_client_user") == "emp-0417",
           "x_client_user 가 에이전트까지 전달된다", str(_seen.get("x_client_user")))
     check(_seen.get("session_id") == "default" and _seen.get("customer_id") is None,
@@ -314,6 +324,27 @@ try:
     _events(r)
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
+    # 하이픈 없는 13자리 — 받기는 한다(main.py 머리말 customer_id).
+    _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
+                                            customer_id="1548214938201")))
+    check(_seen.get("customer_id") == "154821-4938201",
+          "customer_id 는 하이픈 없는 13자리로 와도 원장 표기로 되돌린다", str(_seen.get("customer_id")))
+    # b64 — 프론트가 보내는 꼴이다.
+    from pension_agent.strategy_agent import customer as _sc
+    _enc = _sc.encode_id("154821-4938201")
+    _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
+                                            customer_id=_enc)))
+    import re as _re
+    check(_enc.startswith("b64:") and not _re.search(r"\d{4}", _enc)
+          and _seen.get("customer_id") == "154821-4938201",
+          "customer_id 의 b64 꼴은 숫자열이 없고(4자리 연속 없음), 원장 표기로 되돌아온다",
+          f"{_enc} → {_seen.get('customer_id')}")
+    _events(client.post("/chat", json=_body(message="q", x_client_user="emp-0417", customer_id="b64:@@")))
+    check(_seen.get("customer_id") == "b64:@@",
+          "풀리지 않는 b64 값은 그대로 둔다(없는 고객으로 떨어진다)")
+    _events(client.post("/chat", json=_body(message="q", x_client_user="emp-0417", customer_id="C-없음")))
+    check(_seen.get("customer_id") == "C-없음",
+          "customer_id 의 다른 꼴은 손대지 않는다 — 없는 고객을 있는 고객으로 읽지 않는다")
 
     # ── 사번(employee_id) ────────────────────────────────────
     # 쪽지의 수신자이자 발송 주체이고 상담이력에 «누가 상담했나»로 남는다. x_client_user
@@ -360,6 +391,10 @@ try:
           "연계 제안 문장은 answer.text 의 마지막 문장으로 남는다")
     check(next(e for e in evs if e["type"] == "followups")["items"] == [],
           "연계 제안 턴에는 추천질문이 없다(빈 목록으로는 온다)")
+
+    # 동명이인 목록 턴 — 네/아니오 턴이 아니라 action 을 내지 않는다(버튼이 서지 않게).
+    picking = main._turn_events({"answer": "a", "pending_action": {**ACTION, "candidates": [{"user_id": "1"}]}})
+    check("action" not in _types(picking), "동명이인 목록 턴에는 action 이벤트가 없다", str(_types(picking)))
 
     # 되묻기 — 선택지가 clarify 이벤트로 간다.
     evs = _events(client.post("/chat", json=_body(message="되묻기", x_client_user="emp-1")))
@@ -486,7 +521,8 @@ try:
 
     # ── 계약 문서와 코드가 갈리지 않는다 — client/README.md 는 프론트가 읽는 계약이다 ──
     _readme = (_cfg.SRC_ROOT.parent / "client" / "README.md").read_text(encoding="utf-8")
-    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done"}
+    _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done",
+                "log", "trace"}
     _in_code = set(re.findall(r'"type":\s*"(\w+)"', Path(main.__file__).read_text(encoding="utf-8")))
     check(_in_code == _emitted,
           "main.py 가 내보내는 이벤트 type 목록이 테스트가 아는 것과 같다(새 type 은 여기와 문서에 등록)",
@@ -498,6 +534,8 @@ try:
     # 이벤트 type 만으로는 안 잡히는 자리 — `links` 는 새 type 이 아니라 answer 의 필드다.
     check("`links`" in _readme and "mystar-link://" in _readme,
           "client/README.md 가 answer.links 와 딥링크 스킴을 설명한다")
+    check("`answer.messages`" in _readme and "`copy`" in _readme,
+          "client/README.md 가 answer.messages(고객 발송 문구)와 복사 값을 설명한다")
 
     # ── 호출자가 중간에 끊어도 맥락은 남는다 ─────────────────
     # 게이트웨이 타임아웃으로 답을 다 받기 전에 끊기면 generate 는 멈추지만 ask() 스레드는
@@ -565,6 +603,59 @@ try:
     main.consult_graph.ask = _fake_ask
     _captured.clear()
 
+    # ── 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다(main.py 머리말 «로그 이벤트») ──
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
+    check("log" not in _types(_events(r)) and "trace" not in _types(_events(r)),
+          "로그 이벤트·절차 기록은 기본으로 꺼져 있다", str(_types(_events(r))))
+
+    r = client.post("/chat", json=_body(message="로그 질문", x_client_user="emp-9",
+                                        customer_id="171203-4815062", log_events=True))
+    evs = _events(r)
+    _lg = [e for e in evs if e["type"] == "log"]
+    _texts = [e["text"] for e in _lg]
+    _lrid = next((t.split("[api] [")[1][:8] for t in _texts if "] request " in t), None)
+    check(bool(_lrid) and all(f"[{_lrid}]" in t for t in _texts),
+          "log_events 를 켜면 그 요청의 줄만 실린다", str(_texts[:2]))
+    check(any("[api]" in t and "] request " in t and "사용자=emp-9" in t for t in _texts)
+          and any("[agent]" in t and " fake " in t for t in _texts)
+          and any("[api]" in t and "] done " in t for t in _texts),
+          "log 이벤트에 api request · agent 단계 · api done 줄이 모두 실린다", str(_texts))
+    check(all(e.get("level") and e.get("logger") and t.startswith(f"{e['level']}:     [{e['logger']}]")
+              for e, t in zip(_lg, _texts)),
+          "log.text 는 stdout 줄과 같은 형식이고 level·logger 가 따로 실린다", str(_lg[:1]))
+    check(not any("171203-4815062" in t for t in _texts) and any("[개인정보 가림]" in t for t in _texts),
+          "log 이벤트는 고객 원장 표기를 가린다 — 게이트웨이 필터가 응답을 막지 않게", str(_texts[:1]))
+    check(any("171203-4815062" in rec.getMessage() for rec in _captured if rec.name == "api"),
+          "stdout 로그 줄은 가리지 않는다(사본만 가린다)")
+    _nolog = [e for e in evs if e["type"] != "log"]
+    check(_types(_nolog) == ["progress"] * 3 + ["answer", "sources", "followups", "trace", "done"]
+          and _types(evs)[-1] == "done",
+          "log 이벤트를 빼면 순서는 그대로이고 trace 가 done 바로 앞에 온다", str(_types(evs)))
+    _tr = next((e for e in evs if e["type"] == "trace"), {})
+    check(_tr.get("intent") == "situation" and _tr.get("sources") == SOURCES
+          and isinstance(_tr.get("timeline"), list),
+          "trace 이벤트가 ask() 의 절차 기록을 구조 그대로 싣는다", str(_tr)[:200])
+    check("171203-4815062" not in json.dumps(_tr, ensure_ascii=False)
+          and "[개인정보 가림]" in json.dumps(_tr, ensure_ascii=False),
+          "trace 이벤트도 고객 원장 표기를 가린다", str(_tr.get("timeline")))
+    check(not main._log_tap._sinks, "요청이 끝나면 로그 가로채기를 뗀다", str(main._log_tap._sinks))
+
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-9", log_events=True),
+                    headers={"Accept": "application/json"})
+    _jevs = _events_in(r.json().get("content", ""))
+    _jt = _types(_jevs)
+    check(_jt[0] == "log" and "done" in _jt and _jt.index("answer") > max(i for i, x in enumerate(_jt) if x == "log")
+          and any("] done " in e["text"] for e in _jevs if e["type"] == "log"),
+          "비스트림은 log 이벤트를 content 앞에 모아 싣는다", str(_jt))
+    check(_jt[-2:] == ["trace", "done"], "비스트림도 trace 가 done 바로 앞에 온다", str(_jt))
+
+    main.LOG_EVENTS = True
+    try:
+        r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
+        check("log" in _types(_events(r)), "CHAT_LOG_EVENTS=1 이면 모든 요청에 실린다", str(_types(_events(r))))
+    finally:
+        main.LOG_EVENTS = False
+
     # ── 실패해도 스트림은 끊지 않는다 ────────────────────────
     def _boom(*a, **k):
         raise llm.LLMError("LLM 미설정 — 테스트")
@@ -585,6 +676,12 @@ try:
           str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
     check(not any("] disconnect " in rec.getMessage() for rec in _captured),
           "정상 완료·실패 응답에는 «연결 끊김» 경고가 찍히지 않는다")
+    # 실패 줄(`[api] error`)은 이벤트 루프에서 찍힌다 — error 이벤트보다 먼저 실려야 한다.
+    r = client.post("/chat", json=_body(message="q", x_client_user="emp-1", log_events=True))
+    evs = _events(r)
+    _err_log = next((i for i, e in enumerate(evs) if e["type"] == "log" and "] error " in e["text"]), None)
+    check(_err_log is not None and _err_log < _types(evs).index("error") and _types(evs)[-1] == "done",
+          "실패 턴도 error 로그 줄이 error 이벤트보다 먼저 실린다", str(_types(evs)))
 finally:
     main.consult_graph.ask = _saved_ask
 

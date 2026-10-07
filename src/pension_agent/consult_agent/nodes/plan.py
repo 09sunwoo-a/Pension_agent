@@ -49,24 +49,23 @@ MAX_STEPS = 4
 #: "도구를 한 번도 안 부른" 것이 된다(증상은 '근거 없음'이라 원인이 안 보인다).
 PLAN_MAX_TOKENS = 300
 
-#: 근거를 하나도 못 모았을 때의 답. 지어내는 대신 없다고 말하고 무엇이 있는지 알려준다.
+#: 근거를 하나도 못 모았을 때의 답. 지어내는 대신 없다고만 말한다 — 한 문장이다.
 #:
 #: **말투는 답변과 같은 공손한 해요체다**(2026-09-18 — 그 전에는 「찾지 못했습니다」였다).
 #: 이 문장은 답변 자리에 그대로 나가므로, 평소 답변보다 딱딱하면 직원에게는 «못 찾은 턴에만
 #: 에이전트가 무례해지는» 것으로 읽힌다 — 실제로 시험 질문(지식베이스에 없는 예측 질문)에
-#: 「그 자료는 없어요」가 나가 그 지적을 받았다. 내용(무엇이 있는지 · 무엇이 화면에 걸려
-#: 있는지)은 그대로다 — 공손하게 쓰는 것과 없는 것을 있다고 말하는 것은 다르다.
-NO_EVIDENCE = (
-    "죄송해요, 그 질문에 쓸 근거는 제가 가진 지식베이스에서 찾지 못했어요. "
-    "제가 가진 자료는 화법·제도 수치·업무 절차·단말 화면번호·비대면 채널 경로·"
-    "고객군 정의·관리 방법론·현장 관찰이고, 고객 개별 정보와 지난 상담 기록은 "
-    "브리핑 화면이 열려 있을 때만 볼 수 있어요."
-)
-
-#: '없다'에 덧붙이는 **무엇을 찾아봤는지**. §5 "못 찾았으면 무엇을 갖고 있는지 알려준다"의
-#: 나머지 절반이다 — 어떤 재료를 어떤 말로 뒤졌는지 보이면 직원이 다시 물을 수 있다.
-#: 이게 없으면 "분명 있는 지식인데 왜 못 찾지?"에 아무도 답할 수 없다(화면에서 끝나야 한다).
-TRIED = "\n\n찾아본 곳: {calls}\n다른 말로 다시 물어보시면 찾을 수도 있어요."
+#: 「그 자료는 없어요」가 나가 그 지적을 받았다.
+#:
+#: **내용은 «없다» 하나다**(2026-09-21 — 그 전에는 가진 재료 종류 여덟 가지를 나열하고, 뒤에
+#: 「찾아본 곳: 시황 자료 「…」 · 제도·상품 수치 「…」」와 「다른 말로 다시 물어보시면 찾을 수도
+#: 있어요」를 붙였다). 행내 실측(질문 리스트 13번)에서 그 안내문 전체가 직원에게 이상하게
+#: 읽혔다: «지식베이스»는 직원에게 생소한 개발 용어이고, 재료 종류 나열은 직원이 물은 것과
+#: 무관하며, «찾아본 곳»은 계획 LLM 이 만든 질의를 직원에게 보여주는 것이라 읽을 이유가 없고,
+#: «다른 말로 다시 물어보라»는 어떻게 물으라는 것인지가 없어 지시가 아니다. 진단(무엇을 어떤
+#: 말로 찾아봤나)은 화면이 아니라 트레이스·로그의 몫이다 — `tools.run` 이 호출마다 결과를
+#: 남기고, 아래 compose 가 `searched=` 로 건수를 남긴다. 공손하게 쓰는 것과 없는 것을 있다고
+#: 말하는 것은 다르다 — 없다는 사실은 그대로다.
+NO_EVIDENCE = "죄송해요, 그 질문은 제가 가진 자료로는 답을 드리기 어려워요."
 
 
 #: 재료를 **읽지 못한** 턴의 답. NO_EVIDENCE 와 절대 같은 말을 하면 안 된다 — 찾아보고
@@ -75,7 +74,7 @@ TRIED = "\n\n찾아본 곳: {calls}\n다른 말로 다시 물어보시면 찾을
 #: 에 맞춘 것도 같은 이유다 — 직원이 받는 안내가 실패 지점에 따라 달라지면 진단이 어렵다.
 TOOL_FAILED = (
     "지금은 답변을 만들 수 없어요 — {what} 자료를 읽는 데 실패했습니다. "
-    "지식베이스에 자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reasons})"
+    "자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reasons})"
 )
 
 
@@ -124,23 +123,6 @@ def _failed_label(name: str) -> str:
     return (tool.progress if tool and tool.progress else name)
 
 
-def _tried_label(step: dict) -> str:
-    """«찾아본 곳» 한 칸 — 직원이 읽는 재료 이름 + 찾아본 말.
-
-    **`_label` 과 갈라 둔다.** 그쪽은 계획 프롬프트에 실리는 서명이라 도구 **이름**이어야
-    하고(LLM 이 같은 호출을 다시 고르지 않게 하는 좌표다), 이쪽은 화면에 나가는 문장이다.
-    한 함수로 쓰던 동안 「찾아본 곳: fact:고유계정대 최근 한 달 증가액」이 직원 화면에
-    그대로 떴다(2026-09-21 실측, 13번) — `fact` 는 코드 안의 이름이지 업무 표현이 아니고,
-    §5 「재료에 개발 용어를 쓰지 않는다」가 막는 바로 그것이다. 죽은 도구를 `_failed_label`
-    이 이미 같은 방식으로 옮기고 있었는데 이 줄만 빠져 있었다.
-
-    재료 이름은 도구 선언에서 온다 — 여기서 표를 새로 만들지 않는다(진행 표시·고장 안내와
-    같은 문구를 쓴다. 표가 둘이면 한쪽만 고쳐진다). 찾아본 말(`query`)은 계획 LLM 이 쓴
-    한국어라 그대로 싣는다 — 그게 «어떤 말로 찾아봤는지»이고, 직원이 다시 물을 때의 단서다.
-    """
-    return f"{_failed_label(str(step.get('tool') or ''))} 「{step.get('query')}」"
-
-
 def _tool_failed(state: AgentState) -> str:
     """도구가 죽어 재료를 못 읽은 턴의 답. 무엇이 왜 실패했는지를 함께 남긴다 —
     진단이 화면에서 끝나야 한다(§11 · LLM_FAILED 가 원인을 싣는 것과 같은 이유).
@@ -158,19 +140,40 @@ def _tool_failed(state: AgentState) -> str:
 
 
 def _no_evidence(state: AgentState) -> str:
-    """근거 0건 답변. 무엇을 찾아봤는지 함께 말한다.
+    """근거 0건 답변 — 없다고만 말한다(NO_EVIDENCE 주석).
 
-    죽은 호출은 «찾아본 곳»에 세지 않는다 — 그 도구는 지식베이스를 보지도 못했으므로,
-    거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다. 장부가 하나가 된 뒤로는
-    그 판정이 `outcome` 한 칸이다(예전에는 서명을 잘라 죽은 도구 목록과 맞춰 봤다).
+    무엇을 어떤 말로 찾아봤는지는 화면에 싣지 않는다. 그 기록은 `state["steps"]` 에 그대로
+    있고 트레이스가 호출마다 결과(성공·없음·실패)를 남긴다 — 「분명 있는 자료인데 왜 못
+    찾지?」는 거기서 답한다. 함수로 남겨 두는 이유는 호출부(compose)가 세 안내문을 같은
+    꼴로 부르기 때문이다(LLM_FAILED · TOOL_FAILED 와 나란히).
     """
-    calls = [_tried_label(s) for s in _steps(state) if s.get("outcome") != FAILED]
-    if not calls:
-        return NO_EVIDENCE
-    return NO_EVIDENCE + TRIED.format(calls=" · ".join(calls))
+    return NO_EVIDENCE
 
-#: 빠진 필수 표시를 채워 넣는 블록의 머리말. 근거 원문 전체가 아니라 표시만 붙는다.
-MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
+#: 표시 문장의 첫 글자. 카드에서 온 표시는 이 셋 중 하나로 시작한다(※ 시효 · ⚠ 주의 · ⚖ 고지).
+_MARK_HEADS = ("※", "⚠", "⚖")
+
+
+def _as_mark(text: str) -> str:
+    """빠져서 코드가 덧붙이는 표시 한 줄. 표지가 없는 문장(세액공제 카드의 결정세액 단서처럼
+    카드 본문에서 떼어 온 것)에는 ※ 를 앞세운다 — 그래야 본문 뒤에 이어진 문단이 아니라
+    표시로 읽힌다. 예전에는 「── 빠뜨리면 안 되는 표시」 머리말을 세웠는데, 그 말은 코드
+    안의 라벨이지 직원이 읽을 말이 아니었다(2026-09-22, 질문 리스트 49·50번). 문장 자체는
+    한 글자도 바꾸지 않는다 — 표시 포함 검사(`_span_verdict`)가 그 문장을 그대로 찾는다."""
+    text = text.strip()
+    return text if text.startswith(_MARK_HEADS) else f"※ {text}"
+
+
+#: 본문 한 줄 안에서 앞 문장에 이어 붙은 표시(※·⚠·⚖). 표시는 «그대로 옮겨 적을 문장»이라
+#: LLM 이 앞 문장 뒤에 한 칸 띄고 붙이는 일이 잦다 — 「…밝히신 적이 있어요. ※ 지난 상담
+#: 기록입니다 — …」(2026-09-29 행내 실측, 질문 리스트 29번). 표시가 문장의 일부로 읽힌다.
+_MARK_INLINE = re.compile(r"(?<=\S)[ \t]+(?=[※⚠⚖]\s)")
+
+
+def _break_marks(text: str) -> str:
+    """앞 문장에 이어 붙은 표시를 제 줄로 내린다. 글자는 바꾸지 않는다 — 공백 하나가 줄바꿈이
+    될 뿐이라 검증(수치·스팬·표시 포함 여부)의 결과는 그대로다. 작성 규칙 14 가 같은 것을
+    시키지만 지시만으로는 지켜지지 않아 코드가 마지막에 한 번 정리한다."""
+    return _MARK_INLINE.sub("\n", text)
 
 #: 재료 성격 표시 블록의 머리말(§7). 어느 자료에서 온 말인지 · 고객에게 그대로 옮겨도
 #: 되는지. 답을 읽는 사람은 직원이고, 무엇을 옮길지는 직원이 거른다 — 그 판단에 필요한
@@ -182,7 +185,7 @@ MISSING_NOTICES = "── 빠뜨리면 안 되는 표시"
 #: 어느 단계(슬롯 분해·계획·문장 작성)에서 실패했든 이 한 문장으로 답한다.
 LLM_FAILED = (
     "지금은 답변을 만들 수 없어요 — LLM 호출이 실패했습니다. "
-    "지식베이스에 자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reason})"
+    "자료가 없다는 뜻이 아니니, 잠시 후 다시 시도해주세요.\n({reason})"
 )
 
 
@@ -216,7 +219,7 @@ def short_reason(reason: str | None) -> str:
 #: 안내문으로 분류하면 그 재료가 턴 기록에서 사라진다.
 RAW_EVIDENCE = (
     "답변 문장이 근거 검증을 통과하지 못해서, 찾은 근거를 원문 그대로 보여드려요 — "
-    "아래는 제가 쓴 문장이 아니라 지식베이스 원문입니다.\n({reason})"
+    "아래는 제가 쓴 문장이 아니라 자료 원문입니다.\n({reason})"
 )
 
 
@@ -371,7 +374,8 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # 프롬프트 본문이 도구 이름을 규칙 안에 적고 있어(PLAN_PROMPT 「직원이 이전 답변을
     # 가리키면 last_answer 를 부른다」) LLM 은 카탈로그에 없는 이름도 고른다. 등록 여부로만
     # 거르면 그 호출이 실행돼 빈손으로 돌아오고, 같은 이름이 반복 차단에 걸릴 때까지 바퀴를
-    # 버린 뒤 «찾아본 곳: last_answer:[1]» 이 직원 화면에 나갔다(2026-09-15 케이스 12b).
+    # 버린 뒤 그 호출이 «찾아본 곳: last_answer:[1]» 으로 직원 화면에 나갔다(2026-09-15
+    # 케이스 12b — 그 줄은 지금 없지만 바퀴를 버리는 것은 그대로다).
     # 카탈로그 밖 이름은 없는 도구와 같은 처분이다 — 실행하지 않고 재계획으로 넘긴다.
     if action.get("done") or not isinstance(name, str) or name not in tools.usable(state):
         return {**alive, **_wrap_up(state, evidence, steps)}
@@ -499,13 +503,28 @@ def _ledger_screens(evidence: Iterable[tools.Evidence]) -> set[str]:
     return screens.declared(evidence)
 
 
+#: 답변·원문 스팬 속 링크. 인용부호·괄호·공백에서 끊고, 문장부호 꼬리는 뒤에서 뗀다.
+_URL = re.compile(r"https?://[^\s\"'“”‘’«»<>()\[\]]+")
+
+
+def _urls_in(text: str) -> set[str]:
+    return {m.group().rstrip(".,;:!?…") for m in _URL.finditer(text or "")}
+
+
+def _ledger_urls(evidence: Iterable[tools.Evidence]) -> set[str]:
+    """이번 턴 원장 **전체**가 원문 스팬으로 선언한 링크. `_ledger_screens` 와 같은 이유로 합집합이다."""
+    return {u for e in evidence for span in e["atomic"] for u in _urls_in(span)
+            if _URL.fullmatch(span.strip())}
+
+
 def _span_verdict(found: tools.Evidence, answer: str,
-                  known_screens: set[str] | None = None) -> tuple[str, list[str]]:
+                  known_screens: set[str] | None = None,
+                  known_urls: set[str] | None = None) -> tuple[str, list[str]]:
     """이 근거의 원문 스팬이 답변에서 어떻게 어긋났는지 판정한다. 종류는 도구가 선언한다.
 
     `known_screens` — 화면번호 판정에 쓸 «원장이 아는 화면» 집합. 호출부(`_screen`)가
     원장 전체의 합집합(`_ledger_screens`)을 넘긴다. 넘기지 않으면 이 근거 것만 본다
-    (근거 하나로 재는 검사용).
+    (근거 하나로 재는 검사용). `known_urls` 는 링크에 대한 같은 것이다(`_ledger_urls`).
 
     · `atomic` — 값 + 조건이 붙은 한 덩이. 그 숫자를 쓰면서 원문을 안 실었다 → **DISCARD**.
       블록을 덧붙이는 복구로는 안 된다. 틀린 문장이 옳은 블록 옆에 그대로 남기 때문이다.
@@ -540,8 +559,24 @@ def _span_verdict(found: tools.Evidence, answer: str,
             if said not in known_screens:
                 return DISCARD, [(m.group(), [])]
 
+    # 링크도 **식별자**다 — 화면번호와 같은 규칙으로 잰다. 한 글자만 달라도 죽는 값이라
+    # 정확히 인용했거나 아예 안 불렀거나 둘 중 하나여야 하고, 흩어진 숫자로 재면 안 된다.
+    # 콘텐츠 링크끼리 꼬리 번호를 공유하기 때문이다(`/event/irp-001` · `/seminar/irp-001`).
+    # 예전 규칙(스팬이 답변에 없는데 숫자가 겹치면 폐기)은 그래서 **세미나 링크만 정확히
+    # 인용한 답을** «이벤트 링크를 풀어 썼다»로 버렸다 — 걸린 것은 요건과 무관해서 답변이
+    # 일부러 뺀 폴백 이벤트의 링크였다(2026-09-23 실측 — 오세훈, 안내 콘텐츠 질문).
+    #
+    # 지금 재는 것은 «답변의 링크가 이 턴 원장에 **없는** 링크인가» 하나다. 원장이 링크를
+    # 하나도 선언하지 않았으면 재지 않는다(그때 링크 속 숫자는 수치 검사가 본다).
+    if known_urls is None:
+        known_urls = _ledger_urls([found])
+    if known_urls:
+        for said in sorted(_urls_in(answer)):
+            if said not in known_urls:
+                return DISCARD, [(said, [])]
+
     for span in found["atomic"]:
-        if _SCREEN_SPAN.fullmatch(span.strip()):
+        if _SCREEN_SPAN.fullmatch(span.strip()) or _URL.fullmatch(span.strip()):
             continue                      # 위에서 식별자 규칙으로 이미 판정했다
         if span not in answer and (numbers(span) & numbers(answer)):
             # 걸린 스팬을 함께 돌려준다 — DISCARD 처분에는 안 쓰이지만, 계측(trace)이 이걸
@@ -754,7 +789,8 @@ def _screen(answer: str, evidence: list[tools.Evidence],
         return [f"자료가 「틀린 표현」으로 적어둔 것을 그대로 말함: {b}" for b in broken], []
 
     ledger_screens = _ledger_screens(evidence)
-    verdicts = [_span_verdict(e, answer, ledger_screens) for e in evidence]
+    ledger_urls = _ledger_urls(evidence)
+    verdicts = [_span_verdict(e, answer, ledger_screens, ledger_urls) for e in evidence]
     if any(v == DISCARD for v, _ in verdicts):
         spans = [span for e, (v, detail) in zip(evidence, verdicts) if v == DISCARD
                  for span, _ in detail]
@@ -766,8 +802,9 @@ def _screen(answer: str, evidence: list[tools.Evidence],
     for _found, (verdict, gaps) in zip(evidence, verdicts):
         if verdict != APPEND:
             continue
-        appends += [f"· {label}\n" + "\n".join(f"  {m}" for m in missing)
-                    for label, missing in gaps]
+        # 표시 문장만 모은다 — 카드 제목 줄(「· 세액공제 — 한도 900만원 …」)은 붙이지 않는다.
+        # 그 줄은 화면의 근거 목록이 이미 말하고, 답변 본문에 서면 코드 라벨로 읽힌다.
+        appends += [m for _label, missing in gaps for m in missing if m not in appends]
     return [], appends
 
 
@@ -833,7 +870,13 @@ def compose(state: AgentState) -> dict[str, Any]:
     guards = guard.cautions_for(KB, conds) if conds else []
     alts = guard.sensitive_cards(KB, conds) if conds else []
 
-    spans = [a for e in evidence for a in (e["atomic"] + e["notices"])]
+    # <필수 인용> 은 값+조건 스팬(`atomic`)뿐이다. 표시(`notices`)는 넘기지 않는다(2026-09-22,
+    # 질문 리스트 19번 — 이수민 세액공제): 넘기던 동안 LLM 이 카드 원문 단서를 「-다」체로
+    # 본문 한가운데 절반만 베꼈고, 나머지 절반이 빠졌다고 코드가 전문을 ※ 로 덧붙여 같은
+    # 단서가 세 번 섰다(원문 절반 · LLM 의 의역 · 코드의 전문). 표시는 어차피 빠지면 코드가
+    # 채우는 것이라 LLM 이 쓸 이유가 없다 — 아래 `appends` 가 답변 아래에 한 번 세운다.
+    # 표시 안의 수치는 여전히 인용 허용이다(`tools.ledger_texts` — 기준시점을 본문에 녹인다).
+    spans = [a for e in evidence for a in e["atomic"]]
     prompt = COMPOSE_PROMPT.format(
         context="\n\n".join(e["text"] for e in evidence),
         must_block=MUST_BLOCK.format(spans="\n".join(f"- {a}" for a in spans)) if spans else "",
@@ -901,11 +944,15 @@ def compose(state: AgentState) -> dict[str, Any]:
                     observability.step("verify", passed=False,
                                        attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}",
                                        fallback="raw_evidence", reason="; ".join(faults[:2]),
+                                       detail={"faults": faults[:FAULTS_SHOWN]},
                                        level=logging.WARNING)
                     break
+                # 로그에는 사유 두 건만, 응답의 절차 기록에는 전부(`detail`).
                 observability.step("verify", passed=False,
                                    attempt=f"{attempt + 1}/{COMPOSE_RETRIES + 1}",
-                                   reason="; ".join(faults[:2]), level=logging.WARNING)
+                                   reason="; ".join(faults[:2]),
+                                   detail={"faults": faults[:FAULTS_SHOWN]},
+                                   level=logging.WARNING)
                 # 걸린 자리를 실어 한 번 더. 폐기 사유를 안 주면 같은 문장이 다시 나온다.
                 progress.emit("근거와 어긋난 부분을 고쳐 다시 쓰고 있어요")
                 retry = prompt + COMPOSE_RETRY_BLOCK.format(
@@ -932,7 +979,8 @@ def compose(state: AgentState) -> dict[str, Any]:
                 "sources": _sources(evidence, [], [])}
 
     if answer:
-        parts = [answer] + ([MISSING_NOTICES, *appends] if appends else [])
+        # 빠진 표시는 머리말 없이 본문 아래 제 줄로 선다 — 근거 원문 전체가 아니라 표시만.
+        parts = [_break_marks(answer)] + ([ "\n".join(_as_mark(a) for a in appends)] if appends else [])
     else:
         # 생성문을 못 쓰면 근거 원문이 답이다 — 다만 그것이 **답변이 아님을 밝힌다**.
         parts = [RAW_EVIDENCE.format(reason=fault_kinds(faults))]

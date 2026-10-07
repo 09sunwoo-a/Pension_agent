@@ -348,6 +348,16 @@ def check_trigger_entrances() -> int:
           f"({' · '.join(f'{s:.2f}' for s in idle)})")
     ok += hit
 
+    # 판매중단 펀드 교체 화법(k03.027)도 같은 자리였다 — 입구가 제목 절 하나뿐이라 「손실 난 걸
+    # 지금 팔라는 거냐고 하면 뭐라고 하지?」(질문 리스트 82번)가 폴백에서 0건이었고, LLM 이
+    # 카드를 못 고른 턴은 «자료 없음»으로 끝났다(2026-09-22). 문턱을 넘어 채택되는지까지 잰다.
+    q82 = "고객이 '손실 난 걸 지금 팔라는 거냐'고 하면 뭐라고 하지?"
+    top = tools.retrieve(tools.KB, top_k=1, kinds=["pitch"], utterance=q82)
+    hit = bool(top) and top[0][1]["id"] == "pitch.k03.027"
+    print(f"{'✓' if hit else '✗'} 「손실 난 걸 지금 팔라는 거냐」가 폴백에서 판매중단 교체 화법을 찾는다"
+          + ("" if hit else f" — {[c['id'] for _s, c in top]}"))
+    ok += hit
+
     # ⑦ 표가 든 본문에서 **표 조각**을 검색 입구로 만들지 않는다.
     #    세그먼트 3·33·50 의 조건문에는 마크다운 표가 들어 있다. 변환기가 표의 줄바꿈을
     #    지키게 되면서(`parse.joined`) 절 자르기가 표 줄까지 먹으면 입구가 「… 분류: | 유형 |
@@ -418,6 +428,50 @@ def check_tool_axes() -> int:
     hit = bool(hits) and hits[0][1]["tags"].get("objection_type") == "해지·망설임"
     print(f"{'✓' if hit else '✗'} 그 질문의 화법이 pitch 쪽 검색에 실재한다"
           f" ({hits[0][1]['id'] if hits else '0건'})")
+    ok += hit
+
+    return ok
+
+
+def check_procedure_axes() -> int:
+    """«~ 등록 방법»이 절차 카드 한 장으로 끝나지 않는다 (gap 38).
+
+    2026-09-28 행내 실측: 「디폴트옵션 등록 방법 알려줘」에 계획이 `procedure` 하나에
+    `last` 를 붙여 끝냈다. 절차 카드(proc.020)는 «만기가 다가오는 미등록 고객 처리»라 등록
+    화면·앱 경로를 들고 있지 않았고, 답은 만기 예약변경 안내와 문자 발송 화면 [75-08-110]을
+    «활용할 화면번호»로 세운 것이 됐다. 등록 화면 [06-12-610]·스타뱅킹 경로(channel.030)는
+    screen·channel 에 있었다 — gap 35 와 같은 꼴(**재료가 있는데 도구가 안 불렸다**)이다.
+
+    실 LLM 없이 재는 것은 계획이 읽는 판단 재료(도구 설명·계획 규칙)와, 작성이 받는 형태
+    요구가 재료에 없는 화면을 요구하지 않는가, 그리고 재료가 실제로 그쪽에 있는가다.
+    """
+    from pension_agent.consult_agent.prompts import ANSWER_SHAPES
+    from pension_agent.consult_agent.prompts.plan import PLAN_PROMPT
+    from pension_agent.consult_agent.state import KB
+    ok = 0
+    print("\n[도구 설명 — 등록 방법은 procedure + screen·channel (gap 38)]")
+
+    desc = tools.TOOLS["procedure"].desc
+    hit = "screen" in desc and "channel" in desc and "방법" in desc
+    print(f"{'✓' if hit else '✗'} procedure 설명이 화면번호·메뉴 경로는 screen·channel 에 있다고 밝힌다")
+    ok += hit
+
+    hit = "반대 방향도 같다" in PLAN_PROMPT and "procedure 에 `\"last\": true` 를 붙이지 않는다" in PLAN_PROMPT
+    print(f"{'✓' if hit else '✗'} 계획 규칙 — 업무 방법 질문은 procedure 하나로 끝내지 않는다")
+    ok += hit
+
+    # 형태 요구가 화면을 무조건 요구하면 LLM 은 재료에 있는 아무 번호로 채운다(§5).
+    shape = ANSWER_SHAPES["procedure"]
+    hit = "재료에 있는" in shape and "그 업무의 화면으로 소개하지 않는다" in shape
+    print(f"{'✓' if hit else '✗'} procedure 형태 요구가 재료에 없는 화면을 요구하지 않는다")
+    ok += hit
+
+    # 재료가 실제로 그쪽에 있다는 것 — 설명만 갈라 두고 검색이 못 찾으면 아무것도 아니다.
+    q = "디폴트옵션 등록 방법 알려줘"
+    ch = [c["id"] for _s, c in tools.retrieve(KB, top_k=3, kinds=["channel"], utterance=q)]
+    sc = [c["id"] for _s, c in tools.retrieve(KB, top_k=3, kinds=["screen"], utterance=q)]
+    hit = "channel.030" in ch and "screen.06-12-610" in sc
+    print(f"{'✓' if hit else '✗'} 등록 경로가 channel·screen 검색에 실재한다 (channel {ch[:1]} · screen {sc})")
     ok += hit
 
     return ok

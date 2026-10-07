@@ -76,6 +76,7 @@ flowchart TD
     compose -.-> offer
     confirm_action -.-> __end__
     confirm_action -.-> compose
+    confirm_action -.-> plan
     correction -.-> __end__
     correction -.-> plan
     plan -.-> compose

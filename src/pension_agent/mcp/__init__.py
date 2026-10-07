@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 
 from pension_agent.mcp.client import (  # noqa: F401 — 공개 표면
+    NOISY_LOGGERS,
     MCPCallError,
     MCPClient,
     MCPError,
@@ -44,6 +45,7 @@ from pension_agent.mcp.client import (  # noqa: F401 — 공개 표면
     Settings,
     client_for,
     configured,
+    quiet_loggers,
     reset,
     settings,
     stats,
@@ -54,9 +56,9 @@ from pension_agent.mcp.client import (  # noqa: F401 — 공개 표면
 log = logging.getLogger(__name__)
 
 __all__ = [
-    "MCPCallError", "MCPClient", "MCPError", "MCPUnavailable", "Settings",
-    "client_for", "configured", "install", "reset", "settings", "stats", "unavailable",
-    "use_backend",
+    "NOISY_LOGGERS", "MCPCallError", "MCPClient", "MCPError", "MCPUnavailable", "Settings",
+    "client_for", "configured", "install", "quiet_loggers", "reset", "settings", "stats",
+    "unavailable", "use_backend",
 ]
 
 

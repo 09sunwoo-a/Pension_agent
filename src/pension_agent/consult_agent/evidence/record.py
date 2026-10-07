@@ -21,7 +21,9 @@
             어기면 생성문을 **폐기**한다 — 틀린 짝을 옳은 블록 옆에 남겨둘 수 없다.
   notices   빠지면 안 되는 표시(⚠ 유의 · 「하지 말 것」 · 「본부 지침 아님」). 언급 여부와
             무관하게 항상 요구한다. 누락은 답변이 틀린 게 아니라 덜 갖춰진 것이므로
-            블록을 **덧붙여** 채운다.
+            블록을 **덧붙여** 채운다. **LLM 에 필수 인용으로 넘기지 않는다**(2026-09-22) —
+            넘기면 카드 원문(「-다」체)이 본문 한가운데 절반만 베껴지고 코드가 전문을 또
+            붙여 같은 단서가 겹쳐 선다. 코드가 답변 아래에 ※ 로 한 번 세운다.
 
 atomic 이 비어 있는 도구(pitch·customer)는 수치 집합 검사만 걸린다.
 """
@@ -80,12 +82,17 @@ def _ev(tool: str, query: str, text: str, sources: list[dict],
         atomic: list[str] | None = None, notices: list[str] | None = None,
         allow: list[str] | None = None, meta: dict | None = None,
         scopes: list[dict] | None = None, cards: list[dict] | None = None,
-        source_keys: dict[str, list[str]] | None = None) -> Evidence | None:
+        source_keys: dict[str, list[str]] | None = None,
+        marks: list[str] | None = None) -> Evidence | None:
+    """`marks` — 카드 선언에서 오지 않는 재료 성격 표시(§7). 카드가 없는 재료(상담 기록)가
+    «이 재료가 어떤 성격인가»를 밝히는 자리다. 카드에서 온 표시 뒤에 잇는다 — 표시는 답변
+    끝 「── 참고한 자료」 블록에 코드가 세우고, `notices` 와 달리 LLM 이 본문에 쓰지 않는다."""
     if not text.strip():
         return None
     atomic, notices = _clean(atomic), _clean(notices)
+    card_marks = MARKS.notes_for(KB, cards or [])
     return {"tool": tool, "query": query, "text": text,
-            "marks": MARKS.notes_for(KB, cards or []),
+            "marks": card_marks + [m for m in _clean(marks) if m not in card_marks],
             "related": [c for c in (cards or []) if REL.declared(c)],
             "atomic": atomic, "notices": notices,
             # 카드별로 나눠 선언하지 않은 도구는 블록 하나를 통째로 한 묶음으로 본다.

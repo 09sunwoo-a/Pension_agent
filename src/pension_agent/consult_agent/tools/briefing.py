@@ -35,7 +35,13 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     except Exception:
         return None
 
-    lines = [f"■ 고객 {customer_id} — 브리핑 자료"]
+    # 머리줄은 **이름으로** 부른다. 고객 식별번호(KB-PIN)를 싣지 않는 이유는 둘이다:
+    # LLM 이 답하는 데 쓰지 않는 값이고(직원은 그 고객 화면을 열어 둔 채 묻는다), 행내
+    # 게이트웨이의 개인정보 필터가 이 꼴을 주민등록번호로 보고 **요청을 통째로 400 으로
+    # 끊는다**(2026-09-29 실측 — `pension_agent/privacy.py` 머리말). 한 턴에 열려 있는
+    # 고객은 하나라 이름만으로 어느 고객인지 갈린다. 경계는 여기서 긋는다 — 재료에 없으면
+    # 프롬프트에도 없다(§3 오늘의 타겟 목록이 같은 결정을 이미 적어 뒀다).
+    lines = [f"■ 고객 {profile.nm} — 브리핑 자료"]
     lines += [f"· {k} {v}" for k, v in facts["customer"].items()]
     lines += [f"· {k} {v}" for k, v in facts["briefing"].items() if k != "source"]
     # 계좌 상태 — **정상인 항목도 값으로** 싣는다. 화면(briefing)은 요건이 성립한 것만
@@ -78,7 +84,12 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
             head, body = (str(item.get(k) or "").strip() for k in keys)
             if not head and not body:
                 continue
-            mark = " · ".join(x for x in (item.get("card_id"), item.get("situation")) if x)
+            # 줄 꼬리에는 «어느 문제상황에서 나온 카드인가»만 붙인다. 카드 id 는 붙이지 않는다 —
+            # 재료에 있는 말은 답변에 그대로 나온다(§5 「재료에 개발 용어를 쓰지 않는다」).
+            # 화법 렌더러가 머리줄에 id 를 싣던 동안 답변이 「[pitch.k03.020] 자료를 활용해
+            # 보세요」라고 썼고(2026-09-21 행내 실측), 이 줄도 같은 꼴(`[pitch.k03.020 · 상황]`)
+            # 이었다. id 는 아래 출처(card_sources)에 남는다 — 그것이 화면의 역추적 자리다.
+            mark = item.get("situation")
             card_lines.append(f"· {label}: {head} — {body}" + (f" [{mark}]" if mark else ""))
             # 이 줄들의 출처는 **지식 카드**다(고객 원장이 아니다). 답에 영향을 준 재료는
             # 전부 출처에 실린다(§3) — 안 실으면 직원은 화법이 어디서 나왔는지 모른 채
@@ -131,13 +142,20 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                            facts.get("account_state") or {})
                for k, v in src.items()]
     return _ev("customer", query, "\n".join(lines),
-               [{"id": f"customer.{customer_id}",
-                 "title": f"{profile.nm} 고객 계좌 현황 (KB-PIN {customer_id})",
+               # 출처 id 에도 KB-PIN 을 넣지 않는다. 출처는 응답의 `sources` 이벤트로 프론트까지
+               # 나가는데, 그 길에 선 플랫폼 게이트웨이의 개인정보 필터가 `customer.171203-4815062`
+               # 를 주민등록번호로 보고 **응답을 통째로 막았다**(FILTER_INVALID — 김서연 「이 고객
+               # 왜 타겟」, LLM 쪽을 고친 다음 날 실측). 한 턴에 열려 있는 고객은 하나라 id 에
+               # 번호가 없어도 갈리고, 이 id 를 되읽어 고객을 찾는 코드는 없다(고객은 항상
+               # `state["customer_id"]` 에서 읽는다). 제목도 같다 — 제목은 화면뿐 아니라 계획
+               # 프롬프트의 「이미 모은 재료」로도 나간다(`evidence/ledger.py::summarize`).
+               [{"id": "customer",
+                 "title": f"{profile.nm} 고객 계좌 현황",
                  "doc": "고객 정보 — 계좌 원장 조회값 (브리핑 화면과 같은 값)",
                  "score": None, "page": None}, *deduped],
                source_keys=card_keys,
                allow=["\n".join(lines), json.dumps(_citable(facts), ensure_ascii=False, default=str)],
-               cards=[{"id": f"customer.{customer_id}", "labeled": labeled,
+               cards=[{"id": "customer", "labeled": labeled,
                        # 재료 전문 — 항목 이름이 다른 자리(문제상황 제목·⑥⑦⑧ 카드 문구
                        # 등)에도 나오면 그 항목은 판정에서 뺀다(relations.checkable).
                        #

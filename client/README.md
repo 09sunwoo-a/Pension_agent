@@ -38,7 +38,7 @@ Content-Type: application/json
 ```json
 {
   "agentId": "<assetId>",
-  "contents": ["{\"message\": \"질문\", \"x_client_user\": \"사번-uuid\", \"customer_id\": \"고객id\", \"session_id\": \"세션id\"}"],
+  "contents": ["{\"message\": \"질문\", \"x_client_user\": \"사번-uuid\", \"customer_id\": \"b64:MTcxMjAzLTQ4MTUwNjI=\", \"session_id\": \"세션id\"}"],
   "llmConfig": {},
   "isStream": true
 }
@@ -51,8 +51,9 @@ Content-Type: application/json
 |---|---|---|
 | `message` | 예 | 직원이 입력한 질문. **유효한 UTF-8** 이어야 한다 — 대리 문자(U+DCxx)가 섞이면 게이트웨이가 input_value 를 깨뜨려 500 이 난다(터미널이 한글을 바이트 단위로 지운 입력에서 실측 · `call_agent.py::_check_utf8`) |
 | `x_client_user` | 예 | 호출한 직원 식별자. 감사 기록이자 LLM 쿼터 버킷이고, 에이전트는 여기서 **사번을 읽어** 쪽지의 받는 사람·보내는 사람을 정한다. **「사번 7자리」로 시작해야 하고**, 뒤에 접미(LLM 호출을 가르는 uuid 등)를 붙일 거면 **구분자로 잇는다**(`3902172-550e8400-…` · `3902172_…`). 사번 뒤에 숫자가 바로 이어지면 사번으로 읽지 않는다 — 사번이 아닌 숫자 id 를 남의 사번으로 오독하지 않기 위해서다 |
-| `customer_id` | 아니오 | **지금 열려 있는 브리핑 화면의 고객 id.** 고객 관련 질문(현황·왜 타겟인가·제안·지난 상담)은 이것이 있어야 답한다. 없으면 에이전트가 «고객 화면을 먼저 열어달라»고 답한다. 지식 질의응답·화법은 없이도 답한다 |
+| `customer_id` | 아니오 | **지금 열려 있는 브리핑 화면의 고객 id — `b64:` + base64(원장 표기)로 보낸다**(`171203-4815062` → `b64:MTcxMjAzLTQ4MTUwNjI=`). JavaScript 로는 `"b64:" + btoa(customerId)`. 원장 표기는 주민등록번호와 같은 꼴이라 플랫폼 게이트웨이의 «기본필터»(policy 350)가 그 요청을 `FILTER_INVALID` 로 끊는다(질문이 한 글자여도 막힌다). 에이전트가 원장 표기로 되돌린다. 고객 관련 질문(현황·왜 타겟인가·제안·지난 상담)은 이것이 있어야 답한다. 없으면 에이전트가 «고객 화면을 먼저 열어달라»고 답한다. 지식 질의응답·화법은 없이도 답한다 |
 | `session_id` | 아니오 | 상담 세션 구분자. **상담 한 번마다 새로 만들고**(UUID 등) 같은 상담의 턴들은 같은 값을 보낸다. 에이전트가 이 값으로 이전 턴의 맥락을 이어간다 — 후속 질문·되묻기의 답·「네」가 이것으로 해석된다. 없으면 `"default"` |
+| `log_events` | 아니오 | `true` 면 이 요청의 서버 로그 줄을 `log` 이벤트로, 턴의 절차 기록을 `trace` 이벤트로 함께 받는다(아래 표). 개발자 콘솔과 «답변 근거» 패널을 위한 자리다. 서버에 `CHAT_LOG_EVENTS=1` 이 설정돼 있으면 보내지 않아도 모든 요청에 실린다 |
 | `employee_id` | 아니오 | 로그인한 직원의 **WorkB 사번**. `x_client_user` 앞자리가 사번이면 **보낼 필요가 없다** — 사번을 다른 데서 받아오거나 `x_client_user` 의 꼴이 바뀌는 배포를 위한 자리다. 여기 넣은 값은 꼴을 검사하지 않고 그대로 쓴다 |
 
 - 고객을 질문 문장에서 알아내는 기능은 없다. 어느 고객인지는 **호출자가 정한다.**
@@ -70,13 +71,16 @@ Content-Type: application/json
 | type | 필드 | 화면 |
 |---|---|---|
 | `progress` | `text` | 답변을 기다리는 동안의 상태 문구. 여러 번 온다. 답변보다 먼저 |
-| `answer` | `text`, `intent`, `links[]` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다. `links` 는 아래 |
+| `answer` | `text`, `intent`, `links[]`, `messages[]` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다. `links` · `messages` 는 아래 |
 | `action` | `kind`, `label`, `prompt` (+ 쪽지면 `title`, `text`, `to`) | 연계 제안 턴에만, `answer` 다음. **답변 본문 바로 아래**에 `prompt` 와 **네 / 아니오 버튼**을 그린다(아래 「제안은 근거가 아니다」). 누르면 다음 턴 `message` 로 `"네"` 또는 `"아니오"` 를 보낸다 |
+| (예외) | | 쪽지를 이름으로 보내려는데 같은 이름의 직원이 여러 명이면, 그 턴은 `answer` 에 번호 목록과 「어느 분께 보낼까요? 번호나 부서로 답해 주세요.」만 싣고 **`action` 을 보내지 않는다**(네/아니오로 답할 턴이 아니다). 직원이 입력한 「1번」·「WM」은 다음 턴 `message` 로 그대로 보낸다 |
 | `clarify` | `question`, `options[]` | 되묻기 턴에만, `answer` 다음. 선택지 버튼. 누른 값을 다음 턴 `message` 로 보낸다 |
-| `sources` | `items[]` — `id`, `doc`, `title`, `url`, `score`, `page`, `role` | 근거. **항상** 온다. `role` 은 `"근거"` 와 `"주의"`(이 고객 상담에서 지켜야 할 것) 두 종류라 두 블록으로 나눠 그린다. `score` 는 있을 때만 관련도로 표기. `items` 가 비면 «근거 없음»을 **표시한다**(빼지 않는다) |
+| `sources` | `items[]` — `id`, `doc`, `title`, `url`, `score`, `page`, `role` | 근거. **항상** 온다. `role` 은 `"근거"` 와 `"주의"`(이 고객 상담에서 지켜야 할 것) 두 종류라 두 블록으로 나눠 그린다. `score` 는 있을 때만 관련도로 표기. `items` 가 비면 «근거 없음»을 **표시한다**(빼지 않는다). `id` 는 표시·중복 제거용 라벨이고 **고객 번호를 싣지 않는다** — 고객 재료는 `customer`·`suitable`·`outreach`·`session` 처럼 종류 이름만 온다(고객 번호가 실리면 플랫폼 게이트웨이의 개인정보 필터가 응답을 막는다). 어느 고객인지는 프론트가 보낸 `customer_id` 가 정한다 |
 | `followups` | `items[]` | 추천질문. 항상 온다(없으면 빈 목록). 누르면 그 문장을 다음 턴 `message` 로 보낸다 |
 | `error` | `text` | 실패. `answer` 대신 온다. 이 뒤에 `done` |
 | `done` | 없음 | 턴 끝. 항상 마지막. 스피너를 끈다 |
+| `log` | `level`, `logger`, `text` | 서버 로그 한 줄. **로그 이벤트를 켰을 때만** 온다(요청 키 `log_events` 또는 서버 `CHAT_LOG_EVENTS=1`). 화면에 그리지 않고 `console.log(ev.text)` 로 개발자 콘솔에 찍는다. `text` 는 Grafana(stdout)에 찍히는 줄과 같은 글자다(`INFO:     [agent] [ab12cd34]  2.0s plan …`). 스트림에서는 찍히는 즉시 다른 이벤트 사이사이에 오고(`done` 앞까지), 비스트림에서는 맨 앞에 모여 온다. 고객 원장 번호 같은 개인정보 꼴은 `[개인정보 가림]` 으로 바뀌어 온다 |
+| `trace` | `started_at`, `finished_at`, `intent`, `timeline[]`, `rounds[]`, `evidence[]`, `sources[]`, `sentences[]` | 이 턴의 절차 기록 — «답변 근거» 패널의 재료다(아래 「`trace` — 답변 근거 패널」). **로그 이벤트를 켰을 때만**, 턴 끝에 한 번, `done` 바로 앞에 온다. 오류로 끝난 턴(`error`)에는 오지 않는다. 개인정보 가림은 `log` 와 같다 |
 
 `answer.text` 에 추천질문 블록은 없다(`followups` 로만 온다). 답변 본문은 검증을 거친 뒤 한 번에
 오고 토큰 단위로 흐르지 않는다 — 진행 문구가 그 시간을 채운다.
@@ -112,12 +116,112 @@ Content-Type: application/json
 - 여기 실리는 번호는 전부 근거 카드에 있는 실재 화면이다 — 답변이 근거 밖 화면을 가리키면
   서버가 그 답변을 폐기한다.
 
+### `answer.messages` — 고객 발송 문구(LMS)
+
+본문의 큰따옴표 인용 중 **고객에게 문자로 보낼 문구**다. 화면은 큰따옴표 인용을 «고객에게
+이렇게 말씀해 보세요»(화법) 블록으로 그리는데, 발송 문구는 직원이 **말하는** 것이 아니라 발송
+화면에 **붙여 넣는** 것이라 다른 블록으로 그린다. 항목은 `kind` · `label` · `text` · `copy` 이고,
+**없으면 빈 목록으로 항상 온다.**
+
+```json
+{"type": "answer", "text": "… 고객님께 보낼 발송 문구는 다음과 같습니다.\n\n“(광고) 오세훈 고객님, KB국민은행입니다. 12/30까지 … ▶ https://obank.kbstar.com/demo/event/irp-004 무료수신거부 080-XXX-XXXX”", "intent": "situation",
+ "links": [],
+ "messages": [{"kind": "lms", "label": "고객 발송 문구",
+               "text": "(광고) 오세훈 고객님, KB국민은행입니다. 12/30까지 … ▶ https://obank.kbstar.com/demo/event/irp-004 무료수신거부 080-XXX-XXXX",
+               "copy": "(광고) 오세훈 고객님, KB국민은행입니다.\n12/30까지 …\n▶ https://obank.kbstar.com/demo/event/irp-004\n무료수신거부 080-XXX-XXXX"}]}
+```
+
+- `text` 는 **본문의 인용 안쪽 내용 그대로**다(따옴표 `“ ”` 또는 `" "` 는 빼고). 프론트는 본문의
+  큰따옴표 인용을 화법 블록으로 바꾸기 전에, 인용 안쪽이 어떤 항목의 `text` 와 같으면 그 인용을
+  화법 블록 대신 `label` 을 머리에 단 **발송 문구 블록**으로 그린다. 같은 인용이 두 블록으로
+  서지 않게 한다.
+- 복사 버튼에는 `copy` 를 넣는다. 본문은 줄바꿈을 한 줄로 이어 쓸 수 있어서, 원래 문구와 공백만
+  다르면 서버가 줄바꿈이 살아 있는 원본을 `copy` 에 싣는다. 다르면 `text` 와 같다.
+- 판정은 서버가 한다 — `(광고)` 로 시작하는 인용만 실린다(광고 표기는 발송 문구를 조립하는
+  코드가 붙인다). 프론트가 따로 추측하지 않는다.
+- 발송 문구 블록은 **보내지 않는다.** 복사만 한다. 보낼지는 직원이 발송 화면에서 정한다.
+
+### `trace` — 답변 근거 패널
+
+이 답이 **어떤 절차로, 무엇을 근거로** 나왔는지를 근거 카드 단위로 싣는다. 발표용 패널이 이것을
+그린다. 값은 전부 코드가 이번 턴에 실제로 판정한 것이다. 로그 줄(`log`)과 같은 사건이지만 로그는
+상한이 있는 요약이고, 이것은 구조 그대로다. 서버 stdout(Grafana)에는 싣지 않는다.
+
+| 필드 | 무엇 | 패널에서 |
+|---|---|---|
+| `started_at` · `finished_at` | 턴 시작·끝 시각. ISO 8601, 밀리초, 시간대 포함(`2026-09-28T10:58:09.405+09:00`) | 머리줄 «요청 … · 응답 …». 시간대를 붙여 보내므로 표시할 시간대로 바꿔 그린다 |
+| `intent` | 질문을 어떻게 읽었나(`situation` · `procedure` …) | «질문 이해» |
+| `timeline[]` | 단계 기록, 시간순. 항목: `at`(시각) · `elapsed_ms`(턴 시작 뒤 ms) · `stage` · `ident` · `level`(`INFO`·`WARNING`·`DEBUG`) · `text`(로그 줄과 같은 한글 요약) · `facts`(같은 내용의 구조값) | 왼쪽 시각 열 + 단계 이름 + `text`. `level` 이 `WARNING` 이면 답이 실패·축소로 바뀐 단계다(검증 폐기·도구 고장·LLM 장애) |
+| `rounds[]` | 계획이 부른 도구 호출. 항목: `n` · `tool` · `query`(질의 전문) · `outcome`(`found` 찾음 · `miss` 없음 · `failed` 고장) · `reason`(고장 사유) | «무엇을 찾아봤나» |
+| `evidence[]` | 모은 근거 블록. 항목: `tool` · `query` · `text`(근거 원문, 4,000자 상한 · 넘으면 `truncated: true`) · `cards[]`(`id` · `title` · `doc` · `score` · `used`) · `atomic[]`(원문 그대로 인용해야 하는 값) · `notices[]`(빠지면 안 되는 주의) | «확인한 사실». `used: false` 인 카드는 **딸려 왔지만 답변이 쓰지 않은** 카드다 — 흐리게 그린다 |
+| `sources[]` | 최종 출처 — `sources` 이벤트와 같은 목록 | «근거» |
+| `sentences[]` | 답변 문장별 대응. 항목: `text` · `matches[]`(`tool` · `card` · `by` · `span` 또는 `values`) | 문장 아래 작은 글씨로 «사실 fact.k04.f2 · 수치 900» |
+
+**`timeline[].stage` 이름과 뜻** — 코드의 단계 이름이라 영문 그대로 온다. 패널에는 오른쪽 이름으로 쓴다.
+
+| stage | 패널 이름 | stage | 패널 이름 |
+|---|---|---|---|
+| `turn` | 턴 시작 / 턴 끝(첫 항목·마지막 항목) | `verify` | 근거 검증 |
+| `understand` | 질문 이해 | `clarify` | 되묻기 판정 |
+| `plan` | 조회 계획 | `offer` · `confirm` · `action` | 연계 제안 · 확인 · 실행 |
+| `tool` | 근거 수집 | `llm` | LLM 호출(`DEBUG` — 기본으로 접어 둔다) |
+| `compose` | 답변 작성 | `agent_help` | 능력 안내 |
+
+**검증이 무엇을 걸렀나.** `stage: "verify"` 항목의 `facts` 에 `passed`(통과 여부) · `attempt`(`1/2`) ·
+`faults[]`(폐기 사유 전부) · `fallback`(끝내 통과하지 못해 근거 원문으로 대신했으면 `raw_evidence`)이
+있다. **폐기된 초안 문장은 싣지 않는다** — 근거 밖 수치가 든 문장이 화면에 뜨면 답으로 읽히기
+때문이다. 사유만으로 «검증이 이것을 잡아 버렸다»가 보인다.
+
+**`sentences[].matches` 는 코드가 증명한 대응뿐이다.** LLM 에게 출처를 달게 하지 않는다. `by` 는 셋이다.
+
+| `by` | 뜻 | 함께 오는 것 |
+|---|---|---|
+| `원문스팬` | 근거의 «원문 그대로 인용해야 하는 값» 문장이 이 문장에 그대로 있다 | `span` |
+| `카드문구` | 그 카드에서만 나오는 문구가 이 문장에 있다 | `span` · `card` |
+| `수치` | 이 문장의 수치가 그 근거 블록에 있다 — 문장에 적힌 표기 그대로 | `values` |
+
+`card` 는 근거 블록에 카드가 한 장뿐일 때만 채워지고(`카드문구` 는 항상), 여러 장이 한 블록으로
+온 근거는 `null` 이다 — 그때는 `tool` 과 그 블록의 `evidence[].cards` 로 보여준다. **`matches` 가
+빈 문장은 대응을 확인하지 못한 문장이다**(의역한 화법 등). 대응을 지어 붙이지 않는다 — 출처
+표시가 틀리면 패널 전체를 믿을 수 없게 된다.
+
+되묻기·승낙(«네»)·LLM 장애 턴은 도구 호출이나 검증이 없다. 없는 칸은 빈 목록으로 온다.
+
+```json
+{"type": "trace", "started_at": "2026-09-28T10:58:08.601+09:00", "finished_at": "2026-09-28T10:58:09.423+09:00",
+ "intent": "situation",
+ "timeline": [
+  {"at": "2026-09-28T10:58:08.604+09:00", "elapsed_ms": 3, "stage": "plan", "ident": null, "level": "INFO",
+   "text": "회차=1/4 도구=fact 질의='세액공제 한도' 종료=예",
+   "facts": {"step": "1/4", "tool": "fact", "query": "세액공제 한도", "done": true}},
+  {"at": "2026-09-28T10:58:08.608+09:00", "elapsed_ms": 7, "stage": "tool", "ident": "fact", "level": "INFO",
+   "text": "fact 결과=성공 후보=3 채택=1 카드=fact.k04.f2(0.37)",
+   "facts": {"result": "found", "candidates": 3, "picked": 1, "cards": ["fact.k04.f2(0.37)"]}},
+  {"at": "2026-09-28T10:58:09.411+09:00", "elapsed_ms": 810, "stage": "verify", "ident": null, "level": "WARNING",
+   "text": "통과=아니오 시도=1/2 사유=\"자료에 없는 수치·상품명: 수치 '1,200'\"",
+   "facts": {"passed": false, "attempt": "1/2", "reason": "자료에 없는 수치·상품명: 수치 '1,200'",
+             "faults": ["자료에 없는 수치·상품명: 수치 '1,200'"]}}
+ ],
+ "rounds": [{"n": 1, "tool": "fact", "query": "세액공제 한도", "outcome": "found", "reason": null}],
+ "evidence": [{"tool": "fact", "query": "세액공제 한도",
+               "text": "■ 세액공제 — 한도 900만원 · 5,500만원 이하 16.5% / 초과 13.2% · 최대 148.5만원\n…",
+               "truncated": false,
+               "cards": [{"id": "fact.k04.f2", "title": "세액공제 — 한도 900만원 · …",
+                          "doc": "개인형IRP 마케팅 보물지도 Vol.1 (연금사업본부 연금컨설팅부, 2026-03)",
+                          "score": 0.37, "used": true}],
+               "atomic": [], "notices": []}],
+ "sources": [{"id": "fact.k04.f2", "title": "세액공제 — 한도 900만원 · …", "doc": "…", "url": null,
+              "score": 0.37, "page": null, "role": "근거"}],
+ "sentences": [{"text": "세액공제 한도는 연 900만원이에요(연금저축 포함).",
+                "matches": [{"tool": "fact", "card": "fact.k04.f2", "by": "수치", "values": ["900"]}]}]}
+```
+
 ### 실제 출력 예
 
 ```
 {"type": "progress", "text": "질문 내용을 파악하고 있어요"}
 {"type": "progress", "text": "고객 브리핑 자료를 찾고 있어요"}
-{"type": "answer", "text": "이준호 고객님은 만기 예금을 보유하고 있어 자산 재배분이 필요한 시점이기 때문에 타겟이에요.\n\n구체적으로는 …", "intent": "situation", "links": []}
+{"type": "answer", "text": "이준호 고객님은 만기 예금을 보유하고 있어 자산 재배분이 필요한 시점이기 때문에 타겟이에요.\n\n구체적으로는 …", "intent": "situation", "links": [], "messages": []}
 {"type": "sources", "items": [
   {"id": "customer.198734-1205842", "doc": "고객 정보 — 계좌 원장 조회값", "title": "이준호 고객 계좌 현황", "url": null, "score": null, "page": null, "role": "근거"},
   {"id": "pitch.k03.024", "doc": "연금사업부(상품) 오늘의할일 스크립트", "title": "만기 임박 + 디폴트옵션 미등록 고객에게 …", "url": null, "score": 2.0, "page": null, "role": "근거"}
@@ -157,3 +261,13 @@ Content-Type: application/json
   `[api] done` 사이에 `[agent]` 단계 줄(understand · plan · tool · compose · verify · turn)이
   경과초와 함께 선다(`src/main.py` 머리말 «로그»). request 줄의 `맥락=N턴(저장)` 이 두 번째
   턴부터 보이면 세션이 이어지고 있는 것이다.
+- Grafana 를 볼 수 없을 때는 요청에 `"log_events": true` 를 넣으면 같은 줄이 `log` 이벤트로
+  응답에 실려 온다. 프론트에서 이렇게 찍는다:
+
+  ```js
+  if (ev.type === "log") { console.log(ev.text); continue; }   // 화면에는 그리지 않는다
+  if (ev.type === "trace") { renderTracePanel(ev); continue; } // 답변 근거 패널(위 「trace」)
+  ```
+
+  `client/call_agent.py` 는 `LOG_EVENTS = True` 로 두면 같은 두 이벤트를 받아 `log` 는 stderr 에
+  찍고 `trace` 는 요약해 보여준다(참조 구현).

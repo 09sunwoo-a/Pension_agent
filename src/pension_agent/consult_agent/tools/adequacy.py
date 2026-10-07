@@ -109,7 +109,11 @@ def _headline(card: dict) -> str:
     tail = (detail or points).replace("\n", " ")[:80]
     speech = _speech_line(card)
     tiers = _tiers_line(card)
+    # «같은 말»(screen 카드의 파생 필드) — 「디폴트옵션」을 물었는데 후보 줄에 「사전지정운용제도」만
+    # 보이면 게이트가 단어만 겹친 후보로 읽고 뺄 수 있다(tools/cards.py::_render_screen 과 같은 이유).
+    aliases = " · ".join(card.get("aliases") or [])
     return (f"- [{card.get('id')}] {title}" + (f" · {tail}" if tail else "")
+            + (f" · 같은 말: {aliases}" if aliases else "")
             + (f" · 대사: {speech}" if speech else "")
             + (f" · 조건별 값: {tiers}" if tiers else ""))
 

@@ -306,6 +306,35 @@ def _norm(question: str | None) -> str:
     return _TRIVIAL.sub("", question or "")
 
 
+#: 어미로 보고 무시하는 끝 글자 수. 「…말하면 좋을까?」 와 「…말하면 좋을지 알려줘」 는
+#: 직원에게 같은 질문인데 정규형이 달라, 방금 친 질문이 추천질문으로 다시 섰다
+#: (2026-09-28 실측 — 칩 문구를 직원이 어미만 바꿔 입력했다). 한국어 질문은 앞이
+#: 내용이고 끝이 어미라, 짧은 쪽 끝 이만큼을 뺀 앞부분이 전부 같으면 같은 질문으로 본다.
+_ENDING = 3
+
+#: 어미를 뺀 뒤 남아야 하는 공통 앞부분의 최소 길이. 짧은 질문은 어미를 빼면 남는 것이
+#: 거의 없어 다른 질문끼리 같다고 판정된다 — 그런 질문은 정규형이 같을 때만 같다.
+_SAME_MIN = 8
+
+
+def _same_question(a: str, b: str) -> bool:
+    """정규형 둘이 같은 질문인가 — 표기 차이와 어미 차이를 무시한다."""
+    if a == b:
+        return True
+    short = min(len(a), len(b))
+    common = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        common += 1
+    return common >= _SAME_MIN and common >= short - _ENDING
+
+
+def _already(question: str, pool: set[str]) -> bool:
+    """이 질문(정규형)이 pool 의 어느 질문과 같은가."""
+    return any(_same_question(question, p) for p in pool)
+
+
 def _topic(found: dict) -> str:
     """이 재료의 근거 카드 제목 — `{topic}` 슬롯에 들어갈 값. 없으면 빈 문자열."""
     for source in found.get("sources") or []:
@@ -439,7 +468,7 @@ def followup_questions(out: dict) -> list[str]:
                     and not (found.get("meta") or {}).get("lms"):
                 continue
             question = _phrase(variants, topic, len(history))
-            if not question or _norm(question) in asked or _norm(question) in seen:
+            if not question or _already(_norm(question), asked | seen):
                 continue
             # 이 칩을 눌렀을 때 답이 나올 재료가 실제로 있나 — 없으면 안 띄운다.
             #

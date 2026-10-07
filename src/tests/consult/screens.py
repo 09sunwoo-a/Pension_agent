@@ -194,6 +194,115 @@ def check_outreach() -> int:
     hit = "요건 일치: " in text and "요건 일치: 없음" not in text and "지금 안내할 것 2건" in text
     print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 «요건 일치: <요건 이름>»이 붙는다")
     ok += hit
+
+    # ⑥ 답변이 인용한 발송 문구는 화법 대사와 갈라 `messages` 로 실린다(effects/messages.py).
+    #
+    # 회귀 대상(2026-09-23 시연 화면): 발송 문구가 큰따옴표 인용이라 «고객에게 이렇게 말씀해
+    # 보세요» 화법 블록으로 섰다 — 직원이 말할 대사와 발송 화면에 붙여 넣을 문자가 구분되지
+    # 않았다. 답변은 문구의 줄바꿈을 한 줄로 이어 쓰기도 하므로, 복사 값은 원본으로 돌린다.
+    from pension_agent.consult_agent.effects import messages as lms_messages
+    original = ev["meta"]["messages"][0]
+    flat = " ".join(original.split())
+    answer = (f"이 대사로 먼저 말씀해 보세요. “노후 자금 한번 같이 점검해 보시죠.”\n\n"
+              f"고객님께 보낼 발송 문구는 다음과 같습니다.\n\n“{flat}”")
+    got = lms_messages.messages_in(answer, lms_messages.canonical([ev]))
+    hit = (len(got) == 1 and got[0]["kind"] == "lms" and got[0]["text"] == flat
+           and got[0]["copy"] == original and "\n" in got[0]["copy"])
+    print(f"{'✓' if hit else '✗'} 발송 문구 인용만 messages 로 실리고(화법 대사는 빠진다), "
+          f"복사 값은 줄바꿈이 살아 있는 원본이다")
+    ok += hit
+
+    # 원장에 outreach 재료가 없는 턴(「더 짧게」로 다시 쓴 턴)의 문구도 `(광고)` 로 알아본다 —
+    # 원본이 없으니 복사 값은 본문 그대로다.
+    short = "(광고) 김현수 고객님, KB국민은행입니다. 이벤트 확인해 보세요. 무료수신거부 080-XXX-XXXX"
+    got = lms_messages.messages_in(f"줄인 문구예요.\n\"{short}\"", [])
+    hit = len(got) == 1 and got[0]["text"] == short and got[0]["copy"] == short
+    print(f"{'✓' if hit else '✗'} 재료 없는 턴의 발송 문구도 (광고) 접두로 알아보고 본문 그대로 복사한다")
+    ok += hit
+
+    # 폴백 콘텐츠의 문구도 인용되면 같은 꼴로 선다(발송 화면 제안과 달리 복사는 막지 않는다 —
+    # 본문에 이미 떠 있는 문구다). 재료에 원본이 실려 있어야 한다.
+    hit = (not none_cid) or bool(none_ev and none_ev["meta"]["messages"])
+    print(f"{'✓' if hit else '✗'} 요건 무관 콘텐츠의 발송 문구도 재료가 원본을 싣는다")
+    ok += hit
+
+    # ⑦ 링크는 식별자로 잰다 — 콘텐츠 링크끼리 꼬리 번호를 공유한다.
+    #
+    # 회귀 대상(2026-09-23 실측, 오세훈): 요건에 맞는 세미나 링크(`/seminar/irp-001`)만 정확히
+    # 인용한 답이, 일부러 뺀 폴백 이벤트 링크(`/event/irp-001`)와 숫자 `001` 이 겹친다는
+    # 이유로 «그대로 옮겨야 하는 문장을 풀어 씀»에 두 번 걸려 근거 원문이 덤프됐다.
+    from pension_agent.consult_agent.nodes import plan as _plan
+    from pension_agent.verify import numbers as _numbers
+    # 꼬리 번호가 겹치는 두 링크가 함께 실리는 고객을 로스터에서 찾는다(실측 고객이 그렇다).
+    twin_ev, one, twin = None, "", ""
+    for persona in PERSONAS:
+        cand = tools.run("outreach", {"customer_id": persona.id, "question": "이벤트 있어?"}, "이벤트")
+        urls = [a for a in (cand or {}).get("atomic", []) if a.startswith("http")]
+        pair = next(((a, b) for a in urls for b in urls
+                     if a != b and _numbers(a) & _numbers(b)), None)
+        if pair:
+            twin_ev, (one, twin) = cand, pair
+            break
+    answer = f"이 콘텐츠를 안내해보세요. ▶ {one}"
+    hit = (twin_ev is not None and _plan._span_verdict(twin_ev, answer)[0] != _plan.DISCARD
+           and _plan._span_verdict(twin_ev, answer + ".")[0] != _plan.DISCARD)
+    print(f"{'✓' if hit else '✗'} 링크 하나만 정확히 인용한 답은 번호가 겹치는 다른 링크가 있어도 "
+          f"버리지 않는다" + (f" ({one} · {twin})" if twin else " (겹치는 고객 없음)"))
+    ok += hit
+    urls = [a for a in ev["atomic"] if a.startswith("http")]
+    one = urls[-1] if urls else ""
+    # 원장에 없는 링크(한 글자 바꾼 것)는 그대로 걸린다 — 넓힌 것은 «안 부른 링크» 하나다.
+    forged = one[:-1] + ("9" if not one.endswith("9") else "8")
+    hit = bool(one) and _plan._span_verdict(ev, f"여기서 확인하세요 {forged}")[0] == _plan.DISCARD
+    print(f"{'✓' if hit else '✗'} 원장에 없는 링크를 쓴 답은 버린다")
+    ok += hit
+
+    # ⑧ 다른 후보 중 요건에 맞는 것은 요건을 표시하고, 요건 무관 폴백은 적합성 근거로 못 쓰게 한다.
+    #
+    # 회귀 대상(2026-09-28 실측, 오세훈): 만기예금 요건에 맞는 세미나가 «다른 세미나 후보»에
+    # 이름만 있어서, «다른 건 없어?»에 답변이 요건 무관 폴백 이벤트를 골랐고 그 발송 문구 속
+    # «만기예금을 보유 중이신 고객님께서…»를 근거로 «이 이벤트가 적합해요»라고 말했다.
+    # 요건 성립은 날짜에 따라 바뀐다(«만기 1개월 전»은 기준일이 움직이면 켜지고 꺼진다). 그래서
+    # 특정 고객·날짜를 박지 않고 **로스터 전체에서 성질을 잰다** — 표시가 붙는 후보는 요건 판정
+    # 함수(`relevant_outreach`)가 맞다고 한 것뿐이고, 요약 줄이 센 수와 표시 줄 수가 같아야 한다.
+    import re as _re2
+    marked_total, wrong = 0, []
+    for persona in PERSONAS:
+        p_ev = tools.run("outreach", {"customer_id": persona.id, "question": "다른 건 없어?"}, "다른 후보")
+        if not p_ev:
+            continue
+        p_facts = strategy_agent.propose(strategy_customer.get_profile(persona.id))["facts"]
+        relevant = {r["name"] for r in strategy_support.relevant_outreach(
+            p_facts.get("problem_situations") or [], name=persona.nm)}
+        cand = [ln.strip()[2:] for ln in p_ev["text"].splitlines()
+                if ln.startswith("  · ")]
+        marked = [c for c in cand if " · 요건 일치: " in c]
+        marked_total += len(marked)
+        wrong += [f"{persona.nm}: {c}" for c in cand
+                  if (" · 요건 일치: " in c) != (c.split(" — ")[0] in relevant)]
+        m = _re2.search(r"다른 후보 중 이 고객 요건에 맞는 것 (\d+)건", p_ev["text"])
+        if (int(m.group(1)) if m else 0) != len(marked):
+            wrong.append(f"{persona.nm}: 요약 수 {m.group(1) if m else 0} ≠ 표시 {len(marked)}")
+    hit = marked_total > 0 and not wrong
+    print(f"{'✓' if hit else '✗'} 다른 후보 중 이 고객 요건에 맞는 것만 요건 이름을 달고, 요약 줄이 그 수를 센다"
+          + (f" (표시 {marked_total}건)" if not wrong else f" (어긋남: {wrong[:3]})"))
+    ok += hit
+
+    # 요건 무관 폴백 — 오세훈은 어느 기준일에도 이벤트 쪽이 요건 무관 폴백이다.
+    osh = next((p for p in PERSONAS if p.nm == "오세훈"), None)
+    osh_ev = tools.run("outreach", {"customer_id": osh.id, "question": "다른 건 없어?"}, "다른 후보") \
+        if osh else None
+    osh_text = (osh_ev or {}).get("text", "")
+    hit = ("주의: 요건 무관 콘텐츠의 문구다" in osh_text
+           and "콘텐츠 대상 키워드(이 고객과 무관)" in osh_text
+           and osh_text.count("매칭 키워드:") == 1)
+    print(f"{'✓' if hit else '✗'} 요건 무관 폴백은 문구를 적합성 근거로 쓰지 말라고 적고, "
+          f"키워드를 «매칭»이라 부르지 않는다")
+    ok += hit
+    # 요건에 맞는 콘텐츠(PERSONAS[0])에는 그 주의가 붙지 않는다.
+    hit = "주의: 요건 무관" not in text
+    print(f"{'✓' if hit else '✗'} 요건에 맞는 콘텐츠에는 요건 무관 주의가 붙지 않는다")
+    ok += hit
     return ok
 
 
@@ -437,6 +546,47 @@ def check_screen_registry() -> int:
     hit = (bool(pay) and "해지" in line
            and (pay.get("trigger_examples") or [""] * 2)[1].startswith("해지, 계좌이체"))
     print(f"{'✓' if hit else '✗'} 표A 「주요 기능」 칸이 둘째 검색 예시로 실려 화면명에 없는 말(해지)로도 닿는다")
+    ok += hit
+
+    # «같은 말» — [06-12-610] 의 주요 기능 칸은 「사전지정운용제도 신청」이라고만 적는다.
+    # 직원은 「디폴트옵션 등록 화면」으로 묻고, 그 둘이 같은지를 LLM 이 턴마다 따로 판단해
+    # 답이 갈렸다(2026-09-23 — 첫 턴은 화면번호를 답하고, 다음 턴은 «자료로는 확인이
+    # 어려워요», 대화가 쌓인 턴은 그 화면을 빼고 되물었다). 원문(표B)이 두 이름을 괄호로
+    # 병기하므로 변환기가 파생 필드로 붙이고, 카드 선택·게이트·작성 재료가 전부 그것을 본다.
+    from pension_agent.consult_agent.tools.adequacy import _headline
+    dopt = by_screen.get("[06-12-610]")
+    alias = "사전지정운용 = 디폴트옵션"
+    hit = (bool(dopt) and alias in (dopt.get("aliases") or [])
+           and "디폴트옵션" in _card_line(dopt, 2)
+           and alias in tools._render_screen(dopt)
+           and alias in _headline(dopt))
+    print(f"{'✓' if hit else '✗'} 원문 표기만 있는 화면 카드에 «같은 말»이 붙어 카드 선택·게이트·재료에 보인다")
+    ok += hit
+
+    # 이미 직원이 부르는 이름을 쓰는 카드에는 붙이지 않는다 — [06-12-918] 디폴트옵션 대기자금 관리.
+    # 원문 summary 는 손대지 않는다(루트 CLAUDE.md 규칙 1) — 괄호 병기는 검색 예시에만 있다.
+    idle = by_screen.get("[06-12-918]")
+    hit = (bool(idle) and not idle.get("aliases") and bool(dopt)
+           and "디폴트옵션" not in (dopt.get("summary") or ""))
+    print(f"{'✓' if hit else '✗'} «같은 말»은 이름이 빠진 카드에만, 원문 칸은 그대로 둔다")
+    ok += hit
+
+    # 원문이 병기하지 않은 쌍은 붙이지 않는다 — 코드가 동의어를 지어내지 않는다.
+    from scripts.kb_build import procedures as _procs
+    hit = (_procs._attested_aliases("디폴트옵션(사전지정운용) 등록") == {"사전지정운용": "디폴트옵션"}
+           and _procs._attested_aliases("사전지정운용제도 신청 · 디폴트옵션 대기자금") == {})
+    print(f"{'✓' if hit else '✗'} 원문에 괄호 병기가 없는 «같은 말»은 붙이지 않는다")
+    ok += hit
+
+    # 업무 묶음은 기능 설명이 아니다 — 화면명 뒤 괄호에 붙어 있던 동안 「[06-12-918] 디폴트옵션
+    # 대기자금 관리  (운용지시·상품변경)」이 설명처럼 읽혀, 답변이 «즉 운용지시나 상품변경을
+    # 처리하는 화면»으로 풀어 썼다(2026-09-28). 기능 칸이 화면명을 되풀이해도 그 줄은 남긴다 —
+    # 빼면 기능 설명이 없는 재료가 되어 출처 줄을 기능으로 풀어 썼다(같은 날 재실측).
+    idle_text = tools._render_screen(idle) if idle else ""
+    hit = (bool(idle) and idle_text.splitlines()[0] == f"■ {idle['screen']} {idle['title']}"
+           and f"· 표의 업무 묶음: {idle['group']}" in idle_text
+           and f"· 무슨 화면인지: {idle['summary']}" in idle_text)
+    print(f"{'✓' if hit else '✗'} 화면 재료가 업무 묶음을 기능 설명과 갈라 싣는다")
     ok += hit
 
     # 화면번호는 한 글자만 틀려도 없는 화면이라 원문 그대로 요구한다.

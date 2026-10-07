@@ -192,15 +192,16 @@ def check_miss_recovery() -> int:
     print(f"{'✓' if hit else '✗'} 질의가 원문과 같으면 헛되이 두 번 부르지 않는다")
     ok += hit
 
-    # ③ '없다'가 무엇을 찾아봤는지 말한다.
+    # ③ '없다'는 없다고만 말한다 — 찾아본 내역(계획 LLM 이 만든 질의)을 화면에 싣지 않는다
+    #    (2026-09-21 행내 실측, 질문 리스트 13번). 그 기록은 steps·트레이스에 남는다.
     answer = P._no_evidence({"steps": [{"tool": "procedure",
                                     "query": "운용현황 조회 화면번호", "outcome": "miss"}]})
-    hit = "찾아본 곳" in answer and "운용현황 조회 화면번호" in answer
-    print(f"{'✓' if hit else '✗'} '근거 없음'이 무엇을 어떤 말로 찾아봤는지 밝힌다")
+    hit = answer == P.NO_EVIDENCE and "운용현황 조회 화면번호" not in answer
+    print(f"{'✓' if hit else '✗'} '근거 없음'이 찾아본 질의를 화면에 싣지 않는다")
     ok += hit
 
     hit = P._no_evidence({}) == P.NO_EVIDENCE
-    print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴에는 빈 '찾아본 곳'을 붙이지 않는다")
+    print(f"{'✓' if hit else '✗'} 아무것도 안 불러본 턴도 같은 한 문장이다")
     ok += hit
     return ok
 
@@ -217,18 +218,26 @@ def check_no_material_tone() -> int:
     문장이다. 뒤엣것은 **프롬프트의 예시 문구가 그대로 베껴져** 나온 것이라, 문구를 고쳤는지가
     아니라 그 예시가 지워졌는지를 재야 한다 — 코드 쪽만 고치고 프롬프트를 두면 증상이 남는다.
 
-    바꾸지 않은 것도 함께 잰다: 없다고 말하면서 **무엇을 갖고 있는지** 알려주는 것은 §5 의
-    요건이라, 공손하게 고치다가 안내가 짧아지면 그것도 회귀다.
+    안내문의 **내용은 «없다» 하나다**(2026-09-21 — §5 「못 찾았으면 없다고만 말한다」). 그 전에는
+    가진 재료 종류를 나열하고 «지식베이스»라는 말을 썼는데, 행내 실측(질문 리스트 13번)에서
+    직원에게 생소한 개발 용어이고 물은 것과 무관한 나열이라는 지적을 받았다. 되살아나지
+    않게 함께 잰다.
     """
     from pension_agent.consult_agent.prompts import COMPOSE_MISSING_BLOCK, COMPOSE_SYSTEM
 
     ok = 0
-    hit = "죄송" in plan.NO_EVIDENCE and plan.NO_EVIDENCE.rstrip().endswith("어요.")
+    hit = "죄송" in plan.NO_EVIDENCE and plan.NO_EVIDENCE.rstrip().endswith("요.")
     print(f"{'✓' if hit else '✗'} '근거 없음' 안내문이 답변과 같은 공손한 해요체다")
     ok += hit
 
-    hit = "제가 가진 자료는" in plan.NO_EVIDENCE and "브리핑 화면" in plan.NO_EVIDENCE
-    print(f"{'✓' if hit else '✗'} 그러면서 무엇을 갖고 있는지는 그대로 알려준다")
+    hit = (plan.NO_EVIDENCE.count(".") == 1
+           and not any(w in plan.NO_EVIDENCE for w in ("지식베이스", "화법·", "찾아본 곳", "다시 물어")))
+    print(f"{'✓' if hit else '✗'} 안내문은 한 문장이고 개발 용어·재료 나열·찾아본 곳·되묻기 안내가 없다")
+    ok += hit
+
+    # 같은 말이 다른 안내문(LLM 장애·도구 고장·검증 폴백 머리말)에도 있었다 — 함께 걷어낸다.
+    hit = not any("지식베이스" in t for t in (plan.LLM_FAILED, plan.TOOL_FAILED, plan.RAW_EVIDENCE))
+    print(f"{'✓' if hit else '✗'} 장애·고장·폴백 안내문에도 «지식베이스»가 없다")
     ok += hit
 
     # 옛 예시 문구가 «이렇게 답하라»로 서 있으면 LLM 이 그대로 베낀다. 금지 예시로
@@ -596,6 +605,69 @@ def check_tool_loop() -> int:
     return ok
 
 
+def check_tone_and_marks() -> int:
+    """답변 말투가 「-다」체로 새지 않고, 표시(※)가 제 줄에 서는가(2026-09-29, 질문 리스트 29번).
+
+    실측: 「그때 안내한 금리가 지금도 맞는 거야?」의 첫 문단이 팩트 F65 의 값 원문(「…고정
+    팩트로 쓸 수 없다. … 유일하게 정확한 안내다.」)으로 그대로 나갔고, 상담 기록의 시효
+    표시가 앞 문장 뒤에 한 칸 띄고 붙었다. 원인이 둘이라 검사도 둘이다.
+    ① 관계 선언이 없는 팩트는 값을 «한 글자도 바꾸지 말고» 옮기게 강제되는데(atomic), F65 는
+       숫자가 화면번호뿐인 산문이라 그 강제가 지키는 값이 없다 — 그런 스팬은 강제하지 않는다.
+       값이 있는 미선언 팩트는 그대로 강제된다(가짜 완화가 되지 않게 함께 잰다).
+    ② 표시가 본문 한 줄에 이어 붙으면 코드가 제 줄로 내린다. 글자는 바꾸지 않는다.
+    """
+    from pension_agent.consult_agent.evidence import relations as REL
+    from pension_agent.consult_agent.prompts import COMPOSE_SYSTEM
+    from pension_agent.consult_agent.state import KB as _KB
+    from pension_agent.consult_agent.tools.cards import fact_evidence
+
+    ok = 0
+    f65 = _KB.facts["fact.k04.f65"]
+    ev = fact_evidence("q", [(1.0, f65)])
+    hit = ev is not None and not REL.declared(f65) and ev["atomic"] == []
+    print(f"{'✓' if hit else '✗'} 숫자가 화면번호뿐인 미선언 팩트(F65)는 원문을 강제하지 않는다"
+          + ("" if hit else f" — {ev and ev['atomic']}"))
+    ok += hit
+
+    # 값이 있는 미선언 팩트는 여전히 강제된다 — 이 완화가 종류 단위 해제가 아니라는 증거.
+    valued = next(f for f in _KB.facts.values()
+                  if not REL.declared(f) and (numbers(f.get("value") or "")
+                                              - {t for s in f.get("screens") or [] for t in numbers(s)}))
+    ev = fact_evidence("q", [(1.0, valued)])
+    hit = ev is not None and valued["value"] in ev["atomic"]
+    print(f"{'✓' if hit else '✗'} 값이 있는 미선언 팩트({valued['id']})는 그대로 원문을 강제한다")
+    ok += hit
+
+    hit = "「-다」로 끝나는 문어체여도" in COMPOSE_SYSTEM and "줄을 바꿔 따로 세운다" in COMPOSE_SYSTEM \
+        and "직접 쓰지 않는다 — 시스템이 답변 아래에 세운다" in COMPOSE_SYSTEM
+    print(f"{'✓' if hit else '✗'} 작성 규칙이 해요체 유지·표시는 코드가 아래에 세움·줄바꿈을 시킨다")
+    ok += hit
+
+    # 표시 예시는 notices 로 남는 종류(⚠ 유의)를 쓴다 — 상담 기록 표시(HISTORY_MARK)는
+    # 2026-09-22 부터 재료 성격 표시라 본문에 서지 않는다(material.check_history_material).
+    mark = "⚠ 유의 — 기록의 값은 그때 기준이라 지금과 다를 수 있어요."
+    inline = f"밝히신 적이 있어요. {mark}"
+    hit = plan._break_marks(inline) == f"밝히신 적이 있어요.\n{mark}" \
+        and plan._break_marks(f"앞 문장.\n{mark}") == f"앞 문장.\n{mark}" \
+        and plan._break_marks("금리 3.5% ※표시 아님") == "금리 3.5% ※표시 아님"
+    print(f"{'✓' if hit else '✗'} 앞 문장에 이어 붙은 표시를 제 줄로 내린다(이미 제 줄이면 그대로)")
+    ok += hit
+
+    # compose 를 통과한 답변에도 적용된다 — 표시가 붙은 채로 나가지 않는다.
+    ev_h = tools._ev("history", "q", "■ 지난 상담\n2025-10-06 재투자 의사", [{"id": "h", "title": "h"}],
+                     notices=[mark])
+    orig = plan.generate
+    try:
+        plan.generate = lambda p, **kw: inline
+        out = plan.compose({"question": "q", "evidence": [ev_h]})
+    finally:
+        plan.generate = orig
+    hit = f"있어요.\n{mark}" in out["answer"] and out["answer"].count(mark) == 1
+    print(f"{'✓' if hit else '✗'} 통과한 답변의 표시가 제 줄에 서고 중복 덧붙임은 없다")
+    ok += hit
+    return ok
+
+
 def check_atomic_spans() -> int:
     """원문 스팬 집행 — 도구 종류가 아니라 **재료**가 보호 수준을 정한다.
 
@@ -621,7 +693,7 @@ def check_atomic_spans() -> int:
         # ② 값을 원문 그대로 실으면 그대로 통과한다 — 산문 안에 인용이 녹는다.
         plan.generate = lambda p, **kw: f"정리하면 이래요. {VALUE} 라고 안내하시면 돼요."
         out = plan.compose({"question": "q", "evidence": [ev_num]})
-        hit = VALUE in out["answer"] and plan.MISSING_NOTICES not in out["answer"]
+        hit = out["answer"].count(VALUE) == 1 and "빠뜨리면" not in out["answer"]
         print(f"{'✓' if hit else '✗'} 값 원문 인용 → 블록 덧붙임 없이 통과")
         ok += hit
 
@@ -639,9 +711,39 @@ def check_atomic_spans() -> int:
         plan.generate = lambda p, **kw: "현장에서는 KPI부터 본다고 해요."
         out = plan.compose({"question": "q", "evidence": [ev_mark]})
         hit = ("현장에서는" in out["answer"] and tools.FIELDTIP_MARK in out["answer"]
-               and plan.MISSING_NOTICES in out["answer"]
+               and "빠뜨리면" not in out["answer"]         # 코드 라벨 머리말은 세우지 않는다
                and ev_mark["text"] not in out["answer"])   # 표시만 붙고 카드 전문은 안 붙는다
-        print(f"{'✓' if hit else '✗'} 필수 표시 누락 → 생성문 유지 + 빠진 표시만 덧붙임")
+        print(f"{'✓' if hit else '✗'} 필수 표시 누락 → 생성문 유지 + 빠진 표시만 덧붙임(머리말 없이)")
+        ok += hit
+
+        # 표지 없는 표시(세액공제 카드의 결정세액 단서)는 ※ 를 앞세워 붙는다 — 본문에 이어진
+        # 문단으로 읽히지 않게. 문장은 그대로라 표시 포함 검사도 그대로 통과한다.
+        caveat = "단, 세액공제 전 결정세액이 공제액보다 적으면 최대 환급액을 받지 못한다."
+        ev_plain = tools._ev("tax_credit", "q", "■ 환급 계산\n300만원 추가 납입 시 495,000원",
+                             [{"id": "t.1", "title": "환급"}], notices=[caveat])
+        prompts_seen: list[str] = []
+
+        def gen_capture(p, **kw):
+            prompts_seen.append(p)
+            return "300만원 더 넣으면 495,000원을 돌려받을 수 있어요."
+
+        plan.generate = gen_capture
+        out = plan.compose({"question": "q", "evidence": [ev_plain]})
+        hit = f"\n※ {caveat}" in out["answer"] and out["answer"].count(caveat) == 1
+        print(f"{'✓' if hit else '✗'} 표지 없는 표시는 ※ 를 앞세워 제 줄에 붙는다")
+        ok += hit
+
+        # 표시는 <필수 인용> 으로 넘기지 않는다(2026-09-22 — 질문 리스트 19번, 이수민). 넘기던
+        # 동안 LLM 이 「-다」체 원문을 본문 한가운데 절반만 베꼈고, 코드가 전문을 또 붙여 같은
+        # 단서가 세 번 섰다. 값+조건 스팬(atomic)은 그대로 필수 인용이다.
+        hit = bool(prompts_seen) and "<필수 인용" not in prompts_seen[0] and caveat not in prompts_seen[0]
+        print(f"{'✓' if hit else '✗'} 표시(notices)는 필수 인용에 넣지 않는다(코드가 아래에 세운다)")
+        ok += hit
+        prompts_seen.clear()
+        plan.generate = gen_capture
+        plan.compose({"question": "q", "evidence": [ev_num]})
+        hit = bool(prompts_seen) and "<필수 인용" in prompts_seen[0] and VALUE in prompts_seen[0]
+        print(f"{'✓' if hit else '✗'} 값+조건 스팬(atomic)은 여전히 필수 인용이다")
         ok += hit
 
         # ⑤ 화법은 atomic 이 비어 있을 뿐, 처리 경로가 다르지 않다.
@@ -784,7 +886,7 @@ def check_plan_failure() -> int:
             raise LLMError("LLM 미설정")
 
         state, answer = drive(dead)
-        hit = bool(state.get("llm_error")) and "지식베이스에 자료가 없다는 뜻이 아니" in answer \
+        hit = bool(state.get("llm_error")) and "자료가 없다는 뜻이 아니" in answer \
             and plan.NO_EVIDENCE not in answer
         print(f"{'✓' if hit else '✗'} LLM 호출 실패를 '근거 없음'으로 둔갑시키지 않음")
         ok += hit
@@ -822,7 +924,7 @@ def check_plan_failure() -> int:
 
         hit = (bool([s for s in state.get("steps") or [] if s["outcome"] == "failed"])
                and plan.NO_EVIDENCE not in answer
-               and "지식베이스에 자료가 없다는 뜻이 아니" in answer
+               and "자료가 없다는 뜻이 아니" in answer
                and "KeyError" in answer)
         print(f"{'✓' if hit else '✗'} 도구가 죽은 것을 '근거 없음'으로 둔갑시키지 않는다")
         ok += hit
@@ -841,25 +943,19 @@ def check_plan_failure() -> int:
         print(f"{'✓' if hit else '✗'} 죽은 도구는 이번 턴 카탈로그에서 빠진다")
         ok += hit
 
-        # 죽은 호출은 '찾아본 곳'에도 서지 않는다 — 지식베이스를 보지도 못했으므로
-        # 거기 세우면 «그 재료로 찾아봤는데 없더라»는 거짓 진술이 된다.
+        # 근거 0건 안내문에는 호출 내역이 아예 없다 — 죽은 호출도 빗나간 호출도, 도구 이름도
+        # 질의도 화면에 서지 않는다(2026-09-21, 질문 리스트 13번 — 「찾아본 곳: fact:고유계정대
+        # …」가 직원 화면에 그대로 떴던 자리. 도구 이름을 재료 이름으로 바꾸는 것으로는 부족했고
+        # 줄 자체가 직원에게 읽을 이유가 없는 것이었다).
         tried = plan._no_evidence({"steps": [
             {"tool": "screen", "query": "운용현황", "outcome": "failed", "reason": "KeyError"},
             {"tool": "fact", "query": "수수료", "outcome": "miss"}]})
-        hit = "수수료" in tried and "운용현황" not in tried
-        print(f"{'✓' if hit else '✗'} 죽은 호출을 '찾아본 곳'으로 세지 않는다")
+        hit = (tried == plan.NO_EVIDENCE
+               and not any(w in tried for w in ("수수료", "운용현황", "fact", "screen", "찾아본 곳")))
+        print(f"{'✓' if hit else '✗'} 근거 0건 안내문에 호출 내역(도구 이름·질의)이 서지 않는다")
         ok += hit
 
-        # «찾아본 곳» 은 도구 이름이 아니라 **직원이 읽는 재료 이름**으로 쓴다(§5 — 재료에
-        # 개발 용어를 쓰지 않는다). 「찾아본 곳: fact:고유계정대 …」가 직원 화면에 그대로
-        # 뜬 자리다(2026-09-21 실측, 질문 리스트 13번). 계획 프롬프트의 서명(`_label`)은
-        # 도구 이름 그대로여야 하므로 그쪽과 갈라 둔다.
-        hit = ("제도·상품 수치" in tried and "fact" not in tried
-               and "screen" not in tried and "playbook" not in tried)
-        print(f"{'✓' if hit else '✗'} '찾아본 곳'이 도구 이름이 아니라 재료 이름을 쓴다")
-        ok += hit
-
-        # 반대쪽도 고정한다 — 계획 프롬프트에 실리는 서명은 **도구 이름 그대로**여야 한다.
+        # 계획 프롬프트에 실리는 서명은 **도구 이름 그대로**여야 한다.
         # 그건 LLM 이 같은 호출을 다시 고르지 않게 하는 좌표라, 한국어 재료 이름으로 바꾸면
         # 계획이 자기가 뭘 불러봤는지 짚을 수 없다(지워진 gap 23 이 만든 경로다).
         sig = plan._label({"tool": "fact", "query": "수수료"})
@@ -938,7 +1034,7 @@ def check_llm_down() -> int:
     try:
         out = G.build_agent().invoke({"question": "사업자 고객인데 수수료 부담된다고 하시네요"})
         answer = out.get("answer", "")
-        hit = ("지식베이스에 자료가 없다는 뜻이 아니" in answer
+        hit = ("자료가 없다는 뜻이 아니" in answer
                and plan.NO_EVIDENCE not in answer and "LLMError" in answer)
     except Exception as exc:
         answer, hit = f"({type(exc).__name__})", False
@@ -958,7 +1054,7 @@ def check_llm_down() -> int:
                      "atomic": [], "notices": [], "notice_scopes": [], "allow": [],
                      "sources": [{"id": "f1"}], "meta": {}}]
         answer = plan.compose({"question": "한도가 얼마야?", "evidence": evidence})["answer"]
-        hit = "지식베이스에 자료가 없다는 뜻이 아니" in answer and "900만원" not in answer
+        hit = "자료가 없다는 뜻이 아니" in answer and "900만원" not in answer
     finally:
         plan.generate = orig
     print(f"{'✓' if hit else '✗'} compose: 문장 작성 실패를 근거 원문 덤프로 덮지 않음")

@@ -13,6 +13,7 @@ from pension_agent.consult_agent.state import KB, AgentState
 from pension_agent.consult_agent import tools as _T  # noqa: PLC0415 — 후크는 패키지를 거쳐 부른다(머리말)
 from pension_agent.consult_agent.tools.adequacy import _adopt
 from pension_agent.consult_agent.evidence.record import Evidence, _ev, _scope
+from pension_agent.verify import numbers
 
 
 # ─────────────────────────────────────────────────────────────
@@ -45,13 +46,26 @@ def fact_evidence(query: str, hits: list[tuple[float, dict]], tool: str = "fact"
         # value 를 통째로 답변에 싣게 하던 것은 오짝을 잡는 장치가 그것뿐이어서였다.
         # 이제 그 카드는 relations.py 가 조건–값 쌍으로 대조하므로, LLM 이 질문에 맞게 풀어
         # 써도 된다(§4 "원문을 그대로 옮길 의무는 없다"). 선언이 없는 팩트는 그대로 강제된다.
+        #
+        # **값이 없는 스팬은 강제하지 않는다**(2026-09-29). 원문 강제가 지키는 것은 값–조건의
+        # 짝인데, F65 「원리금보장상품 금리는 매월 변경되므로 어떤 자료의 수치도 고정 팩트로 쓸
+        # 수 없다 …」처럼 숫자가 화면번호뿐인 산문에는 지킬 짝이 없다. 그런데 «한 글자도
+        # 바꾸지 말라»는 요구는 그대로 걸려서, 답변 첫 문단이 카드의 「-다」체 원문으로 나갔다
+        # (행내 실측, 질문 리스트 29번). 화면번호는 식별자 규칙이 따로 지키므로(plan._span_verdict)
+        # 그 숫자는 «값»으로 세지 않는다 — 카드가 선언한 화면(`screens`)의 토큰을 뺀다.
         if not REL.declared(f):
-            atomic += keys
+            atomic += [k for k in keys if _has_values(k, f)]
         notices += marks
         if marks:
             scopes.append(_scope(f.get("label") or f["id"], keys, marks))
     return _ev(tool, query, facts_qa.render(hits), kb_index.sources_of(KB, hits),
                atomic=atomic, notices=notices, scopes=scopes, cards=[f for _s, f in hits])
+
+
+def _has_values(span: str, card: dict) -> bool:
+    """이 스팬에 원문 강제로 지킬 **값**이 있는가 — 화면번호의 숫자는 값이 아니다."""
+    screen_tokens = {t for s in card.get("screens") or [] for t in numbers(s)}
+    return bool(numbers(span) - screen_tokens)
 
 
 def _procedure(state: AgentState, query: str) -> Evidence | None:
@@ -91,9 +105,22 @@ def _procedure_decls(cards: list[dict]) -> tuple[list[str], list[str], list[dict
 
 
 def _render_screen(card: dict) -> str:
-    lines = [f"■ {card['screen']} {card['title']}  ({card.get('group')})"]
+    lines = [f"■ {card['screen']} {card['title']}"]
+    # 기능 칸이 화면명을 되풀이할 뿐인 카드([06-12-918] · [00-12-211])에도 이 줄은 싣는다.
+    # 한 번 뺐더니 기능 설명이 아예 없는 재료가 되어, 작성 LLM 이 출처 줄(「퇴직연금 주요거래
+    # 화면번호 안내」)을 «주요거래를 처리하는 화면»으로 풀어 채웠다(2026-09-28 실측).
     if card.get("summary"):
         lines.append(f"· 무슨 화면인지: {card['summary']}")
+    # 업무 묶음은 표A 의 그룹 이름이지 이 화면의 기능이 아니다. 한때 화면명 뒤 괄호에 붙어
+    # 있었는데(「디폴트옵션 대기자금 관리  (운용지시·상품변경)」) 설명처럼 읽혀, 답변이 «즉
+    # 운용지시나 상품변경을 처리하는 화면입니다»로 풀어 썼다(2026-09-28 실측). 이름을 달아 가른다.
+    if card.get("group"):
+        lines.append(f"· 표의 업무 묶음: {card['group']}")
+    # «같은 말»은 판단이 아니라 재료로 준다. 이 줄이 없으면 「디폴트옵션 등록 화면」을 물었을 때
+    # 「사전지정운용제도 신청」 화면이 같은 것인지를 되묻기 판정·작성 LLM 이 매번 따로 정하고,
+    # 턴마다 «[06-12-610] 에서 하세요»와 «자료로는 확인이 어려워요»로 갈렸다(config.SCREEN_TERM_ALIASES).
+    if card.get("aliases"):
+        lines.append(f"· 같은 말: {' · '.join(card['aliases'])}")
     if card.get("confidence"):
         lines.append(f"· 근거 신뢰도: {card['confidence']}")
     # 비고는 역할 선언(role)대로만 싣는다 — authoring(저작·검증 메모)은 직원에게 띄우지

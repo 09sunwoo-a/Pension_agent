@@ -28,7 +28,9 @@ D 는 «행내 기준»이 아니라 «검증 전 제안값»이므로, 실데�
 
 from __future__ import annotations
 
+import base64
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -236,6 +238,10 @@ class Profile:
     own_contrib_amt: int = 0  # 개인부담금(가입자부담금) 몫(원)
     pension_paid_ytd: int = 0  # 당해 연금계좌 기납입액(원). 세액공제 잔여 한도 산출에 사용한다.
     paid_ytd_total: int = 0  # 당해 연금계좌 실납입액 합계(원) — IRP + 연금저축.
+    # 연금저축(연금저축펀드 포함) 계좌 보유 여부. None 은 «미확인»이다 — 원본 9Cases 에 없던
+    # 컬럼이라(tax_isa.연금저축보유여부, 데이터사전 21행) 값을 부여한 고객만 True/False 가 된다.
+    # 당해 연금저축 납입액 0원은 «올해 안 넣었다»일 뿐이라 이 값으로 대신 읽지 않는다.
+    pension_savings: bool | None = None
     # `pension_paid_ytd`(세액공제 **인정** 납입액)와 다른 값이다: 900만원을 넘겨 넣은 몫은
     # 인정액에 안 잡히지만 1,800만원 납입한도는 그만큼 쓴다. `deposit_room` 의 입력이다.
     balPct: int | None = None  # 평가금액(적립금) 백분위 — 값이 낮을수록 상위 구간이다(예:
@@ -736,6 +742,7 @@ def _to_profile(rec: dict) -> Profile:
         # 납입한도 여력의 입력. 인정액이 아니라 **실납입액**을 더한다 — 한도를 넘겨 넣은
         # 몫은 공제 인정액에서 빠지지만 1,800만원 한도는 그만큼 쓴다.
         paid_ytd_total=_paid_ytd_total(rec["tax_isa"]),
+        pension_savings={"Y": True, "N": False}.get(rec["tax_isa"].get("연금저축보유여부")),
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
         joined=rec["pension"].get("IRP가입일"),
         severance_amt=rec["pension"].get("퇴직급여금액") or 0,
@@ -765,6 +772,44 @@ def _load_personas() -> list[Profile]:
 PERSONAS: list[Profile] = _load_personas()
 
 _BY_ID = {p.id: p for p in PERSONAS}
+
+#: 고객 id(KB-PIN)의 원장 표기 — 6자리-7자리. 앞자리가 생년월일이라 **주민등록번호와 같은
+#: 꼴**이고, 행내 개인정보 필터(APIM 의 LLM 앞단 · 플랫폼 게이트웨이의 요청/응답)가 그 꼴을
+#: 잡는다. 그래서 프론트는 다른 꼴로 보내고 여기서 원장 표기로 되돌린다.
+#: 하이픈을 뺀 13자리 — 받기는 한다.
+_ID_COMPACT = re.compile(r"^\d{13}$")
+#: 프론트가 보내는 꼴 — `b64:` + 원장 표기의 base64(`b64:MTcxMjAzLTQ4MTUwNjI=`). 연속된
+#: 숫자열이 없어 숫자열을 보는 룰에 걸리지 않는다(«기본필터»의 룰 표는 확인된 바 없다).
+#: 접두를 두는 이유는 base64 문자열이 다른 꼴과 겉으로 갈리지 않기 때문이다 — 접두 없는
+#: 값은 풀지 않는다.
+ID_B64_PREFIX = "b64:"
+
+
+def normalize_id(value: str | None) -> str | None:
+    """요청이 실어 온 고객 id 를 원장 표기(`171203-4815062`)로. 비어 있으면 None.
+
+    받는 꼴은 셋이다 — 원장 표기 그대로 · 하이픈을 뺀 13자리(`1712034815062`) · `b64:` 접두의
+    base64. 뒤의 둘을 받는 이유는 위 주석이다. 그 밖의 꼴은 손대지 않는다 — 여기서 고쳐 쓰기 시작하면
+    없는 고객이 있는 고객으로 읽힐 수 있다. id 의 형식을 아는 곳은 이 모듈 하나다.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.startswith(ID_B64_PREFIX):
+        try:
+            decoded = base64.b64decode(text[len(ID_B64_PREFIX):], validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return text          # 풀리지 않는 값은 그대로 — 없는 고객으로 떨어진다
+        return normalize_id(decoded)
+    if _ID_COMPACT.match(text):
+        return f"{text[:6]}-{text[6:]}"
+    return text
+
+
+def encode_id(customer_id: str) -> str:
+    """원장 표기를 요청에 실을 꼴(`b64:…`)로 — 연속된 숫자열이 남지 않는다. `normalize_id` 의
+    역이고, 프론트가 보내야 하는 꼴의 기준이다(client/README.md)."""
+    return ID_B64_PREFIX + base64.b64encode(customer_id.encode("utf-8")).decode("ascii")
 
 
 def get_profile(customer_id: str) -> Profile | None:

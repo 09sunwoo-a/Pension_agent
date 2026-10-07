@@ -35,9 +35,9 @@ from pension_agent import llm, observability, note
 from pension_agent.session_store import append_turn
 from pension_agent.strategy_agent import customer as CUST
 
-from pension_agent.consult_agent import progress, tools
+from pension_agent.consult_agent import progress, tools, turn_trace
 from pension_agent.consult_agent.evidence import guard
-from pension_agent.consult_agent.effects import screens, suggest
+from pension_agent.consult_agent.effects import messages as lms_messages, screens, suggest
 
 from pension_agent.consult_agent.nodes.act import confirm_action, offer
 from pension_agent.consult_agent.nodes.answer import answer
@@ -52,7 +52,7 @@ from pension_agent.consult_agent.routing import (
 )
 from pension_agent.consult_agent.state import ANSWER_KEEP, HISTORY_LIMIT, KB, AgentState
 
-#: 답변 끝 추천질문 블록의 머리말. `plan.MISSING_NOTICES`·`MATERIAL_MARKS` 와 같은 꼴로,
+#: 답변 끝 추천질문 블록의 머리말. `MATERIAL_MARKS` 와 같은 꼴로,
 #: **프론트가 이 블록만 떼어낼 수 있게** 고정 문자열로 둔다(반환값의 "followups" 를 쓰면
 #: 떼어낼 필요도 없다). 지금은 텍스트로 붙이고, 실서비스 프론트가 칩 UI 를 따로 만든다.
 FOLLOWUP_HEADER = "── 이어서 물어보실 수 있어요"
@@ -90,8 +90,9 @@ def build_agent():
     # 승낙 턴 — 화면 연계는 URL 하나로 끝나고, 화법 제시는 근거만 실린 채 answer 로 간다.
     # 답변을 만드는 경로를 둘로 늘리지 않기 위해서다(routing.route_confirm). 그 턴에는
     # 되묻기 판정이 돌지 않는다 — 입력이 "네" 한 글자다(clarify.applicable).
+    # 쪽지 초안이 걸린 턴에 새 질문이 오면 초안을 무효로 하고 계획 루프로 넘긴다(§10).
     g.add_conditional_edges("confirm_action", route_confirm,
-                            {"compose": "compose", "__end__": END})
+                            {"compose": "compose", "plan": "plan", "__end__": END})
     g.add_edge("offer", END)
     # 브리핑 수정 노드가 «이건 화면 문장이 아니라 방금 한 답변을 고쳐 달라는 것»이라고
     # 판정하면 답을 내지 않고 계획 루프로 넘긴다(routing.route_correction). 분류가 어긋나도
@@ -211,6 +212,7 @@ def ask(
     # 흘린다(llm.client_user 주석).
     # 단계 로그의 요청 id·경과초 시계를 여기서 (다시) 연다 — main.py 가 연 id 는 그대로 잇고
     # 시계만 턴 시작으로 맞춘다. CLI·화면(app.py)처럼 id 없이 부른 경우도 시계는 생긴다.
+    started_at = observability.wall_clock()
     with observability.request_id(observability.current_request_id()), \
             llm.client_user(x_client_user), observability.trace(
         "consult.turn", input=question, session_id=session_id,
@@ -261,6 +263,12 @@ def ask(
             verdict=out.get("judge_verdict"), llm=f"{tally['calls']}회",
             chars=f"{tally['chars'] / 1000:.1f}k자" if tally["chars"] else None,
             level=logging.WARNING if outcome in ("llm_down", "tool_failed") else logging.INFO)
+        # 단계 기록은 이 블록이 닫히면 사라진다(request_id) — 닫기 전에 거둔다.
+        journal = observability.journal()
+    # 이 턴의 절차 기록 — 응답의 `trace` 이벤트가 싣는다(turn_trace 머리말). 로그 이벤트를
+    # 켠 요청에만 나가지만 만드는 값은 코드가 이미 아는 것이라 매 턴 만든다.
+    trace = turn_trace.build(out, journal, started_at=started_at,
+                             finished_at=observability.wall_clock())
     answer = out["answer"]
     # 답변 끝 추천질문 — 조건이 아니면 아무것도 붙지 않는다(suggest.followup_questions).
     # **모든 intent 가 지나는 여기 한 곳**에서 붙인다. 노드마다 붙이면 새 intent 가
@@ -278,6 +286,10 @@ def ask(
     if links is None:
         links = screens.links_in(out.get("answer") or "",
                                  screens.declared(evidence), screens.names(KB))
+    # 본문이 인용한 고객 발송 문구(LMS). 화면은 이 인용을 화법 블록이 아니라 «복사할 문구»
+    # 블록으로 그린다(effects/messages.py). links 와 같은 이유로 여기 한 곳에서 만든다.
+    messages = lms_messages.messages_in(out.get("answer") or "",
+                                        lms_messages.canonical(evidence))
     turn = {
         "question": question,
         "customer_type": out.get("customer_type"),
@@ -327,6 +339,9 @@ def ask(
         # 열 수 있는 링크로 감싼다 — 없으면 빈 목록이다(키가 있을 때와 없을 때를 프론트가
         # 갈라 처리하지 않게. `sources`·`followups` 와 같은 규약).
         "links": list(links or []),
+        # 본문 속 고객 발송 문구 — `{kind, label, text, copy}`. `text` 는 본문의 인용 내용
+        # 그대로라 화면이 그것으로 인용을 찾는다(links 의 screen 과 같은 규약). 없으면 [].
+        "messages": messages,
         # 추천질문만 따로 쓰고 싶은 프론트를 위해 리스트로도 준다 — answer 끝의 블록과
         # 같은 내용이다(프론트가 붙이면 answer 쪽 블록은 떼면 된다).
         "followups": followups,
@@ -337,4 +352,6 @@ def ask(
         # 이 턴이 답변 대신 판별 질문으로 끝났으면 그 질문과 선택지. 화면이 선택지를
         # 버튼으로 띄우고 싶을 때 쓴다.
         "clarify": out.get("clarify"),
+        # 절차 기록 — 근거 패널용(turn_trace). main.py 는 로그 이벤트를 켠 요청에만 싣는다.
+        "trace": trace,
     }

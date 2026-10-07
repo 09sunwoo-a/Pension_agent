@@ -30,6 +30,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import uuid
@@ -75,6 +76,9 @@ DEBUG_LINES = 40             # content 를 못 찾았을 때 stderr 에 보여�
 # 를 거기에 맞췄으므로 기본은 스트림이다. 게이트웨이 status 가 SUCCESS 가 아니면 stderr 에
 # 찍는다 — 오류 문구 안에 답변처럼 보이는 글이 있어도 답변이 아니다.
 IS_STREAM = True             # True 면 SSE 로 받는다. False 면 응답 JSON 하나에서 content 를 읽는다
+LOG_EVENTS = False           # True 면 요청에 "log_events": true 를 싣는다 — 서버 로그 줄(`log`)과 턴의
+                             # 절차 기록(`trace`)이 응답에 함께 온다. log 는 stderr 에, trace 는 요약으로
+                             # 찍는다(client/README.md 「trace — 답변 근거 패널」)
 INNER_SHAPE = "agent"        # "agent": {"message", "x_client_user"} — src/main.py 규약
                              # "reference": 참고 파이프라인 형태 {"filtered_body": {...}, "file_objects": []}
                              #   게이트웨이가 contents[0] 를 그대로 넘기지 않고 이 형태를 기대할 때 확인용
@@ -113,8 +117,14 @@ def _inner(question: str, x_client_user: str, customer_id: str = "", session_id:
             "file_objects": [],
         }
     inner = {"message": question, "x_client_user": x_client_user, "session_id": session_id}
+    if LOG_EVENTS:
+        inner["log_events"] = True
     if customer_id:
-        inner["customer_id"] = customer_id
+        # `b64:` + base64(원장 표기)로 보낸다 — 원장 표기(`171203-4815062`)는 주민등록번호와
+        # 같은 꼴이라 플랫폼 게이트웨이의 «기본필터»가 요청을 FILTER_INVALID 로 끊는다.
+        # 에이전트가 원장 표기로 되돌린다(src/main.py 머리말 customer_id). 실서비스 프론트도
+        # 같게 보낸다.
+        inner["customer_id"] = "b64:" + base64.b64encode(customer_id.encode("utf-8")).decode("ascii")
     return inner
 
 
@@ -168,12 +178,21 @@ def _events_in(text: str) -> Iterator[dict]:
 
 
 def _note_status(obj: dict) -> None:
-    """게이트웨이 이벤트의 status 가 SUCCESS 가 아니면 알린다 — content 는 그때 오류 문구다."""
+    """게이트웨이 이벤트의 status 가 SUCCESS 가 아니면 알린다 — content 는 그때 오류 문구다.
+
+    오류 객체는 **통째로** 찍는다(content 만 빼고 — 그건 _render 가 «이벤트가 아닌 응답»으로
+    따로 보여준다). `FILTER_INVALID` 실측(2026-09-22)에서 status·responseCode 두 칸만 찍었더니
+    «The content was blocked by the filter» 밖에 안 남았다 — 어느 방향(요청/응답)을 어떤 룰이
+    막았는지는 나머지 칸(filter_block_reason · rule · direction 류)에 있을 수 있는데 그것을
+    버리고 있었다. 오류 객체에 비밀은 없다(토큰은 요청 헤더에만 있다).
+    """
     status = obj.get("status")
     if status and status != "SUCCESS":
         code = obj.get("responseCode") or obj.get("response_code")
         print(f"[게이트웨이 status={status} responseCode={code}] content 는 답변이 아니라 오류 문구입니다.",
               file=sys.stderr)
+        rest = {k: v for k, v in obj.items() if k != "content"}
+        print(f"[게이트웨이 오류 객체] {json.dumps(rest, ensure_ascii=False)}", file=sys.stderr)
 
 
 def _dump_raw(resp: requests.Response, raw: list[str]) -> None:
@@ -274,11 +293,17 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
         customer_id: str = "", session_id: str = "default") -> dict:
     """한 턴을 돌려 이벤트를 종류별로 모은 dict 를 돌려준다.
 
-        {"answer": str, "intent": str|None, "links": [..], "sources": [..], "followups": [..],
-         "action": dict|None, "clarify": dict|None, "error": str|None, "progress": [..]}
+        {"answer": str, "intent": str|None, "links": [..], "messages": [..], "sources": [..],
+         "followups": [..],
+         "action": dict|None, "clarify": dict|None, "error": str|None, "progress": [..],
+         "logs": [..], "trace": dict|None}
+
+    logs·trace 는 LOG_EVENTS 를 켰을 때만 채워진다.
     """
-    out: dict = {"answer": "", "intent": None, "links": [], "sources": [], "followups": [],
-                 "action": None, "clarify": None, "error": None, "progress": [], "raw": []}
+    out: dict = {"answer": "", "intent": None, "links": [], "messages": [], "sources": [],
+                 "followups": [],
+                 "action": None, "clarify": None, "error": None, "progress": [], "raw": [],
+                 "logs": [], "trace": None}
     for ev in events(question, x_client_user, customer_id=customer_id, session_id=session_id):
         t = ev.get("type")
         if t == "progress":
@@ -287,6 +312,7 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
             out["answer"] += ev.get("text", "")
             out["intent"] = ev.get("intent")
             out["links"] = list(ev.get("links") or [])
+            out["messages"] = list(ev.get("messages") or [])
         elif t == "sources":
             out["sources"] = list(ev.get("items") or [])
         elif t == "followups":
@@ -299,7 +325,31 @@ def ask(question: str, x_client_user: str = X_CLIENT_USER, *,
             out["error"] = ev.get("text")
         elif t == "raw":
             out["raw"].append(ev.get("text", ""))
+        elif t == "log":
+            out["logs"].append(ev.get("text", ""))
+        elif t == "trace":
+            out["trace"] = {k: v for k, v in ev.items() if k != "type"}
     return out
+
+
+def _render_trace(ev: dict) -> None:
+    """절차 기록을 터미널에 요약한다 — 프론트의 «답변 근거» 패널이 그리는 것과 같은 재료다."""
+    print(f"\n─ 답변 근거 ({ev.get('started_at')} → {ev.get('finished_at')} · 의도 {ev.get('intent')})",
+          file=sys.stderr)
+    for step in ev.get("timeline") or []:
+        if step.get("level") == "DEBUG":
+            continue                       # LLM 호출 한 건 한 건 — 패널도 기본으로 접는다
+        mark = "⚠" if step.get("level") == "WARNING" else " "
+        print(f"  {mark} {step.get('elapsed_ms', 0):>6}ms {step.get('stage', ''):<10} {step.get('text', '')}",
+              file=sys.stderr)
+    for e in ev.get("evidence") or []:
+        cards = ", ".join(f"{c['id']}{'' if c.get('used') else '(안 씀)'}" for c in e.get("cards") or [])
+        print(f"  · 근거 {e.get('tool')} «{e.get('query')}» — {cards or '카드 없음'}", file=sys.stderr)
+    for s in ev.get("sentences") or []:
+        if s.get("matches"):
+            how = "; ".join(f"{m['by']} {m.get('card') or m['tool']} {m.get('span') or ', '.join(m.get('values') or [])}"
+                            for m in s["matches"])
+            print(f"  ↳ {s['text'][:40]} … ← {how}", file=sys.stderr)
 
 
 def _render(ev: dict) -> None:
@@ -314,6 +364,10 @@ def _render(ev: dict) -> None:
         for item in ev.get("links") or []:
             print(f"  [화면] {item.get('screen')} {item.get('label') or ''} → {item.get('url')}",
                   flush=True)
+        # 본문이 인용한 고객 발송 문구 — 프론트는 본문의 그 인용을 화법 블록 대신 복사 블록으로
+        # 그린다. 터미널에서는 복사할 값(copy)을 따로 세운다.
+        for item in ev.get("messages") or []:
+            print(f"  [{item.get('label') or '고객 발송 문구'} · 복사]\n{item.get('copy')}", flush=True)
     elif t == "action":
         # 본문 끝에 제안 문장이 이미 있다. 여기서는 «버튼 자리»만 알린다 — 다음 턴에 네/아니오.
         print(f"  [연계 제안 · {ev.get('label')}] — 다음 질문에 «네» 또는 «아니오»로 답합니다", flush=True)
@@ -340,6 +394,11 @@ def _render(ev: dict) -> None:
         print(f"[오류] {ev.get('text')}", file=sys.stderr, flush=True)
     elif t == "raw":
         print(f"[이벤트가 아닌 응답] {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "log":
+        # 개발자 콘솔 자리 — 화면(본문)에는 그리지 않는다.
+        print(f"  [log] {ev.get('text')}", file=sys.stderr, flush=True)
+    elif t == "trace":
+        _render_trace(ev)
     elif t == "done":
         print()
 

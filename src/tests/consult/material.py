@@ -275,7 +275,7 @@ def check_customer_material() -> int:
     if ev:
         # 원장 한 줄 답 — 딸려 온 카드는 전부 빠지고 원장 출처만 남는다.
         lean = P._sources([ev], [], [], "네, 디폴트옵션이 설정되어 있어요.")
-        hit = len(lean) == 1 and lean[0]["id"].startswith("customer.")
+        hit = len(lean) == 1 and lean[0]["id"] == "customer"
         print(f"{'✓' if hit else '✗'} 원장 한 줄로 답한 턴에는 딸려 온 화법 카드가 근거로 서지 않는다"
               f" ({len(ev['sources'])}건 → {len(lean)}건)")
         ok += hit
@@ -293,6 +293,69 @@ def check_customer_material() -> int:
         hit = len(P._sources([searched], [], [], "관계없는 답변")) == len(ev["sources"])
         print(f"{'✓' if hit else '✗'} 스팬을 선언하지 않은 출처(검색 결과)는 하나도 빠지지 않는다")
         ok += hit
+    return ok
+
+
+def check_no_card_ids_in_material() -> int:
+    """작성 프롬프트에 실리는 재료 본문에 **카드 id 가 없다**(§5 「재료에 개발 용어를 쓰지 않는다」).
+
+    회귀 대상: 화법 렌더러(`kb_index.build_context`)가 머리줄을 「### [pitch.k03.020] 제목
+    (관련도 4.2)」로 만들었고, 고객 재료(`customer` 도구)의 ⑥⑦⑧ 줄 꼬리가
+    「[pitch.k03.020 · 문제상황]」이었다. 재료에 있는 말은 답변에 그대로 나온다 — 행내 실측
+    (2026-09-21, 질문 리스트 31번 「이 고객 상태에 걸린 참고자료 뭐뭐 있어?」)에서 답변이
+    「우선 [pitch.k03.020] 자료를 활용해 보세요」라고 썼다. 직원은 그 id 가 무엇인지 모르고,
+    안다 해도 상담에서 쓸 수 없다. id 는 출처(`sources`)에 남는다 — 화면이 역추적용으로
+    보여주는 자리이고, 여기서는 그것을 막지 않는다.
+
+    id 접두는 지식베이스에서 읽는다(pitch·proc·m·seg·fact·screen·channel·tip·mkt·lnp) —
+    종류가 늘어도 검사가 따라간다.
+    """
+    import re
+
+    from pension_agent.consult_agent.evidence import kb_index
+    from pension_agent.consult_agent.state import KB as _KB
+    from pension_agent.consult_agent.tools.combine import evidence_from_cards
+
+    ok = 0
+    SONG = "188406-7352194"
+    prefixes = sorted({c["id"].split(".")[0] for c in _KB.cards}, key=len, reverse=True)
+    card_id = re.compile(r"(?<![0-9A-Za-z_가-힣.])(" + "|".join(map(re.escape, prefixes))
+                         + r")\.[0-9A-Za-z_][0-9A-Za-z_.-]*")
+
+    def leaked(text: str) -> list[str]:
+        return sorted({m.group(0) for m in card_id.finditer(text or "")})
+
+    # ① 화법 렌더러 — 검색 결과 3장을 그대로 태운다(도구·playbook·last_answer 가 함께 쓴다).
+    pitches = [(4.0 - i, c) for i, c in enumerate(_KB.pitches[:3])]
+    text = kb_index.build_context(_KB, pitches)
+    bad = leaked(text)
+    hit = bool(text) and not bad and all(f"■ {c['title']}" in text for _s, c in pitches)
+    print(f"{'✓' if hit else '✗'} 화법 재료 머리줄은 「■ 제목」이고 카드 id·관련도가 없다"
+          + (f" — {bad[:3]}" if bad else ""))
+    ok += hit
+
+    # ② 종류가 섞인 묶음(playbook·last_answer 의 조립) — 어느 렌더러도 id 를 싣지 않는다.
+    mixed = [(1.0, c) for kind in ("pitch", "procedure", "method", "fact", "screen", "channel",
+                                   "segment", "fieldtip", "market", "lineup")
+             for c in [next((x for x in _KB.cards if x["_kind"] == kind), None)] if c]
+    ev = evidence_from_cards("playbook", "q", mixed, customer_id=SONG)
+    bad = leaked(ev["text"] if ev else "")
+    hit = ev is not None and not bad
+    print(f"{'✓' if hit else '✗'} 종류별 렌더러 전부가 재료 본문에 카드 id 를 싣지 않는다"
+          + (f" — {bad[:3]}" if bad else ""))
+    ok += hit
+
+    # ③ 고객 재료 — ⑥⑦⑧ 줄 꼬리에 문제상황만 남고 id 는 출처로 간다.
+    ev = tools.run("customer", {"customer_id": SONG}, "이 고객 상태에 걸린 참고자료 뭐뭐 있어?")
+    bad = leaked(ev["text"] if ev else "")
+    hit = ev is not None and not bad
+    print(f"{'✓' if hit else '✗'} 고객 재료의 ⑥⑦⑧ 줄에 카드 id 가 없다"
+          + (f" — {bad[:3]}" if bad else ""))
+    ok += hit
+
+    hit = ev is not None and any(card_id.fullmatch(s["id"]) for s in ev["sources"])
+    print(f"{'✓' if hit else '✗'} 그 카드 id 는 출처에 그대로 남는다(역추적용)")
+    ok += hit
     return ok
 
 
@@ -759,6 +822,33 @@ def check_relations() -> int:
     print(f"{'✓' if hit else '✗'} 한쪽에서 정정하고 다른 쪽에서 그대로 말하면 잡는다")
     ok += hit
 
+    # 문구 바로 뒤에 부정이 붙으면 인용이 아니라 반대 주장이다 — 따옴표가 없어도 정정이다.
+    # 52번(송도윤) 실측: 재료가 「전환금 전액이 공제 대상이 되는 것이 아니다」를 주고 LLM 이
+    # 그대로 옮겨 썼는데 오답 주장으로 잡혀 두 번 다 폐기, 근거 원문 폴백으로 끝났다.
+    pf4 = (KB.facts.get("fact.k04.f4") or {}).get("pitfalls") or []
+    hit = (bool(pf4)
+           and not R.known_wrong("전환금 전액이 공제 대상이 되는 것이 아니에요. 10%만 더해져요.", pf4)
+           and not R.known_wrong("전환금 전액이 공제 대상이 아니라 10%예요.", pf4)
+           and R.known_wrong("전환금 전액이 공제 대상이에요.", pf4) != []
+           and R.known_wrong("전환금 전액이 공제 대상이에요. 아니, 확인해 볼게요.", pf4) != [])
+    print(f"{'✓' if hit else '✗'} 오답 문구 바로 뒤의 부정은 정정이고, 문장 부호 너머의 부정은 아니다")
+    ok += hit
+
+    # 재료가 오답 문구를 주면 답변이 그 문구를 쓴다 — 도구 재료 자체에 자기 카드의 오답
+    # 문구가 있으면 안 된다(위 52번의 첫 원인).
+    from pension_agent.strategy_agent import customer as CUST
+    isa_cust = next((p for p in CUST.PERSONAS if p.isa), None)
+    ev_tax = tools.run("tax_credit", {"customer_id": isa_cust.id, "question": "ISA 8천만원 다 옮기면?"},
+                       "ISA") if isa_cust else None
+    wrongs = [w for c in (ev_tax or {}).get("related") or [] for x in c.get("pitfalls") or []
+              for w in x.get("wrong") or []]
+    hit = bool(ev_tax) and bool(wrongs) and not any(w in ev_tax["text"] for w in wrongs)
+    print(f"{'✓' if hit else '✗'} 세액공제 재료 본문에 자기 카드의 오답 문구가 없다")
+    ok += hit
+    hit = bool(ev_tax) and "10%는" in ev_tax["text"] and "상한에서 잘려" in ev_tax["text"]
+    print(f"{'✓' if hit else '✗'} 상한에 잘린 전환액은 10% 원값도 재료에 있다(수치 검사 대비)")
+    ok += hit
+
     # 오답 문자열은 **구절**이어야 한다 — 값 하나짜리는 다른 팩트의 맞는 문장에도 들어간다.
     bare = [w for f in KB.facts.values() for x in f.get("pitfalls") or []
             for w in x.get("wrong") or [] if " " not in w and len(w) < 8]
@@ -1219,6 +1309,7 @@ def check_history_material() -> int:
     from pension_agent.consult_agent.nodes import clarify as CL
     from pension_agent.consult_agent.nodes import meta
     from pension_agent.consult_agent.nodes import plan as P
+    from pension_agent.consult_agent.state import HISTORY_LIMIT
 
     ok = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -1241,7 +1332,7 @@ def check_history_material() -> int:
             session_store.SESSION_DATA_DIR = orig_dir
 
     hit = bool(found) and "수수료 부담된다고 하시네요" in found["text"] \
-        and found["sources"][0]["id"] == "session.CX"
+        and found["sources"][0]["id"] == "session"
     print(f"{'✓' if hit else '✗'} 지난 상담 기록이 재료로 올라온다")
     ok += hit
 
@@ -1251,9 +1342,12 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 에이전트 답변은 발췌만 싣는다(가장 긴 줄 {longest}자)")
     ok += hit
 
-    # 기록은 "그때 무슨 얘기를 했나"의 근거이지 현재 기준 값의 근거가 아니다.
-    hit = bool(found) and tools.HISTORY_MARK in found["notices"]
-    print(f"{'✓' if hit else '✗'} 시효 표시를 재료가 달고 나온다(빠지면 코드가 채운다)")
+    # 기록은 "그때 무슨 얘기를 했나"의 근거이지 현재 기준 값의 근거가 아니다. 표시는 재료
+    # 성격 표시(`marks`)다 — `notices` 로 두면 <필수 인용> 으로 LLM 에 넘어가 본문 아무
+    # 자리에나 선다(2026-09-22, 질문 리스트 28번).
+    hit = (bool(found) and tools.HISTORY_MARK in found["marks"]
+           and tools.HISTORY_MARK not in found["notices"])
+    print(f"{'✓' if hit else '✗'} 시효 표시를 재료가 성격 표시로 달고 나온다(본문 필수 인용이 아니다)")
     ok += hit
 
     # 고객 화면이 닫혀 있으면 어느 고객인지가 없다 — «확인하지 못함»이라 None 이고, 계획은
@@ -1267,7 +1361,7 @@ def check_history_material() -> int:
     # 원장에 싣고 질문과 무관한 ⑥⑦⑧ 화법 카드를 «근거»로 세웠다. 시효 표시는 붙지
     # 않는다 — 낡을 값 자체가 없다.
     hit = (bool(unseen) and tools.HISTORY_NONE in unseen["text"]
-           and tools.HISTORY_MARK not in unseen["notices"])
+           and tools.HISTORY_MARK not in unseen["marks"])
     print(f"{'✓' if hit else '✗'} 기록 0건도 재료로 올라온다(없다고 답할 근거)")
     ok += hit
 
@@ -1288,12 +1382,54 @@ def check_history_material() -> int:
     print(f"{'✓' if hit else '✗'} 앞 턴의 미답을 이번 답변에서 사과하지 않는다")
     ok += hit
 
-    opened = meta.agent_help({"question": "뭘 도와줄 수 있어?", "customer_id": "CX"})["answer"]
-    shut = meta.agent_help({"question": "뭘 도와줄 수 있어?"})["answer"]
-    hit = "지난 상담 기록" in opened and "지난 상담 기록" not in shut \
-        and "단말 화면번호" in opened
-    print(f"{'✓' if hit else '✗'} 도울 수 있는 것 안내가 실제 능력과 같다(화면번호·채널·상담 기록)")
+    # 능력 안내의 재료는 코드가 만들고(실제로 쓸 수 있는 도구만), 문장은 LLM 이 질문에 맞춰 쓴다.
+    # 템플릿으로 찍던 동안 「기억해?」·「문자 보내줄 수 있어?」에도 같은 능력 표가 나갔다
+    # (2026-09-22 행내 실측, 질문 리스트 121~123번).
+    opened = meta.help_material({"question": "뭘 도와줄 수 있어?", "customer_id": "CX"})
+    shut = meta.help_material({"question": "뭘 도와줄 수 있어?"})
+    hit = ("지난 상담" in opened and "지난 상담 기록" in opened
+           and "지난 상담에서 무슨 얘기를 했는지도 볼 수 있어요" not in shut
+           and "고객 화면이 열려 있지 않아서" in shut
+           and "단말 화면번호" in opened and "문자(LMS)를 직접 보내지 않아요" in opened
+           and f"최근 {HISTORY_LIMIT}턴" in opened)
+    print(f"{'✓' if hit else '✗'} 능력 안내 재료가 실제 능력과 같다(화면번호·상담 기록·기억 범위·하지 않는 것)")
     ok += hit
+
+    # 도구 설명은 계획 LLM 용이라 「적합성 게이트」·「도구」·「세션」·굵게 표기가 섞여 있다 —
+    # 재료에 실을 때 직원 표현으로 바꾼다(재료에 있는 말은 답변에 그대로 나온다, §5).
+    import re as _re
+    dev = [w for w in ("(86건)", "(131건)", "게이트", "원장", "도구", "세션", "후보군", "⑥⑦⑧", "**", "LLM")
+           if w in opened]
+    dev += [n for n in tools.TOOLS if _re.search(rf"(?<![0-9A-Za-z_]){n}(?![0-9A-Za-z_])", opened)]
+    hit = not dev
+    print(f"{'✓' if hit else '✗'} 능력 안내 재료에 카드 장수·개발 용어가 없다" + (f" — {dev}" if dev else ""))
+    ok += hit
+
+    orig_gen = meta.generate
+    try:
+        meta.generate = lambda p, **kw: "네, 이번 상담의 대화는 최근 12턴까지 함께 보고 답해요."
+        out = meta.agent_help({"question": "너 이전 대화 기억해?", "customer_id": "CX"})
+        hit = out["answer"].startswith("네, 이번 상담") and out["sources"] == []
+        print(f"{'✓' if hit else '✗'} 능력 안내는 LLM 이 질문에 맞춰 쓴 문장으로 나간다")
+        ok += hit
+
+        # 재료 밖 수치를 지어내면 재료(코드가 쓴 사실 목록)를 그대로 낸다.
+        meta.generate = lambda p, **kw: "최근 40턴까지 기억해요."
+        out = meta.agent_help({"question": "너 이전 대화 기억해?"})
+        hit = out["answer"] == shut
+        print(f"{'✓' if hit else '✗'} 재료 밖 수치를 말하면 재료를 그대로 낸다")
+        ok += hit
+
+        from pension_agent.llm import LLMError as _LLMError
+        def _dead(p, **kw):
+            raise _LLMError("LLM 미설정 — 테스트")
+        meta.generate = _dead
+        out = meta.agent_help({"question": "뭘 도와줄 수 있어?"})
+        hit = bool(out.get("llm_error")) and out["answer"].startswith(plan.LLM_FAILED.split("{", 1)[0])
+        print(f"{'✓' if hit else '✗'} LLM 이 죽으면 규칙으로 대신 답하지 않고 장애 안내로 끝난다(§11)")
+        ok += hit
+    finally:
+        meta.generate = orig_gen
 
     # ③ 답이 나온 재료와 표현을 제한한 재료를 갈라 싣는다.
     ev = [{"tool": "screen", "query": "자동이체", "text": "퇴직연금 자동이체 [06-12-619]",
@@ -1397,12 +1533,39 @@ def check_history_selection() -> int:
 
     # 시효 표시는 과거 상담이 실렸을 때만. 방금 나눈 대화에 "지난 상담 기록입니다"가
     # 붙으면 표시가 거짓말을 하고, 매번 붙는 표시는 정작 낡은 값이 실린 턴에서 안 읽힌다.
-    hit = bool(today_only) and today_only["notices"] == [] \
+    hit = bool(today_only) and today_only["marks"] == [] \
         and "[과거 상담 기록]" not in today_only["text"]
     print(f"{'✓' if hit else '✗'} 오늘 대화만 있으면 시효 표시를 달지 않는다")
     ok += hit
-    hit = bool(plain) and tools.HISTORY_MARK in plain["notices"]
+    hit = bool(plain) and tools.HISTORY_MARK in plain["marks"]
     print(f"{'✓' if hit else '✗'} 과거 상담이 실리면 시효 표시를 단다")
+    ok += hit
+
+    # 표시는 **본문이 아니라 답변 끝** 「── 참고한 자료」 블록에 선다(2026-09-22 — 질문 리스트
+    # 28번, 송도윤). <필수 인용> 으로 LLM 에 넘기던 동안 첫 문장 뒤에 서서, 그 아래 여섯
+    # 문단이 전부 지난 상담 얘기로 읽혔다. 본문의 경계는 형태 요구(날짜 문단)가 맡는다.
+    from pension_agent.consult_agent import prompts as PR
+
+    mark = tools.HISTORY_MARK
+    prompts_seen: list[str] = []
+    orig_gen = plan.generate
+
+    def fake_generate(prompt, **kw):
+        prompts_seen.append(prompt)
+        return "지난 상담에서는 수수료 부담으로 상품 전환을 보류하셨어요."
+
+    try:
+        plan.generate = fake_generate
+        out = plan.compose({"question": "지난 상담 참고해서 오늘 뭐라고 말하지", "evidence": [plain]})
+    finally:
+        plan.generate = orig_gen
+    body, _sep, tail = out["answer"].partition("\n\n" + plan.MATERIAL_MARKS + "\n")
+    hit = bool(prompts_seen) and mark not in prompts_seen[0] \
+        and mark not in body and f"· {mark}" in tail
+    print(f"{'✓' if hit else '✗'} 시효 표시는 필수 인용으로 넘기지 않고 답변 끝 참고 블록에만 선다")
+    ok += hit
+    hit = "날짜를 앞세운" in PR.ANSWER_SHAPES["history"] and "오늘 기준" in PR.ANSWER_SHAPES["history"]
+    print(f"{'✓' if hit else '✗'} history 형태 요구가 지난 상담 문단의 경계(날짜 문단)를 시킨다")
     ok += hit
     return ok
 
@@ -1486,10 +1649,46 @@ def check_market_material() -> int:
     print(f"{'✓' if hit else '✗'} 경고 문구와 기준시점을 원문에서 읽어 온다")
     ok += hit
 
-    # 필드 이름을 코드표기로 인용한 원문(`as_of`)이 밑줄 제거로 깨지지 않는가 —
-    # 깨지면 직원이 존재하지 않는 필드를 찾게 된다.
-    hit = bool(sample) and "asof" not in sample["volatile"]
-    print(f"{'✓' if hit else '✗'} 원문의 필드 이름 표기가 깨지지 않는다")
+    # 경고 문구에 필드 이름(`as_of`)·저작 표기(`⏳ 시효 민감`)가 없다 — 직원이 읽는 문장이다
+    # (2026-09-29 행내 실측: 답변 끝에 「인용 전 as_of 기준시점을 확인하고 …」가 그대로 나갔다).
+    # README ※ 줄은 이 저장소가 쓴 선언이라 고쳐도 원문(절대 규칙 1)이 아니다.
+    hit = bool(sample) and not any(w in sample["volatile"] for w in ("as_of", "asof", "⏳"))
+    print(f"{'✓' if hit else '✗'} 시효 경고 문구에 개발 용어·저작 표기가 없다")
+    ok += hit
+
+    # 같은 경고를 든 카드 여러 장이 한 묶음이면 ※ 줄은 **한 번**이고 기준시점만 나란히 선다 —
+    # 카드마다 세우면 같은 문장이 두 번 «빠뜨리면 안 되는 표시»로 나갔다(같은 날 실측).
+    from pension_agent.consult_agent.tools.market import market_evidence, stale_marks
+    two = [c for c in cards if c.get("volatile") and c.get("as_of")]
+    two = [next(c for c in two if c["_kind"] == "market"), next(c for c in two if c["_kind"] == "lineup")]
+    ev2 = market_evidence("market", "q", [(1.0, c) for c in two])
+    stale = [n for n in (ev2["notices"] if ev2 else []) if n.startswith("※")]
+    hit = (len(stale) == 1 and all(c["as_of"] in stale[0] for c in two)
+           and ev2["text"].count("※") == 1)
+    print(f"{'✓' if hit else '✗'} 시황 카드 2장의 시효 표시가 한 줄로 합쳐진다"
+          + ("" if hit else f" — {stale}"))
+    ok += hit
+
+    hit = bool(sample) and stale_marks([sample]) == [tools.stale_mark(sample)]
+    print(f"{'✓' if hit else '✗'} 카드 한 장이면 합친 표시가 낱장 표시와 같다")
+    ok += hit
+
+    # TDF 매트릭스의 둘째 줄 「T D F | 2020 | … | 2055」는 값이 아니라 열의 빈티지다. 데이터
+    # 행으로 선언돼 있던 동안 「1975년생은 TDF 2035, KB 온국민 59.5%」라는 맞는 답이 «KB 온국민
+    # 행의 값이 아닌 2035»로 두 번 폐기되고 원문이 덤프됐다(2026-09-29 행내 실측, 질문 리스트
+    # 91번). 변환기가 그 행을 열 머리말에 접는다(`config.TABLE_HEADER_ROWS`).
+    from pension_agent.consult_agent.evidence import relations as _REL
+    tdf = next(c for c in cards if c["id"] == "lnp.퇴직연금펀드_포트폴리오_2026-08.01")
+    table = tdf["tables"][0]
+    hit = ("1975년 (TDF 2035)" in table["columns"]
+           and not any("TDF" in k.replace(" ", "") for r in table["rows"] for k in r["keys"]))
+    print(f"{'✓' if hit else '✗'} TDF 표의 빈티지 행이 열 머리말로 접히고 데이터 행에서 빠진다")
+    ok += hit
+
+    right = "1975년생이면 TDF 2035 예요. 위험자산 비중은 KB 온국민 59.5%, 신한 58.6% 예요(2026.08 기준)."
+    wrong = "1975년생이면 TDF 2035 예요. KB 온국민 위험자산 비중은 65.8% 예요."
+    hit = not _REL.check(right, [tdf]) and bool(_REL.check(wrong, [tdf]))
+    print(f"{'✓' if hit else '✗'} 빈티지를 말한 맞는 답은 통과하고, 남의 행 비중을 붙인 답은 잡힌다")
     ok += hit
 
     # 행내한 자료는 고객에게 그대로 못 준다 — 원문 confidentiality 선언에서 온다.
@@ -1570,8 +1769,10 @@ def check_market_material() -> int:
 
     # 표에서 나온 검색 입구 — 열 머리말(1975년)과 행 이름(알파드림 III)이 둘 다 있어야 한다.
     tdf = next((c for c in cards if c["title"] == "TDF 포트폴리오"), None)
-    hit = bool(tdf) and "1975년" in (tdf.get("trigger_examples") or [])
-    print(f"{'✓' if hit else '✗'} 표의 열 머리말이 검색 입구가 된다 — 1975년")
+    # 빈티지 행을 머리말에 접은 뒤(config.TABLE_HEADER_ROWS) 입구는 「1975년 (TDF 2035)」다 —
+    # 출생연도와 빈티지를 한 입구가 함께 든다.
+    hit = bool(tdf) and any("1975년" in t and "TDF 2035" in t for t in tdf.get("trigger_examples") or [])
+    print(f"{'✓' if hit else '✗'} 표의 열 머리말이 검색 입구가 된다 — 1975년 (TDF 2035)")
     ok += hit
 
     hit = bool(deck) and "알파드림 III" in (deck.get("trigger_examples") or [])

@@ -117,9 +117,11 @@ try:
 
     # ── 붙었을 때: 인증 헤더 · 주소 · 도구 인자 ──
     _memo_tool = _FakeTool("send_memo")
-    _adapter = _use_mcp(tools=[_memo_tool, _FakeTool("search_emp_and_send_memo")])
-    check(_mcp.install() is True and note.SENDER is _mcpw.send_memo,
-          "mcp.install: 설정이 갖춰지면 위층(note)의 발송 함수로 등록된다")
+    _name_tool = _FakeTool("search_emp_and_send_memo")
+    _adapter = _use_mcp(tools=[_memo_tool, _name_tool])
+    check(_mcp.install() is True and note.SENDER is _mcpw.send_memo
+          and note.NAME_SENDER is _mcpw.search_emp_and_send_memo,
+          "mcp.install: 설정이 갖춰지면 위층(note)의 발송 함수로 등록된다(사번 · 이름)")
 
     _sent = note.send_note_sync(["3902172"], _note)
     check(_sent["status"] == "sent", "mcp: 승낙받은 쪽지가 MCP 도구로 나가고 발송으로 판정된다",
@@ -166,6 +168,19 @@ try:
     check(_FakeSdk.log.count(("context", "3902172", "jwt-test")) == 2,
           "mcp: 요청 컨텍스트를 접속할 때와 **호출 직전에** 다시 세운다", str(_FakeSdk.log))
 
+    # 이름 발송 — 위 호출 횟수 검사 뒤에 둔다(그 검사가 호출 수를 센다).
+    note.send_note_by_name_sync("김국민", "미아동지점", _note)
+    check(_name_tool.calls[-1:] == [{"user_name": "김국민", "title": _note.title,
+                                     "body": _note.body, "group_name": "미아동지점"}],
+          "mcp.workb: 이름 발송은 소문자 user_name·group_name·title·body 로 나간다"
+          "(대문자 TITLE·BODY 는 서버가 «Missing required parameters» 로 거부했다)",
+          str(_name_tool.calls))
+    # 도구가 인자 이름을 밝히면 그 대소문자를 따른다(명세가 한 번 어긋났던 자리).
+    _name_tool.args = {"USER_NAME": {}, "TITLE": {}, "BODY": {}, "GROUP_NAME": {}}
+    note.send_note_by_name_sync("김국민", None, _note)
+    check(_name_tool.calls[-1] == {"USER_NAME": "김국민", "TITLE": _note.title, "BODY": _note.body},
+          "mcp.workb: 이름 발송 인자는 도구가 밝힌 이름의 대소문자를 따른다", str(_name_tool.calls[-1]))
+
     # ── 발송은 재시도하지 않는다 — 타임아웃은 «안 나갔다»가 아니라 «나갔는지 모른다» ──
     _flaky = _FakeTool("send_memo", fail=99)
     _use_mcp(tools=[_flaky])
@@ -174,6 +189,74 @@ try:
     check(_failed["status"] == "failed" and len(_flaky.calls) == 1,
           "mcp: 발송이 실패해도 다시 부르지 않는다 — 재시도가 곧 중복 발송이다",
           f"{_failed['status']} · 호출 {len(_flaky.calls)}회")
+
+    # ── 실패 문구에 자격증명이 남지 않는다 — 로그(Grafana)와 화면 둘 다 ──
+    # 전송 계층의 예외 문구는 요청을 그대로 싣는다: 게이트웨이 주소(경로에 MCP_USER_ID) ·
+    # Authorization · MCP-User-Key. 그 문구가 `MCP 호출 실패` 경고와 `MCPCallError` 에 실려
+    # 로그와 화면의 «쪽지를 보내지 못했어요. …»까지 올라갔다.
+    import logging as _logging  # noqa: PLC0415
+
+    class _LeakyTool(_FakeTool):
+        async def ainvoke(self, args):
+            self.calls.append(args)
+            raise ConnectionError(
+                "POST https://mcp.test/api/workb/tea000/messages failed · headers="
+                "{'Authorization': 'Bearer jwt-test', 'MCP-User-Key': '" + _b64.b64encode(
+                    _js.dumps({"client_id": "tea000", "emp_no": "3902172", "timestamp": "x",
+                               "request_id": "y", "signature": "z" * 44}).encode()).decode()
+                + "'} · secret=s3cret")
+
+    class _Capture(_logging.Handler):
+        lines: list[str] = []
+
+        def emit(self, record):
+            _Capture.lines.append(record.getMessage())
+
+    _leaky = _LeakyTool("send_memo")
+    _use_mcp(tools=[_leaky])
+    _mcp.install()
+    _handler = _Capture()
+    _mcpc.log.addHandler(_handler)
+    try:
+        _leaked = note.send_note_sync(["3902172"], _note)
+    finally:
+        _mcpc.log.removeHandler(_handler)
+    _texts = [_leaked["detail"], *_Capture.lines]
+    check(_leaked["status"] == "failed" and _Capture.lines
+          and not any(s in t for t in _texts for s in ("tea000", "jwt-test", "s3cret", "eyJ")),
+          "mcp: 실패 문구(로그·화면)에 클라이언트 id·토큰·사용자 키·시크릿이 남지 않는다",
+          str(_texts)[:300])
+    check("send_memo" in _leaked["detail"] and "ConnectionError" in _leaked["detail"],
+          "mcp: 가려도 무엇이 어떻게 실패했는지는 남는다(도구 이름·예외 종류)", _leaked["detail"])
+    check(_mcpc.redact("주소 https://gw/workb/tea000/sse", _mcpc.settings())
+          == f"주소 https://gw/workb/{_mcpc.REDACTED}/sse",
+          "mcp.redact: 설정에 있는 값은 값으로 가린다")
+
+    # ── SDK 가 install() 때 자기 로거를 INFO 로 다시 세워도 감사 JSON 이 나가지 않는다 ──
+    # 2026-09-22 행내 로그: [mcp_sdk.audit] {"client_id", "emp_no", "mcp_user_key", …} 가
+    # 접속마다 두 줄(자기 핸들러 + 루트 전파)로 찍혔다. 기동 때 부모만 내리면 SDK 설치 순간
+    # 풀리므로 install() 직후에 다시 내린다(client._setup_system).
+    class _LoudSdk(_FakeSdk):
+        @staticmethod
+        def install():
+            _FakeSdk.log.append(("install",))
+            for _n in ("mcp_sdk", "mcp_sdk.audit"):
+                _lg = _logging.getLogger(_n)
+                _lg.setLevel(_logging.INFO)
+                _lg.addHandler(_logging.NullHandler())
+
+    _mcpc.quiet_loggers()
+    _use_mcp(tools=[_FakeTool("send_memo")])
+    _mcpc.use_backend(sdk=_LoudSdk, adapter=_fake_adapter([_FakeTool("send_memo")]))
+    _mcp.install()
+    note.send_note_sync(["3902172"], _note)
+    check(all(_logging.getLogger(n).getEffectiveLevel() >= _logging.WARNING
+              for n in _mcpc.NOISY_LOGGERS),
+          "mcp: SDK 설치 뒤에도 감사·httpx 로거의 INFO 가 꺼져 있다(자격증명 JSON 이 안 나간다)",
+          str({n: _logging.getLogger(n).getEffectiveLevel() for n in _mcpc.NOISY_LOGGERS}))
+    for _n in ("mcp_sdk", "mcp_sdk.audit"):
+        for _h in list(_logging.getLogger(_n).handlers):
+            _logging.getLogger(_n).removeHandler(_h)
 
     # 다시 불러도 되는 도구는 재시도한다(읽기 도구가 붙을 자리 — 지금은 쪽지뿐이다).
     _readonly = _FakeTool("some_query", fail=1)

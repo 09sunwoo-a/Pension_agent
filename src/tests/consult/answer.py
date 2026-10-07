@@ -566,7 +566,7 @@ def check_last_answer() -> int:
         # 근거 0건·도구 고장 안내는 상태 키가 없다 — 문장으로 가려야 한다(케이스 12c: 「찾지
         # 못했다」가 «이전 답변»이 되어 있는 자료를 없다고 답했다).
         G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
-            "answer": plan.NO_EVIDENCE + plan.TRIED.format(calls="last_answer:[1]"), "sources": [],
+            "answer": plan.NO_EVIDENCE, "sources": [],
             "steps": [{"tool": "last_answer", "query": "[1]", "outcome": "miss"}]})})
         empty = G.ask("q")["history"][-1]
         G._AGENT = type("Fake", (), {"invoke": staticmethod(lambda st: {
@@ -1260,6 +1260,20 @@ def check_followups() -> int:
          "question": "이 고객 왜 관리대상이야"})
     hit = "이 고객 왜 관리 대상이야?" not in loose
     print(f"{'✓' if hit else '✗'} 공백·물음표만 다른 같은 질문도 다시 제안하지 않는다")
+    ok += hit
+
+    # 어미만 다른 같은 질문도 다시 서면 안 된다 — 칩 「…말하면 좋을까?」 를 직원이
+    # 「…말하면 좋을지 알려줘」 로 쳤는데 답변 끝에 칩 문구가 그대로 섰다(2026-09-28).
+    # 반대로 앞부분이 다른 질문은 같은 질문이 아니다.
+    n = suggest._norm
+    ending = suggest._same_question(n("지난 상담 내용 참고해서 오늘 뭐라고 말하면 좋을지 알려줘"),
+                                    n("지난 상담 내용 참고해서 오늘 뭐라고 말하면 좋을까?"))
+    distinct = not suggest._same_question(n("이 고객한테 안내할 만한 세미나나 이벤트 있어?"),
+                                          n("이 고객한테 안내할 수 있는 상품 범위는 뭐야?")) \
+        and not suggest._same_question(n("고객이 앱에서 직접 할 수 있어?"),
+                                       n("고객이 앱에서 직접 하려면 어떻게 안내하지?"))
+    hit = ending and distinct
+    print(f"{'✓' if hit else '✗'} 어미만 다른 같은 질문은 다시 제안하지 않고, 앞부분이 다른 질문은 가른다")
     ok += hit
 
     # ⑨ ask() 배선 — 답변 끝에 머리말과 함께 붙고, 반환에 followups 가 따로 실린다.
