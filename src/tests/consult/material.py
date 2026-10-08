@@ -724,6 +724,29 @@ def check_material_marks() -> int:
         hit = P.MATERIAL_MARKS not in out["answer"]
         print(f"{'✓' if hit else '✗'} 붙일 표시가 없으면 머리말도 붙이지 않는다")
         ok += hit
+
+        # **끝을 흘려 옮겨도 겹침으로 잡는다.** 위 검사는 LLM 이 표시를 한 글자도 안 틀리고
+        # 옮긴 경우만 본다. 실물에서는 끝이 깎인다 — 2026-10-07 실측(질문 리스트 99번)에서
+        # 본문과 표시가 마지막 네 글자만 달라(「… 기준 표기」 / 「… 기준 표기입니다.」)
+        # 같은 문장이 두 번 섰다. 기준시점 꼬리(「 — … 기준 표기입니다.」)는 카드의 as_of 라
+        # 실행마다 달라지므로, 그 앞의 경고 문장으로 견뎌야 한다(plan._already_said).
+        warn = ("※ 시황·상품 정보는 시장 변동과 상품 개편에 따라 빠르게 달라집니다. "
+                "인용 전 as_of 기준시점을 확인하고, 시효가 지난 수치는 갱신하세요.")
+        # 꼬리에 **숫자를 두지 않는다** — 재료 허용 집합에 없는 수치가 본문에 있으면 검증이
+        # 그 답변을 폐기해, 꼬리 불일치가 아니라 폴백을 재게 된다(이 검사를 처음 그렇게 썼다).
+        mark = f"{warn} — 기준시점 표기입니다."
+        P.generate = lambda prompt, **kw: f"{warn} — 기준시점 표기"   # 끝이 깎였다
+        out = P.compose({"question": "q", "evidence": [ev([mark])]})
+        hit = P.MATERIAL_MARKS not in out["answer"]
+        print(f"{'✓' if hit else '✗'} 표시 끝을 흘려 옮겨도 겹침으로 잡는다(기준시점 꼬리 제외)")
+        ok += hit
+
+        # 반대쪽 — 본문에 없는 표시는 그대로 붙는다(겹침 판정이 너무 느슨하면 표시가 사라진다).
+        P.generate = lambda prompt, **kw: "전혀 다른 답변이에요."
+        out = P.compose({"question": "q", "evidence": [ev([mark])]})
+        hit = mark in out["answer"]
+        print(f"{'✓' if hit else '✗'} 본문에 없는 표시는 빠뜨리지 않는다")
+        ok += hit
     finally:
         P.generate = orig_gen
 

@@ -436,9 +436,13 @@ row(I, "이번 주 금융시장에 영향 줄 만한 일정 뭐 있어?", NONE_,
 row(I, "이번 달 FOMC 어떻게 보고 있는지 시나리오별로 알려줘", NONE_,
     "긍정·기본·부정 + 기준시점(26.09 — 시연일과 같은 달) ↔ 하나로 접어 단정 · "
     "없는 추천상품을 지어낸다", "○")
-row(I, "지금 환율 예상 범위 얼마로 보고 있어?", NONE_,
-    "**시연 보류 — 주간 재료가 6주 낡음.** 「지금」에 8월 3주차 1,410원대가 나온다. "
-    "봐야 할 것은 범위의 양 끝과 기준시점이 함께 나오는가", "–")
+# 문구를 「지금 환율 예상 범위」에서 「월간」으로 바꿨다(2026-10-07 지적). 보류 사유가
+# **문구**였다 — 「지금」으로 물으면 8월 3주차 주간 범위(1,410원대)가 오늘 값처럼 읽힌다.
+# 월간으로 물으면 답이 「2026년 8월 월간 예상 범위 … 기준」으로 기준시점을 달고 나오므로
+# 그 오해가 사라진다. 재료가 낡은 것은 그대로이고, 그것은 답이 기준시점을 밝히는지로 잰다.
+row(I, "환율 월간 예상 범위 얼마로 보고 있어?", NONE_,
+    "월간 범위의 양 끝 + 기준시점을 함께 ↔ 기준시점 없이 숫자만 말해 오늘 값처럼 읽힌다 · "
+    "묻지 않은 주간 범위로 답한다", "○")
 row(I, "요즘 시황 근거로 이 고객 원리금보장 그대로 둬도 되는지 판단 근거 알려줘", "정민석·박정호",
     "시황 + 이 고객 상태 ↔ 근거 없이 「지금은 예금이 유리」식 판단을 지어낸다", "○")
 
@@ -1204,6 +1208,25 @@ def _carry_answers(path):
             out[_key(item, q, str(r[wi]))] = (r[ai] or "", pre, src)
     return out
 
+#: 「성립 요건」 칸을 **한글로 푼다.** 표에는 요건 코드(dep·idl·nod…)로 적혀 있는데, 그건
+#: `customer.conditions()` 가 쓰는 코드 안의 이름이고 표를 읽는 사람은 못 알아본다.
+#:
+#: **한글 이름을 여기 손으로 옮겨 적지 않는다.** `customer.CONDS` 가 이미 그 표를 갖고 있다
+#: (「dep: 원리금보장상품 편중(80% 이상)」…). 옮겨 적으면 요건 이름이 바뀔 때 두 곳이
+#: 갈리고, 이 표는 생성물이라 어느 쪽이 맞는지 화면에서 구별되지 않는다.
+def _conds_ko(codes: str) -> str:
+    """「dep, idl, nod」 → 「원리금보장상품 편중(80% 이상) · 미운용 현금성자산 · 디폴트옵션 미설정」.
+
+    코드가 아닌 글(「(0개 — 타겟 아님)」)은 그대로 둔다. CONDS 에 없는 코드는 **코드를 그대로
+    남긴다** — 조용히 지우면 요건이 빠진 것으로 읽힌다.
+    """
+    from pension_agent.strategy_agent.customer import CONDS
+    parts = [c.strip() for c in str(codes or "").split(",") if c.strip()]
+    if not parts or not all(p in CONDS for p in parts):
+        return str(codes or "")
+    return " · ".join(CONDS[p] for p in parts)
+
+
 CUSTOMERS = (
     ("김현수", "173544-2074623", 29, "위험중립형", "–", "없음", "0", "미설정", 1, "dep, idl, nod"),
     ("박지민", "154821-4938201", 34, "적극투자형", "–", "있음", "300만", "설정", 1, "lim, tax, add"),
@@ -1470,14 +1493,15 @@ def to_xlsx(path=XLSX):
     ws2.row_dimensions[4].height = 26
     for ri, cust in enumerate(CUSTOMERS, 5):
         for ci, v in enumerate(cust, 1):
-            ws2.cell(ri, ci, v)
+            ws2.cell(ri, ci, _conds_ko(v) if ci == 10 else v)
     for rr in range(5, 5 + len(CUSTOMERS)):
         for cc in range(1, 11):
             ws2.cell(rr, cc).font = Font(size=10)
             ws2.cell(rr, cc).alignment = Alignment(vertical="center", wrap_text=True)
         ws2.cell(rr, 1).font = Font(size=10, bold=True)
-        ws2.row_dimensions[rr].height = 20
-    for i, w in enumerate((10, 18, 6, 12, 6, 10, 10, 12, 10, 34), 1):
+        ws2.row_dimensions[rr].height = max(
+            20, 13.5 * -(-len(str(ws2.cell(rr, 10).value or "")) // 60))
+    for i, w in enumerate((10, 18, 6, 12, 6, 10, 10, 12, 10, 64), 1):
         ws2.column_dimensions[get_column_letter(i)].width = w
     ws2.freeze_panes = "A5"
     wb.save(path)
