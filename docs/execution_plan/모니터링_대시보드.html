@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>엔진 품질 대시보드</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --text-1: #0b0b0b;
+  --text-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --s-base: #2a78d6;   /* 기준 */
+  --s-llm: #eb6834;    /* LLM 판단 */
+  --s-sub: #1baf7a;    /* 대체 */
+  --s-hold: #4a3aa7;   /* 미발송 */
+  --band: #e8e7e1;
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+  --f1: #86b6ef; --f2: #5598e7; --f3: #2a78d6; --f4: #1c5cab; --f5: #104281;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --text-1: #ffffff; --text-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+    --s-base: #3987e5; --s-llm: #d95926; --s-sub: #199e70; --s-hold: #9085e9; --band: #2c2c2a;
+    --f1: #184f95; --f2: #1c5cab; --f3: #256abf; --f4: #3987e5; --f5: #6da7ec;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --text-1: #ffffff; --text-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+  --s-base: #3987e5; --s-llm: #d95926; --s-sub: #199e70; --s-hold: #9085e9; --band: #2c2c2a;
+  --f1: #184f95; --f2: #1c5cab; --f3: #256abf; --f4: #3987e5; --f5: #6da7ec;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text-1);
+  font-family: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--text-2); font-size: 13px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 3px 10px; font-size: 12px; color: var(--text-2); }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(12, 1fr); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.card h2 { font-size: 14px; margin: 0 0 2px; }
+.card .desc { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.c12 { grid-column: span 12; } .c8 { grid-column: span 8; } .c6 { grid-column: span 6; } .c4 { grid-column: span 4; } .c3 { grid-column: span 3; }
+@media (max-width: 900px) { .c8, .c6, .c4 { grid-column: span 12; } .c3 { grid-column: span 6; } }
+.tile .label { color: var(--text-2); font-size: 12px; }
+.tile .value { font-size: 28px; font-weight: 600; margin: 2px 0; }
+.tile .delta { font-size: 12px; color: var(--text-2); }
+.alerts { list-style: none; margin: 0; padding: 0; }
+.alerts li { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--grid); font-size: 13px; }
+.alerts li:first-child { border-top: 0; }
+.status { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; white-space: nowrap; color: var(--text-1); }
+.status i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.tbl-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-2); font-weight: 600; font-size: 12px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--text-2); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+svg .lbl { fill: var(--text-2); font-size: 12px; }
+svg .val { fill: var(--text-1); font-size: 11px; }
+.tip { position: fixed; pointer-events: none; background: var(--surface); color: var(--text-1); border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12); border-radius: 6px; padding: 6px 9px; font-size: 12px; display: none; z-index: 10; max-width: 260px; }
+.note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.btn { border: 1px solid var(--border); background: transparent; color: var(--text-2); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; }
+.toggle { display: flex; gap: 4px; }
+.toggle button[aria-pressed="true"] { color: var(--text-1); border-color: var(--axis); font-weight: 600; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>판단 엔진 품질 대시보드 — 1단계(배치)</h1>
+      <div class="sub">화면 시안 · 모든 수치는 예시 데이터 · 설계 문서: 모니터링_설계.md</div>
+    </div>
+    <div class="meta">
+      <span class="chip">배치 2027-03-12 02:00 · 소요 1시간 42분</span>
+      <span class="chip">하우스뷰 2027-03판</span>
+      <span class="chip">고시금리 2027-03-11</span>
+      <span class="chip">비교집단 2027-03-12 재계산</span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card c3 tile"><div class="label">생성 건수</div><div class="value" id="k-gen"></div><div class="delta">대상 고객 기준, 전일 대비 +2.1%</div></div>
+    <div class="card c3 tile"><div class="label">대체율 (사유 1~6)</div><div class="value" id="k-sub"></div><div class="delta">전일 6.4% · 경고 기준 유형별 15%</div></div>
+    <div class="card c3 tile"><div class="label">미발송율 (사유 7~10)</div><div class="value" id="k-hold"></div><div class="delta">전일 4.1% · 경고 기준 10%</div></div>
+    <div class="card c3 tile"><div class="label">실행률 (발송 후 30일)</div><div class="value" id="k-exec"></div><div class="delta">4주 전 11.2% · 2월 발송분 기준</div></div>
+
+    <div class="card c12">
+      <h2>경고와 조치</h2>
+      <p class="desc">사람이 개입하는 단위는 이슈 유형이다. 개별 건은 전부 자동 처리되었다.</p>
+      <ul class="alerts" id="alerts"></ul>
+    </div>
+
+    <div class="card c12">
+      <h2>이슈 유형별 현황</h2>
+      <p class="desc">대체율 15% 초과 경고, 30% 초과 자동 일시 중지. 재개는 표본 검수 통과 후.</p>
+      <div class="tbl-wrap"><table id="typeTable"></table></div>
+    </div>
+
+    <div class="card c8">
+      <h2>최근 14일 대체율·미발송율</h2>
+      <p class="desc">전체 생성 건 대비 비율(%)</p>
+      <div class="legend"><span><i style="background:var(--s-sub)"></i>대체율</span><span><i style="background:var(--s-hold)"></i>미발송율</span></div>
+      <div id="trend"></div>
+    </div>
+
+    <div class="card c4">
+      <h2>대체 사유 분포</h2>
+      <p class="desc">오늘 대체된 건의 사유별 건수</p>
+      <div id="reasons"></div>
+      <p class="note">1~3이 많으면 프롬프트, 4~5가 많으면 LLM 판단·기준선, 6이 많으면 판단 기준 자료 부족을 의심한다.</p>
+    </div>
+
+    <div class="card c6">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+        <div><h2>판단 등급 비중 (이슈 유형별)</h2><p class="desc">발송된 값 중 기준 / LLM 판단 / 대체 비율</p></div>
+        <div class="toggle"><button class="btn" aria-pressed="true" data-view="chart">차트</button><button class="btn" aria-pressed="false" data-view="table">표</button></div>
+      </div>
+      <div class="legend"><span><i style="background:var(--s-base)"></i>기준</span><span><i style="background:var(--s-llm)"></i>LLM 판단</span><span><i style="background:var(--s-sub)"></i>대체</span></div>
+      <div id="grades"></div>
+      <div class="tbl-wrap hidden" id="gradesTable"></div>
+    </div>
+
+    <div class="card c6">
+      <h2>LLM 판단 분포 vs 기준선 — 투자자산 내 주식 비중</h2>
+      <p class="desc">고객군별. 회색 구간은 비교집단 하위 10%~상위 10%, 세로 눈금은 모델포트폴리오</p>
+      <div class="legend"><span><i style="background:var(--band)"></i>비교집단 구간</span><span><i style="background:var(--s-llm)"></i>LLM 판단 (하위 10%~상위 10%, 점=중앙값)</span><span><i style="background:var(--text-1);width:2px"></i>모델포트폴리오</span></div>
+      <div id="dist"></div>
+      <p class="note">40대 공격형의 LLM 판단이 기준선 상단에 몰려 있다 → 이 고객군의 기준선 이탈(사유 4) 증가와 일치.</p>
+    </div>
+
+    <div class="card c12">
+      <h2>발송 퍼널 (2월 발송분)</h2>
+      <p class="desc">생성 → 발송 → 열람 → 카드 클릭 → 실행(거래 확인)</p>
+      <div id="funnel"></div>
+    </div>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const DATA = {
+  kpi: { gen: 184320, sub: 7.1, hold: 3.8, exec: 12.6 },
+  types: [
+    { name: "예금 만기 자금 배분",     gen: 41200, sub: 5.2,  hold: 6.1, exec: 18.4, grade: [38, 55, 7],  status: "정상", deploy: "2027-01-20 · 표본 100건 반려 1" },
+    { name: "고금리 부채 상환",       gen: 22850, sub: 3.9,  hold: 2.2, exec: 21.7, grade: [71, 25, 4],  status: "정상", deploy: "2027-01-20 · 표본 100건 반려 0" },
+    { name: "ISA 만기 자금",          gen: 9640,  sub: 4.4,  hold: 1.8, exec: 26.3, grade: [64, 32, 4],  status: "정상", deploy: "2027-02-03 · 표본 100건 반려 2" },
+    { name: "투자자산 쏠림 조정",      gen: 38110, sub: 18.6, hold: 2.9, exec: 6.8,  grade: [22, 59, 19], status: "경고", deploy: "2027-03-02 · 프롬프트 변경 · 표본 50건 반려 2" },
+    { name: "전세대출 만기 대비",      gen: 14730, sub: 6.8,  hold: 5.4, exec: 9.9,  grade: [30, 63, 7],  status: "정상", deploy: "2027-02-03 · 표본 100건 반려 3" },
+    { name: "큰 입출금 재계산",       gen: 27900, sub: 4.1,  hold: 4.6, exec: 8.2,  grade: [41, 55, 4],  status: "정상", deploy: "2027-02-17 · 표본 100건 반려 1" },
+    { name: "절세 한도 미사용",       gen: 26480, sub: 2.6,  hold: 1.1, exec: 14.5, grade: [82, 16, 2],  status: "정상", deploy: "2027-01-20 · 표본 100건 반려 0" },
+    { name: "외화예금 만기",          gen: 3410,  sub: 33.4, hold: 3.0, exec: 0,    grade: [18, 48, 34], status: "중지", deploy: "2027-03-10 신규 · 표본 100건 반려 3" }
+  ],
+  alerts: [
+    { s: "critical", t: "외화예금 만기 — 대체율 33.4%로 자동 일시 중지 (03-12 02:41)", d: "사유 6(기준 없음) 61%: 환율 전망 기준 자료 미연결. 조치: 하우스뷰 외환 섹션 연결 후 표본 검수 재실시" },
+    { s: "warning",  t: "투자자산 쏠림 조정 — 대체율 18.6% (전일 9.2%의 2배)", d: "03-02 프롬프트 변경 이후 증가. 사유 4(기준선 이탈) 집중, 고객군 40대 공격형. 조치: 개발자 원인 확인 중" },
+    { s: "good",     t: "그 외 6개 유형 정상", d: "미발송율 3.8% — 사유 9(노출 직전 계좌 변경)가 미발송의 52%" }
+  ],
+  trend: [
+    [5.9,4.0],[6.1,3.7],[5.8,4.2],[6.0,3.9],[6.3,4.4],[5.7,3.6],[6.0,3.8],
+    [5.9,4.1],[6.2,3.9],[6.4,3.7],[6.6,4.0],[6.5,4.3],[6.4,4.1],[7.1,3.8]
+  ],
+  trendStart: "2027-02-27",
+  reasons: [
+    ["1 수치_원장밖", 2210], ["2 비교_순위불일치", 640], ["3 금지표현", 180],
+    ["4 기준선_이탈", 5120], ["5 판단_흔들림", 2390], ["6 기준_없음", 2550]
+  ],
+  dist: [
+    { g: "30대 공격형",   band: [45, 85], mp: 70, llm: [55, 68, 80] },
+    { g: "40대 공격형",   band: [40, 80], mp: 65, llm: [62, 76, 88] },
+    { g: "40대 위험중립형", band: [25, 60], mp: 40, llm: [30, 42, 55] },
+    { g: "50대 위험중립형", band: [20, 55], mp: 40, llm: [26, 38, 52] },
+    { g: "60대 안정형",   band: [0, 18],  mp: 10, llm: [4, 10, 16] }
+  ],
+  funnel: [["생성", 171400], ["발송", 160900], ["열람", 72400], ["카드 클릭", 31800], ["실행", 20270]]
+};
+
+const fmt = n => n.toLocaleString("ko-KR");
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const tip = document.getElementById("tip");
+function bindTip(node, html) {
+  node.style.cursor = "default";
+  node.addEventListener("mousemove", e => {
+    tip.innerHTML = html; tip.style.display = "block";
+    const x = Math.min(e.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+    tip.style.left = x + "px"; tip.style.top = (e.clientY + 12) + "px";
+  });
+  node.addEventListener("mouseleave", () => tip.style.display = "none");
+}
+const STATUS = { "정상": "good", "경고": "warning", "중지": "critical" };
+const STATUS_ICON = { good: "●", warning: "▲", critical: "■" };
+function statusHtml(label) {
+  const k = STATUS[label] || label;
+  return `<span class="status"><i style="background:var(--${k})"></i>${label}</span>`;
+}
+
+// KPI
+document.getElementById("k-gen").textContent = fmt(DATA.kpi.gen);
+document.getElementById("k-sub").textContent = DATA.kpi.sub + "%";
+document.getElementById("k-hold").textContent = DATA.kpi.hold + "%";
+document.getElementById("k-exec").textContent = DATA.kpi.exec + "%";
+
+// 경고
+document.getElementById("alerts").innerHTML = DATA.alerts.map(a =>
+  `<li><span class="status"><i style="background:var(--${a.s})"></i>${{critical:"중지",warning:"경고",good:"정상"}[a.s]}</span>
+   <div><div>${a.t}</div><div style="color:var(--text-2);font-size:12px">${a.d}</div></div></li>`).join("");
+
+// 이슈 유형 표
+document.getElementById("typeTable").innerHTML =
+  `<thead><tr><th>이슈 유형</th><th>상태</th><th class="num">생성</th><th class="num">대체율</th><th class="num">미발송율</th><th class="num">실행률</th><th>마지막 배포·표본 검수</th><th>조치</th></tr></thead><tbody>` +
+  DATA.types.map(t => `<tr><td>${t.name}</td><td>${statusHtml(t.status)}</td><td class="num">${fmt(t.gen)}</td>
+    <td class="num" style="${t.sub > 15 ? "font-weight:600" : ""}">${t.sub}%</td><td class="num">${t.hold.toFixed(1)}%</td>
+    <td class="num">${t.status === "중지" ? "—" : t.exec + "%"}</td><td style="color:var(--text-2)">${t.deploy}</td>
+    <td><button class="btn">${t.status === "중지" ? "재개 요청" : "일시 중지"}</button></td></tr>`).join("") + `</tbody>`;
+
+function cw(id) { const c = document.getElementById(id); c.innerHTML = ""; return Math.max(280, c.clientWidth); }
+
+function renderCharts() {
+// 추이 (단일 축, %)
+(function () {
+  const W = cw("trend"), H = 220, m = { l: 34, r: 96, t: 10, b: 26 };
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "최근 14일 대체율과 미발송율 추이" }, document.getElementById("trend"));
+  const n = DATA.trend.length, max = 10;
+  const x = i => m.l + i * (W - m.l - m.r) / (n - 1);
+  const y = v => H - m.b - v / max * (H - m.t - m.b);
+  for (let v = 0; v <= max; v += 2) {
+    el("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: v === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1 }, svg);
+    el("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }, svg, v + "%");
+  }
+  const start = new Date(DATA.trendStart);
+  const dlabel = i => { const d = new Date(start); d.setDate(d.getDate() + i); return `${d.getMonth() + 1}/${d.getDate()}`; };
+  for (let i = 0; i < n; i += (W < 500 ? 4 : 3)) el("text", { x: x(i), y: H - 8, "text-anchor": "middle" }, svg, dlabel(i));
+  [["var(--s-sub)", 0, "대체율"], ["var(--s-hold)", 1, "미발송율"]].forEach(([c, k, name]) => {
+    el("path", { d: DATA.trend.map((p, i) => (i ? "L" : "M") + x(i) + " " + y(p[k])).join(" "), fill: "none", stroke: c, "stroke-width": 2, "stroke-linejoin": "round" }, svg);
+    const last = DATA.trend[n - 1][k];
+    el("circle", { cx: x(n - 1), cy: y(last), r: 4, fill: c, stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    el("text", { x: x(n - 1) + 8, y: y(last) + 4, class: "lbl" }, svg, `${name} ${last}%`);
+  });
+  const cross = el("line", { y1: m.t, y2: H - m.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" }, svg);
+  const hit = el("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: "transparent" }, svg);
+  hit.addEventListener("mousemove", e => {
+    const r = svg.getBoundingClientRect();
+    const px = (e.clientX - r.left) * W / r.width;
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - m.l) / ((W - m.l - m.r) / (n - 1)))));
+    cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+    tip.innerHTML = `<b>${dlabel(i)}</b><br>대체율 ${DATA.trend[i][0]}%<br>미발송율 ${DATA.trend[i][1]}%`;
+    tip.style.display = "block"; tip.style.left = (e.clientX + 12) + "px"; tip.style.top = (e.clientY + 12) + "px";
+  });
+  hit.addEventListener("mouseleave", () => { tip.style.display = "none"; cross.setAttribute("visibility", "hidden"); });
+})();
+
+// 가로 막대 (사유, 퍼널 공용)
+function hbars(container, rows, color, opts) {
+  const W = cw(container.id), rowH = 26, m = { l: opts.left || 120, r: opts.right || 60 };
+  const H = rows.length * rowH + 6;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": opts.label }, container);
+  const max = Math.max(...rows.map(r => r[1]));
+  rows.forEach((r, i) => {
+    const y = i * rowH + 4, w = Math.max(2, (W - m.l - m.r) * r[1] / max);
+    el("text", { x: m.l - 8, y: y + 13, "text-anchor": "end", class: "lbl" }, svg, r[0]);
+    const c = typeof color === "function" ? color(i) : color;
+    const bar = el("rect", { x: m.l, y: y + 2, width: w, height: 16, rx: 3, fill: c }, svg);
+    el("text", { x: m.l + w + 6, y: y + 14, class: "val" }, svg, opts.valueText ? opts.valueText(r, i) : fmt(r[1]));
+    bindTip(bar, opts.tip ? opts.tip(r, i) : `${r[0]}: ${fmt(r[1])}건`);
+  });
+}
+hbars(document.getElementById("reasons"), DATA.reasons, "var(--s-sub)", { label: "대체 사유 분포", left: 128 });
+
+const fcol = ["var(--f1)", "var(--f2)", "var(--f3)", "var(--f4)", "var(--f5)"];
+const f0 = DATA.funnel[0][1];
+hbars(document.getElementById("funnel"), DATA.funnel, i => fcol[i], {
+  label: "발송 퍼널", left: 80, right: 130,
+  valueText: (r, i) => `${fmt(r[1])} (${(r[1] / f0 * 100).toFixed(1)}%)`,
+  tip: (r, i) => `${r[0]}: ${fmt(r[1])}건<br>생성 대비 ${(r[1] / f0 * 100).toFixed(1)}%` + (i ? `<br>전 단계 대비 ${(r[1] / DATA.funnel[i - 1][1] * 100).toFixed(1)}%` : "")
+});
+
+// 판단 등급 누적 막대
+(function () {
+  const W = cw("grades"), rowH = 28, m = { l: 132, r: 8 };
+  const rows = DATA.types, H = rows.length * rowH + 22;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "이슈 유형별 판단 등급 비중" }, document.getElementById("grades"));
+  const cols = ["var(--s-base)", "var(--s-llm)", "var(--s-sub)"], names = ["기준", "LLM 판단", "대체"];
+  const sx = v => v / 100 * (W - m.l - m.r);
+  rows.forEach((t, i) => {
+    const y = i * rowH + 4;
+    el("text", { x: m.l - 8, y: y + 14, "text-anchor": "end", class: "lbl" }, svg, t.name);
+    let acc = 0;
+    t.grade.forEach((g, k) => {
+      const x = m.l + sx(acc) + (k ? 1 : 0), w = Math.max(0, sx(g) - (k ? 1 : 0) - (k < 2 ? 1 : 0));
+      const r = el("rect", { x, y: y + 3, width: w, height: 16, fill: cols[k] }, svg);
+      if (g >= 12) el("text", { x: x + w / 2, y: y + 15, "text-anchor": "middle", style: "fill:#fff;font-size:10px;font-weight:600" }, svg, g + "%");
+      bindTip(r, `<b>${t.name}</b><br>${names[k]} ${g}%`);
+      acc += g;
+    });
+  });
+  [0, 50, 100].forEach(v => el("text", { x: m.l + sx(v), y: H - 4, "text-anchor": v === 0 ? "start" : v === 100 ? "end" : "middle" }, svg, v + "%"));
+  document.getElementById("gradesTable").innerHTML = `<table><thead><tr><th>이슈 유형</th><th class="num">기준</th><th class="num">LLM 판단</th><th class="num">대체</th></tr></thead><tbody>` +
+    rows.map(t => `<tr><td>${t.name}</td>${t.grade.map(g => `<td class="num">${g}%</td>`).join("")}</tr>`).join("") + `</tbody></table>`;
+})();
+
+// 판단 분포 vs 기준선
+(function () {
+  const W = cw("dist"), rowH = 34, m = { l: 112, r: 20 };
+  const rows = DATA.dist, H = rows.length * rowH + 24;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": "고객군별 LLM 주식 비중 판단과 기준선" }, document.getElementById("dist"));
+  const sx = v => m.l + v / 100 * (W - m.l - m.r);
+  [0, 25, 50, 75, 100].forEach(v => {
+    el("line", { x1: sx(v), x2: sx(v), y1: 0, y2: H - 20, stroke: "var(--grid)", "stroke-width": 1 }, svg);
+    el("text", { x: sx(v), y: H - 4, "text-anchor": "middle" }, svg, v + "%");
+  });
+  rows.forEach((d, i) => {
+    const y = i * rowH + 8, cy = y + 10;
+    el("text", { x: m.l - 8, y: cy + 4, "text-anchor": "end", class: "lbl" }, svg, d.g);
+    const band = el("rect", { x: sx(d.band[0]), y: y, width: sx(d.band[1]) - sx(d.band[0]), height: 20, rx: 4, fill: "var(--band)" }, svg);
+    bindTip(band, `<b>${d.g}</b><br>비교집단 하위 10%~상위 10%: ${d.band[0]}~${d.band[1]}%`);
+    el("line", { x1: sx(d.mp), x2: sx(d.mp), y1: y - 2, y2: y + 22, stroke: "var(--text-1)", "stroke-width": 2 }, svg);
+    const over = d.llm[2] > d.band[1];
+    el("line", { x1: sx(d.llm[0]), x2: sx(d.llm[2]), y1: cy, y2: cy, stroke: "var(--s-llm)", "stroke-width": 3, "stroke-linecap": "round" }, svg);
+    const dot = el("circle", { cx: sx(d.llm[1]), cy, r: 5, fill: "var(--s-llm)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    const hit = el("rect", { x: sx(d.llm[0]) - 4, y: y, width: sx(d.llm[2]) - sx(d.llm[0]) + 8, height: 20, fill: "transparent" }, svg);
+    const html = `<b>${d.g}</b><br>LLM 판단 하위 10%~상위 10%: ${d.llm[0]}~${d.llm[2]}%<br>중앙값 ${d.llm[1]}% · 모델포트폴리오 ${d.mp}%` + (over ? `<br>▲ 상위 일부가 기준선 밖` : "");
+    bindTip(hit, html); bindTip(dot, html);
+    if (over) el("text", { x: sx(d.llm[2]) + 6, y: cy + 4, style: "fill:var(--text-1);font-size:11px" }, svg, "▲");
+  });
+})();
+}
+
+renderCharts();
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderCharts, 150); });
+document.querySelectorAll(".toggle button").forEach(b => b.addEventListener("click", () => {
+    document.querySelectorAll(".toggle button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    const table = b.dataset.view === "table";
+    document.getElementById("grades").classList.toggle("hidden", table);
+    document.getElementById("gradesTable").classList.toggle("hidden", !table);
+  }));
+</script>
+</body>
+</html>
