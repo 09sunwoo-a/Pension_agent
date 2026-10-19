@@ -291,9 +291,13 @@ def _source_text(res: dict) -> str:
     표를 읽을 수 없다). 열을 따로 두면 둘 다 읽힌다 — 보고 자료에서 «무엇을 보고 답했나»는
     답변만큼 중요한 칸이고, 전에는 `--sources` 를 붙인 사람만 볼 수 있었다.
     """
-    from pension_agent.consult_agent.tools import source_lines
-    lines = [ln for s in res.get("sources") or [] for ln in source_lines(s)]
-    return "\n".join(lines)
+    # 카드 id·관련도는 싣지 않는다 — 보고 자료의 독자에게 뜻이 없는 값이다(QM.source_line).
+    lines = []
+    for s in res.get("sources") or []:
+        lines.append(QM.source_line(s.get("doc"), s.get("title")))
+        if s.get("url"):
+            lines.append(f"  ↗ {s['url']}")
+    return QM.clean_source_text("\n".join(lines))
 
 
 def _pre_text(res: dict, args) -> str:

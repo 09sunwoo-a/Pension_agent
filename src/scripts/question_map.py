@@ -30,6 +30,8 @@
 
 from __future__ import annotations
 
+import re
+
 from pension_agent import config
 
 XLSX = config.REPO_ROOT / "docs" / "QUESTION_MAP.xlsx"
@@ -1092,6 +1094,47 @@ ANS_COL = "AI 답변"
 #: 섞으면 표가 안 읽혀 따로 뗀 자리다(`_answer_text` 머리말의 그 이유).
 SRC_COL = "출처"
 
+#: 「출처」 칸의 한 줄 — «문서명 — 제목». **카드 id 와 관련도는 싣지 않는다**(2026-10-19).
+#: 보고 자료를 읽는 사람에게 `[fact.k04.f2 · 관련도 2.0]` 은 뜻이 없는 값이다. 그 값은
+#: 역추적용이라 에이전트 화면·운영 CLI·디버그 실행기(`ledger.source_lines`)에는 그대로 남고,
+#: 여기서만 뺀다. 한 건을 두 줄(문서명 / 제목)로 쓰던 것도 한 줄로 합친다.
+def source_line(doc: str, title: str = "") -> str:
+    doc = (doc or "출처 미상").strip()
+    title = (title or "").strip()
+    return f"· {doc} — {title}" if title and title != doc else f"· {doc}"
+
+
+#: 옛 꼴(두 줄 + `[id · 관련도]`)로 채워진 칸을 새 꼴로 편다. 이미 새 꼴이면 그대로다.
+#: id 는 영문으로 시작하고 공백이 없다 — 제목 끝의 «[Series 1]» 같은 원문 괄호는 안 건드린다.
+_SRC_ID_TAIL = re.compile(r"\s*\[[A-Za-z_][\w.\-가-힣]*(?: · 관련도 [-\d.]+)?\]\s*$")
+
+
+def clean_source_text(text) -> str:
+    out: list[str] = []
+    for line in str(text or "").split("\n"):
+        body = line.strip()
+        if body.startswith("— ") and out and out[-1].startswith("· "):
+            title = _SRC_ID_TAIL.sub("", body[2:])
+            out[-1] = source_line(out[-1][2:], title)
+        elif body.startswith("· "):
+            out.append(source_line(_SRC_ID_TAIL.sub("", body[2:])))
+        elif body.startswith("↗ "):
+            out.append("  " + body)
+        else:
+            out.append(body)
+    # 같은 문서·제목이 두 번 서면 한 번만 — id 가 갈려 있던 것이 id 를 떼면 겹친다.
+    # 고객 묶음(● 이름)마다 따로 센다 — 두 고객이 같은 카드를 쓴 것은 중복이 아니다.
+    seen, dedup = set(), []
+    for line in out:
+        if line.startswith("● "):
+            seen = set()
+        if line.startswith("· ") and line in seen:
+            continue
+        seen.add(line)
+        dedup.append(line)
+    return "\n".join(dedup).strip()
+
+
 HEAD = ("구분", "항목", NUM_COL, "질문", "고객", ANS_COL, SRC_COL,
         "시연", "대상 고객", "확인 포인트", "선행 질문")
 
@@ -1366,6 +1409,7 @@ def to_xlsx(path=XLSX):
         for num, r in rows:
             ok, why = runnable(item, r[1], r[2])
             answer, pre_log, src = carried.get(_key(item, r[1], r[2]), ("", "", ""))
+            src = clean_source_text(src)
             shown_q = f"{r[1]}{PRE_MARK}{pre_log}" if pre_log else r[1]
             ws.append((sec, item, num, shown_q, _who_short(r[2]), answer, src,
                        demo_cell(r[4], r[5]), pin(r[2]),
