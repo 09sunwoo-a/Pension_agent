@@ -685,6 +685,11 @@ def offer(state: AgentState) -> dict[str, Any]:
     return {"answer": state["answer"] + f"\n\n— {ask}", "pending_action": action}
 
 
+#: 승낙할 제안이 없는 턴의 답. 질문 리스트 실행기가 «앞 턴이 제안을 남기지 못한 행»을
+#: 가려내는 데도 쓴다(scripts/run_question_map.py) — 문구를 바꾸면 그쪽도 따라온다.
+NO_PENDING = "직전에 제안드린 작업이 없어요. 무엇을 도와드릴까요?"
+
+
 def _pending(history: list[dict] | None) -> dict | None:
     """직전 턴이 걸어둔 제안. **그 한 턴만** 본다(§10 "제안은 그 자리에서만 유효하다").
 
@@ -705,7 +710,7 @@ def confirm_action(state: AgentState) -> dict[str, Any]:
     pending = _pending(state.get("history"))
     if not pending:
         observability.step("confirm", pending="없음")
-        return {"answer": "직전에 제안드린 작업이 없어요. 무엇을 도와드릴까요?",
+        return {"answer": NO_PENDING,
                 "sources": [], "pending_action": None}
 
     if pending.get("kind") == "memo":

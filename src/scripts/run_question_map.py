@@ -284,6 +284,33 @@ def _answer_text(res: dict, args) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+def _print_pre(text: str, limit: int = 6) -> None:
+    """앞 턴 답의 앞부분을 찍는다 — 쪽지 초안처럼 긴 답은 몇 줄만."""
+    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
+    for ln in lines[:limit]:
+        print(f"      ↳ {ln[:100]}")
+    if len(lines) > limit:
+        print(f"      ↳ … ({len(lines) - limit}줄 더)")
+
+
+def _lost_offer(pre: list[str], answer: str, last_pre: str) -> str:
+    """앞 턴이 있는 행인데 마지막 턴이 «승낙할 제안이 없다»로 끝났으면 그 사유. 아니면 빈 글.
+
+    승낙 턴(「(쪽지 초안 뒤) 응, 보내줘」)은 앞 턴이 제안을 걸어야 성립한다. 앞 턴이 제안 없이
+    끝나면 승낙 턴의 답은 언제나 「직전에 제안드린 작업이 없어요」라, 그 칸은 **질문을 잰 것이
+    아니라 앞 턴이 실패한 것**을 적은 것이다(2026-10-19 행내 실측 — 126번).
+    """
+    from pension_agent.consult_agent.nodes.act import NO_PENDING, NO_RECIPIENT
+
+    if not pre or not answer.strip().startswith(NO_PENDING):
+        return ""
+    if NO_RECIPIENT.split(" — ")[0] in last_pre:
+        return ("앞 턴이 제안을 남기지 못했다 — 쪽지 받는 사람(사번)을 몰랐다. "
+                "WORKB_EMP_NO=<사번> 을 붙여 다시 돌린다(머리말 ④)")
+    first = next((ln for ln in last_pre.splitlines() if ln.strip()), "")[:80]
+    return f"앞 턴이 제안을 남기지 못했다 — 앞 턴 답: {first}"
+
+
 def _source_text(res: dict) -> str:
     """「출처」 칸 — 그 답이 무엇을 보고 나왔나.
 
@@ -366,6 +393,15 @@ def main(argv: list[str]) -> int:
     print(f"■ {len(picked)}행 · 오늘={today or '실제 날짜(고정 안 됨 — 머리말 ①)'} · "
           f"기록={'답변+근거+화면' if args.full else '답변+근거' if args.sources else '답변+화면' if args.links else '답변 본문만'}")
 
+    # 쪽지 행은 받는 사람(사번)이 있어야 초안이 선다(머리말 ④). 없으면 그 행들이 전부
+    # «받는 사람을 알 수 없어요»로 끝나므로 돌리기 전에 알린다.
+    item_of = _filled(ws, idx["항목"], first_row)   # 세로 병합이라 _filled 로 읽는다
+    items = {item_of.get(r, "") for r in picked}
+    if any("쪽지" in it for it in items):
+        from pension_agent import note
+        if not note.employee_id(None):
+            print(f"⚠ 쪽지 행이 있는데 사번이 없다 — {note.EMP_NO_ENV}=<사번> 을 붙여 돌린다(머리말 ④)")
+
     if args.dry_run:
         for r in picked:
             n = ws.cell(r, idx[QM.NUM_COL]).value
@@ -397,15 +433,21 @@ def main(argv: list[str]) -> int:
                     # **앞 턴의 답을 버리지 않는다.** 승낙 턴("네, 보여줘")은 앞 턴에서
                     # 에이전트가 무엇을 제안했는지 없이는 읽을 수 없다 — 제안은 앞 턴
                     # 답변의 마지막 줄이다. 「앞 턴」 칸(QM.PRE_COL)에 함께 적는다.
-                    log = []
+                    log, last_pre = [], ""
                     for n, p in enumerate(pre, 1):
                         print(f"    (앞 턴 {n}) {p[:40]}")
-                        log.append(f"{n}. {p}\n→ {_pre_text(ask(p), args)}")
+                        last_pre = _pre_text(ask(p), args)
+                        log.append(f"{n}. {p}\n→ {last_pre}")
+                        # 앞 턴의 답도 찍는다 — 승낙 턴이 «제안이 없다»로 끝났을 때, 앞 턴이
+                        # 왜 제안을 못 남겼는지가 여기 보이지 않으면 엑셀을 열어야만 안다.
+                        if not args.quiet:
+                            _print_pre(last_pre)
                     res = ask(q)
                     down = _llm_down(tr)
                 text = _answer_text(res, args)
                 pre_log = "\n\n".join(log)
                 src_log = _source_text(res)
+                lost = _lost_offer(pre, text, last_pre)
             except Exception as e:                     # noqa: BLE001 — 한 행이 죽어도 계속
                 failed += 1
                 text = f"{FAILED} {type(e).__name__}: {e}"
@@ -419,6 +461,12 @@ def main(argv: list[str]) -> int:
                     failed += 1
                     text = f"{FAILED} LLM 다운 — {text}"
                     print(f"    ✗ LLM 다운으로 끝난 턴 ({len(text)}자)")
+                elif lost:
+                    # 승낙할 제안이 없어 끝난 턴은 **이 질문의 답이 아니다** — 앞 턴이 제안을
+                    # 남기지 못한 것이다. 답으로 적으면 채워진 칸이 되어 다시 안 돌아간다.
+                    failed += 1
+                    text = f"{FAILED} {lost}"
+                    print(f"    ✗ {lost}")
                 else:
                     print(f"    ✓ {len(text)}자")
                 # 답변을 터미널에도 찍는다 — 엑셀을 열어야만 볼 수 있으면 돌리는 동안 이상한
