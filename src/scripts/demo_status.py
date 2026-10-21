@@ -1,21 +1,10 @@
-"""데모 점검 리포트 생성기 — `docs/DEMO_STATUS.md` 를 코드에서 뽑아 덮어쓴다.
+"""데모 점검 리포트 생성기 — `docs/DEMO_STATUS.md` 를 코드에서 생성 (손 수정 금지).
 
     python -m scripts.demo_status            # 리포트 생성
-    python -m scripts.demo_status --check    # 생성만 하고 파일은 안 건드림(요약만 출력)
+    python -m scripts.demo_status --check    # 파일 미갱신, 요약만 출력
 
-**손으로 쓰지 않는다.** 이 저장소는 발표용 데모라 화면에는 더미 표시를 붙이지 않기로 했고,
-그래서 "무엇이 더미인지"를 아는 방법이 이 리포트뿐이다. 그걸 마크다운으로 손수 적으면
-반드시 코드와 어긋나고, 어긋난 순간부터 아무도 믿지 않는다 — 실제로 폴더 재번호 때
-`source.locator` 543 건이 조용히 썩는 동안 테스트는 654/654 초록불이었다.
-
-집계하는 것
-  1. 안내 콘텐츠 더미 (`assets.json` 의 `dummy: true`)
-  2. 데모 금리표 (`market.current()` 의 `dummy` 와 그 값을 쓰는 화법 카드)
-  3. 주장 성립 조건 — 격리된 카드 · 확인 요구 카드
-  4. 소스 미확정 필드 (데이터딕셔너리에 없는 `Profile` 필드)
-  5. 하드코딩된 데모 상수 (기준일·페르소나·자리표시자 데이터)
-  6. 시효 미기재 사실 (`fact.as_of` 없음)
-  7. 요건 임계값의 근거등급 (타겟 룰베이스 대조)
+집계: 1 안내 콘텐츠 더미 · 2 데모 금리표 · 3 주장 성립 조건 · 4 소스 미확정 필드 ·
+5 데모 상수 · 6 시효 미기재 사실 · 7 요건 임계값 근거등급
 """
 
 from __future__ import annotations
@@ -31,9 +20,7 @@ from pension_agent.tools.customer_solution import customer, engine, support
 
 OUT = config.REPO_ROOT / "docs" / "DEMO_STATUS.md"
 
-# 데이터딕셔너리(`퇴직연금_데이터딕셔너리_정리 (1).xlsx`)에 대응 컬럼을 찾지 못한 Profile 필드.
-# 데모에서는 전부 더미로 채워 화면을 매끄럽게 보이게 하고, 실데이터 전환 때 여기부터 확인한다.
-# 딕셔너리가 아직 정리 중이라 "없다"가 아니라 "**소스 확인 필요**"로 읽어야 한다.
+# 데이터딕셔너리에 대응 컬럼이 없는 Profile 필드(«없음» 아닌 «소스 확인 필요»).
 UNSOURCED_FIELDS = [
     ("matDD / matAmt", "만기 잔여일·만기금액", "딕셔너리 전체에 '만기' 컬럼 없음",
      "④ 기한 임박 · mat 요건"),
@@ -52,11 +39,7 @@ UNSOURCED_FIELDS = [
 ]
 
 
-# 요건 판정 임계값 → 근거로 삼은 타겟 룰베이스 TARGET_ID.
-#
-# 근거등급은 여기 적지 않고 targets.json 에서 읽는다. 등급은 기획자가 매기는 값이라
-# 여기 복사해두면 표가 갱신돼도 리포트만 옛 등급을 말하게 된다 — 그러면 "D(검증 전
-# 제안값)를 A(행내 기준)로 읽는" 정확히 그 사고가 리포트를 통해 일어난다.
+# 요건 판정 임계값 → 근거 TARGET_ID. 근거등급은 targets.json 에서 읽음 — 여기 복사 금지(표 갱신 시 낡은 등급 노출).
 COND_THRESHOLDS = [
     ("dep", "customer.PRINCIPAL_HEAVY_PCT", lambda: f"{customer.PRINCIPAL_HEAVY_PCT}%",
      "TG-202", "고유계정대+예금+GIC 합산 비중. TG-003(합산 100%, 등급 A)을 함께 덮으려 상한은 두지 않는다"),
@@ -68,7 +51,7 @@ COND_THRESHOLDS = [
 
 
 def _outreach_runway() -> str:
-    """⑨ 이벤트·세미나 후보가 언제 마르는지. 더미 캘린더가 오늘을 앞지르면 섹션이 빈다."""
+    """⑨ 이벤트·세미나 후보 소진 시점. 더미 캘린더가 오늘을 지나면 섹션이 빔."""
     from pension_agent.tools.customer_solution import support  # noqa: PLC0415
 
     out = []
@@ -80,7 +63,7 @@ def _outreach_runway() -> str:
 
 
 def _scheduler_state() -> str:
-    """예약 실행기 표시 — 리포트를 만든 환경의 값이다(`.env` 포함)."""
+    """예약 실행기 표시(생성 환경 값, `.env` 포함)."""
     from pension_agent.common import env  # noqa: PLC0415
     from pension_agent.actions import actions  # noqa: PLC0415
 
@@ -92,7 +75,7 @@ def _scheduler_state() -> str:
 
 
 def _branch_db_state() -> str:
-    """부점 DB 백엔드 표시 — 리포트를 만든 환경의 값이다(`.env` 포함)."""
+    """부점 DB 백엔드 표시(생성 환경 값, `.env` 포함)."""
     from pension_agent.common import env  # noqa: PLC0415
     from pension_agent.tools.branch_briefing import run  # noqa: PLC0415
 
@@ -127,13 +110,7 @@ def build() -> tuple[str, dict[str, int]]:
         "",
     ]
 
-    # 1. 안내 콘텐츠
-    #
-    # 예전에는 이 절이 "지어낸 더미 몇 건"만 셌다. 지금 ⑨ 의 이벤트·세미나 9건은 연금사업부가
-    # 확인해준 콘텐츠 DB 에서 왔고 dummy 가 아니다 — 게이트가 안 막는다. 그렇다고 실제 운영
-    # 정보인 것은 아니라서(일정·링크가 시연을 위해 구성된 값이다), 더미 건수만 세면 이 리포트가
-    # **아무것도 보고하지 않게 된다.** 그래서 두 가지를 함께 센다: 게이트가 막는 더미와,
-    # 게이트를 통과하지만 시연값인 콘텐츠.
+    # 1. 안내 콘텐츠 — 게이트가 막는 더미 + 게이트 통과하는 시연값 둘 다 집계(더미만 세면 0건)
     outreach = [a for a in support.ASSETS if a.get("content_type") in ("이벤트", "세미나")]
     dummies = [a for a in support.ASSETS if a.get("dummy")]
     n["assets"] = len(dummies)
@@ -153,7 +130,7 @@ def build() -> tuple[str, dict[str, int]]:
             ", ".join(a.get("keywords") or []) or "—",
             "차단(더미)" if a.get("dummy") else "통과"] for a in outreach])
 
-    # keywords 중 요건으로 내려가지 못한 것 — 그 콘텐츠는 관련도 0 으로만 뜬다.
+    # 요건으로 매핑 안 된 keywords — 해당 콘텐츠는 관련도 0
     unmapped = sorted({kw for a in outreach for kw in (a.get("keywords") or [])
                        if kw not in support.KEYWORD_CONDS and not support.conds_of(a)})
     if unmapped:
@@ -166,10 +143,7 @@ def build() -> tuple[str, dict[str, int]]:
                for kw in unmapped])
     L += [""]
 
-    # 전략에 첨부할 발송 자료(customer_facing) — 미등록이면 그 전략은 자료 없는 문구로 내려간다.
-    # 예전에는 브리핑 엔진이 이 사실을 «확인 필요» 목록에 넣었는데(engine/pipeline.py), 그
-    # 목록은 대화형 customer 재료로 실려 직원 안내에 그대로 나갔다(2026-09-07 실측). 저작자가
-    # 볼 것은 여기서 센다.
+    # 발송 자료(customer_facing) 미등록 전략 — 엔진 «확인 필요» 목록에 넣으면 직원 안내로 새므로 여기서 집계
     from pension_agent.tools.customer_solution.engine import catalog as _catalog  # noqa: PLC0415
     from pension_agent.tools.customer_solution.engine import render as _render  # noqa: PLC0415
     no_asset = [s for s in _catalog.BY_ID.values()

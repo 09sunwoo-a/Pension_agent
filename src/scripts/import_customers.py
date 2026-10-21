@@ -1,24 +1,8 @@
-"""시연용 더미 고객 원본(xlsx + demo_cases.json) → customers.json 변환기 (멱등).
+"""시연용 더미 고객 원본(xlsx 9케이스 + demo_cases.json 3명) → customers.json 변환 (멱등).
 
-원본은 둘이다: ① 저장소 루트의 `IRP_Agent_더미고객_9Cases_v3.xlsx` — 기준일 2026-08-24 의
-목업 9케이스(00_시연케이스 시트 참고) ② `scripts/demo_cases.json` — 브리핑 에이전트 데모
-골든 케이스 3명(DEMO_GOLDEN_CASES_V2, 같은 기준일·같은 레코드 스키마). 이 스크립트는
-xlsx 전 시트를 KB-PIN 단위 레코드로 묶고 데모 3명을 뒤에 이어붙여
-`pension_agent/tools/customer_solution/customers.json` 으로 내린다. 값의 가공은 하지 않는다 —
-비중은 원본 그대로 소수(0~1)로 두고, Profile 로의 매핑(4분류 반올림·파생 필드)은 적재
-시점에 `tools/customer_solution/customer.py` 가 한다. 여기서 미리 가공하면 "원본이 무엇이었나"가
-JSON 에서 사라진다.
+값 가공 없음 — Profile 매핑은 `customer.py` 담당. 전 시트 보존(미요건화 배지·상담이력 재료).
 
-전 시트를 보존하는 이유: 신규 배지 4종(판매중단펀드·ISA만기·연금개시 미개시·이탈위험관찰)·
-동연령 비교·상담이력은 아직 엔진 요건(CONDS)이 아니다 — 지식베이스 근거 확인이 선행돼야
-요건화할 수 있다(CLAUDE.md "지식베이스에 없는 기준은 만들지 않는다"). 그때 쓸 재료를
-잃지 않도록 JSON 에 다 담아둔다.
-
-실행 (src/ 에서):
-
-    python -m scripts.import_customers
-
-openpyxl 이 필요하다(변환할 때만 — 적재·테스트는 산출된 JSON 만 읽으므로 불필요).
+    python -m scripts.import_customers    # openpyxl 필요(변환 시에만)
 """
 
 from __future__ import annotations
@@ -30,15 +14,13 @@ from typing import Any
 from pension_agent.common import config
 
 SOURCE_XLSX = config.REPO_ROOT / "IRP_Agent_더미고객_9Cases_v3.xlsx"
-#: 데모 골든 케이스(브리핑 에이전트 시연 3명, DEMO_GOLDEN_CASES_V2) 병합 소스.
-#: customers.json 에 직접 넣으면 이 스크립트 재실행 한 번에 증발하므로, 체크인된 JSON 을
-#: 여기서 xlsx 9케이스 뒤에 이어붙인다. 없으면 그냥 9케이스만 내린다.
+#: 데모 골든 케이스 3명(DEMO_GOLDEN_CASES_V2) — customers.json 직접 수정 시 재생성에 소실. 없으면 9케이스만.
 DEMO_JSON = config.SRC_ROOT / "scripts" / "demo_cases.json"
 OUTPUT_JSON = config.CUSTOMERS_JSON
 
-AS_OF = "2026-08-24"  # 09_데이터사전 '기준일' — customer.AS_OF 와 일치해야 한다
+AS_OF = "2026-08-24"  # 09_데이터사전 '기준일' — customer.AS_OF 와 일치 필수
 
-#: 시트 → 레코드 키. BASIC 류(고객당 1행)는 dict 로, PRODUCTS·상담이력(고객당 n행)은 list 로 담는다.
+#: 시트 → 레코드 키. 고객당 1행은 dict, n행은 list.
 _ONE_ROW_SHEETS = {
     "01_BASIC": "basic",
     "02_IRP_SUMMARY": "summary",
@@ -55,7 +37,7 @@ _MANY_ROW_SHEETS = {
 
 
 def _cell(v: Any) -> Any:
-    """엑셀 셀 값을 JSON 친화형으로. 날짜는 ISO 문자열, 빈 문자열은 None."""
+    """엑셀 셀 → JSON 값. 날짜는 ISO, 빈 문자열은 None."""
     if isinstance(v, datetime):
         return v.date().isoformat()
     if isinstance(v, date):
@@ -66,7 +48,7 @@ def _cell(v: Any) -> Any:
 
 
 def _rows(ws) -> list[dict[str, Any]]:
-    """1행 제목·2행 헤더 규약의 시트를 dict 행 목록으로 읽는다."""
+    """1행 제목·2행 헤더 시트 → dict 행 목록."""
     it = ws.iter_rows(values_only=True)
     next(it)  # 제목 행
     header = [str(h).strip() if h is not None else "" for h in next(it)]
@@ -83,13 +65,7 @@ def build() -> dict[str, Any]:
 
     wb = openpyxl.load_workbook(SOURCE_XLSX, data_only=True)
 
-    # 00_시연케이스가 고객 목록·순서의 원장이다.
-    #
-    # 같은 시트의 «시연 포인트» 열은 담지 않는다. 기획자가 "이 케이스로 무엇을 보여줄지"를
-    # 적어둔 **연출 메모**이지 고객에 관한 사실이 아니다. 원장에 섞이면 에이전트가 읽는
-    # 재료가 되고("현금성자산 장기 방치 + 디폴트옵션 미설정 고객"), 판정이 데이터에서
-    # 나온 것인지 메모를 옮긴 것인지 구분되지 않는다 — 요건은 계좌 값에서 코드가 정한다
-    # (CLAUDE.md 규칙 2). 시연 의도는 원본 xlsx 에 그대로 남아 있다.
+    # 00_시연케이스 = 고객 목록·순서 원장. «시연 포인트» 열은 연출 메모라 미포함 — 에이전트 재료로 섞임 방지
     cases = _rows(wb["00_시연케이스"])
     records: dict[str, dict[str, Any]] = {}
     for c in cases:

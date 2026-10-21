@@ -1,16 +1,6 @@
-"""아키텍처 다이어그램 생성기 — 에이전트 README 의 생성 구간을 코드에서 다시 그린다.
+"""아키텍처 다이어그램 생성기 — README 마커 구간을 코드에서 mermaid 로 생성.
 
-`get_graph()` 는 노드·엣지만 그린다 — 도구 루프는 `plan` 노드 **안**이라(도구 목록·호출
-상한은 코드 소유, 루트 CLAUDE.md 규칙 2) 그래프에 안 찍히고, 검증 게이트도 `answer` 한 칸
-뒤에 숨는다. 그렇다고 손으로 그린 다이어그램은 코드와 어긋나기 시작한다(lms_send → lms_link
-개명 때 실측). 그래서 이 스크립트가 세 소스를 **코드에서** 읽어 mermaid 로 그린다:
-
-  ① 컴파일된 그래프의 노드·엣지 (`graph.build_agent().get_graph()`)
-  ② 도구 레지스트리 (`tools.TOOLS` — 이름·개수를 그대로 옮긴다)
-  ③ 답변 점검 게이트 순서 (`plan` 의 검사 셋 — 속성이 사라지면 크게 실패한다)
-
-산출물은 README 의 마커 구간 **하나**다 — 아키텍처 문서를 둘로 늘리지 않는다(생성물은
-생성기가 만든다는 저장소 규약 — DEMO_STATUS·kb_*.json 과 같다).
+소스: 그래프 노드·엣지(`get_graph()`) · 도구 레지스트리(`tools.TOOLS`) · 답변 점검 게이트(`plan`).
 
     cd src
     python -m scripts.render_architecture           # README 구간 갱신 (멱등)
@@ -28,11 +18,7 @@ MARK_END = "<!-- generated:architecture:end -->"
 
 README = config.SRC_ROOT / "README.md"
 
-#: 그래프 노드의 화면 라벨 — «영문 노드명 — 기능명» 한 줄 + 하는 일 한 줄. 기능은 점검
-#: 자리에서 읽는 사람 기준으로 쓰되, 코드로 찾아갈 수 있게 노드명은 남긴다. 그 밖의 개발
-#: 용어는 다이어그램 아래 산문으로 내린다. 노드 이름 자체는 그래프에서 오고 여기서는
-#: 설명만 단다(라벨만 있고 노드가 없으면 무시된다) — 첫 줄의 영문명은 dict 키에서 뽑으므로
-#: 라벨과 실제 노드명이 어긋날 수 없다.
+#: 노드 라벨 «노드명 — 기능명» + 하는 일. 그래프에 없는 키는 무시.
 _NODE_DESCS = {
     "understand": ("질문 이해", "무엇을 원하는 질문인지 가려 보낸다"),
     "plan": ("근거 수집 루프", "질문에 필요한 자료를 도구로 찾아 모은다"),
@@ -48,30 +34,26 @@ _NODE_DESCS = {
 _NODE_LABELS = {name: f"{name} — {title}<br/>{desc}"
                 for name, (title, desc) in _NODE_DESCS.items()}
 
-#: 도구 상자의 갈래. 이름은 도구 선언의 진행 표시 라벨(`Tool.progress` — 코드 소유)에서
-#: 오고, 여기는 묶음만 정한다. 레지스트리와 어긋나면(새 도구가 갈래에 없거나, 갈래에 적힌
-#: 도구가 사라지면) 생성 시점에 크게 실패한다 — 낡은 다이어그램은 없는 것만 못하다.
+#: 도구 갈래(표시명은 `Tool.progress`). 레지스트리와 불일치 시 생성 실패.
 _TOOL_GROUPS = (
     ("지식베이스", ("pitch", "fact", "procedure", "screen", "channel",
                     "segment", "method", "fieldtip", "market", "lineup")),
     ("현재 고객", ("briefing", "customer", "suitable", "history", "transcript", "playbook", "outreach")),
-    # `targets` 는 «고객 화면을 열기 전»의 재료라 현재 고객 갈래가 아니다 — 고객이 안
-    # 열려 있을 때가 이 도구의 자리다(오늘의 타겟 목록이 서비스의 첫 화면이다).
+    # targets 는 고객 화면 열기 전 재료 — 현재 고객 갈래 아님
     ("오늘의 목록", ("targets",)),
-    # 메인 브리핑 — 직원 부점의 고객 데이터를 질문 조건으로 조회한다. 고객 화면과 무관하다.
+    # 메인 브리핑(부점 데이터 조회) — 고객 화면과 무관
     ("부점 데이터", ("branch",)),
     ("계산", ("tax_credit", "date")),
-    # 지식베이스도 고객 원장도 아닌 재료 — 이 에이전트가 방금 한 답변. 고객 화면과 무관하다.
+    # 직전 답변 — 고객 화면과 무관
     ("이번 대화", ("last_answer",)),
 )
 
-#: 한 줄에 올리는 도구 수 상한. 지식베이스 10종을 한 줄에 다 쓰면 상자가 옆으로 늘어져
-#: 다른 상자들이 그 폭에 끌려간다 — 넘치면 다음 줄로 내리고 들여쓴다.
+#: 한 줄 도구 수 상한 — 초과 시 줄바꿈(상자 폭 과대 방지).
 _TOOLS_PER_LINE = 4
 
 
 def _graph_lines() -> list[str]:
-    """컴파일된 그래프의 노드·엣지 → mermaid 줄. 조건 분기는 점선이다."""
+    """그래프 노드·엣지 → mermaid 줄. 조건 분기는 점선."""
     from pension_agent import graph as G  # noqa: PLC0415 — langgraph 지연
     drawable = G.build_agent().get_graph()
 
@@ -91,7 +73,7 @@ def _graph_lines() -> list[str]:
 
 
 def _tool_lines() -> list[str]:
-    """도구 레지스트리 → plan 옆의 주석 노드. 도구 이름은 선언의 진행 라벨에서 옮긴다."""
+    """도구 레지스트리 → plan 옆 주석 노드."""
     from pension_agent import tools as T  # noqa: PLC0415
     grouped = {name for _label, names in _TOOL_GROUPS for name in names}
     if grouped != set(T.TOOLS):
@@ -112,8 +94,7 @@ def _tool_lines() -> list[str]:
 
 
 def _gate_lines() -> list[str]:
-    """답변 점검 → compose(답변 작성) 옆의 주석 노드. 검사 함수가 사라지면 크게 실패한다 —
-    이름만 남아 있는 다이어그램은 없는 것만 못하다(tests/debug/trace 와 같은 원칙)."""
+    """답변 점검 → compose 옆 주석 노드. 검사 함수가 사라지면 실패."""
     from pension_agent.nodes import plan as P  # noqa: PLC0415
     missing = [a for a in ("verify_texts", "relations", "_span_verdict") if not hasattr(P, a)]
     if missing:
@@ -128,12 +109,10 @@ def _gate_lines() -> list[str]:
 
 
 def render_block() -> str:
-    """마커 사이에 들어갈 본문 전체."""
+    """마커 사이 본문."""
     body = "\n".join([
         "```mermaid",
-        # 줄바꿈은 라벨의 <br/> 가 정한다 — 기본 wrapping(200px)이 도구 이름·설명을
-        # 낱말 중간에서 다시 접어 「가/려 보낸다」 꼴이 되는 것을 막는다. 노드 6개가
-        # 한 단에 늘어서는 그래프라 가로 간격은 조이고 세로 간격을 벌려 비율을 잡는다.
+        # wrappingWidth 확대 — 기본 200px 은 라벨을 낱말 중간에서 접음(줄바꿈은 <br/> 로만)
         '%%{init: {"flowchart": {"wrappingWidth": 800, "nodeSpacing": 35, "rankSpacing": 80}}}%%',
         "flowchart TD",
         *_graph_lines(),
