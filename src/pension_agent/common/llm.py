@@ -92,12 +92,12 @@ def _auth_hint() -> str:
     """401·403 용 설정 진단 문구. 키 값 미포함."""
     where = f"URL={BASE_URL_SRC or '(없음)'} · 키={API_KEY_SRC or '(없음)'} · 단계={STAGE}"
     if key_stage_mismatch():
-        return (f"설정: {where} — **키가 단계와 어긋난다.** {wanted_key_name()} 에 이 단계의 "
-                f"키를 넣으십시오(지금은 접미사 없는 {API_KEY_SRC} 가 실려 나갔습니다).")
-    return (f"설정: {where} — 게이트웨이가 키를 거부했습니다. 이 엔드포인트에 발급된 키가 "
-            f"{API_KEY_SRC or 'LLM_API_KEY'} 에 들어 있는지 확인하십시오. "
-            f"**한 달 동안 호출이 없으면 구독 키가 폐기된다**(2026-09-16 행내 실측 — 서빙계가 그렇게 끊겼다). "
-            f"오래 안 쓴 단계라면 콘솔에서 재발급받는 것이 먼저입니다. 그 밖의 원인: 다른 단계의 키·앞뒤 공백.")
+        return (f"설정: {where} — 키와 단계 불일치. {STAGE} 단계에서는 {wanted_key_name()} 에 "
+                f"그 단계용 키 필요(지금은 {API_KEY_SRC} 의 키 사용 중).")
+    return (f"설정: {where} — 게이트웨이가 키 거부. 확인할 것: "
+            f"① {API_KEY_SRC or 'LLM_API_KEY'} 에 이 엔드포인트용으로 발급된 키가 있는지 · "
+            f"② 한 달 이상 호출이 없었던 키는 자동 폐기 — 콘솔에서 재발급 · "
+            f"③ 다른 단계의 키를 넣지 않았는지, 키 앞뒤에 공백이 없는지")
 
 
 PROVIDER = os.getenv("LLM_PROVIDER") or (
