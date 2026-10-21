@@ -12,8 +12,8 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from pension_agent import session_store
-from pension_agent.consult_agent.effects import actions
+from pension_agent.common import session_store
+from pension_agent.actions import actions
 
 _results: list[tuple[bool, str, str]] = []
 

@@ -4,9 +4,9 @@
 
 루트 CLAUDE.md 규칙 4 의 사고는 데이터 `locator` 에서 났고 `scripts/kb_build/test_paths.py`
 가 그것을 막는다. 같은 일이 **문서**에서도 난다 — 모듈을 옮기면 임포트는 테스트가 잡지만,
-`README.md`·`CLAUDE.md` 가 적어둔 `consult_agent/relations.py` 같은 경로는 아무도 잡지 않아서
+`README.md`·`CLAUDE.md` 가 적어둔 `relations.py` 같은 경로는 아무도 잡지 않아서
 «문서가 기준»(루트 CLAUDE.md 「무엇이 어디 있나」)인 파일이 없는 자리를 가리키게 된다.
-2026-09-15 에 `consult_agent/relations.py` 를 `tools/` 아래로 옮기면서 이 검사를 두었다.
+2026-09-15 에 `relations.py` 를 `tools/` 아래로 옮기면서 이 검사를 두었다.
 
 ━━ 무엇을 보나 ━━
 저장소의 마크다운 중 **코드를 설명하는 문서**만 본다 — 루트 `CLAUDE.md`, `docs/`, `src/`
@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pension_agent import config
+from pension_agent.common import config
 from tests.infra._common import check
 
 _ROOT = config.REPO_ROOT

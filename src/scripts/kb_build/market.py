@@ -125,7 +125,7 @@ def _market_advisory() -> str | None:
 
     출처는 `01_시황/` 두 문서가 원문에 스스로 적어둔 「유의사항(고지)」이고, `02_상품/`
     문서에는 같은 고지가 없다. 그래도 **05 카드 전부**에 싣는 것은 운영 판단이며 근거는
-    폴더 README 와 `consult_agent/CLAUDE.md` §8 관리대장에 있다 — 원문에 없는 문장을
+    폴더 README 와 `pension_agent/CLAUDE.md` §8 관리대장에 있다 — 원문에 없는 문장을
     원문 문서에 심지 않고, 선언은 폴더가 한 번만 한다.
     """
     return _readme_note("⚖")
@@ -321,7 +321,7 @@ def _markdown_tables(text: str) -> list[tuple[list[str], list[list[str]]]]:
 
 #: 상품명이 적히는 열 머리말. **이 열의 칸만** 상품 등록부로 인정한다.
 #:
-#: 등록부는 「답변이 이 이름을 말해도 되는가」의 상한이다(pension_agent/verify.py). 원문
+#: 등록부는 「답변이 이 이름을 말해도 되는가」의 상한이다(pension_agent/evidence/verify.py). 원문
 #: 산문에서 «KB ○○» 를 긁어 채우면, LLM 이 지어낸 이름이 우연히 문장과 겹칠 때 그 문장이
 #: 스스로의 근거가 된다 — 표의 칸은 저작자가 «이게 상품 이름이다»라고 적어둔 자리라
 #: 경계가 분명하다.
@@ -424,7 +424,7 @@ def _market_tables(text: str) -> list[dict]:
     `units` 는 이 표에서 **백분율로 선언된 열**이고, `percents` 는 그 열에 적힌 행의 값이다
     (`config.PERCENT_COLUMNS`). 단위가 열 머리말에만 있어서 셀의 `35` 를 답변이 `35%` 라
     쓰는 순간 «자료에 없는 수치»가 되던 자리를 위한 것이다 — 소비는 대화형이 한다
-    (`consult_agent/tools/market.py::market_evidence`). 원문(content)은 바뀌지 않는다.
+    (`tools/kb_search/market.py::market_evidence`). 원문(content)은 바뀌지 않는다.
     """
     out: list[dict] = []
     for columns, body in _markdown_tables(text):

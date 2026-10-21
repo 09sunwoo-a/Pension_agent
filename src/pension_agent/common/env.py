@@ -1,0 +1,77 @@
+""".env 로딩과 실행 단계 — llm.py 와 observability.py 가 함께 쓴다.
+
+따로 있는 이유는 하나다: observability 도 .env 값이 필요한데 llm 이 observability 를
+임포트하므로 그 반대 방향은 순환이다. 파싱은 python-dotenv(플랫폼 승인 패키지)가 한다.
+
+파일은 `src/.env` 하나다. 실제 환경변수 > `LLM_DOTENV` 로 지정한 파일 > `src/.env`
+(python-dotenv 의 기본 override=False — 이미 있는 값은 덮지 않는다. 운영이 주입한 값을
+저장소에 남은 파일이 뒤엎는 것이 가장 나쁜 실패다).
+
+행내 GenAI 플랫폼은 분석계(…/trnn/…)와 서빙계(…/serv/…)의 APIM 경로가 달라 URL·키가 두
+벌이고 같은 .env 에 함께 있다. 어느 것을 읽을지는 실제 환경변수 `ENV_PATH` 가 정한다 —
+워크스페이스에는 없고(→ 분석계), 배포 때 Jenkins 가 `serving` 을 넣는다(→ 서빙계).
+플랫폼 가이드의 분기 그대로: `ENV == "serving"` 이면 _SERV, 그 외 전부 _TRNN.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from pension_agent.common import config
+
+
+def load(root: Path | None = None) -> None:
+    """LLM_DOTENV(있으면) → src/.env. 여러 번 불러도 결과는 같다(있는 값은 덮지 않는다)."""
+    if os.getenv("LLM_DOTENV"):
+        load_dotenv(os.environ["LLM_DOTENV"])
+    load_dotenv((root or config.SRC_ROOT) / config.DOTENV.name)
+
+
+def stage() -> str:
+    """ENV_PATH 값(소문자). 없으면 train — 행내 워크스페이스가 그렇다."""
+    return (os.getenv("ENV_PATH") or "train").strip().lower()
+
+
+def suffix() -> str:
+    """serving 이면 SERV, 그 외 전부 TRNN — 가이드의 if/else 그대로."""
+    return "SERV" if stage() == "serving" else "TRNN"
+
+
+def staged(name: str, default: str = "") -> str:
+    """`<name>_TRNN|_SERV` 가 있으면 그것, 없으면 `<name>` — 단계 구분이 없는 Gateway·사외용 폴백."""
+    return os.getenv(f"{name}_{suffix()}") or os.getenv(name) or default
+
+
+def source(name: str) -> str:
+    """`staged(name)` 이 **어느 이름에서** 값을 가져왔나. 아무 데도 없으면 빈 문자열.
+
+    값이 아니라 이름만 돌려준다 — 키 값은 로그·/health 어디에도 찍지 않는다.
+    URL 과 키는 각자 폴백하므로 «서빙계 URL + 접미사 없는 키» 같은 짝이 조용히 만들어진다
+    (2026-09-16 행내 실측: `…/serv/gemma-4` 가 APIM 401 `invalid subscription key`).
+    401 이 나야 알 수 있었던 것을 설정 표시에서 먼저 보이게 하려고 둔다.
+    """
+    staged_name = f"{name}_{suffix()}"
+    if os.getenv(staged_name):
+        return staged_name
+    return name if os.getenv(name) else ""
+
+
+if __name__ == "__main__":
+    # python -m pension_agent.common.env — «키를 넣었는데 왜 안 되나»를 한 화면에. 키 값은 찍지 않는다.
+    load()
+    from pension_agent.common import llm  # noqa: PLC0415
+
+    print(f"설정 파일       {config.DOTENV}  ({'있음' if config.DOTENV.is_file() else '없음 — cp .env.example .env'})")
+    url_src, key_src = source("LLM_BASE_URL"), source("LLM_API_KEY")
+    print(f"단계(ENV_PATH)  {stage()}  — {'실제 환경변수' if os.getenv('ENV_PATH') else '없음 → 분석계'}")
+    print(f"URL · 키 출처   {url_src or '(없음)'} · {key_src or '(없음)'}")
+    if llm.key_stage_mismatch():
+        print(f"  ⚠ 단계가 어긋난다 — URL 은 {url_src}, 키는 접미사 없는 {key_src} 다. "
+              f"게이트웨이가 단계마다 다른 키를 요구하면 401(invalid subscription key) 이 난다. "
+              f"{llm.wanted_key_name()} 에 그 단계의 키를 넣는다.")
+    print(f"프로바이더      {llm.PROVIDER}  · 모델 {llm._default_model_label()}")
+    print(f"LLM 호출 가능   {'예' if llm.available() else '아니오 — 키·엔드포인트가 비어 있다'}")
+    print(f"관측(Langfuse)  {'켜짐' if os.getenv('LANGFUSE_PUBLIC_KEY') else '꺼짐'}")

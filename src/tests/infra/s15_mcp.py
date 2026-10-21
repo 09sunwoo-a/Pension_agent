@@ -29,10 +29,10 @@ import hashlib as _hl  # noqa: E402
 import hmac as _hm  # noqa: E402
 import json as _js  # noqa: E402
 
-from pension_agent import mcp as _mcp  # noqa: E402
-from pension_agent.mcp import client as _mcpc  # noqa: E402
-from pension_agent.mcp import servers as _mcps  # noqa: E402
-from pension_agent.mcp import workb as _mcpw  # noqa: E402
+from pension_agent.common import mcp as _mcp  # noqa: E402
+from pension_agent.common.mcp import client as _mcpc  # noqa: E402
+from pension_agent.common.mcp import servers as _mcps  # noqa: E402
+from pension_agent.common.mcp import workb as _mcpw  # noqa: E402
 
 _MCP_ENV = ("MCP_SERVER_URL", "MCP_USER_ID", "MCP_SECRET_KEY", "MCP_CONN_ID", "MCP_SERVERS",
             "MCP_RETRY_ATTEMPTS", "MCP_RETRY_BACKOFF_SEC", "MCP_AUTH_TTL_SEC", note.EMP_NO_ENV)

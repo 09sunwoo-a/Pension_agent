@@ -24,11 +24,11 @@ import dataclasses
 import json
 
 from pension_agent.knowledge import shared_store
-from pension_agent.strategy_agent import agent as agent_mod
-from pension_agent.strategy_agent import engine
-from pension_agent.strategy_agent import situations as situations_mod
-from pension_agent.strategy_agent import support
-from pension_agent.strategy_agent.customer import PERSONAS, conditions
+from pension_agent.tools.customer_solution import agent as agent_mod
+from pension_agent.tools.customer_solution import engine
+from pension_agent.tools.customer_solution import situations as situations_mod
+from pension_agent.tools.customer_solution import support
+from pension_agent.tools.customer_solution.customer import PERSONAS, conditions
 
 FACTS = {p.nm: engine.prepare(p) for p in PERSONAS}
 BY_NAME = {p.nm: p for p in PERSONAS}
@@ -205,7 +205,7 @@ for key, rows in support.outreach_candidates().items():
 #
 # 이 저장소는 한때 3종 표시(dummy + 이름 앞 "(더미) " + 발송문 앞 "[더미] ")를 함께 강제했다.
 # 발표용 데모에서는 화면도 발송문도 산출물이라 딱지가 없어야 한다는 결정으로 텍스트 딱지를
-# 뗐고, 대신 보호막을 게이트로 옮겼다(consult_agent/effects/actions.py::open_lms_screen). 이 테스트는 방향이
+# 뗐고, 대신 보호막을 게이트로 옮겼다(actions/actions.py::open_lms_screen). 이 테스트는 방향이
 # 반대다 — "딱지가 있는가"가 아니라 **"딱지가 없고 dummy 플래그는 남아 있는가"**를 본다.
 for a in support.ASSETS:
     if a.get("content_type") not in ("이벤트", "세미나"):
@@ -220,14 +220,14 @@ for a in support.ASSETS:
 
 # ⑨ 더미 게이트 — 딱지 대신 이것이 더미 문구가 발송 화면에 채워지는 것을 막는다.
 #
-# 에이전트는 이제 발송하지 않고 화면만 연다(consult_agent/CLAUDE.md §10). 그래도 게이트는
+# 에이전트는 이제 발송하지 않고 화면만 연다(pension_agent/CLAUDE.md §10). 그래도 게이트는
 # 남는다 — 화면에 채워 넣으면 직원이 **그대로 보낼 수 있기 때문**이다.
 #
 # 지금 등록된 이벤트·세미나 9건은 연금사업부 콘텐츠 DB 에서 와 전부 dummy 가 아니다. 그래서
 # 게이트를 **레지스트리에 남은 더미로** 검사할 수 없고, 검사용 자산을 하나 끼워 넣어 확인한다
 # (실데이터로 갈아탈수록 조용히 검사가 사라지는 것이 이 자리의 위험이다 — 예전에는 "더미가
 # 하나라도 남아 있어야 한다"고 데이터에 요구했는데, 그건 데이터를 테스트에 맞추는 것이다).
-from pension_agent.consult_agent.effects import actions as _actions
+from pension_agent.actions import actions as _actions
 
 _probe = {"id": "TEST-DUMMY", "name": "게이트 검사용 더미 콘텐츠", "content_type": "이벤트",
           "url": "https://example.invalid/demo/gate-probe", "dummy": True,
@@ -257,7 +257,7 @@ check(_actions.open_lms_screen("TEST", "행내 자산과 무관한 직접 작성
       "⑨ 더미 자산에서 온 문구가 아니면 막지 않음")
 # 게이트 검사가 세션이력을 남긴다(도구 호출 기록). 이 테스트가 만든 것만 지운다 —
 # session_data 에는 시연 픽스처(과거 상담 기록)가 함께 살고 있어 통째로 비우면 안 된다.
-from pension_agent import config as _config
+from pension_agent.common import config as _config
 (_config.SESSION_DATA_DIR / "TEST.json").unlink(missing_ok=True)
 
 # ⑨ LMS 문구의 골격 — 광고 표기·수신거부·안내 링크는 코드가 붙인다(채널 규약).
@@ -345,7 +345,7 @@ check(all(r["end_date"] >= "2026-12-31" for r in past["event"]),
 
 import copy
 
-from pension_agent import market as _market
+from pension_agent.knowledge import market as _market
 from pension_agent.knowledge import kb as _kbmod
 _kb = support.pitch_kb()
 

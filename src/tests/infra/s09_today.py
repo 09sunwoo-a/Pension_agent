@@ -21,7 +21,7 @@ import os
 from datetime import date
 
 import tests
-from pension_agent.strategy_agent import customer as CUST
+from pension_agent.tools.customer_solution import customer as CUST
 
 check(tests.PINNED_TODAY == CUST.AS_OF.isoformat(),
       "테스트가 고정한 오늘 = 원장 기준일(AS_OF)",
@@ -43,7 +43,7 @@ for _base, _want in _counts:
 # 오늘이 고정돼 있던 동안에는 시연 데이터의 만기가 전부 미래라 한 번도 안 나던 경우다.
 from copy import deepcopy
 
-from pension_agent.strategy_agent.engine.text import dday
+from pension_agent.tools.customer_solution.engine.text import dday
 
 check(dday(14) == "D-14" and dday(0) == "D-0", "잔여일수 표기: 오늘까지는 D-n", dday(0))
 check(dday(-87) == "만기 경과 87일", "지난 만기는 «D--87» 이 아니라 «만기 경과»로 읽는다", dday(-87))

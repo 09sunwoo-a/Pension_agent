@@ -30,7 +30,7 @@
 
 from __future__ import annotations
 
-from pension_agent import config
+from pension_agent.common import config
 
 XLSX = config.REPO_ROOT / "docs" / "QUESTION_MAP.xlsx"
 
@@ -614,20 +614,20 @@ row(I, "(고객 연 직후 첫 질문)", ALL,
 # «다른 데서 본다»여야 하므로, 대응 테스트를 여기 적어 둔다 — 그 테스트가 사라지면 이
 # 줄들을 되살려야 한다.
 #
-#   (도구가 죽는 상황)              tests/consult/plan_loop.py — 「도구가 죽은 것을
+#   (도구가 죽는 상황)              tests/agent/plan_loop.py — 「도구가 죽은 것을
 #                                  '근거 없음'으로 둔갑시키지 않는다」
 #   (상담기록 저장소를 못 읽는 상황)   실측 — session_store 가 던지면 history 도구는 None
 #                                  («확인하지 못함». 예외가 새지도, 「기록 없음」이 되지도 않는다)
 #   (LLM 미연결 상황)               llm_down 노드 · 실측 — 429 로 죽은 턴이 「지식베이스에
 #                                  자료가 없다는 뜻이 아니니」로 나갔다
-#   (화면번호 여러 개가 나오는 절차 질문) tests/consult/clarify.py — 「화면번호를 일부만 써도 되는가」
-#   (기준시점이 기간으로 적힌 카드)    tests/consult/answer.py — 「기간 표기를 풀어 쓴 답변이 통과한다」
-#   (기준시점이 표시에만 있는 카드)    tests/consult/answer.py — notices 인용 허용(2025.03.31)
-#   (내부용 카드가 걸리는 질문)       tests/consult/material.py — 「내부용 주의는
+#   (화면번호 여러 개가 나오는 절차 질문) tests/agent/clarify.py — 「화면번호를 일부만 써도 되는가」
+#   (기준시점이 기간으로 적힌 카드)    tests/agent/answer.py — 「기간 표기를 풀어 쓴 답변이 통과한다」
+#   (기준시점이 표시에만 있는 카드)    tests/agent/answer.py — notices 인용 허용(2025.03.31)
+#   (내부용 카드가 걸리는 질문)       tests/agent/material.py — 「내부용 주의는
 #                                  customer_facing 선언이 거짓일 때만 붙는다」
-#   (현장 노하우 카드가 걸리는 질문)   tests/consult/material.py — 「신뢰 등급을 문서
+#   (현장 노하우 카드가 걸리는 질문)   tests/agent/material.py — 「신뢰 등급을 문서
 #                                  레지스트리의 tier 에서 그대로 옮긴다」
-#   (가드 재료가 있는 요건 고객)      tests/consult/routing.py check_guard() — low·dep·idl·hlt·mis
+#   (가드 재료가 있는 요건 고객)      tests/agent/routing.py check_guard() — low·dep·idl·hlt·mis
 #   (가드 재료가 없는 요건 고객)      실측 — mat·pen·tax·add·isa·nod 여섯 요건 전부
 #                                  caution 0건 · 대안화법 0건
 #
@@ -785,7 +785,7 @@ def runnable(item, q, who):
 # 처음 제안은 관찰·이해·제안·실행·사후였다(영어 Observe·Understand·Advise·Act·Follow-up).
 # 그중 둘을 쓰지 않았다. **「관찰」** 은 상시 보고 있다는 뜻으로 읽히는데 스케줄러도 감시
 # 루프도 없다 — 변화는 원장에 `cash_delta_1m` 같은 계산된 열로 들어오고 에이전트는 물을 때
-# 읽는다. **「실행(거래)」** 은 `consult_agent/CLAUDE.md` §10 이 「대외로 나가는 행위를
+# 읽는다. **「실행(거래)」** 은 `pension_agent/CLAUDE.md` §10 이 「대외로 나가는 행위를
 # 수행하지 않는다 — 화면을 열어줄 뿐」이라고 못박은 자리다. 없는 기능을 가리키는 이름을
 # 화면에 세우면 그 이름이 거짓이 된다.
 #
@@ -807,7 +807,7 @@ SECTIONS = (
     ("Ⅱ. 고객 상태 — 이 고객이 지금 어떤 상태이고, 조심할 것은 무엇인가", (
         "고객 현황 확인", "고객 계좌 상태 확인", "상담 이력 조회",
         # 금지·주의와 상담 준비 자료는 **같은 자리에서 온다** — 둘 다 고객 요건으로
-        # 재료를 찾는다(`consult_agent/evidence/guard.py` 가 같은 요건 코드를 쓴다).
+        # 재료를 찾는다(`tools/customer_solution/guard.py` 가 같은 요건 코드를 쓴다).
         "금지·주의 안내", "상담 준비 자료",
     )),
     ("Ⅲ. 업무 확인 — 제도는 어떻고, 어떻게 처리하고, 몇 번 화면이고, 시장은 어떤가", (
@@ -939,7 +939,7 @@ HIDDEN: dict[tuple[str, str], str] = {
     # 판정이 아니라 «달라는 것을 달라»인데 줄 수가 없다.
     ("오늘의 타겟 목록", "타겟 목록에 고객번호도 같이 넣어줘"):
         "(나) 고객 식별번호는 싣지 않기로 한 값이다 — 행내 게이트웨이가 주민등록번호로 읽어 "
-        "400 으로 끊는다(tests/infra/s17_privacy.py · tools/targets.py 머리말). 기능이 "
+        "400 으로 끊는다(tests/infra/s17_privacy.py · tools/customer_solution/targets.py 머리말). 기능이 "
         "없는 것이 아니라 하지 않기로 한 것이고, 앞으로도 안 한다",
     ("제도·수치 확인", "타행 IRP 수수료는 우리보다 싼가?"):
         "(나) 타행 수수료는 지식베이스 밖이다 — 당행 수수료율로 대신 답하지만 물은 것은 "
@@ -1220,7 +1220,7 @@ def _conds_ko(codes: str) -> str:
     코드가 아닌 글(「(0개 — 타겟 아님)」)은 그대로 둔다. CONDS 에 없는 코드는 **코드를 그대로
     남긴다** — 조용히 지우면 요건이 빠진 것으로 읽힌다.
     """
-    from pension_agent.strategy_agent.customer import CONDS
+    from pension_agent.tools.customer_solution.customer import CONDS
     parts = [c.strip() for c in str(codes or "").split(",") if c.strip()]
     if not parts or not all(p in CONDS for p in parts):
         return str(codes or "")

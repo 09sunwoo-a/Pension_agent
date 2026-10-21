@@ -1,7 +1,7 @@
 """범용 무결성 검증 — 종류·도메인과 무관한 세 가지.
 
 ID 중복 · 깨진 참조 · 사실충돌. `schema.py` 의 종류별 검증기, `knowledge/kb.py`,
-`strategy_agent/engine` 의 validate 가 공통으로 부른다.
+`tools/customer_solution/engine` 의 validate 가 공통으로 부른다.
 """
 
 from __future__ import annotations

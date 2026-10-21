@@ -39,7 +39,7 @@
    `--pause=20`.
 
 ③ **상담 기록을 더럽히지 않는다.** 실행은 `tests.debug.runner.session()` 을 그대로 쓰므로
-   세션마다 기록이 남았다가 나갈 때 걷힌다(그 함수 주석). `git status src/session_data/`
+   세션마다 기록이 남았다가 나갈 때 걷힌다(그 함수 주석). `git status src/runtime/session_data/`
    가 깨끗한지 끝나고 한 번 본다.
 
 ④ **쪽지 행(「이번 상담 요약·쪽지」)은 사번이 있어야 돈다.** 실서비스에서는 프론트가
@@ -64,7 +64,7 @@ import os
 import sys
 import time
 
-from pension_agent import config
+from pension_agent.common import config
 from scripts import question_map as QM
 
 XLSX = QM.XLSX
@@ -264,7 +264,7 @@ def _body(res: dict) -> str:
     한쪽만 고쳐지는 자리가 생긴다. 추천질문은 `graph.ask` 가 **기록에 넣기 전에** 떼므로
     히스토리 마지막 턴의 답변을 집으면 그 단계까지 같이 해결된다.
     """
-    from pension_agent.consult_agent.tools.answered import _body as strip_devices
+    from pension_agent.tools.general.answered import _body as strip_devices
     turns = res.get("history") or []
     stored = (turns[-1] or {}).get("answer") if turns else None
     return strip_devices(stored or res.get("answer") or "")
@@ -277,7 +277,7 @@ def _answer_text(res: dict, args) -> str:
         for item in res.get("links") or []:
             parts.append(f"[화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
     if args.full or args.sources:
-        from pension_agent.consult_agent.tools import source_lines
+        from pension_agent.tools import source_lines
         lines = [ln for s in res.get("sources") or [] for ln in source_lines(s)]
         if lines:
             parts.append("─ 근거\n" + "\n".join(lines))
@@ -291,7 +291,7 @@ def _source_text(res: dict) -> str:
     표를 읽을 수 없다). 열을 따로 두면 둘 다 읽힌다 — 보고 자료에서 «무엇을 보고 답했나»는
     답변만큼 중요한 칸이고, 전에는 `--sources` 를 붙인 사람만 볼 수 있었다.
     """
-    from pension_agent.consult_agent.tools import source_lines
+    from pension_agent.tools import source_lines
     lines = [ln for s in res.get("sources") or [] for ln in source_lines(s)]
     return "\n".join(lines)
 
@@ -345,7 +345,7 @@ def main(argv: list[str]) -> int:
     # .env 를 먼저 읽는다 — 그러지 않으면 아래 머리말이 PENSION_TODAY 를 «고정 안 됨»으로
     # 찍는다(실행 자체는 에이전트가 import 될 때 읽으므로 맞게 돌았다 — 머리말만 거짓말을
     # 했다). 날짜가 틀렸는지를 이 한 줄로 보고 판단하므로 거짓말하면 안 되는 자리다.
-    from pension_agent import env as _env
+    from pension_agent.common import env as _env
     _env.load()
 
     wb, ws, idx, head_row = _load()

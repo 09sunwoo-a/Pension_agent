@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pension_agent import config as agent_config
+from pension_agent.common import config as agent_config
 
 # ─────────────────────────────────────────────────────────────
 # 지식베이스 폴더 경로 — 번호 접두에 의존하지 않는다
@@ -612,7 +612,7 @@ CLAIM_CONDITIONS: dict[str, dict] = {
 # **고치는 자리를 verify 로 잡지 않는다.** 전역에서 %를 무시하면 원장의 `3`(건수)을 답변이
 # 「수익률 3%」라고 써도 통과한다. 대신 «이 열은 백분율이다»를 여기서 선언하고, 변환기가
 # 그 열의 셀 값을 `rows[].percents` 로 내려(`market._market_tables`), 대화형이 그 값의
-# **두 표기를 다 인용 허용**에 싣는다(`consult_agent/tools/market.py`). 원문(content)은
+# **두 표기를 다 인용 허용**에 싣는다(`tools/kb_search/market.py`). 원문(content)은
 # 한 글자도 바뀌지 않는다 — 루트 규칙 1.
 #
 # **문서별이 아니라 컬럼명 전역 사전이다.** 이 재료는 매달 새 회차가 들어오는데, 문서별로

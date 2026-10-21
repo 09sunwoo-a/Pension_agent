@@ -27,11 +27,12 @@ import types
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from pension_agent import session_store, verify as V
-from pension_agent.consult_agent import graph as G
-from pension_agent.consult_agent.evidence import relations as REL
-from pension_agent.consult_agent import tools as T
-from pension_agent.consult_agent.nodes import plan as P
+from pension_agent.common import session_store
+from pension_agent.evidence import verify as V
+from pension_agent import graph as G
+from pension_agent.evidence import relations as REL
+from pension_agent import tools as T
+from pension_agent.nodes import plan as P
 from tests.debug import script, trace as TR
 from tests.debug.__main__ import main
 from tests.debug.runner import run
@@ -222,7 +223,7 @@ code, out = _capture(["-c", _UNKNOWN, "세액공제 한도가 얼마야?"])
 check(code == 2 and "없습니다" in out, "없는 고객 id 면 실행 전에 끊는다", f"code={code}")
 # 특정 페르소나를 이름으로 박지 않는다 — 고객 데이터는 이미 한 번 통째로 갈렸다
 # (C1~C6 → PIN 9케이스). 안내가 **지금 적재된 것**을 말하는지만 본다.
-from pension_agent.strategy_agent import customer as SC  # noqa: E402, PLC0415
+from pension_agent.tools.customer_solution import customer as SC  # noqa: E402, PLC0415
 
 _first = SC.PERSONAS[0]
 check(f"{_first.id} {_first.nm}" in out and "--any-customer" in out,

@@ -19,9 +19,9 @@ import os
 # 글이 나와야 하고, 자를 때도 값이 반쪽으로 남지 않아야 한다(보내고 나면 못 되돌린다).
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent import note  # noqa: E402
-from pension_agent.strategy_agent import customer as _customer  # noqa: E402
-from pension_agent.strategy_agent.target_list import today_targets  # noqa: E402
+from pension_agent.common import note  # noqa: E402
+from pension_agent.tools.customer_solution import customer as _customer  # noqa: E402
+from pension_agent.tools.customer_solution.target_list import today_targets  # noqa: E402
 
 _targets = today_targets()
 check(bool(_targets), "target_list: 오늘의 타겟 고객이 산출된다", str(len(_targets)))

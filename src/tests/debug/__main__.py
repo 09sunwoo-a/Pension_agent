@@ -7,7 +7,7 @@
     python -m tests.debug -c 198734-1205842 --debug                  # REPL
     python -m tests.debug --list                                     # 시나리오 목록
 
-**인자 규약은 운영 CLI(`pension_agent.consult_agent.__main__`)와 같다** — 그래야 평소 쓰던
+**인자 규약은 운영 CLI(`pension_agent.__main__`)와 같다** — 그래야 평소 쓰던
 줄에 `--debug` 만 붙여 쓸 수 있다. `-c/--customer` 는 앞뒤 어디에 와도 되고, 질문이 여러
 개면 순서대로 한 턴씩(맥락 이어서), 질문이 없으면 REPL 이다. 여기에 셋이 더 있다:
 
@@ -45,7 +45,7 @@ if hasattr(sys.stdout, "reconfigure"):
 def _print_source(s: dict) -> None:
     # 표기는 운영 CLI 와 같은 공용 함수가 정한다(tools.source_lines) — 각자 복사해 갖고
     # 있던 동안 출처 URL 변경이 운영 CLI 에만 적용되고 이 화면에는 빠졌다.
-    from pension_agent.consult_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
+    from pension_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
 
     for line in source_lines(s):
         print(line)
@@ -54,7 +54,7 @@ def _print_source(s: dict) -> None:
 def _print_answer(r: dict) -> None:
     print(r["answer"])
     # 답변이 가리킨 단말 화면의 딥링크(§10) — 화면이 본문의 번호를 감쌀 재료다.
-    # 터미널에는 감쌀 자리가 없으므로 목록으로 세운다(`consult_agent/__main__` 과 같다).
+    # 터미널에는 감쌀 자리가 없으므로 목록으로 세운다(`__main__` 과 같다).
     for item in r.get("links") or []:
         print(f"  [화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
     sources = r["sources"]
@@ -77,7 +77,7 @@ def _check_customer(customer_id: str | None, allow_any: bool) -> tuple[bool, str
     """
     if not customer_id:
         return True, ""
-    from pension_agent.strategy_agent import customer as SC  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as SC  # noqa: PLC0415
     if SC.get_profile(customer_id):
         return True, ""
 
@@ -107,7 +107,7 @@ def _repl(ask, tr, customer_id: str | None, debug: bool, show_llm: bool) -> int:
         print(f"(고객 화면 열림: {customer_id})")
     if debug:
         print("(--debug: 답변 아래에 이번 턴의 트레이스를 붙입니다)")
-    from pension_agent.session_store import scrub_text  # noqa: PLC0415 — graph 적재 뒤
+    from pension_agent.common.session_store import scrub_text  # noqa: PLC0415 — graph 적재 뒤
 
     while True:
         try:
@@ -177,10 +177,10 @@ def main(argv: list[str]) -> int:
     # 운영 CLI 와 같이 행내 MCP(쪽지 발송)를 붙인다 — 캔드 시나리오(--script)는 LLM 도 발송도
     # 스텁이라 붙이지 않는다. 안 붙이면 쪽지 승낙 턴이 설정과 무관하게 «미연결»로 끝난다.
     if scenario is None:
-        from pension_agent import mcp, note  # noqa: PLC0415 — graph 적재 뒤
+        from pension_agent.common import mcp, note  # noqa: PLC0415 — graph 적재 뒤
         if not mcp.install():
             print("(쪽지 발송: 미연결 — .env 의 MCP_* 가 없거나 행내 패키지가 없습니다. "
-                  "확인: python -m pension_agent.mcp)", file=sys.stderr)
+                  "확인: python -m pension_agent.common.mcp)", file=sys.stderr)
         elif note.employee_id(employee_id) is None:
             # 붙었는데 보내는 사번이 없으면 승낙 턴이 «보낼 직원 사번이 없다»로 끝난다.
             print(f"(쪽지 보내는 사번: 없음 — -e 사번 을 넘기거나 {note.EMP_NO_ENV} 를 채우세요)",

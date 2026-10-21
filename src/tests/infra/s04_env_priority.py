@@ -22,8 +22,8 @@ from tests.infra._common import check
 import os  # noqa: E402
 import tempfile  # noqa: E402
 
-from pension_agent import env as _env  # noqa: E402
-from pension_agent import llm as _llm  # noqa: E402
+from pension_agent.common import env as _env  # noqa: E402
+from pension_agent.common import llm as _llm  # noqa: E402
 
 _ENV_KEYS = ("LLM_PROVIDER", "LLM_MODEL", "LLM_DOTENV", "PENSION_TEST_MARK", "ENV_PATH",
              "LLM_BASE_URL", "LLM_BASE_URL_TRNN", "LLM_BASE_URL_SERV", "LLM_API_KEY", "LLM_API_KEY_SERV")

@@ -23,7 +23,7 @@
 - `source`·`refs` — 표준 출처/참조. 새 데이터는 이걸 쓴다(레거시는 fields 안에 둔 것도 허용).
 - 파일을 **데이터 루트에 떨어뜨리면** 스토어가 `kind` 로 자동 인덱싱한다. 파일별 배선 없음.
 
-**데이터 루트**: 상품·전략 카탈로그 = `pension_agent/strategy_agent/data/` · 공용 지식 = `pension_agent/knowledge/data/`
+**데이터 루트**: 상품·전략 카탈로그 = `pension_agent/tools/customer_solution/data/` · 공용 지식 = `pension_agent/knowledge/data/`
 (폴더명은 같지만 대외비 경계로 물리적으로 분리). `_` 로 시작하는 파일·폴더는 로더가 건너뛴다
 (검토 게이트 — `pension_agent/knowledge/store.py::iter_knowledge_files`). 작업 중인 초안이나 보관본을 데이터
 루트에 두어야 할 때 `_` 를 붙이면 적재 대상에서 빠진다.
@@ -34,9 +34,9 @@
 
 | kind | 소비 | 사는 곳 |
 |---|---|---|
-| `product` | 관계형(적합성 게이트) | `strategy_agent/data/products.json` |
-| `strategy` / `system_strategy` | 관계형(전략 로직) | `strategy_agent/data/strategies.json` 등 |
-| `baseline` · `capability` · `asset` | 관계형(레지스트리) | `strategy_agent/data/` |
+| `product` | 관계형(적합성 게이트) | `tools/customer_solution/data/products.json` |
+| `strategy` / `system_strategy` | 관계형(전략 로직) | `tools/customer_solution/data/strategies.json` 등 |
+| `baseline` · `capability` · `asset` | 관계형(레지스트리) | `tools/customer_solution/data/` |
 | `fact` | 참조(재사용 사실·제도 팩트) | `knowledge/data/*.json` |
 | `resource` | 참조(자료 목록) | `knowledge/data/*.json` |
 | `doc` | 참조(원천 문서 레지스트리) | `knowledge/data/kb_docs.json` |
@@ -130,10 +130,10 @@ python -m scripts.kb_build.build_kb --activate   # '_draft_' 접두 제거(= 검
 7) 활성화      →  파일명에서 '_draft_' 제거
 8) 검증        →  python -m pension_agent.knowledge.schema validate <루트>   # ERROR 0 필수
                   + 도메인 검증: 지식 `python -m pension_agent.knowledge.kb`
-                                 전략 `python -m pension_agent.strategy_agent.engine && python -m tests.test_engine`
+                                 전략 `python -m pension_agent.tools.customer_solution.engine && python -m tests.test_engine`
 ```
 
-- **루트**: 관계형(product·strategy·baseline·capability·asset) → `strategy_agent/data/`,
+- **루트**: 관계형(product·strategy·baseline·capability·asset) → `tools/customer_solution/data/`,
   검색·참조(pitch·fact·resource) → `knowledge/data/`.
 - 프롬프트에는 환각방지 규칙이 내장돼 있다: **문서에 없거나 안 보이면 지어내지 말고 null**,
   스캔 문서는 보이는 값 그대로 전사, 같은 수치는 `fact` 로 한 번만 두고 `refs` 로 참조,
@@ -160,7 +160,7 @@ python -m scripts.kb_build.build_kb --activate   # '_draft_' 접두 제거(= 검
 `knowledge.schema validate` (통합·종류 무관): 필수필드 누락 · 잘못된 값/enum · id 중복 ·
 깨진 refs · **사실충돌**(같은 label 에 다른 value = 개정 반영 누락, ERROR) · **최신성 미기재**
 (`fact.as_of` 없음, WARN) · **개인정보 의심**(작성자 실명·부점·직급 패턴, WARN). 도메인 검증
-(엔진 게이트·근거 교차검증·화법 오답 차단)은 `strategy_agent/engine`·`knowledge/kb.py` 가 계속 담당한다.
+(엔진 게이트·근거 교차검증·화법 오답 차단)은 `tools/customer_solution/engine`·`knowledge/kb.py` 가 계속 담당한다.
 
 ## 6. 새 종류를 만났을 때 (내가 놓친 데이터 포함)
 

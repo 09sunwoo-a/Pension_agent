@@ -14,7 +14,7 @@
 **이 스크립트를 돌린 적이 없으면 아무것도 달라지지 않는다.** 저장소는 디렉터리가 있어야
 켜지고(`briefing_store.enabled`), 디렉터리를 만드는 것이 이 스크립트다. 실서비스에서
 브리핑을 프로세스 밖으로 공유하는 방법은 아직 정해지지 않았다 —
-`consult_agent/CLAUDE.md` §13 이 그 미결 사항을 들고 있고, 여기서 앞질러 정하지 않는다.
+`pension_agent/CLAUDE.md` §13 이 그 미결 사항을 들고 있고, 여기서 앞질러 정하지 않는다.
 
 **입력이 바뀌면 저장분은 자동으로 버려진다**(지문 대조 — `briefing_store` 머리말). 지식
 카드를 다시 만들었거나 프롬프트를 고쳤거나 날짜가 바뀌면 다시 돌리면 된다. 굳이 지울
@@ -34,10 +34,10 @@ import shutil
 import sys
 import time
 
-from pension_agent import config
-from pension_agent import llm as LLM
-from pension_agent.strategy_agent import agent as SA
-from pension_agent.strategy_agent import briefing_store, customer as SC
+from pension_agent.common import config
+from pension_agent.common import llm as LLM
+from pension_agent.tools.customer_solution import agent as SA
+from pension_agent.tools.customer_solution import briefing_store, customer as SC
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")

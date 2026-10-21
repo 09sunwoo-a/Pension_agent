@@ -22,7 +22,7 @@ D·Pilot 값을 A 와 같은 얼굴로 화면에 세우면 "행내 기준"이라
 
 값의 가공은 하지 않는다 — 조건식은 문자열 그대로 싣는다. 조건식을 여기서 파이썬 판정으로
 번역하면 "원본이 무엇이었나"가 JSON 에서 사라지고, 번역이 틀렸을 때 표를 다시 봐도
-드러나지 않는다. 판정은 `strategy_agent/customer.py::conditions()` 가 코드로 쓰고,
+드러나지 않는다. 판정은 `tools/customer_solution/customer.py::conditions()` 가 코드로 쓰고,
 어떤 타겟을 근거로 삼았는지는 그 자리에 TARGET_ID 로 적는다.
 
 실행 (src/ 에서):
@@ -38,7 +38,7 @@ import json
 from datetime import date, datetime
 from typing import Any
 
-from pension_agent import config
+from pension_agent.common import config
 
 SOURCE_XLSX = config.REPO_ROOT / "IRP_타겟고객_룰베이스_v1.xlsx"
 OUTPUT_JSON = config.TARGETS_JSON

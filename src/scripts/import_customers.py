@@ -4,9 +4,9 @@
 목업 9케이스(00_시연케이스 시트 참고) ② `scripts/demo_cases.json` — 브리핑 에이전트 데모
 골든 케이스 3명(DEMO_GOLDEN_CASES_V2, 같은 기준일·같은 레코드 스키마). 이 스크립트는
 xlsx 전 시트를 KB-PIN 단위 레코드로 묶고 데모 3명을 뒤에 이어붙여
-`pension_agent/strategy_agent/customers.json` 으로 내린다. 값의 가공은 하지 않는다 —
+`pension_agent/tools/customer_solution/customers.json` 으로 내린다. 값의 가공은 하지 않는다 —
 비중은 원본 그대로 소수(0~1)로 두고, Profile 로의 매핑(4분류 반올림·파생 필드)은 적재
-시점에 `strategy_agent/customer.py` 가 한다. 여기서 미리 가공하면 "원본이 무엇이었나"가
+시점에 `tools/customer_solution/customer.py` 가 한다. 여기서 미리 가공하면 "원본이 무엇이었나"가
 JSON 에서 사라진다.
 
 전 시트를 보존하는 이유: 신규 배지 4종(판매중단펀드·ISA만기·연금개시 미개시·이탈위험관찰)·
@@ -27,7 +27,7 @@ import json
 from datetime import date, datetime
 from typing import Any
 
-from pension_agent import config
+from pension_agent.common import config
 
 SOURCE_XLSX = config.REPO_ROOT / "IRP_Agent_더미고객_9Cases_v3.xlsx"
 #: 데모 골든 케이스(브리핑 에이전트 시연 3명, DEMO_GOLDEN_CASES_V2) 병합 소스.

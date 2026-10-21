@@ -4,7 +4,7 @@
 트레이스가 "이 코드가 이렇게 판정한다"의 기록이 된다. 스텁이 게이트까지 흉내 내면 그건
 운영 동작이 아니라 스텁의 동작을 재는 것이다.
 
-스텁을 거는 자리는 기존 `tests/test_consult_agent.py` 와 같은 규약이다:
+스텁을 거는 자리는 기존 `tests/test_agent.py` 와 같은 규약이다:
   understand.generate   의도 분류 — `"{}"` 면 기본 의도(계획 루프)로 떨어진다
   plan.generate         계획 JSON 과 답변 문장 둘 다. 프롬프트로 갈린다
   clarify.generate      되묻기 판정 — `{"ask": null}` = 되묻지 않는다
@@ -23,12 +23,12 @@ import json
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from pension_agent.consult_agent.evidence import select as S
-from pension_agent.consult_agent import tools as T
-from pension_agent.consult_agent.nodes import clarify as CL
-from pension_agent.consult_agent.nodes import plan as P
-from pension_agent.consult_agent.nodes import understand as U
-from pension_agent.llm import LLMError
+from pension_agent.tools.kb_search import select as S
+from pension_agent import tools as T
+from pension_agent.nodes import clarify as CL
+from pension_agent.nodes import plan as P
+from pension_agent.nodes import understand as U
+from pension_agent.common.llm import LLMError
 from tests.debug import trace as TR
 
 #: 세액공제 카드(fact.k04.f2)를 근거로 받은 답변들. 게이트가 무엇을 어떻게 가르는지

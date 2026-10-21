@@ -7,12 +7,12 @@
 
 최상단 모듈·패키지의 역할과 층은 [`__init__.py`](__init__.py) 머리말이 지도다 — 지도에 빠진
 항목과 층을 거스르는 임포트는 `tests/infra/s03_boundaries.py` 가 잡는다. 하위 패키지의 파일별
-설명은 각 폴더의 `__init__.py` 머리말에 있다(`knowledge/` · `consult_agent/` 등).
+설명은 각 폴더의 `__init__.py` 머리말에 있다(`knowledge/` · `` 등).
 
 층은 세 겹이다 — 단일 출처(config·clock) → 실행 환경(env ← observability ← llm) → 기록·행위
 (session_store·note·mcp). 두 에이전트는 `knowledge ← strategy_agent ← consult_agent` 한 방향이다.
 승낙 뒤 실행하는 행위의 게이트(발송 화면·쪽지)는 consult 만 부르므로
-`consult_agent/effects/actions.py` 에 있다.
+`actions/actions.py` 에 있다.
 
 ## 데이터 규격 (모든 지식/데이터 공통)
 
@@ -36,7 +36,7 @@ python -m pension_agent.knowledge.schema validate <데이터 루트...>  # 통�
 호출부는 `generate()` / `agenerate()` 만 쓴다. 백엔드는 환경변수로 정해진다.
 
 ```python
-from pension_agent.llm import agenerate, available, generate
+from pension_agent.common.llm import agenerate, available, generate
 
 if available():
     text = generate(prompt, system=SYS, max_tokens=900)
@@ -84,7 +84,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 ```bash
 cp .env.example .env                 # 하나
-python -m pension_agent.env          # 어느 파일·단계·프로바이더가 잡혔나
+python -m pension_agent.common.env          # 어느 파일·단계·프로바이더가 잡혔나
 ```
 
 **URL 과 키는 각자 폴백한다** — 단계별 이름(`_TRNN`·`_SERV`)이 없으면 접미사 없는 이름을 읽는다.

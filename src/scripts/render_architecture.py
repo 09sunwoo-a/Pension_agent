@@ -1,4 +1,4 @@
-"""아키텍처 다이어그램 생성기 — consult_agent README 의 생성 구간을 코드에서 다시 그린다.
+"""아키텍처 다이어그램 생성기 — 에이전트 README 의 생성 구간을 코드에서 다시 그린다.
 
 `get_graph()` 는 노드·엣지만 그린다 — 도구 루프는 `plan` 노드 **안**이라(도구 목록·호출
 상한은 코드 소유, 루트 CLAUDE.md 규칙 2) 그래프에 안 찍히고, 검증 게이트도 `answer` 한 칸
@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import sys
 
-from pension_agent import config
+from pension_agent.common import config
 
 MARK_START = "<!-- generated:architecture:start — python -m scripts.render_architecture 가 갱신한다. 손으로 고치지 않는다 -->"
 MARK_END = "<!-- generated:architecture:end -->"
 
-README = config.PACKAGE_ROOT / "consult_agent" / "README.md"
+README = config.PACKAGE_ROOT / "README_graph.md"
 
 #: 그래프 노드의 화면 라벨 — «영문 노드명 — 기능명» 한 줄 + 하는 일 한 줄. 기능은 점검
 #: 자리에서 읽는 사람 기준으로 쓰되, 코드로 찾아갈 수 있게 노드명은 남긴다. 그 밖의 개발
@@ -70,7 +70,7 @@ _TOOLS_PER_LINE = 4
 
 def _graph_lines() -> list[str]:
     """컴파일된 그래프의 노드·엣지 → mermaid 줄. 조건 분기는 점선이다."""
-    from pension_agent.consult_agent import graph as G  # noqa: PLC0415 — langgraph 지연
+    from pension_agent import graph as G  # noqa: PLC0415 — langgraph 지연
     drawable = G.build_agent().get_graph()
 
     lines: list[str] = []
@@ -90,7 +90,7 @@ def _graph_lines() -> list[str]:
 
 def _tool_lines() -> list[str]:
     """도구 레지스트리 → plan 옆의 주석 노드. 도구 이름은 선언의 진행 라벨에서 옮긴다."""
-    from pension_agent.consult_agent import tools as T  # noqa: PLC0415
+    from pension_agent import tools as T  # noqa: PLC0415
     grouped = {name for _label, names in _TOOL_GROUPS for name in names}
     if grouped != set(T.TOOLS):
         raise AssertionError(
@@ -112,7 +112,7 @@ def _tool_lines() -> list[str]:
 def _gate_lines() -> list[str]:
     """답변 점검 → compose(답변 작성) 옆의 주석 노드. 검사 함수가 사라지면 크게 실패한다 —
     이름만 남아 있는 다이어그램은 없는 것만 못하다(tests/debug/trace 와 같은 원칙)."""
-    from pension_agent.consult_agent.nodes import plan as P  # noqa: PLC0415
+    from pension_agent.nodes import plan as P  # noqa: PLC0415
     missing = [a for a in ("verify_texts", "relations", "_span_verdict") if not hasattr(P, a)]
     if missing:
         raise AttributeError(f"게이트 검사가 사라졌습니다 — 다이어그램이 거짓이 됩니다: {missing}")

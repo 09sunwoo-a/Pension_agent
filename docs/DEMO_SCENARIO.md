@@ -8,7 +8,7 @@
 > 피할 질문·리허설 체크는 확정본에도 그대로 적용된다.
 >
 > 이 문서는 손으로 쓴다(생성물이 아니다). 무엇이 더미인지는 `DEMO_STATUS.md` 가 갖고 있고,
-> 에이전트가 **무엇을 해야 하는가**는 `src/pension_agent/consult_agent/CLAUDE.md` 가 기준이다.
+> 에이전트가 **무엇을 해야 하는가**는 `src/pension_agent/CLAUDE.md` 가 기준이다.
 > 여기는 그중 **보여줄 것만** 골라 순서를 정한 자리다.
 
 ## 남길 메시지 셋
@@ -42,7 +42,7 @@ C 를 빼면 A·B 가 위험해 보인다. **셋을 같이 보여주는 것이 �
 게다가 10개월 전 상담 기록에 「현금성자산은 단계적으로 재투자하고 싶다」는 본인 의사가
 남아 있다 — T5 가 그 기록을 꺼내면서 오늘의 제안에 명분이 선다.
 
-> **고객 화면을 열면 추천 질문 칩이 먼저 뜬다**(`consult_agent/effects/suggest.py`). 칩은 두
+> **고객 화면을 열면 추천 질문 칩이 먼저 뜬다**(`actions/suggest.py`). 칩은 두
 > 갈래다 — 상담 기록 칩은 기록이 **있는 고객에만** 뜨고(송도윤은 「지난 상담(10/6 ·
 > 322일 전)에서 무슨 얘기 했지?」), 안내 콘텐츠 칩(「이 고객한테 안내할 만한 이벤트나 세미나 있어?」 — 건수는 싣지 않는다, 칩이 떴다는 것이 알림이다)은
 > 그 고객 상태에 걸린 콘텐츠가 열려 있으면 뜬다. 기록이 없는 김현수는 콘텐츠 칩만 뜨고
@@ -141,7 +141,7 @@ C 를 빼면 A·B 가 위험해 보인다. **셋을 같이 보여주는 것이 �
 
 ```bash
 cd src
-python -m tests.test_consult_agent      # 전부 통과하는지 (LLM 키 불필요)
+python -m tests.test_agent      # 전부 통과하는지 (LLM 키 불필요)
 python -m tests.debug.reps demo          # 대본 전체를 실 LLM 으로
 python -m tests.debug.reps demo --why       # + 「무엇을 찾아봤나 → LLM 이 썼다」 로그
 ```
@@ -201,11 +201,11 @@ python -m tests.debug.reps demo --why       # + 「무엇을 찾아봤나 → LL
   숫자를 대본에 외워 두지 말고, 고정하고 싶으면 `PENSION_TODAY=2026-08-24` 를 걸고 돈다.
 - **상담 기록이 픽스처를 덮어쓰지 않게 한다.** 에이전트는 턴마다 상담이력을 남기고
   (기준서 §2), T5 가 읽는 것이 바로 그 저장소다. `reps demo` 는 실행 전후로
-  `session_data/` 를 되돌리지만 **Streamlit 화면과 `tests.debug` CLI 는 되돌리지 않는다** —
+  `runtime/session_data/` 를 되돌리지만 **Streamlit 화면과 `tests.debug` CLI 는 되돌리지 않는다** —
   그쪽으로 연습했으면 시연 직전에 픽스처를 되돌린다:
 
   ```bash
-  git checkout src/session_data/       # 되돌리지 않으면 T5 가 «어제 연습»을 읽는다
+  git checkout src/runtime/session_data/       # 되돌리지 않으면 T5 가 «어제 연습»을 읽는다
   ```
 
 - 답변이 **카드 원문 문어체**로 나오면(「■ 세액공제 — 한도 900만원 …」) 그건 생성문이

@@ -1,33 +1,41 @@
-"""퇴직연금 AI 사후관리 에이전트.
+"""연금 에이전트 — 퇴직연금·IRP 직원 상담을 돕는 LangGraph 에이전트.
 
-최상단의 공용 모듈·패키지는 폴더로 묶지 않고 평평하게 둔다 — 각자 책임이 하나씩이고,
-층은 아래 지도와 `tests/infra/s03_boundaries.py` 의 의존 표가 고정한다(새 모듈을 더하면
-둘 다 고쳐야 검사가 통과한다).
+한 턴은 understand → plan(도구 선택·실행 반복) → compose(답변) → offer(후속 제안) 순서로
+흐른다. 경계(부를 수 있는 도구·수치 계산·답변 검사)는 코드가 정하고, LLM 은 그 안에서
+도구를 고르고 문장을 쓴다.
 
-  단일 출처 — 아무것도 임포트하지 않는다
-    config.py          경로·데이터 위치의 단일 출처
-    clock.py           «오늘»의 단일 출처 (PENSION_TODAY 로 고정 — 원장 기준일과는 다른 축)
+    graph.py          build_agent · ask      그래프 조립 · 단발 진입점
+    state.py          AgentState · Turn      그래프 상태 · 대화이력 한 턴
+    routing.py        INTENTS · route_*      의도 목록 · 분기 판정
+    context_store.py  get · put · drop       대화 맥락 보관(게이트웨이 경로용 메모리)
+    turn_trace.py                            턴 트레이스
+    __main__.py                              REPL (python -m pension_agent)
 
-  실행 환경 — env ← observability ← llm 한 방향
-    env.py             .env 로딩과 실행 단계(train | serving)
-    observability/     Langfuse 관측 — 트레이스·span·score·전송 워커 (자가진단: python -m pension_agent.observability)
-    privacy.py         행내 개인정보 필터 규칙표 — 나가는 글에서 그 필터가 잡는 꼴을 가린다
-                       (자가진단: python -m pension_agent.privacy "<글>")
-    llm.py             프로바이더 전환식 LLM 클라이언트 (환경 이전 시 여기만 수정) · 응답 JSON 추출
+    nodes/            그래프 단계
+    tools/            plan 이 고르는 기능 — 기능마다 하위 폴더
+      customer_solution/   고객별 솔루션(고객 원장·타겟 판정·추천 계산·브리핑)
+      kb_search/           지식베이스 검색(카드·시황·화법·참고자료)
+      general/             날짜·세액공제 계산·상담 이력·직전 답변
+    evidence/         근거 원장의 규약과 답변 검사(verify)
+    actions/          답변 뒤 실행: 발송 화면·쪽지 초안·추천 칩
+    prompts/          LLM 프롬프트
+    knowledge/        지식 카드 적재·스키마·카드 데이터·시황 소스
+    common/           설정·환경변수·시계·LLM·MCP·로깅 등 공용 기반
 
-  검증
-    verify.py          LLM 산출물의 재료 이탈 판정 — 두 에이전트 공통
+의존 방향과 허용 간선은 `tests/infra/s03_boundaries.py` 가 고정한다.
 
-  기록·행위 — 승낙 뒤 실행하는 행위의 게이트는 consult_agent/effects/actions.py (부르는 쪽이 거기뿐이다)
-    session_store.py   상담 세션·대화이력 (consult 가 쓰고 strategy 가 읽는다)
-    note.py            WorkB 쪽지의 꼴과 발송 (본문 표·마스킹·길이 상한·결과 판정)
-    mcp/               행내 시스템 연동 — 서버 표·클라이언트·도구 어댑터(workb.py) (진단: python -m pension_agent.mcp)
-
-  데이터와 에이전트 — knowledge ← strategy_agent ← consult_agent 한 방향
-    market/            시황·금리 소스 (자리표시자)
-    knowledge/         데이터 접근 계층 (kinds·schema·store·kb + 공용 지식 카드)
-    strategy_agent/    AI 브리핑 — 고객 1명 종합 → ①~⑨ 섹션
-    consult_agent/     직원 상담 대화 (LangGraph)
-
-설계 원칙과 실행 방법은 ../README.md 참고.
+`ask` 는 지연 재노출한다. 여기서 바로 임포트하면 이 패키지를 건드리는 모든 경로가
+LangGraph 와 지식베이스 적재를 함께 끌고 오게 된다.
 """
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ask":
+        from pension_agent.graph import ask
+
+        return ask
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

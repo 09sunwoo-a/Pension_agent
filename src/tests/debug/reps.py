@@ -50,7 +50,7 @@
 "괜찮네"로 읽히지만, 에이전틱한지는 **도구를 몇 개 어떤 순서로 골랐는가**에서만 갈린다.
 
 **채점하지 않는다.** 통과·실패를 코드가 정하면 그건 회귀 테스트지 검토가 아니다
-(회귀는 `tests/test_consult_agent.py` 가 이미 315건 재고 있다). 여기는 사람이 읽고
+(회귀는 `tests/test_agent.py` 가 이미 315건 재고 있다). 여기는 사람이 읽고
 판단하는 자리라, 요약표는 «무엇이 일어났나»만 찍는다.
 
 `cases` 말고 셋(`demo`·`library`·`review`)은 검토가 아니라 **리허설**이다. 문서의 대본을
@@ -61,7 +61,7 @@
 청중에게 띄울 것이 아니다.
 
 **상담 기록을 남기지 않는다.** `graph.ask()` 는 턴마다 상담이력을 기록하는데(기준서 §2 —
-진입점 한 곳에서 빠짐없이), `session_data/` 에는 시연 픽스처가 들어 있다
+진입점 한 곳에서 빠짐없이), `runtime/session_data/` 에는 시연 픽스처가 들어 있다
 (`scripts/seed_sessions.py`). 그대로 돌리면 리허설 턴이 픽스처에 덧붙고, 대본 T5
 (「지난번엔 무슨 얘기 했지?」)가 **10개월 전 고객 발언 대신 방금 리허설을 읽는다** —
 돌릴수록 시연이 망가진다. 그래서 실행 전후로 디렉터리를 통째로 되돌린다. 기록 기능
@@ -82,8 +82,8 @@ import time
 import unicodedata
 from contextlib import contextmanager
 
-from pension_agent import config
-from pension_agent import llm as LLM
+from pension_agent.common import config
+from pension_agent.common import llm as LLM
 from tests.debug import scenarios as SCEN
 from tests.debug import trace as TR
 from tests.debug.runner import session
@@ -188,7 +188,7 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
 
 @contextmanager
 def _fixtures_intact():
-    """`session_data/` 를 실행 전 상태로 되돌린다.
+    """`runtime/session_data/` 를 실행 전 상태로 되돌린다.
 
     골라서 지우지 않고 **통째로 스냅샷·복원**하는 이유는, 무엇이 픽스처이고 무엇이 이번
     실행이 만든 것인지 이 스크립트가 알 필요가 없어서다. 새 고객이 픽스처에 추가돼도
@@ -331,7 +331,7 @@ def _print_answer(r: dict) -> None:
 def _print_source_line(s: dict) -> None:
     # 표기는 운영 CLI 와 같은 공용 함수가 정한다(tools.source_lines) — compact 는 이
     # 묶음 화면의 한 줄 표기. 각자 복사하면 한쪽만 고쳐지는 사고가 재현된다.
-    from pension_agent.consult_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
+    from pension_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
 
     for line in source_lines(s, compact=True):
         print(line)
@@ -609,14 +609,14 @@ def main(argv: list[str]) -> int:
                 # 건너뛰는 것이 아니라 같은 자리에서 같은 산출을 읽는 것이라, 리허설이
                 # 예행하는 경로는 그대로다.
                 if rehearsal and customer:
-                    from pension_agent.strategy_agent import agent as SA        # noqa: PLC0415
-                    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
+                    from pension_agent.tools.customer_solution import agent as SA        # noqa: PLC0415
+                    from pension_agent.tools.customer_solution import customer as CUST  # noqa: PLC0415
                     t0 = time.monotonic()
                     prof = CUST.get_profile(customer)
                     if prof is not None:
                         SA.propose(prof)
                     if timing and not brief:
-                        from pension_agent.strategy_agent import briefing_store  # noqa: PLC0415
+                        from pension_agent.tools.customer_solution import briefing_store  # noqa: PLC0415
                         how = ("미리 만들어 둔 것을 읽음" if briefing_store.enabled()
                                else "이번에 생성 — scripts.prebuild_briefings 로 미리 만들 수 있다")
                         print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 · {how} — "

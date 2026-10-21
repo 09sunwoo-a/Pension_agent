@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 
 from scripts.kb_build import config
-from pension_agent.consult_agent.effects import screens
+from pension_agent.actions import screens
 
 from scripts.kb_build.common import EXTRACT, clean, note, record, redact, role_entries, topics_of, triggers_of
 from scripts.kb_build.docs import DocResolver
@@ -85,7 +85,7 @@ def _screen_triggers(title: str, summary: str,
     «주요 기능» 칸은 표A 원문의 절이라 입구로 쓸 수 있는 재료다(knowledge/CLAUDE.md 「입구를
     늘리는 재료는 원문 본문의 절로 한정」). 항목 참조만 떼고 옮긴다 — 문장을 새로 만들지 않는다.
     둘째 칸에 두는 이유는 LLM 카드 목록 한 줄이 예상질문을 앞에서 2개만 싣기 때문이다
-    (`consult_agent/evidence/kb_index.py::_card_line`) — 뒤에 붙이면 LLM 은 못 본다.
+    (`tools/kb_search/kb_index.py::_card_line`) — 뒤에 붙이면 LLM 은 못 본다.
 
     `aliases`(«같은 말»)가 있으면 그 칸의 원문 표기 뒤에 괄호로 직원이 부르는 이름을 붙인다
     — 「사전지정운용제도(디폴트옵션) 신청」. 원문이 표B 에서 쓰는 병기 꼴 그대로다.

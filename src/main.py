@@ -37,13 +37,13 @@ stream/isStream/is_stream 이 false 로 있으면 비스트림.
                            원장 표기(`171203-4815062`)는 주민등록번호와 같은 꼴이라 플랫폼
                            게이트웨이의 «기본필터»가 그 요청을 `FILTER_INVALID` 로 끊는다.
                            원장 표기·하이픈 없는 13자리·b64 셋 다 받아 원장 표기로
-                           되돌린다(`strategy_agent/customer.py::normalize_id`)
+                           되돌린다(`tools/customer_solution/customer.py::normalize_id`)
     session_id      (선택) 상담 세션 구분자. 없으면 "default". 같은 값으로 이어 보내면
                            이전 턴의 맥락이 이어진다(아래 «대화 맥락»)
     employee_id     (선택) 로그인한 직원의 **WorkB 사번**. 쪽지의 기본 수신자이자 발송
                            주체이고 상담이력에 «누가 상담했나»로 남는다. `x_client_user`
                            가 사번으로 시작하면 넘길 필요가 없다
-                           (`pension_agent/note.py::as_emp_no`). 사번을 다른 데서
+                           (`pension_agent/common/note.py::as_emp_no`). 사번을 다른 데서
                            받아오거나 그 값의 꼴이 다른 배포를 위한 자리이고, 여기 실은
                            값은 꼴을 검사하지 않고 그대로 쓴다. 사번을 하나도 못 읽으면
                            `WORKB_EMP_NO` 환경변수로 떨어지고, 그것도 없으면 쪽지 발송을
@@ -73,12 +73,12 @@ JSON 원문을 보게 되므로 포기했다 — 2026-09-09 결정). 한 턴의 
 answer.links 는 **본문이 인용한 단말 화면의 딥링크**다(`mystar-link://scnNo=…&mode=…`).
 프론트는 본문에서 `screen` 문자열(「04-12-642」)을 찾아 `url` 로 누를 수 있게 감싼다 — URL 을
 프론트가 조립하지 않는 이유는 `mode`(운영·개발)와 `scnNo` 자릿수 판정이 백엔드에만 있어야
-하기 때문이다(consult_agent/effects/screens.py). 커스텀 스킴이라 프론트의 링크 sanitizer 가
+하기 때문이다(actions/screens.py). 커스텀 스킴이라 프론트의 링크 sanitizer 가
 href 를 지울 수 있다 — 스킴을 허용 목록에 넣어야 한다.
 
 answer.messages 는 **본문이 인용한 고객 발송 문구(LMS)**다. 프론트는 큰따옴표 인용을 화법
 블록으로 그리는데, `text` 와 내용이 같은 인용은 화법이 아니라 «복사할 발송 문구» 블록으로
-그리고 복사 버튼에는 `copy` 를 넣는다(consult_agent/effects/messages.py).
+그리고 복사 버튼에는 `copy` 를 넣는다(actions/messages.py).
 
 answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — followups 로만 간다. 연계 제안
 문장(«… 보여드릴까요? / 연계해드릴까요? (네 / 아니오)»)은 답변의 마지막 문장으로 남긴다 — 직원이
@@ -95,7 +95,7 @@ answer.text 에서 추천질문 블록(graph.FOLLOWUP_HEADER)은 뗀다 — foll
 후속 질문("그럼 안 된다고 하면요?")·되묻기의 답·연계 확인("네")은 이전 턴의 `history`
 (Turn 목록, state.Turn)가 있어야 해석된다. 게이트웨이 경로는 그것을 돌려줄 자리가 없으므로
 진입점이 `(x_client_user, session_id)` 키로 메모리에 맡겨 두고 다음 턴에 되찾는다
-(consult_agent/context_store.py — 최근 HISTORY_LIMIT(12)턴 · 2시간 · 500세션 · 디스크에 안 쓴다).
+(context_store.py — 최근 HISTORY_LIMIT(12)턴 · 2시간 · 500세션 · 디스크에 안 쓴다).
 호출자가 `message_hists` 에 Turn 형식(`question` 키가 있는 dict 목록)을 실어 보내면 그것이
 저장본보다 우선한다. 다른 형식(OpenAI 식 messages 등)은 버린다 — Turn 이 아닌 것을 넘기면
 `format_history` 가 `turn['question']` 에서 죽어 500 이 난다.
@@ -159,7 +159,7 @@ Grafana 가 불안정할 때 프론트의 개발자 콘솔에서 로그를 보�
             그대로 실으면 게이트웨이가 응답 전체를 막는다(privacy.py). stdout 줄은 원래대로다.
   절차 기록 같은 스위치로 턴 끝에 `trace` 이벤트 하나가 `done` 바로 앞에 온다 — 발표용 «답변
             근거» 패널의 재료다. 단계별 시각·도구 호출·근거 카드(답변이 썼나)·검증 판정과 사유·
-            코드가 증명한 문장–근거 대응을 구조 그대로 싣는다(consult_agent/turn_trace.py).
+            코드가 증명한 문장–근거 대응을 구조 그대로 싣는다(turn_trace.py).
             stdout 에는 싣지 않는다. 가림은 log 와 같다. 오류로 끝난 턴에는 오지 않는다.
 """
 
@@ -183,12 +183,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from pension_agent import config, llm, mcp, observability, privacy
-from pension_agent.consult_agent import context_store
-from pension_agent.consult_agent import graph as consult_graph
-from pension_agent.consult_agent.nodes import act as consult_act
-from pension_agent.strategy_agent import briefing_store
-from pension_agent.strategy_agent import customer as strategy_customer
+from pension_agent.common import config, llm, mcp, observability, privacy
+from pension_agent import context_store
+from pension_agent import graph as consult_graph
+from pension_agent.nodes import act as consult_act
+from pension_agent.tools.customer_solution import briefing_store
+from pension_agent.tools.customer_solution import customer as strategy_customer
 
 
 #: INFO 를 끄는 바깥 라이브러리 로거 — 목록과 이유는 `mcp/client.py::NOISY_LOGGERS`. `httpx`
@@ -546,7 +546,7 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         # 어느 파일이 읽혔나 — «키를 넣었는데 왜 안 되나»의 첫 질문이다.
-        # 자세한 것은 `python -m pension_agent.env` 가 터미널에 찍는다.
+        # 자세한 것은 `python -m pension_agent.common.env` 가 터미널에 찍는다.
         "env": {"dotenv": str(config.DOTENV), "exists": config.DOTENV.is_file()},
         "llm": {
             "provider": llm.PROVIDER,

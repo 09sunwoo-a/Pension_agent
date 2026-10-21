@@ -35,7 +35,7 @@ import threading
 import time as _time
 import urllib.error
 
-from pension_agent import llm as _llm
+from pension_agent.common import llm as _llm
 
 # llm 은 stdlib 의 time.sleep·urllib.request.urlopen 을 모듈 속성으로 부르므로 그 자리를
 # 갈아끼우고 finally 에서 원복한다(다른 검사가 진짜 sleep·urlopen 을 쓸 수 있게).

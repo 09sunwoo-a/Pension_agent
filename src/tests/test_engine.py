@@ -24,12 +24,12 @@ import sys
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from pension_agent import config
-from pension_agent.strategy_agent import engine
-from pension_agent.strategy_agent import customer
-from pension_agent.strategy_agent.customer import Profile, conditions
+from pension_agent.common import config
+from pension_agent.tools.customer_solution import engine
+from pension_agent.tools.customer_solution import customer
+from pension_agent.tools.customer_solution.customer import Profile, conditions
 
-from pension_agent.strategy_agent import prompts
+from pension_agent.prompts import briefing as prompts
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -198,8 +198,8 @@ check(abs(Profile(id="T", nm="T", ag=40, bal=1, rk="안정형", grade="낮은위
 # 드러난다. 원본 xlsx 를 교체했다면 이 표를 새 데이터 기준으로 함께 갱신한다.
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent.strategy_agent import agent
-from pension_agent.strategy_agent.customer import PERSONAS
+from pension_agent.tools.customer_solution import agent
+from pension_agent.tools.customer_solution.customer import PERSONAS
 
 BY_NAME = {p.nm: p for p in PERSONAS}
 check(len(PERSONAS) == 12, "목업 고객 적재 (xlsx 9케이스 + 데모 골든 케이스 3명)",
@@ -212,7 +212,7 @@ check(len(PERSONAS) == 12, "목업 고객 적재 (xlsx 9케이스 + 데모 골�
 # condition_text 원문이고 임계값도 원문 값이다(customer.py 주석에 세그먼트 번호 기재).
 import json as _json
 
-from pension_agent import config as _cfg
+from pension_agent.common import config as _cfg
 
 _BADGE_COND = {
     "미운용현금자산": "idl",                    # 세그 1(고유대 50%↑) + 26(1개월 변동 없음)
@@ -439,10 +439,10 @@ check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 
 # 테스트에서만 있는 일이라, 이 호출이 필요한 것도 여기뿐이다.
 _saved = (agent.llm.available, agent.llm.generate)
 # 파일 저장소(briefing_store)도 끈다 — `scripts.prebuild_briefings` 를 한 번이라도 돌린
-# 체크아웃에는 `briefing_cache/` 가 있어 저장소가 켜지고, 그러면 첫 스텁이 만든 브리핑이
+# 체크아웃에는 `runtime/briefing_cache/` 가 있어 저장소가 켜지고, 그러면 첫 스텁이 만든 브리핑이
 # 파일로 남아 두 번째 스텁의 propose 가 **그 파일을 읽는다**(프로세스 캐시만 비워서는
 # 안 지워진다). 재료 이탈 검사가 «LLM판단 · rejected 없음»으로 갈리는 것이 그 증상이다.
-from pension_agent import config as _cfg  # noqa: E402
+from pension_agent.common import config as _cfg  # noqa: E402
 _saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
 _cfg.BRIEFING_CACHE_DIR = _cfg.BRIEFING_CACHE_DIR / "__off__"   # 없는 디렉터리 = 꺼짐
 try:
@@ -475,8 +475,8 @@ import pathlib as _pathlib  # noqa: E402
 import shutil as _shutil  # noqa: E402
 import tempfile as _tempfile  # noqa: E402
 
-from pension_agent import config as _config  # noqa: E402
-from pension_agent.strategy_agent import briefing_store as _store  # noqa: E402
+from pension_agent.common import config as _config  # noqa: E402
+from pension_agent.tools.customer_solution import briefing_store as _store  # noqa: E402
 
 _saved_dir, _saved_fp = _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT
 _tmp = _pathlib.Path(_tempfile.mkdtemp(prefix="briefing-store-"))

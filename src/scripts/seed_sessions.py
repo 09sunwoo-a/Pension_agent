@@ -10,7 +10,7 @@
 LLM 이 정하게 되어 한쪽만 불린 턴은 나머지가 없는 것이 된다. 읽는 곳을 하나로 두려고
 기록 쪽을 맞춘다 — 실서비스에서도 CRM 상담 기록이 같은 자리에 적재될 자리다.
 
-주의: 여기서 만드는 것은 **목업**이다. `session_data/` 에는 원래 직원 발화 원문 같은
+주의: 여기서 만드는 것은 **목업**이다. `runtime/session_data/` 에는 원래 직원 발화 원문 같은
 개인정보에 준하는 내용이 쌓이므로, 실데이터 전환 시 이 시딩 결과를 지우고 저장소에서도
 제외해야 한다(`.gitignore`).
 
@@ -25,14 +25,14 @@ from __future__ import annotations
 import json
 import sys
 
-from pension_agent import config, session_store
+from pension_agent.common import config, session_store
 
 #: 시딩으로 만든 세션임을 식별하는 접두. 이 접두가 붙은 세션만 --force 로 갈아엎는다 —
 #: 사람이 실제로 나눈 대화까지 지우면 안 된다.
 SEED_PREFIX = "past-"
 
 #: 과거 상담 기록의 역할. 직원·에이전트의 «발화»가 아니라 상담 결과 «요약»이라 따로 둔다
-#: (consult_agent/tools.py::_HISTORY_ROLE 이 이 값을 사람이 읽는 이름으로 옮긴다).
+#: (tools.py::_HISTORY_ROLE 이 이 값을 사람이 읽는 이름으로 옮긴다).
 RECORD_ROLE = "record"
 
 

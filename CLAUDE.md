@@ -18,7 +18,7 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
   DB」에서 왔지만 일정·링크는 시연값이고, 금리는 `market/rates_demo.json` 자리표시자다.
 - **화면에는 더미 표시를 붙이지 않는다**(발송문 포함). 발표 산출물에 딱지를 남기지 않기로
   했다. 대신 무엇이 더미인지는 `docs/DEMO_STATUS.md` 가 전담한다.
-- `src/app.py`(Streamlit)는 개발·테스트용 화면이다. 실서비스 프론트는 따로 만든다.
+- 화면(프론트)은 이 저장소에 없다. 실서비스 프론트는 따로 만든다.
 - 지금 무엇이 더미이고 무엇이 소스 미확정인지 알고 싶으면:
 
       cd src && python -m scripts.demo_status     # docs/DEMO_STATUS.md 갱신
@@ -29,7 +29,7 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
 전부 거기서 나온다.
 
 - 지식베이스에 없는 기준은 **만들지 않는다.** 재료가 없는 요건에는 아무것도 띄우지 않는다
-  (집행: `consult_agent/CLAUDE.md` §8 금지·주의 안내).
+  (집행: `pension_agent/CLAUDE.md` §8 금지·주의 안내).
 - 값을 특정하지 못하면 지어내지 않고 `source_text` 로 원문 표기를 남기고 리포트에 올린다.
 
 **«누구를 타겟으로 볼 것인가»는 타겟 룰베이스가 정한다.** 기획자가 행내 원문(IRP 텐션
@@ -59,17 +59,17 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
    | | 누가 정하나 |
    |---|---|
    | 어떤 도구를 어떤 질의로 부를지, 이제 충분한지 | LLM (`nodes/plan.py::plan_step`) |
-   | 부를 수 있는 도구가 무엇인지 | 코드 (`consult_agent/tools/__init__.py::TOOLS`) |
+   | 부를 수 있는 도구가 무엇인지 | 코드 (`tools/__init__.py::TOOLS`) |
    | 몇 바퀴까지 도는지 · 같은 호출 반복 차단 | 코드 (`plan.MAX_STEPS`) |
    | 수치·상품·적합성 계산 | 코드 (`strategy_agent`) |
    | 답변 문장 | LLM |
-   | 답변이 근거 밖으로 나갔는지 | 코드 (`pension_agent/verify.py`) |
+   | 답변이 근거 밖으로 나갔는지 | 코드 (`pension_agent/evidence/verify.py`) |
 
    근거는 턴마다 **원장**(`state["evidence"]`)에 쌓이고 답변은 그 안에서만 나온다.
    `verify_texts()` 가 원장을 재료로 보고 대조한다 — 원장 밖 수치는 답변에서 잘린다.
 
    이 경계가 consult_agent 안에서 어떻게 지켜져야 하는지는
-   `src/pension_agent/consult_agent/CLAUDE.md`(기준서)가 말한다 — 구현이 그 문서와
+   `src/pension_agent/CLAUDE.md`(기준서)가 말한다 — 구현이 그 문서와
    어긋나면 구현이 틀린 것이다. 새 기능은 도구 하나를 추가하는 일이고, enum·분기표·노드를
    함께 늘리지 않는다.
 
@@ -90,8 +90,8 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 
 5. **되돌릴 수 없는 행위는 게이트로 막는다.** 에이전트는 대외로 나가는 행위를 **수행하지
    않는다** — 문자를 보낼지는 직원이 발송 화면에서 정하고, 에이전트는 그 화면을 열어줄
-   뿐이다(`consult_agent/CLAUDE.md` §10). 그래도 게이트는 남는다: 화면에 채워 넣으면
-   직원이 **그대로 보낼 수 있기 때문**이다. `consult_agent/effects/actions.py::open_lms_screen()` 은
+   뿐이다(`pension_agent/CLAUDE.md` §10). 그래도 게이트는 남는다: 화면에 채워 넣으면
+   직원이 **그대로 보낼 수 있기 때문**이다. `actions/actions.py::open_lms_screen()` 은
    `dummy: true` 자산에서 온 문구를 발송 화면에 채우는 것을 거부한다. 접두 문자열은
    LLM 이 지울 수 있지만 게이트는 못 지운다.
 
@@ -100,16 +100,16 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | | |
 |---|---|
 | 요건 기준 | `docs/REQUIREMENTS.md` — 전체 서비스 요건 앵커. 상위 기준은 `07_에이전트_기능정의/` |
-| 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/strategy_agent/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것 |
-| ⑨ 안내 콘텐츠 | `IRP_세미나이벤트_DB_v1.md` → `src/pension_agent/strategy_agent/data/assets.json` (손 저작 — 9건이라 생성기를 두지 않았다). 평가용 정답은 `data/outreach_golden.json` 에 따로 두고 **LLM 입력에 넣지 않는다** |
+| 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/tools/customer_solution/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것 |
+| ⑨ 안내 콘텐츠 | `IRP_세미나이벤트_DB_v1.md` → `src/pension_agent/tools/customer_solution/data/assets.json` (손 저작 — 9건이라 생성기를 두지 않았다). 평가용 정답은 `data/outreach_golden.json` 에 따로 두고 **LLM 입력에 넣지 않는다** |
 | 데모 상태 | `docs/DEMO_STATUS.md` (생성물) — 무엇이 더미 **데이터**인가 |
 | 실서비스 위험 | `docs/PRODUCTION_RISKS.md` — 무엇이 더미 **구조**인가. 단일 프로세스라서 성립하고 실서비스에서 깨지는 자리 |
 | 지식 저작 | `src/AUTHORING.md` |
 | 실행·테스트 | `src/README.md` |
 | 행내 배포 | `src/main.py`(FastAPI 진입점) · `src/Dockerfile`(내부망) · `src/.env.example`. 외부망용 `Dockerfile.local` · `requirements-dev.txt` 는 저장소에 넣지 않는다 |
-| 행내 시스템 연동(MCP) | `src/pension_agent/mcp/` — 서버 표(`servers.py`) · 연결과 호출(`client.py`) · 도구 어댑터(`workb.py`). 지금 붙는 것은 WorkB 쪽지 발송 하나이고, 설정(`MCP_*`)이 없으면 보내지 않고 «미연결»로 답한다. 진단은 `python -m pension_agent.mcp` |
+| 행내 시스템 연동(MCP) | `src/pension_agent/common/mcp/` — 서버 표(`servers.py`) · 연결과 호출(`client.py`) · 도구 어댑터(`workb.py`). 지금 붙는 것은 WorkB 쪽지 발송 하나이고, 설정(`MCP_*`)이 없으면 보내지 않고 «미연결»로 답한다. 진단은 `python -m pension_agent.common.mcp` |
 | 호출 계약(프론트·게이트웨이) | `client/README.md` — 요청 키 · 응답 이벤트(`type`) · 파싱 규칙 · 멀티턴. 참조 구현은 `client/call_agent.py`. 원천은 `src/main.py` 머리말이고 이벤트를 바꾸면 함께 고친다(`tests/test_api.py` 가 검사) |
-| consult_agent 기준 | `src/pension_agent/consult_agent/CLAUDE.md` — 대화형 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
+| consult_agent 기준 | `src/pension_agent/CLAUDE.md` — 대화형 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
 | 지식 데이터 기준 | `src/pension_agent/knowledge/CLAUDE.md` — 카드가 선언해야 하는 관계 5종 · 실측 · 이행 순서 |
 
 번호 축이 셋 섞여 있으니 주의: `①~④`(영업 시점, 기능정의 문서) · `①~⑨`(브리핑 화면 섹션,
@@ -121,8 +121,8 @@ REQUIREMENTS) · 폴더 번호. 문서에서 `07/01 ①` 은 "기능정의 문�
 cd src
 python -m tests.test_engine               # 엔진 선정 로직
 python -m tests.test_support              # ⑥~⑨ · 더미 규약 · 시효성 수치
-python -m tests.test_strategy_agent       # LLM 산출 검증·폴백
-python -m tests.test_consult_agent        # 라우팅·즉답·도구 루프·하지말것 가드
+python -m tests.test_customer_solution       # LLM 산출 검증·폴백
+python -m tests.test_agent        # 라우팅·즉답·도구 루프·하지말것 가드
 python -m tests.test_infra                # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api                  # HTTP 진입점 — 행내 플랫폼 I/O 스키마
 python -m tests.debug.test_trace          # 트레이스 · $CAD/$CADR 이 쓰는 스텁이 실물과 맞나
@@ -150,7 +150,7 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
 ## 구조 규칙
 
 `src/` 아래는 **`pension_agent` 단일 패키지 하나**다. 임포트는 전부 절대 경로
-(`from pension_agent.strategy_agent import engine`)이고, 실행은 `src/` 에서 `python -m ...` 이다.
+(`from pension_agent.tools.customer_solution import engine`)이고, 실행은 `src/` 에서 `python -m ...` 이다.
 
 - **`sys.path` 를 손대지 않는다.** 예전에는 모듈마다 umbrella 를 올리는 블록이 30곳 있었고,
   두 에이전트의 동명 모듈(`prompts`·`llm`)이 `sys.modules` 를 놓고 경합하는 것을 막으려고
@@ -159,7 +159,7 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
   되짚으면 파일이 한 칸만 움직여도 조용히 엉뚱한 곳을 가리킨다(규칙 4번이 그 사고 기록이다).
 - **데이터는 소유가 있는 곳에 둔다.** 두 에이전트가 함께 읽는 지식 카드는
   `pension_agent/knowledge/data/`, strategy 만 읽는 상품·전략 카탈로그는
-  `pension_agent/strategy_agent/data/`. 적재는 `knowledge.shared_store()` 한 곳에서만 한다.
+  `pension_agent/tools/customer_solution/data/`. 적재는 `knowledge.shared_store()` 한 곳에서만 한다.
   두 에이전트가 함께 쓰는 카드 지식베이스(적재·시효성·출처·검색)도 같은 이유로
   `pension_agent/knowledge/kb.py` 가 소유한다 — consult_agent 에 두면 strategy 가 consult 를
   거꾸로 임포트하게 된다(실제로 그랬다).
@@ -169,6 +169,6 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
   consult_agent 를 임포트하지 않는다. 공용 → 에이전트 방향의 간선은 하나뿐이다 —
   `note.py` 가 쪽지 본문의 타겟·잔여일수를 위해 strategy_agent 를 읽는다(`mcp/` 가 쓰므로
   공용에 남는다). 승낙 뒤 실행하는 행위(발송 화면 게이트·쪽지)는 consult 만 부르므로
-  `consult_agent/effects/actions.py` 에 있다. 공용 모듈 사이의 의존(env ← observability ← llm 등)은
+  `actions/actions.py` 에 있다. 공용 모듈 사이의 의존(env ← observability ← llm 등)은
   `tests/infra/s03_boundaries.py` 의 표가 고정한다 — 간선을 더하면 표에 이유와 함께 적는다.
   `tests/infra/s03_boundaries.py` 가 역방향 간선을 잡는다.

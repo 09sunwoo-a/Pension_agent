@@ -43,9 +43,9 @@ D-32 · D-40 이라 만기 요건이 안 선다(각각 9/9 · 9/17 부터 선다
 429 로 «LLM 호출 실패» 안내). `scripts.prebuild_briefings` 를 한 번 돌려 두면 읽어 쓴다.
 그래도 429 가 나면 `LLM_RETRY_ATTEMPTS=10` 과 `--pause=20`(턴 사이 20초)으로 돌린다.
 
-③ **상담 기록 픽스처가 그대로인지 본다.** `reps` 는 실행 전후로 `session_data/` 를 통째로
+③ **상담 기록 픽스처가 그대로인지 본다.** `reps` 는 실행 전후로 `runtime/session_data/` 를 통째로
 되돌리지만, `tests.debug` CLI 나 Streamlit 으로 연습한 턴은 남는다 — 남으면 「지난 상담에서
-무슨 얘기 했지?」가 방금 연습을 «지난 상담»으로 읽는다. `git status src/session_data/` 가
+무슨 얘기 했지?」가 방금 연습을 «지난 상담»으로 읽는다. `git status src/runtime/session_data/` 가
 깨끗해야 한다(기록 없는 고객 김현수·김서연·이수민은 파일 자체가 없는 것이 정상).
 
 ## 무엇을 재나 — 질문의 여섯 갈래
@@ -326,13 +326,13 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    고객(`suggest.outreach_chips` 가 빈 목록)인데, `outreach` 도구가 화면 ⑨ 의 임박순 폴백
    (EVT-004 · SEM-002)을 «추천 사유»와 함께 실었고 답변이 그것을 «원리금보장·현금성 36% →
    미운용 자금 운용 이벤트가 적합»으로 썼다(36% 는 원장값이라 게이트 통과).
-   **고침(2026-09-07).** `consult_agent/tools/outreach.py::_outreach` 가 콘텐츠마다 이 고객 요건과
+   **고침(2026-09-07).** `tools/customer_solution/outreach.py::_outreach` 가 콘텐츠마다 이 고객 요건과
    맞는지를 추천 질문 칩과 같은 함수(`support.relevant_outreach`)로 판정해, 맞으면
    «요건 일치: <요건 이름>» 을, 아니면 «요건 일치: 없음 — 이 고객 요건과 무관» 을 적고
    추천 사유를 싣지 않는다. 머리말의 «지금 안내할 것 N건»은 맞는 것만 세고, 폴백은 발송
-   화면 제안 목록에서 뺀다. 회귀: `tests.consult.screens::check_outreach` ⑤.
+   화면 제안 목록에서 뺀다. 회귀: `tests.agent.screens::check_outreach` ⑤.
 2. **개발자 메모가 직원 안내로 나간다 (DY5).** 「고객 발송 가능 자료 미등록 — assets.json 의
-   customer_facing 확인 필요」(`strategy_agent/engine/pipeline.py:258` 이 `needs_confirm` 에
+   customer_facing 확인 필요」(`tools/customer_solution/engine/pipeline.py:258` 이 `needs_confirm` 에
    넣는 문장)가 `customer` 재료의 «확인 필요»로 실려 «하면 안 되는 것»의 답에 그대로 나갔다.
    사람에게 보일 문장이 아닌 것은 재료에 싣지 않는다.
    **고침(2026-09-07).** 그 문장을 `needs_confirm` 에서 뺐다. 발송 자료가 없는 전략은
@@ -350,7 +350,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    차례에서는 통과한 [06-12-622] 가 화면 카드 근거 차례에서 «이 근거에 없는 화면»으로
    걸렸다. `nodes/plan.py::_screen` 이 원장 전체의 화면번호 합집합(`_ledger_screens`)을 만들어
    `_span_verdict` 에 넘기고, 화면번호 판정은 그 합집합으로 한다. 지어낸 번호는 여전히
-   걸린다. 회귀: `tests.consult.plan_loop::check_atomic_spans` 「원장의 다른 근거가 아는
+   걸린다. 회귀: `tests.agent.plan_loop::check_atomic_spans` 「원장의 다른 근거가 아는
    화면번호는 통과한다」.
 4. **안정추구형 적합성 범위 답변이 «5종»으로 잘못 센다 (SH6 · PJ3 — 두 번 재현).** 재료는
    안내 가능 6종 · 불가 6종인데 생성문이 원장에 없는 수 «5» 를 써서 verify 게이트가 폐기했다.
@@ -358,7 +358,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    공격 12종)에서는 세는 것이 맞았다 — 안정추구형 재료의 목록 모양을 볼 자리.
    **고침(2026-09-07).** 원인은 `suitable` 도구가 제외 목록을 5건에서 자르던 상한
    (`BLOCKED_MAX`)이었다 — 재료가 «6종»이라 쓰고 5건만 보여주니 LLM 이 «5종»으로 셌다. 상한을
-   없애 제외 상품을 전부 싣는다. 회귀: `tests.consult.answer::check_suitable_shape`
+   없애 제외 상품을 전부 싣는다. 회귀: `tests.agent.answer::check_suitable_shape`
    「머리말의 수와 목록 줄 수가 같다」.
 5. **콘텐츠 이름을 바꿔 쓰면 발송 화면 제안이 안 붙는다 (SE6 → SE7).** `act._propose_lms` 는
    답변이 콘텐츠 이름을 그대로 인용했는지로 «가리켰다»를 판정한다(`_mentions`). 답변이
@@ -367,7 +367,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    **고침(2026-09-07).** 판정 기준에 링크를 더했다 — `outreach` 재료가 콘텐츠마다 `url` 을
    발송 목록에 함께 싣고, `act._mentions` 는 이름 대조 **또는** 그 링크 인용 중 하나면 «가리켰다»로
    본다. 링크는 원문 스팬이라 답변이 바꿔 쓸 수 없고 콘텐츠마다 다르다. 이름도 링크도 없는
-   답변에는 지금처럼 안 붙는다. 회귀: `tests.consult.screens::check_outreach` 「이름을 바꿔
+   답변에는 지금처럼 안 붙는다. 회귀: `tests.agent.screens::check_outreach` 「이름을 바꿔
    써도 링크를 인용한 답변에는 그 콘텐츠의 제안이 붙는다」.
 6. **고객 계산이 필요한 질문이 제도 일반론으로 간다 (DY4).** 「ISA 만기자금 IRP로 넣으면
    세액공제 받아?」에 계획이 `tax_credit` 대신 `fact` 만 불러, 이 고객의 잔여한도 0(현금 축
@@ -381,7 +381,7 @@ P2~P4 가 세운 환급 절차 맥락 없이 묻는 것이라, PJ5 에 순서 �
    값이다), 이탈 위험 기준에 «어떤 세그먼트?», 디폴트옵션 등록 절차에 «어떤 경우?»(최초 입금 /
    만기 / 옵트인 — 이 고객은 만기 D-19 다). 갈래는 실재하지만 고객 화면이 열려 있으면 코드가
    가릴 수 있는 갈래다.
-9. **픽스처 오염 (SE5).** `src/session_data/171203-4815062.json` 이 저장소에 커밋돼 있었는데
+9. **픽스처 오염 (SE5).** `src/runtime/session_data/171203-4815062.json` 이 저장소에 커밋돼 있었는데
    내용은 9/3 의 `tests.debug` CLI 연습 세션 3개(`debug-…`)뿐이었다 — 김서연은 원장에 상담
    기록이 없어 파일 자체가 없는 것이 정상이다. 에이전트는 저장소를 맞게 읽어 «9/4 상담 기록이
    있다»고 답했다. 이 실측과 함께 그 파일을 지웠다(「실행」 ③).

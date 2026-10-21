@@ -4,7 +4,7 @@
 (`KnowledgeBase`)로 재구성하고, 적재 길목에서 시효성 수치를 처리하고, 카드의 출처를
 원천 문서명으로 되짚고, n-gram+태그 채점으로 카드를 찾는다.
 
-예전에는 이 전부가 `consult_agent/kb.py` 에 있었고, strategy_agent 가 ⑥⑦⑧ 후보군을 만들
+예전에는 이 전부가 `kb.py` 에 있었고, strategy_agent 가 ⑥⑦⑧ 후보군을 만들
 때 그것을 거꾸로 임포트했다(strategy → consult 역방향 간선). 두 에이전트가 함께 읽는
 지식 카드의 적재는 데이터 접근 계층(이 패키지)이 소유하는 것이 맞아 여기로 옮겼다 —
 consult_agent 전용인 LLM 카드 선택용 계층 인덱스·프롬프트 컨텍스트는 그쪽에 남아 있다.
@@ -23,7 +23,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-from pension_agent import config, market
+from pension_agent.common import config
+from pension_agent.knowledge import market
 from pension_agent.knowledge import Store
 from pension_agent.knowledge.checks import check_broken_refs, check_fact_conflicts
 from pension_agent.knowledge.schema import REGISTRY

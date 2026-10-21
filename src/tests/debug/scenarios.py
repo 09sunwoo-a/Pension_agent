@@ -35,7 +35,7 @@ Turn = tuple[str, str]
 Block = tuple[object, str, str | None, tuple[Turn, ...]]
 
 
-#: (번호, 무엇을 보나, 고객, 질문들). 고객 id 는 `strategy_agent/customers.json` 의 9케이스.
+#: (번호, 무엇을 보나, 고객, 질문들). 고객 id 는 `tools/customer_solution/customers.json` 의 9케이스.
 CASES: tuple[tuple[int, str, str | None, tuple[str, ...]], ...] = (
     (1, "단일 도구 — fact 한 번으로 끝나나 (기준선)",
      None, ("IRP 세액공제 한도가 얼마야?",)),

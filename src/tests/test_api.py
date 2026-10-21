@@ -11,7 +11,7 @@ genai-platform.md «API I/O 스키마 (고정)»). 이 스키마가 어긋나면
     실린다(0건이면 빈 목록) — 근거를 못 보여주면 이 에이전트의 답이 아니다
   · 진행 표시는 항상, 답변보다 **먼저** 흐른다
   · x_client_user 가 에이전트(graph.ask)까지 실제로 도달한다 — 거기서 이 턴의 모든
-    LLM 호출 주체가 된다(그 배선 자체는 test_consult_agent 가 본다)
+    LLM 호출 주체가 된다(그 배선 자체는 test_agent 가 본다)
 
 LLM 은 부르지 않는다 — graph.ask 를 갈아끼워 위 계약만 본다.
 
@@ -36,9 +36,9 @@ if hasattr(sys.stdout, "reconfigure"):
 from fastapi.testclient import TestClient
 
 import main
-from pension_agent import config as _cfg
-from pension_agent import llm, observability
-from pension_agent.strategy_agent import briefing_store
+from pension_agent.common import config as _cfg
+from pension_agent.common import llm, observability
+from pension_agent.tools.customer_solution import briefing_store
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -121,7 +121,7 @@ def _fake_ask(question, history=None, **kw):
            "sources": SOURCES, "followups": FOLLOWUPS, "intent": "situation",
            "pending_action": None, "clarify": None,
            "history": [*(history or []), {"question": question, "tools": []}],
-           # 절차 기록(consult_agent/turn_trace) — 모양만 흉내 낸다. 가림을 재려고 원장 표기를 싣는다.
+           # 절차 기록(turn_trace) — 모양만 흉내 낸다. 가림을 재려고 원장 표기를 싣는다.
            "trace": {"intent": "situation", "timeline": [{"stage": "fake", "text": "고객=171203-4815062"}],
                      "rounds": [], "evidence": [], "sources": SOURCES, "sentences": []}}
     if question == "연계":
@@ -177,7 +177,7 @@ try:
     # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
     # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
     # 배포된 컨테이너에서 그 셋을 로그 없이 가르는 수단이 여기 말고 없다.
-    # 체크아웃에는 briefing_cache/ 가 있으므로(커밋한다) 여기서는 켜져 있는 것이 정상이다.
+    # 체크아웃에는 runtime/briefing_cache/ 가 있으므로(커밋한다) 여기서는 켜져 있는 것이 정상이다.
     check(h["briefing_cache"]["enabled"] is True and h["briefing_cache"]["dir"].endswith(
         "briefing_cache"), "/health: 저장소가 어디를 보고 있는지 말한다", str(h.get("briefing_cache")))
     _saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
@@ -330,7 +330,7 @@ try:
     check(_seen.get("customer_id") == "154821-4938201",
           "customer_id 는 하이픈 없는 13자리로 와도 원장 표기로 되돌린다", str(_seen.get("customer_id")))
     # b64 — 프론트가 보내는 꼴이다.
-    from pension_agent.strategy_agent import customer as _sc
+    from pension_agent.tools.customer_solution import customer as _sc
     _enc = _sc.encode_id("154821-4938201")
     _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
                                             customer_id=_enc)))
@@ -407,7 +407,7 @@ try:
           "근거가 0건이어도 sources 이벤트가 빈 목록으로 온다", str(_types(evs)))
 
     # ── 대화 맥락 — 게이트웨이 경로는 history 를 돌려줄 자리가 없어 진입점이 세션별로 맡아 둔다 ──
-    from pension_agent.consult_agent import context_store
+    from pension_agent import context_store
     context_store.clear()
     r = client.post("/chat", json=_body(message="첫 질문", x_client_user="emp-7", session_id="S-7"))
     _events(r)
@@ -541,7 +541,7 @@ try:
     # 게이트웨이 타임아웃으로 답을 다 받기 전에 끊기면 generate 는 멈추지만 ask() 스레드는
     # 끝까지 돈다. 그 턴의 맥락(연계 제안)이 다음 «네»에 이어져야 한다 — 예전에는 맥락 기억이
     # 답을 다 흘려보낸 뒤에 있어서, 끊긴 턴은 상담이력에만 남고 맥락에서는 빠졌다.
-    from pension_agent.consult_agent import context_store as _ctx
+    from pension_agent import context_store as _ctx
 
     _release, _slow_done = threading.Event(), threading.Event()
 

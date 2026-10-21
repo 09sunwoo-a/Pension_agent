@@ -22,7 +22,7 @@ from tests.infra.s10_llm_retry import _FakeResp, _http_error, _llm   # 앞 구�
 #   ③ 전송이 깨져도 LLM 호출은 성공한다 — 관측은 부산물이지 기능이 아니다.
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent import observability as _obs  # noqa: E402
+from pension_agent.common import observability as _obs  # noqa: E402
 
 _obs.reset()
 check(not _obs.enabled(), "observability: 키가 없으면 꺼져 있다")

@@ -14,8 +14,8 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 
-from pension_agent import session_store
-from pension_agent.consult_agent import graph as G
+from pension_agent.common import session_store
+from pension_agent import graph as G
 from tests.debug import script, trace as TR
 
 
@@ -77,14 +77,14 @@ def session(*, customer_id: str | None = None,
         # 남는데(§2), 그 파일은 **시연용 시드 세션과 같은 파일**이고 저장소에 커밋된다 —
         # 걷어내지 않으면 리허설을 돌 때마다 추적 파일이 더러워지고, 그대로 커밋되면 다음
         # 시연에서 T5 「지난번엔 무슨 얘기 했지?」가 리허설의 오류 문장을 «지난 상담»으로
-        # 읽는다(tests/test_consult_agent.py 가 자기 잔여물을 지우는 것과 같은 자리다).
+        # 읽는다(tests/test_agent.py 가 자기 잔여물을 지우는 것과 같은 자리다).
         #
         # **호출자가 준 id 는 건드리지 않는다.** 그건 그쪽이 이어 가는 상담이라 우리 것이
         # 아니다. 정리가 실패해도 리허설 결과를 죽이지 않는다 — 잔여물은 손으로 지울 수
         # 있지만 결과는 다시 돌려야 나온다.
         # 기록이 아예 없던 고객이면 **파일째** 걷는다. drop_session 은 세션 하나를 빼고
         # 문서를 다시 쓰므로, 우리가 만든 파일이 `{"sessions": []}` 만 남아 추적되지 않는
-        # 파일로 남는다 — 리허설을 돌 때마다 `git status src/session_data/` 가 더러워지고,
+        # 파일로 남는다 — 리허설을 돌 때마다 `git status src/runtime/session_data/` 가 더러워지고,
         # 그건 «걷어낸다»는 이 블록의 약속이 지켜지지 않은 것이다(기록 없는 고객 3명이
         # 매번 그랬다). 있던 파일은 건드리지 않는다 — 시연용 시드가 거기 들어 있다.
         # 에이전트는 **고정 id 의 별도 세션**에도 쓴다 — 브리핑 수정 내역은 `correction-log`,

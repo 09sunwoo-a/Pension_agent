@@ -15,7 +15,7 @@ engine·support·situations 가 각자 `Store([...])` 를 만들어 같은 JSON 
 
 from __future__ import annotations
 
-from pension_agent import config
+from pension_agent.common import config
 from pension_agent.knowledge.store import Store
 
 _shared: Store | None = None

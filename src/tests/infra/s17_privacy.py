@@ -25,7 +25,7 @@ from tests.infra._common import check
 #      원문·상담 기록처럼 우리가 쓰지 않은 글도 실리기 때문이다.
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent import privacy  # noqa: E402
+from pension_agent.common import privacy  # noqa: E402
 
 #: 행내 표의 룰 이름 — 게이트웨이 응답의 `rule_name` 과 같은 말이어야 로그를 맞대 볼 수 있다.
 _RULE_NAMES = ("신용카드_1", "여권번호_1", "여권번호_2", "여권번호_3", "전화번호_1",
@@ -72,7 +72,7 @@ check(_sp == f"발급된 {privacy.MASK} 번호로", "privacy: 매치가 머금�
 # ── 문 — llm.generate() 가 나가기 직전에 가린다 ───────────────────────────────
 import json  # noqa: E402
 
-from pension_agent import llm as _llm  # noqa: E402
+from pension_agent.common import llm as _llm  # noqa: E402
 
 _saved = (_llm.PROVIDER, _llm.BASE_URL, _llm.API_KEY, _llm.MIN_INTERVAL,
           _llm.urllib.request.urlopen, _llm.PII_SCRUB)
@@ -117,14 +117,14 @@ finally:
 
 
 # ── 재료 — 고객 식별번호가 프롬프트로 나가는 블록에 실리지 않는다 ─────────────
-from pension_agent.consult_agent.evidence import segment_qa as _segment_qa  # noqa: E402
-from pension_agent.consult_agent.evidence.ledger import summarize as _summarize  # noqa: E402
-from pension_agent.consult_agent.state import KB as _KB  # noqa: E402
-from pension_agent.consult_agent.tools.briefing import _customer as _t_customer  # noqa: E402
-from pension_agent.consult_agent.tools.history import _history as _t_history  # noqa: E402
-from pension_agent.consult_agent.tools.outreach import _outreach as _t_outreach  # noqa: E402
-from pension_agent.consult_agent.tools.suitability import _suitable as _t_suitable  # noqa: E402
-from pension_agent.strategy_agent import customer as _sc  # noqa: E402
+from pension_agent.tools.kb_search import segment_qa as _segment_qa  # noqa: E402
+from pension_agent.evidence.ledger import summarize as _summarize  # noqa: E402
+from pension_agent.state import KB as _KB  # noqa: E402
+from pension_agent.tools.customer_solution.briefing import _customer as _t_customer  # noqa: E402
+from pension_agent.tools.general.history import _history as _t_history  # noqa: E402
+from pension_agent.tools.customer_solution.outreach import _outreach as _t_outreach  # noqa: E402
+from pension_agent.tools.customer_solution.suitability import _suitable as _t_suitable  # noqa: E402
+from pension_agent.tools.customer_solution import customer as _sc  # noqa: E402
 
 _TOOLS = (("customer", _t_customer), ("suitable", _t_suitable),
           ("outreach", _t_outreach), ("history", _t_history))
@@ -179,7 +179,7 @@ check(_sc.PERSONAS[0].id not in _seg and not privacy.findings(_seg),
 # 가 내보내는 이벤트를 JSON 으로 직렬화해 id 원문과 필터 룰 매치가 없음을 본다.
 import main as _main  # noqa: E402
 
-from pension_agent.consult_agent.nodes import plan as _plan  # noqa: E402
+from pension_agent.nodes import plan as _plan  # noqa: E402
 
 _out_leaks: list[str] = []
 _out_caught: list[str] = []

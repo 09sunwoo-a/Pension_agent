@@ -5,7 +5,7 @@
 요건 기준은 [../docs/REQUIREMENTS.md](../docs/REQUIREMENTS.md) 하나다.
 
 이 문서는 **설치 · 설정 · 실행 · 배포** 순서다. 설계 원칙은 `CLAUDE.md`(루트 ·
-`pension_agent/consult_agent/`), 패키지 구조는 [pension_agent/README.md](pension_agent/README.md),
+`pension_agent/`), 패키지 구조는 [pension_agent/README.md](pension_agent/README.md),
 지식 저작은 [AUTHORING.md](AUTHORING.md) 에 있다.
 
 ## 1. 설치
@@ -46,7 +46,7 @@ git 으로 받으면 `.gitattributes` 가 알아서 한다.
 
 ```bash
 cp .env.example .env                 # 어디서나 이 파일 하나 — 구역 ①행내 ②Gateway ③사외 중 하나를 채운다
-python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
+python -m pension_agent.common.env          # 어느 파일이 읽혔고 어느 프로바이더가 잡혔나
 ```
 
 무엇을 채우고 무엇을 비워 두는지는 [.env.example](.env.example) 머리말이 전부 말한다.
@@ -56,14 +56,14 @@ python -m pension_agent.env          # 어느 파일이 읽혔고 어느 프로�
 ## 3. 실행
 
 ```bash
-source bin/cli.sh                    # CA · CAD · CADR 정의 + 사용법 출력
+source scripts/cli.sh                    # CA · CAD · CADR 정의 + 사용법 출력
 ```
 
 셋 다 **HTTP 를 타지 않고** `graph.ask()` 를 직접 부르므로 서버와 무관하고, `.env` 만 잡혀
 있으면 행내에서도 사외에서와 똑같이 돈다.
 
 ```bash
-CA="python -m pension_agent.consult_agent"     # 상담 대화 (LangGraph)
+CA="python -m pension_agent"     # 상담 대화 (LangGraph)
 CAD="python -m tests.debug"                    # 같은 것 + 트레이스
 CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 · 시연 대본)
 ```
@@ -71,21 +71,21 @@ CADR="python -m tests.debug.reps"              # 대표 질문 묶음 (검토 ·
 **처음이라면 이 순서로 확인한다.** LLM 없이 도는 검사에서 깨지면 키를 봐도 소용없다.
 
 ```bash
-python -m pension_agent.env          # «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
+python -m pension_agent.common.env          # «프로바이더 genai · LLM 호출 가능 예» 가 나와야 한다
 python -m tests.test_api             # HTTP 스키마 계약
 python -m tests.test_infra           # 429 호출 게이트
-python -m tests.test_consult_agent   # 통과하면 langgraph 0.4.8 에서 그래프가 선다는 뜻
+python -m tests.test_agent   # 통과하면 langgraph 0.4.8 에서 그래프가 선다는 뜻
 $CA "세액공제 한도가 얼마야?"
 $CA -c 198734-1205842 "이 고객 왜 관리 대상이야?"   # 브리핑 경로(LLM 9~11 연쇄)
 ```
 
 **고객 지정(`-c/--customer`)** 은 고객 id(KB-PIN)다. 없으면 브리핑질의·LMS발송·수정이
-"고객 화면을 먼저 열어주세요"로 답한다. id 는 `strategy_agent/customer.py` 의 `PERSONAS`
+"고객 화면을 먼저 열어주세요"로 답한다. id 는 `tools/customer_solution/customer.py` 의 `PERSONAS`
 (예: 이준호=`198734-1205842`).
 
 ```bash
 # ── 브리핑 · 대화 · 화면
-python -m pension_agent.strategy_agent.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
+python -m pension_agent.tools.customer_solution.agent 이준호    # AI 브리핑 (①~⑨ 섹션)
 $CA "ETF로 직접 굴리겠다고 증권사로 옮기겠다는 고객, 뭐라고 하지?"   # 단발
 $CA -c 198734-1205842                                 # REPL — 고객 화면이 열린 상태
 $CA -c 198734-1205842 "투자성향 뭐야?" "만기 자금은?"  # 멀티턴을 한 줄로 (맥락 이어서)
@@ -95,9 +95,9 @@ $CA -c 198734-1205842 -e 3902172 "이 내용 사번 3901317한테 쪽지로 보�
 streamlit run app.py                                  # 개발·테스트 화면
 
 # ── 행내 플랫폼용 HTTP API (main.py) — 실서비스가 붙는 진입점
-bin/run_local.sh                                      # uvicorn main:app :8000
-bin/test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
-CUSTOMER_ID=198734-1205842 bin/test_local.sh "이 고객 왜 관리 대상이야?"
+scripts/run_local.sh                                      # uvicorn main:app :8000
+scripts/test_local.sh "IRP 수수료 부담된다는데 뭐라고 답하죠?"   # /health + /chat 한 턴
+CUSTOMER_ID=198734-1205842 scripts/test_local.sh "이 고객 왜 관리 대상이야?"
 
 # ── 디버그: 이 답이 어디서 갈렸나 (인자 규약이 $CA 와 같다)
 $CAD --debug "세액공제 한도가 얼마야?"
@@ -116,8 +116,8 @@ $CADR --versions · --diff v5 v6 · review@v3           # 중간점검본 판 �
 # ── 테스트 · 점검 (LLM 키 없이 돈다)
 python -m tests.test_engine            # ①~⑤ 결정론 로직
 python -m tests.test_support           # ⑥~⑨ 후보군 · 더미 규약 · 시효성 수치
-python -m tests.test_strategy_agent    # LLM 산출 검증 · 폴백
-python -m tests.test_consult_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드 (검사 본문은 tests/consult/)
+python -m tests.test_customer_solution    # LLM 산출 검증 · 폴백
+python -m tests.test_agent     # 라우팅 · 도구 루프 · 재계획 · 하지말것 가드 (검사 본문은 tests/agent/)
 python -m tests.test_infra             # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api               # HTTP 진입점 — 플랫폼 I/O 스키마 계약
 python -m tests.debug.test_trace       # 트레이스 — 노드 · 게이트 · 폐기 사유
@@ -151,11 +151,11 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 | 증상 | 원인 | 조치 |
 |---|---|---|
 | `/bin/bash^M: bad interpreter` | CRLF | §1 의 `sed` 한 줄 |
-| `프로바이더 anthropic` | `.env` 가 안 읽혔거나 구역 ① 이 비어 있음 | `python -m pension_agent.env` 로 읽힌 파일 확인 |
+| `프로바이더 anthropic` | `.env` 가 안 읽혔거나 구역 ① 이 비어 있음 | `python -m pension_agent.common.env` 로 읽힌 파일 확인 |
 | `Name or service not known` | DNS | `getent hosts <호스트>`. Gateway 면 클러스터 밖이라 원래 안 된다 |
 | `HTTP 404` | 경로 또는 모델 | 오류에 응답 본문과 부른 URL 이 찍힌다. 「Resource not found」면 `LLM_BASE_URL`, 「model_not_found」면 `LLM_MODEL` |
 | `HTTP 429` | 호출이 몰림 | `.env` 「호출 게이트」 구역 — 간격을 늘리거나(`LLM_MIN_INTERVAL_SEC`) 버킷을 나눈다(`LLM_CLIENT_USER_SPREAD`). 재시작 필요 |
-| `HTTP 400 민감정보 감지됨` | 게이트웨이 앞단의 개인정보 필터. 응답의 `rule_name` 이 어느 룰인지 말한다 | 그 꼴을 **프롬프트 재료에서** 뺀다(고객 식별번호가 그랬다 — `pension_agent/privacy.py` 머리말). 나가기 직전에 가리는 문은 이미 서 있고, 무엇이 가려졌는지는 로그의 `llm 개인정보 가림 가린룰=…` 줄이 말한다. 걸린 값을 직접 보려면 `LLM_PII_SCRUB=0` 으로 끄고 재현한다 |
+| `HTTP 400 민감정보 감지됨` | 게이트웨이 앞단의 개인정보 필터. 응답의 `rule_name` 이 어느 룰인지 말한다 | 그 꼴을 **프롬프트 재료에서** 뺀다(고객 식별번호가 그랬다 — `pension_agent/common/privacy.py` 머리말). 나가기 직전에 가리는 문은 이미 서 있고, 무엇이 가려졌는지는 로그의 `llm 개인정보 가림 가린룰=…` 줄이 말한다. 걸린 값을 직접 보려면 `LLM_PII_SCRUB=0` 으로 끄고 재현한다 |
 
 **STG 는 분당 10회다.** 브리핑 한 편이 순차 11회라 한 편이 한도를 넘는다 —
 `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=6.5` 로 조이면 한 편이 약 70초에 완주하고,
@@ -164,7 +164,7 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 ## 5. 브리핑을 미리 만들어 둔다
 
 대화형은 브리핑이 **이미 있다고 보고** 답한다. 배포 컨테이너가 직접 만들면 고객당 순차
-LLM 11회를 외부 호출마다 물기 때문에 `briefing_cache/` 를 이미지에 함께 넣는다. 왜 그런지,
+LLM 11회를 외부 호출마다 물기 때문에 `runtime/briefing_cache/` 를 이미지에 함께 넣는다. 왜 그런지,
 무엇이 저장되고 안 되는지는 `scripts/prebuild_briefings.py` 머리말과 `.gitignore` 주석에 있다.
 
 ```bash
@@ -199,10 +199,10 @@ Jenkins 가 넣는 환경변수가 정한다(`Dockerfile` 주석). 플랫폼 규
 
 `.env` 에 `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` 를 넣으면 켜지고, **없으면 통째로
 꺼진다**(테스트·시연은 그대로 돈다). 브리핑 한 건 · 대화 한 턴이 트레이스 하나로 묶이고,
-점수는 전부 코드가 아는 사실이다. 환경변수 목록과 설계는 `pension_agent/observability/__init__.py` 머리말.
+점수는 전부 코드가 아는 사실이다. 환경변수 목록과 설계는 `pension_agent/common/observability/__init__.py` 머리말.
 
 ```bash
-python -m pension_agent.observability   # 대시보드에 안 찍히면 — 설정을 찍고 이벤트 한 건을 실제로 보낸다
+python -m pension_agent.common.observability   # 대시보드에 안 찍히면 — 설정을 찍고 이벤트 한 건을 실제로 보낸다
 ```
 
 프롬프트에는 고객 원장이 실린다 — 실데이터 전환 때 정할 것은
@@ -221,7 +221,7 @@ WORKB_EMP_NO=3902172    # 로그인 사번이 없을 때의 폴백. 이 값이 �
 ```
 
 ```bash
-python -m pension_agent.mcp          # 지금 붙는지 — 설정·패키지·서버·도구 목록을 한 화면에
+python -m pension_agent.common.mcp          # 지금 붙는지 — 설정·패키지·서버·도구 목록을 한 화면에
 curl -s localhost:8000/health | jq .mcp
 ```
 
@@ -254,5 +254,5 @@ curl -s localhost:8000/health | jq .mcp
   하는 일이 그 등록이다(`send(recipients: list[str], title, body)`).
 
 **다른 행내 기능(사내 DB·메일·뉴스…)을 붙일 때** 고치는 자리는 셋으로 갈라 뒀다 —
-서버 표(`pension_agent/mcp/servers.py`) · 연결과 호출(`client.py`, 고치지 않는다) ·
-도구 어댑터(`workb.py` 같은 파일 하나). 자세한 것은 `pension_agent/mcp/__init__.py` 머리말.
+서버 표(`pension_agent/common/mcp/servers.py`) · 연결과 호출(`client.py`, 고치지 않는다) ·
+도구 어댑터(`workb.py` 같은 파일 하나). 자세한 것은 `pension_agent/common/mcp/__init__.py` 머리말.

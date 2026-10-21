@@ -17,7 +17,7 @@ from tests.infra._common import check
 # 천단위 쉼표(4,050)는 숫자의 일부이므로 함께 고정한다.
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent.verify import _judge, numbers as _numbers, verify_texts as _verify_texts
+from pension_agent.evidence.verify import _judge, numbers as _numbers, verify_texts as _verify_texts
 
 # numbers() 는 **값 보존 정규형**을 돌려준다(verify._canon) — 천단위 쉼표 제거·소수
 # 끝자리 0 제거. 같은 값이 표기 차이로 다른 토큰이 되면 맞는 답변이 «원장 밖 수치»로

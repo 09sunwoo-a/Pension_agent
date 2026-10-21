@@ -13,8 +13,8 @@ sources/
 
 # 상담 세션/대화이력. 지금은 시연용 목업만 있어 저장소에 남긴다(scripts/seed_sessions.py).
 # 실데이터 전환 시 아래 주석을 푼다 — 직원 발화 원문이 쌓이는 자리다(session_store.py 머리말).
-# session_data/
+# runtime/session_data/
 
 # 미리 만들어 둔 브리핑은 커밋한다 — 이유와 규칙은 scripts/prebuild_briefings.py 머리말.
 # 쓰다 만 임시 파일만 막는다.
-briefing_cache/*.tmp
+runtime/briefing_cache/*.tmp
