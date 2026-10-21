@@ -24,6 +24,7 @@ import copy
 import dataclasses
 import json
 import logging
+import re
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -136,12 +137,21 @@ def _extra(f: dict) -> list[str]:
     return out
 
 
-def _lines(value: Any) -> list[str]:
+_SENTENCE_END = re.compile(r"(?<=[다요])\.\s+")
+
+
+def _lines(value: Any, *, split: bool = False) -> list[str]:
+    """응답 값 → 문장 목록. `split` 이면 한 원소에 붙어 온 여러 문장을 나눈다 — 목록을
+    요구해도 모델이 문자열 하나로 세 문장을 이어 보내는 일이 있다(gemma-4 실측)."""
     if isinstance(value, str):
         value = [value]
     if not isinstance(value, list):
         return []
-    return [str(x).strip().strip("*").strip() for x in value if str(x).strip()]
+    out = [str(x).strip().strip("*").strip() for x in value if str(x).strip()]
+    if split:
+        out = [s if s.endswith(".") else s + "."
+               for x in out for s in _SENTENCE_END.split(x) if s.strip()]
+    return out
 
 
 def _narrative(p: Profile, f: dict) -> tuple[dict | None, str, list[str]]:
@@ -163,7 +173,7 @@ def _narrative(p: Profile, f: dict) -> tuple[dict | None, str, list[str]]:
     rejected: list[str] = []
     for key in NARRATIVE_FIELDS:
         kept = []
-        for line in _lines(data.get(key)):
+        for line in _lines(data.get(key), split=key == "recent"):
             ok, bad = engine.verify(line, f, extra=extra)
             if ok:
                 kept.append(line)
