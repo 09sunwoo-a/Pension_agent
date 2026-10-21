@@ -1,30 +1,17 @@
-"""공용 LLM 클라이언트 — 프로바이더 전환. 환경이 바뀌면 이 파일만 손대면 되도록 격리한다.
+"""공용 LLM 클라이언트 — 프로바이더 격리. 호출부는 generate()/agenerate() 만 사용.
 
-호출부(pitch.py·engine.py·agent.py 등)는 provider 세부(메시지 형식·헤더·텍스트 추출)를
-몰라도 되도록 generate()/agenerate() 만 쓴다.
+프로바이더(LLM_PROVIDER, 미지정 시 LLM_BASE_URL → genai, GEMINI_API_KEY → gemma, 그 외 anthropic):
+  genai      사내 GenAI 플랫폼(OpenAI 호환 vLLM). urllib 만 사용
+  gemma      사외 사전점검용 Google generativelanguage Gemma. urllib 만 사용
+  anthropic  사외 테스트용 Anthropic SDK
 
-━━ 프로바이더 ━━
-  genai      사내 GenAI 플랫폼 (OpenAI 호환 vLLM). base_url + kb-key + x-client-user.
-             표준 라이브러리(urllib)만 사용 — 망분리 환경에서 추가 의존성이 필요 없다.
-  gemma      외부 사전점검용 Google generativelanguage API 의 Gemma. 사내 플랫폼이
-             서빙하는 것과 같은 계열 모델이라, 내부 이관 전에 "gemma 로도 답이
-             잘 나오는가"를 사외에서 확인하는 경로다. 표준 라이브러리만 사용.
-  anthropic  외부 테스트용 Anthropic SDK (claude-sonnet-5). anthropic 패키지가 있어야 하며
-             api.anthropic.com 에 접근 가능한 환경(사외)에서만 쓴다.
+- 설정은 `src/.env`(env.py). 진단: python -m pension_agent.common.env
+- 모든 호출은 성공·실패 모두 `observability.record_generation()` 기록
+- 실패는 전부 `LLMError` — 호출부가 삼켜 «자료 없음»으로 둔갑시키지 않게 구분
 
-선택 규칙: LLM_PROVIDER 가 있으면 그 값을, 없으면 자동 판별 —
-           LLM_BASE_URL 이 있으면 genai (내부로 코드를 들여오면 자동으로 이쪽),
-           없고 GEMINI_API_KEY 가 있으면 gemma, 둘 다 없으면 anthropic.
-
-━━ 설정 파일 ━━
-`src/.env` 하나다 — 행내 워크스페이스·배포 이미지·사외 개발 PC 모두. 환경에 따라 내용이
-다를 뿐이다(.env.example 의 구역 ①②③). 어느 파일·단계가 잡혔는지는
-`python -m pension_agent.common.env` 가 보여준다. 이 파일은 그 결과(환경변수)만 읽는다.
-
-━━ 환경변수 ━━
+환경변수:
   LLM_PROVIDER      "genai" | "gemma" | "anthropic" (미지정 시 자동 판별)
-  ENV_PATH          실행 단계. 배포 때 Jenkins 가 serving 을 넣는다 — 손으로 설정하지 않는다.
-                    없으면(워크스페이스) 분석계. 플랫폼 규약
+  ENV_PATH          실행 단계(배포 시 Jenkins 가 serving 주입, 수동 설정 금지). 없으면 분석계
   LLM_BASE_URL_TRNN / _SERV
                     행내 GenAI 플랫폼 URL 두 벌(…/trnn/… · …/serv/…). ENV_PATH 로 고른다
   LLM_BASE_URL      단계 구분이 없을 때의 하나짜리(Gateway·사외). 단계별 값이 없으면 이것
@@ -33,30 +20,17 @@
   LLM_MODEL         모델 슬러그. 비우면 게이트웨이 기본 라우팅
   LLM_TIMEOUT       초. 기본 60
   LLM_CLIENT_USER   x-client-user 기본값. 호출부가 실제 사용자를 주면 그것이 이긴다
-  LLM_CLIENT_USER_SPREAD  사번 뒤에 붙일 임의 접미의 길이. 0(기본)이면 안 붙인다.
-                    한 사번의 쿼터 버킷이 바닥날 때 여러 버킷으로 나눈다 — 「쿼터 버킷 분산」
-  LLM_PII_SCRUB     행내 개인정보 필터가 잡는 꼴을 나가기 직전에 가린다. 기본 켜짐(0 으로 끈다)
+  LLM_CLIENT_USER_SPREAD  쿼터 버킷 분산용 사번 접미 길이. 0(기본)이면 미부착
+  LLM_PII_SCRUB     개인정보 꼴 마스킹. 기본 켜짐(0 으로 끔)
   LLM_RETRY_ATTEMPTS  429·5xx 재시도 횟수(첫 호출 포함). 기본 5
   LLM_MAX_CONCURRENCY  동시에 나가는 호출 수 상한. 기본 2
   LLM_MIN_INTERVAL_SEC  호출 사이 최소 간격(초). 기본 0.2
-  LLM_COOLDOWN      429·5xx 를 맞은 뒤 프로세스 전체가 쉬는 시간의 기준값(초). 기본 2
-                    (서버가 Retry-After 를 주면 그 값이 이긴다 — MAX_RETRY_AFTER 주석)
+  LLM_COOLDOWN      429·5xx 후 프로세스 전체 감속 기준값(초). 기본 2(Retry-After 우선)
   GEMINI_API_KEY    gemma 프로바이더용 (Google AI Studio 발급 키)
   GEMMA_MODEL       gemma 모델 ID. 기본 gemma-4-31b-it
-  GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL (아래 상수 주석 참고)
+  GEMMA_THINKING_LEVEL  thinkingConfig.thinkingLevel. 기본 MINIMAL
   ANTHROPIC_API_KEY anthropic 프로바이더용 (테스트 경로)
   IRP_AGENT_MODEL   anthropic 모델. 기본 claude-sonnet-5
-
-━━ 관측 ━━
-모든 호출은 성공·실패 양쪽 다 `observability.record_generation()` 으로 한 건씩 남는다
-(Langfuse). 키가 없으면 통째로 꺼지고, 켜져 있어도 전송은 백그라운드라 호출을 늦추지
-않는다 — 자세한 것은 `observability/` 패키지 머리말.
-
-available() 가 False 면 strategy_agent 는 규칙 기반 폴백으로 동작한다(그쪽 규약).
-consult_agent 는 폴백하지 않는다 — LLM 이 없으면 답을 만들지 않고 그렇게 말한다
-(pension_agent/CLAUDE.md §11). 그래서 호출 실패는 전부 `LLMError` 한 종류로 올라간다:
-도구·노드가 `except Exception` 으로 삼켜서 "지식베이스에 자료가 없다"로 둔갑하는 것을
-막으려면, 삼키면 안 되는 예외가 다른 예외와 구분돼야 한다.
 """
 
 from __future__ import annotations
@@ -79,42 +53,30 @@ from typing import Any
 
 from pension_agent.common import env, observability, privacy
 
-# .env(= src/.env)를 먼저 읽는다 — 아래 모듈 상수가 그 값으로 정해진다.
-# 파싱은 env.py 가 한다(관측 설정도 같은 파일에서 와야 하므로 아래층으로 내렸다).
+# 모듈 상수보다 먼저 .env 적재
 env.load()
 
-# ── genai (사내 플랫폼) — 값은 실행 단계(ENV_PATH: train | serving)에 따라 고른다 ──
-# 행내 .env 하나에 URL 이 두 벌 있다(…/trnn/… 과 …/serv/…). 워크스페이스는 train,
-# 배포 컨테이너는 플랫폼이 serving 을 넣어 준다. 어느 것을 읽었는지는 /health 와
-# `python -m pension_agent.common.env` 가 보여준다(STAGE).
+# genai — URL·키는 실행 단계(ENV_PATH: train | serving)별로 선택
 STAGE = env.stage()
 BASE_URL = env.staged("LLM_BASE_URL").rstrip("/")
 API_KEY = env.staged("LLM_API_KEY")
-#: URL·키를 **어느 이름에서** 읽었나(값이 아니라 이름 — /health 와 401 안내가 쓴다).
+#: URL·키의 출처 변수 이름(값 아님 — /health·401 안내용).
 BASE_URL_SRC = env.source("LLM_BASE_URL")
 API_KEY_SRC = env.source("LLM_API_KEY")
 
 
 def key_stage_mismatch() -> bool:
-    """URL 은 단계별 이름에서 왔는데 키는 접미사 없는 폴백에서 왔나.
-
-    URL 과 키는 `env.staged()` 로 **각자** 폴백한다. 그래서 `LLM_BASE_URL_SERV` 만 채우고
-    `LLM_API_KEY_SERV` 를 비워 두면 서빙계 URL 에 분석계용 `LLM_API_KEY` 가 실린다 —
-    두 단계가 APIM 의 다른 제품이면 게이트웨이가 401 `Access denied due to invalid
-    subscription key` 로 끊는다(2026-09-16 행내 실측 · `…/serv/gemma-4`). 설정은 «다 채웠는데»
-    로 보이고 /health 의 `api_key_set` 도 참이라, 이 짝을 이름으로 드러내지 않으면 401 이
-    나기 전까지 아무 데도 안 보인다.
-    """
+    """URL 은 단계별 이름, 키는 접미사 없는 폴백에서 왔는지(→ APIM 401 원인)."""
     return _mismatch(BASE_URL_SRC, API_KEY_SRC)
 
 
 def _mismatch(url_src: str, key_src: str) -> bool:
-    """이름 두 개만 보는 판정 — 모듈 상수는 임포트 시각에 굳으므로 테스트가 여기를 부른다."""
+    """출처 이름 두 개로 판정(테스트용 — 모듈 상수는 임포트 시 고정)."""
     return bool(_stage_suffix(url_src) and key_src and not _stage_suffix(key_src))
 
 
 def _stage_suffix(src: str) -> str:
-    """출처 이름의 단계 접미(`_TRNN`·`_SERV`). 접미가 없으면 빈 문자열."""
+    """출처 이름의 단계 접미(`_TRNN`·`_SERV`). 없으면 빈 문자열."""
     for tail in ("_TRNN", "_SERV"):
         if src.endswith(tail):
             return tail
@@ -122,17 +84,12 @@ def _stage_suffix(src: str) -> str:
 
 
 def wanted_key_name() -> str:
-    """지금 URL 과 같은 단계의 키를 넣어야 할 변수 이름 — 안내 문구가 이것을 부른다.
-
-    **`env.suffix()` 를 다시 부르지 않는다.** 그쪽은 호출 시각의 `ENV_PATH` 를 읽는데
-    URL·키는 임포트 시각에 굳은 값이라, 둘이 갈리면 「_SERV URL 을 쓰면서 _TRNN 키를
-    넣으라」는 안내가 나간다. 채워야 할 이름은 **실제로 읽은 URL 변수**가 말한다.
-    """
+    """현재 URL 과 같은 단계의 키 변수 이름. 실제로 읽은 URL 변수 기준(`env.suffix()` 미사용)."""
     return f"LLM_API_KEY{_stage_suffix(BASE_URL_SRC)}"
 
 
 def _auth_hint() -> str:
-    """401·403 에 붙일 설정 진단 한 줄. 키 값은 절대 싣지 않는다 — 이름만."""
+    """401·403 용 설정 진단 문구. 키 값 미포함."""
     where = f"URL={BASE_URL_SRC or '(없음)'} · 키={API_KEY_SRC or '(없음)'} · 단계={STAGE}"
     if key_stage_mismatch():
         return (f"설정: {where} — **키가 단계와 어긋난다.** {wanted_key_name()} 에 이 단계의 "
@@ -149,56 +106,24 @@ PROVIDER = os.getenv("LLM_PROVIDER") or (
     else "anthropic"
 )
 
-#: max_tokens 를 넘기지 않은 호출의 기본치. 브리핑 문장 한 편 분량.
+#: max_tokens 기본값.
 DEFAULT_MAX_TOKENS = 900
 
-#: 모델 슬러그. **비우면 payload 에서 `model` 키를 아예 뺀다** — 그것이 기본이다.
-#:
-#: 규격 문서 셋이 여기서 갈린다(저장소 루트 skills/genai-platform-agent-dev/). SKILL.md 는
-#: LLM_MODEL 을 「필수」로 적고 예시 슬러그(claude-sonnet-4-6)까지 주는데,
-#: refs/genai-platform.md 는 「생략이 기본값 — 게이트웨이가 라우팅한다」고 적고 코드
-#: 예제에서 model 을 주석 처리해 둔다. 어긋난 것이 아니라
-#: **엔드포인트가 모델을 고르는 방식이 둘**이기 때문이다:
-#:
-#:   LLM Gateway(LiteLLM)  엔드포인트 하나에 여러 모델이 붙어 있다 → body 의 model 이
-#:                         라우팅 키다. 채워야 한다(.env.example 의 구역 ②).
-#:   내부 GenAI 플랫폼      URL 경로가 곧 모델이다(…/trnn/gemma-4 · …/serv/gemma-4) → body 에
-#:                         model 을 함께 실으면 **404** 다(2026-09-08 행내 실측).
-#:
-#: 그래서 이 값의 정답은 «플랫폼별»이고, 코드는 둘 다 받는다 — 판단은 .env 가 한다.
-#: 콘솔이 모델 이름을 알려주더라도 그것은 «무엇이 서빙되는지»의 표시이지 body 에 실을
-#: 값이라는 뜻은 아니다. 그 혼동이 행내 첫 연결을 404 로 막았다.
+#: 모델 슬러그. 비우면 payload 에서 `model` 키 제외(기본).
+#: LLM Gateway(LiteLLM)는 필수(라우팅 키), 내부 GenAI 플랫폼은 URL 이 곧 모델 — 넣으면 404.
 MODEL = os.getenv("LLM_MODEL", "")
 TIMEOUT = int(os.getenv("LLM_TIMEOUT", "60"))
-#: 429·5xx 재시도 횟수(첫 호출 포함). anthropic SDK 는 자체 재시도가 있어 genai·gemma 경로만 쓴다.
+#: 429·5xx 재시도 횟수(첫 호출 포함). genai·gemma 전용(anthropic SDK 는 자체 재시도).
 RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
 
-# ─────────────────────────────────────────────────────────────
-# 개인정보 필터 — 나가기 직전의 마지막 문
-#
-# 행내 게이트웨이 앞단에 개인정보 탐지 필터가 서 있고, 걸리면 모델까지 가지 못하고 400 이다
-# (`privacy.py` 머리말의 실측 — 고객 id 가 주민등록번호 꼴이라 걸렸다). 400 은 재시도 대상이
-# 아니라(`_retryable`) 그 턴은 답을 한 글자도 못 내보낸다.
-#
-# **경계는 재료에서 먼저 긋는다** — 고객 식별번호는 프롬프트 재료에 싣지 않는다
-# (`tools/customer_solution/tool.py` 등). 여기 있는 것은 그 뒤의 한 겹이다: 프롬프트에는
-# 직원 질문 원문·상담 기록·카드 원문처럼 **우리가 쓰지 않은 글**도 실리기 때문이다.
-#
-# 가리면 답이 그만큼 어긋날 수 있다. 그래도 400 보다 낫다 — 그쪽은 답이 아예 없다.
-# 진단이 필요하면 `LLM_PII_SCRUB=0` 으로 끄고 게이트웨이의 `rule_name` 을 직접 본다.
-# ─────────────────────────────────────────────────────────────
+# 개인정보 마스킹 — 게이트웨이 필터 400(재시도 불가) 회피. 진단 시 LLM_PII_SCRUB=0
 
-#: 나가는 글에서 행내 필터가 잡는 꼴을 가릴까. 기본 켜짐.
+#: 개인정보 꼴 마스킹 여부. 기본 켜짐.
 PII_SCRUB = (os.getenv("LLM_PII_SCRUB", "1") or "1").strip().lower() not in ("0", "false", "no")
 
 
 def _scrub(prompt: str, system: str | None) -> tuple[str, str | None, list[str]]:
-    """프롬프트·시스템 프롬프트에서 개인정보 꼴을 가린다. 걸린 룰 이름도 함께 돌려준다.
-
-    **걸린 값은 어디에도 남기지 않는다** — 로그에 싣는 것은 룰 이름뿐이다(`privacy` 머리말).
-    가린 사실 자체는 남긴다: 답이 왜 그 자리를 비우고 말하는지 되짚을 길이 없으면 다음
-    사람은 모델이 이상하다고 판단한다.
-    """
+    """프롬프트·시스템 프롬프트 마스킹, 걸린 룰 이름 반환. 로그에는 룰 이름만."""
     if not PII_SCRUB:
         return prompt, system, []
     prompt, hit = privacy.mask(prompt)
@@ -210,52 +135,28 @@ def _scrub(prompt: str, system: str | None) -> tuple[str, str | None, list[str]]
     return prompt, system, hit
 
 
-# ─────────────────────────────────────────────────────────────
-# 호출 게이트 — 429 는 «재시도»가 아니라 «덜 몰아치기»로 막는다
-#
-# 이 코드는 몰아서 부르는 자리가 구조적으로 많다: 브리핑 1건 = 9~11 연쇄 호출, 대화 한 턴
-# = 계획 루프 최대 4바퀴 + compose·되묻기 «동시» 호출(nodes/answer.py 의 ThreadPoolExecutor).
-# 행내 게이트웨이에서도, 무료 쿼터의 generativelanguage 에서도 이 버스트로 턴이 죽었다.
-#
-# 재시도만으로는 못 막는다 — 재시도는 이미 맞은 뒤의 대응이고, 여러 스레드가 동시에 맞으면
-# 같이 재시도해서 다시 같이 맞는다. 그래서 세 겹을 둔다:
-#   ① 동시성 상한  — 한 프로세스에서 동시에 나가는 호출 수를 세마포어로 묶는다
-#   ② 최소 간격    — 호출 사이를 벌려 초당 요청 수를 눌러 둔다
-#   ③ 적응형 감속  — 누가 429·5xx 를 맞으면 **프로세스 전체**가 그만큼 쉰다. 맞은 스레드만
-#                    쉬면 나머지가 그 사이를 메워 서버가 느끼는 압력이 안 준다
-#
-# 게이트는 `_post_json` 이 감싸는 genai·gemma 경로에만 선다. anthropic 은 SDK 가 자체
-# 재시도·백오프를 갖고 있고 행내에서는 쓰지 않는 경로다(RETRY_ATTEMPTS 주석과 같은 이유).
-# ─────────────────────────────────────────────────────────────
+# 호출 게이트(429 예방, genai·gemma 전용): ① 동시성 상한 ② 최소 간격
+# ③ 429·5xx 시 프로세스 전체 감속 — 맞은 스레드만 쉬면 나머지가 틈을 메움
 
 #: 동시에 나가는 호출 수 상한. 1 이면 완전 직렬.
 MAX_CONCURRENCY = max(1, int(os.getenv("LLM_MAX_CONCURRENCY", "2")))
-#: 호출 사이 최소 간격(초). 0 이면 간격 제한 없음(테스트가 이렇게 끈다).
-#: 기본을 0 에서 0.2 로 올린 근거는 행내 실측이다 — 게이트웨이가 이 버스트에 429 를 냈다.
-#: 브리핑 11연쇄에 +2.2초라 감당할 수 있는 값이고, 모자라면 .env 에서 올린다.
+#: 호출 사이 최소 간격(초). 0 이면 제한 없음.
 MIN_INTERVAL = float(os.getenv("LLM_MIN_INTERVAL_SEC", "0.2") or 0)
-#: 서버가 Retry-After 를 안 줄 때 쓰는 지수 백오프의 기준값(초).
+#: Retry-After 없을 때 지수 백오프 기준값(초).
 COOLDOWN = float(os.getenv("LLM_COOLDOWN", "2"))
-#: **우리가 추측한** 백오프의 상한(초). 서버가 회복 시각을 안 알려줄 때만 쓰는 값이다.
+#: 추정 백오프 상한(초).
 MAX_BACKOFF = 30.0
-#: **서버가 알려준** Retry-After 의 상한(초). 추측 상한과 갈라 둔 이유는 행내 실측이다
-#: (2026-09-08 · prebuild_briefings): 게이트웨이의 Retry-After 를 30초에서 끊었더니
-#: «30.0초 감속 → 다시 429 → 20.0초 감속» 으로 한 번 쉴 것을 두 번에 나눠 쉬고, 그 사이
-#: 재시도 횟수(RETRY_ATTEMPTS) 하나를 헛되이 썼다. 서버가 50초라고 하면 50초를 쉬는 것이
-#: 맞다 — 그보다 일찍 가면 같은 답(429)만 돌아온다. 이 값은 «터무니없는 값»만 거른다.
+#: 서버 Retry-After 상한(초). 추정 상한과 별도 — 짧게 끊으면 재시도 횟수만 소모.
 MAX_RETRY_AFTER = 120.0
 
 _SLOTS = threading.BoundedSemaphore(MAX_CONCURRENCY)
 _PACE_LOCK = threading.Lock()
-#: 다음 호출이 나갈 수 있는 가장 이른 시각(time.monotonic 기준). 감속은 이 값을 민다.
+#: 다음 호출 가능 시각(time.monotonic). 감속은 이 값을 뒤로 밂.
 _next_free = 0.0
 
 
-
 def _pace() -> None:
-    """최소 간격·감속이 요구하는 만큼 기다린 뒤 돌아온다. 대기 시각은 락 안에서 «예약»
-    하고 잠은 락 밖에서 잔다 — 락을 쥔 채 자면 뒤따르는 스레드가 예약조차 못 해서
-    간격이 벌어지는 게 아니라 줄줄이 밀린다."""
+    """최소 간격·감속만큼 대기. 시각 예약은 락 안, sleep 은 락 밖."""
     global _next_free
     with _PACE_LOCK:
         now = time.monotonic()
@@ -267,8 +168,7 @@ def _pace() -> None:
 
 
 def _slow_down(seconds: float) -> None:
-    """지금부터 seconds 동안 **모든** 호출을 세운다(위 ③). 맞은 스레드만이 아니라 아직 안
-    맞은 스레드도 같이 쉬어야 서버가 느끼는 압력이 실제로 준다."""
+    """지금부터 seconds 동안 모든 호출 정지."""
     global _next_free
     with _PACE_LOCK:
         _next_free = max(_next_free, time.monotonic() + seconds)
@@ -276,26 +176,15 @@ def _slow_down(seconds: float) -> None:
 
 @contextmanager
 def _gate() -> Iterator[None]:
-    """동시성 상한 + 최소 간격. HTTP 호출 한 번(재시도 한 바퀴)을 감싼다."""
+    """동시성 상한 + 최소 간격(HTTP 호출 1회 단위)."""
     with _SLOTS:
         _pace()
         yield
 
 
-# ─────────────────────────────────────────────────────────────
-# 호출 주체(x-client-user)
-#
-# 플랫폼 규격은 이 값을 «input_value JSON 에서 추출»하라고 못박는다. 감사 기록이자
-# 게이트웨이의 쿼터 버킷이라, 전부 한 값("anonymous")으로 나가면 모든 호출이 한 버킷에
-# 몰린다 — 429 를 스스로 부르는 설정이다. 관측(Langfuse) 메타데이터에도 같은 값이 실린다.
-#
-# 전달은 ContextVar 로 한다. 노드·도구 수십 곳의 시그니처에 인자를 하나씩 꿰는 대신,
-# 진입점(main.py·graph.ask)이 턴 전체를 감싸면 그 안의 모든 호출이 따라간다.
-# consult_agent 의 진행 표시(progress.py)가 같은 방식이고, nodes/answer.py 의 스레드는
-# 이미 contextvars.copy_context() 로 컨텍스트를 복사하므로 스레드 경계도 넘는다.
-# ─────────────────────────────────────────────────────────────
+# 호출 주체(x-client-user) — 감사 기록·쿼터 버킷. 진입점이 ContextVar 로 턴 전체에 설정
 
-#: 호출부가 아무것도 주지 않았을 때 쓰는 값. 사람이 아니라 «이 배치/화면»이라는 표시다.
+#: 호출 주체 미지정 시 기본값.
 DEFAULT_CLIENT_USER = os.getenv("LLM_CLIENT_USER", "pension-agent")
 
 _CLIENT_USER: ContextVar[str] = ContextVar("llm_client_user", default="")
@@ -303,11 +192,7 @@ _CLIENT_USER: ContextVar[str] = ContextVar("llm_client_user", default="")
 
 @contextmanager
 def client_user(name: str | None) -> Iterator[None]:
-    """이 블록 안의 모든 LLM 호출을 name 이 부른 것으로 기록한다.
-
-    name 이 비면 아무것도 바꾸지 않는다 — 바깥에서 이미 정해진 주체가 있으면 그것이
-    남고, 없으면 DEFAULT_CLIENT_USER 로 떨어진다.
-    """
+    """블록 안 LLM 호출의 x-client-user 설정. name 이 비면 변경 없음."""
     if not name:
         yield
         return
@@ -319,72 +204,44 @@ def client_user(name: str | None) -> Iterator[None]:
 
 
 def current_client_user() -> str:
-    """지금 유효한 x-client-user. 명시 인자 > ContextVar > 환경변수 기본값."""
+    """현재 x-client-user. ContextVar > 환경변수 기본값."""
     return _CLIENT_USER.get() or DEFAULT_CLIENT_USER
 
 
-# ── 쿼터 버킷 분산 ────────────────────────────────────────────────────────────
-#
-# x-client-user 가 게이트웨이의 쿼터 버킷이라(위 주석), 한 직원 사번으로 몰아서 부르면
-# 그 버킷 하나가 바닥난다. STG 는 분당 10회인데 브리핑 한 편이 그것만으로 한도를 넘고
-# (README §4), 12명 선생성이면 사번 하나로 144회다. 사번 뒤에 임의 접미를 붙여 한
-# 사람의 호출을 여러 버킷으로 나눈다.
-#
-# **사번은 그대로 앞에 남긴다.** 이 값은 쿼터 버킷이면서 동시에 감사 기록이라,
-# 익명화하면(예전 "anonymous") 누가 불렀는지가 사라진다. 접미만 갈리므로 «누가»는
-# 그대로 읽히고 «어느 버킷»만 나뉜다.
-#
-# **기본은 꺼짐이다.** 감사 기록의 모양을 바꾸는 설정이라 조용히 켜지면 안 되고,
-# 배포 컨테이너(serving)까지 따라가면 곤란하다 — 켜는 것은 .env 가 정한다.
-# 그리고 **버킷이 x-client-user 로 갈릴 때만 듣는다** — 게이트웨이가 API 키 단위나
-# 전체 단위로 재고 있으면 접미를 붙여도 아무것도 달라지지 않는다.
+# 쿼터 버킷 분산 — 사번 뒤 임의 접미(사번은 감사용으로 유지). 기본 꺼짐
 
-#: 사번 뒤에 붙일 임의 접미의 길이. 0 이면 안 붙인다(기본).
+#: 사번 뒤 임의 접미 길이. 0 이면 미부착(기본).
 CLIENT_USER_SPREAD = max(0, int(os.getenv("LLM_CLIENT_USER_SPREAD", "0") or 0))
-#: 접미에 쓰는 글자. 사번과 섞이지 않게 하이픈으로 잇는다.
+#: 접미 문자 집합(하이픈으로 연결).
 _SPREAD_ALPHABET = string.ascii_letters + string.digits
 
 
 def spread_client_user(base: str) -> str:
-    """쿼터 버킷을 나눈 x-client-user. 꺼져 있으면 base 를 그대로 돌려준다.
-
-    호출 **한 건마다** 새로 뽑는다. 프로세스나 턴 단위로 고정하면 선생성처럼 한
-    프로세스가 순차로 도는 자리에서는 버킷이 하나뿐이라 아무것도 나뉘지 않는다 —
-    그 자리가 바로 이것이 필요한 자리다.
-    """
+    """접미를 붙인 x-client-user(호출마다 새로 생성). 꺼져 있으면 base 그대로."""
     if CLIENT_USER_SPREAD <= 0 or not base:
         return base
     suffix = "".join(random.choice(_SPREAD_ALPHABET) for _ in range(CLIENT_USER_SPREAD))
     return f"{base}-{suffix}"
 
-# ── gemma (외부 사전점검) ──
+# gemma (사외 사전점검)
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-31b-it")
 GEMMA_ENDPOINT = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMMA_MODEL}:generateContent"
 )
-#: gemma-4 는 thinking 모델이라 기본 설정으로는 hidden reasoning 이 maxOutputTokens 를
-#: 전부 삼켜 답변이 빈 채로 잘린다(실측: 300 중 297 이 thought). MINIMAL 로 눌러야
-#: 호출부가 준 max_tokens 가 답변 분량으로 쓰인다. thinkingBudget=0 은 이 모델이 거부한다.
+#: MINIMAL 필수 — 기본값이면 thought 가 maxOutputTokens 를 소진해 빈 답. thinkingBudget=0 은 거부됨.
 GEMMA_THINKING_LEVEL = os.getenv("GEMMA_THINKING_LEVEL", "MINIMAL")
 
-# ── anthropic (외부 테스트) ──
+# anthropic (사외 테스트)
 ANTHROPIC_MODEL = os.getenv("IRP_AGENT_MODEL", "claude-sonnet-5")
 
-_anthropic_client = None  # 첫 호출 때 한 번만 생성
+_anthropic_client = None
 
 
 class LLMError(RuntimeError):
-    """LLM 호출이 깨졌다 — 미설정·인증 실패·타임아웃·프로바이더 오류.
+    """LLM 호출 실패(미설정·인증·타임아웃·프로바이더 오류). 호출부에서 삼키기 금지.
 
-    이 예외만 따로 있는 이유는 **삼켜지면 안 되기 때문**이다. consult_agent 는 도구
-    하나가 죽어도 루프를 계속하려고 `except Exception` 을 여러 겹 두고 있는데, 거기에
-    LLM 장애가 같이 걸리면 "찾아봤는데 재료가 없다"는 답으로 나간다 — 있는 자료를
-    없다고 말하는 셈이다(CLAUDE.md §11). 호출부는 이 예외를 재던지고, 턴은 'LLM 연결이
-    안 되어 있다'는 한 가지 안내로 끝난다.
-
-    status: 원인이 HTTP 응답이면 그 상태 코드(429·500 …), 아니면 None. 호출부가 «속도
-    제한이라 조금 뒤에 다시 하면 되는 실패»와 나머지를 문자열 검색 없이 가르는 자리다.
+    status: HTTP 상태 코드(없으면 None).
     """
 
     def __init__(self, message: str, *, status: int | None = None) -> None:
@@ -393,7 +250,7 @@ class LLMError(RuntimeError):
 
 
 def available() -> bool:
-    """LLM 호출 가능 여부. 미설정 시 상위 계층이 폴백 경로를 선택한다."""
+    """LLM 호출 가능 여부."""
     if PROVIDER == "anthropic":
         return bool(os.getenv("ANTHROPIC_API_KEY"))
     if PROVIDER == "gemma":
@@ -403,7 +260,7 @@ def available() -> bool:
 
 def _generate_genai(prompt: str, system: str | None, max_tokens: int,
                     temperature: float, x_client_user: str) -> tuple[str, dict]:
-    """OpenAI 호환 /chat/completions 를 표준 라이브러리로 호출한다."""
+    """OpenAI 호환 /chat/completions 호출(urllib)."""
     messages = ([{"role": "system", "content": system}] if system else []) + [
         {"role": "user", "content": prompt}
     ]
@@ -417,20 +274,16 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {API_KEY}",
-            # 이 게이트웨이(APIM)가 구독 키로 읽는 헤더는 **kb-key 다**(2026-09-16 행내 실측).
-            # 같은 키를 Azure 기본 이름 `Ocp-Apim-Subscription-Key` 로만 보내면 분석계·서빙계
-            # 양쪽 다 401 «missing subscription key» 가 온다 — 헤더를 아예 안 보는 것이다.
-            # 그래서 401 본문이 «invalid» 면 헤더가 아니라 **값**의 문제다(_auth_hint).
-            "kb-key": API_KEY,              # 사내 플랫폼 인증
-            "x-client-user": x_client_user,  # 호출 주체 식별(감사/쿼터)
+            # APIM 구독 키 헤더는 kb-key(Ocp-Apim-Subscription-Key 미인식)
+            "kb-key": API_KEY,
+            "x-client-user": x_client_user,
         },
         method="POST",
     )
     try:
         body = _post_json(req)
     except LLMError as exc:
-        # 401·403 은 «무엇이 잘못됐나»가 전부 설정에 있다. 게이트웨이 본문은 "invalid
-        # subscription key" 까지만 말하고 **어느 변수의 키가 나갔는지**는 말해주지 않는다.
+        # 401·403 에 어느 변수의 키가 나갔는지 덧붙임
         if exc.status in (401, 403):
             raise LLMError(f"{exc}\n{_auth_hint()}", status=exc.status) from exc
         raise
@@ -443,7 +296,7 @@ def _generate_genai(prompt: str, system: str | None, max_tokens: int,
 
 
 def _usage(prompt_tokens: Any, completion_tokens: Any, total_tokens: Any = None) -> dict | None:
-    """토큰 사용량을 Langfuse 가 읽는 모양으로 맞춘다. 프로바이더가 안 주면 None."""
+    """토큰 사용량 → Langfuse 꼴. 없으면 None."""
     if prompt_tokens is None and completion_tokens is None:
         return None
     used = {"unit": "TOKENS"}
@@ -459,28 +312,10 @@ def _usage(prompt_tokens: Any, completion_tokens: Any, total_tokens: Any = None)
 
 
 def _post_json(req: urllib.request.Request) -> dict:
-    """urlopen + JSON 파싱. genai·gemma 경로가 함께 쓴다.
+    """urlopen + JSON 파싱(genai·gemma 공용). 429·5xx 재시도, 그 외 4xx 는 즉시 LLMError.
 
-    **429 와 5xx 를 재시도한다.** 둘 다 «서버 사정이라 잠깐 쉬면 풀리는» 에러이고, 이 코드는
-    몰아서 부르는 자리가 많다(브리핑 1회 = 11연쇄 호출, app.py 기동 시 고객 선생성, 대화
-    한 턴 4~7회 + compose·판정 동시 호출). 행내 게이트웨이(genai)에서도, 무료 쿼터의
-    generativelanguage(gemma)에서도 실제로 429 로 턴이 통째로 죽었다.
-
-    5xx 는 예전에 재시도 대상이 아니었다 — 「401·500 은 기다려도 안 풀린다」는 전제였는데,
-    **실측이 그 전제를 뒤집었다**(2026-09-07 · gemma-4-31b-it): 리허설 대본 한 블록의 11턴
-    중 10턴이 `HTTP 500` 으로 죽었고, 같은 프롬프트를 그대로 다시 던지면 200 으로 통과했다.
-    그 상태에서는 실 LLM 리허설이 «에이전트가 무엇을 답하나»가 아니라 «오늘 엔드포인트가
-    살아 있나»를 재게 된다. 401·403·404 처럼 **요청이 잘못된** 에러는 그대로 올린다 —
-    같은 요청을 반복해도 결과가 같고, 반복하면 진단만 늦어진다.
-
-    재시도해도 계속 실패하면 `LLMError` 다. 그 예외를 삼켜 "자료가 없다"로 답하지 않는 것은
-    호출부의 규약이고(pension_agent/CLAUDE.md §11), 여기서는 **원인을 문장에 남기는 것**까지
-    한다 — 429 와 5xx 는 직원이 할 일이 다르다(기다린다 / 잠시 후 다시 시도한다).
-
-    기다림은 **여기서 자지 않는다.** `_slow_down()` 으로 게이트의 «다음 호출 가능 시각»만
-    밀어 두면 다음 바퀴의 `_gate()` 가 그만큼 재운다. 이렇게 해야 대기가 한 곳에서만
-    일어나고(이중 대기 없음), 같은 대기를 **다른 스레드도 함께** 받는다 — 맞은 스레드만
-    쉬면 나머지가 그 틈을 메워 서버가 느끼는 압력이 안 준다(게이트 ③).
+    - 대기는 직접 sleep 하지 않고 `_slow_down()` → 다음 `_gate()` 에서(이중 대기 방지, 전 스레드 공유)
+    - 최종 실패 문구에 원인(429 / 5xx) 구분
     """
     last: urllib.error.HTTPError | None = None
     last_body = ""
@@ -491,20 +326,7 @@ def _post_json(req: urllib.request.Request) -> dict:
         except urllib.error.HTTPError as exc:
             body = _error_body(exc)
             if not _retryable(exc.code):
-                # 요청이 잘못된 에러는 **무엇이** 잘못됐는지가 전부다. 예전에는 이 예외를
-                # 그대로 올려 `HTTPError: HTTP Error 404: Not Found` 한 줄만 남았는데,
-                # 404 는 «경로가 없다»와 «그런 모델이 없다»가 같은 코드로 온다 — 응답
-                # 본문에만 갈려 있고 그 본문을 버리고 있었다. 진단이 화면에서 끝나야 한다.
-                #
-                # **본문을 로그에 통째로 한 번 더 남긴다**(2026-09-21). 예외 문장만으로는
-                # 진단이 끝나지 않는다 — 그 문장은 세 번 잘려서 사람에게 온다: 여기서
-                # `ERROR_BODY_LIMIT`(400자) · 단계 로그에서 `STEP_TEXT_MAX`(120자) ·
-                # 화면에서 `plan.REASON_MAX`(120자). 행내 게이트웨이가 400 을 준 실측에서
-                # 운영자가 본 것은 `응답: { "error":` 까지였다(김서연 턴, gemma-4).
-                # 잘라야 하는 이유는 **상담 화면과 로그가 스택트레이스 자리가 되면 안 된다**
-                # 는 것이고, 그건 재시도해도 소용없는 요청 오류에는 해당하지 않는다 —
-                # 429·5xx 는 직원이 기다리면 되지만 4xx 는 고쳐야 하고, 고치려면 본문을
-                # 봐야 한다. 그래서 자르는 쪽은 그대로 두고 **한 줄을 따로** 남긴다.
+                # 4xx 는 응답 본문이 진단의 전부 — 예외 문장은 여러 단계에서 잘리므로 전문을 로그에 별도 기록
                 if body:
                     logging.getLogger("agent").error(
                         "LLM %s %s — 응답 전문 ↓\n%s\n요청 URL: %s",
@@ -516,10 +338,7 @@ def _post_json(req: urllib.request.Request) -> dict:
             if attempt == RETRY_ATTEMPTS - 1:
                 break
             wait, told = _backoff(exc, attempt)
-            # 서버가 준 값인지 우리 추측인지를 남긴다 — 「30.0초」가 서버 말인지 상한에 걸린
-            # 것인지 로그만 보고 갈려야 상한을 조정할 근거가 생긴다(MAX_RETRY_AFTER 주석).
-            # 단계 로그(`agent` 로거)로 찍는다 — 턴의 다른 줄과 같은 요청 id·경과초가 붙어
-            # «어느 단계에서 기다렸나»가 그 자리에 보인다.
+            # 대기값 출처(서버/추정) 기록 — 상한 조정 근거
             observability.step("llm", retries=f"{attempt + 1}/{RETRY_ATTEMPTS}", status=exc.code,
                                wait=f"{wait:.1f}초", source="서버" if told else "추정",
                                level=logging.WARNING)
@@ -534,57 +353,38 @@ def _post_json(req: urllib.request.Request) -> dict:
         + (f"\n응답: {last_body}" if last_body else ""), status=code or None) from last
 
 
-#: 오류 본문을 이만큼만 싣는다. 게이트웨이가 HTML 오류 페이지를 통째로 주기도 한다.
-#: 이 상한은 **예외 문장**에 걸린다 — 그 문장은 답변 자리·단계 로그로 흘러가므로 짧아야
-#: 한다. 재시도 안 되는 오류의 전문은 위 `_post_json` 이 로그에 따로 한 줄 남긴다.
+#: 예외 문장에 싣는 오류 본문 상한(화면·단계 로그로 흘러감).
 ERROR_BODY_LIMIT = 400
 
-#: 로그에 남기는 전문의 상한. 화면·답변이 아니라 **진단 로그**라 넉넉히 두되, HTML 오류
-#: 페이지를 통째로 받는 경우가 있어 무한은 아니다.
+#: 진단 로그용 오류 전문 상한(HTML 오류 페이지 대비).
 FULL_ERROR_BODY_LIMIT = 4000
 
 
 def _full_error_body(exc: urllib.error.HTTPError, already: str) -> str:
-    """진단 로그용 응답 전문. 본문은 한 번만 읽히므로 이미 읽어 둔 것을 쓴다.
-
-    `_error_body` 가 자르기 **전의** 원문을 들고 있지 않으므로, 잘린 표시가 붙어 있으면
-    그 사실을 밝힌다 — 「더 있는데 안 보여준다」가 조용히 일어나면 안 된다.
-    """
+    """진단 로그용 응답 전문(`_error_body` 가 보관한 원문, 없으면 잘린 것)."""
     raw = getattr(exc, "_full_body", None) or already
     return raw[:FULL_ERROR_BODY_LIMIT]
 
 
 def _error_body(exc: urllib.error.HTTPError) -> str:
-    """오류 응답 본문 한 줄. 못 읽으면 빈 문자열 — 진단을 돕자고 다른 예외를 내지 않는다.
-
-    본문은 **한 번만** 읽을 수 있다(스트림). 재시도 경로와 최종 예외가 같은 것을 봐야 하므로
-    잡는 자리에서 바로 읽어 문자열로 들고 다닌다.
-    """
+    """오류 응답 본문 한 줄(잘림). 못 읽으면 빈 문자열. 스트림이라 한 번만 읽힘."""
     try:
         raw = exc.read().decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 — 본문을 못 읽는 것이 원래 오류를 가리면 안 된다
+    except Exception:  # noqa: BLE001 — 원래 오류를 가리지 않게
         return ""
-    # 자르기 전의 원문을 예외에 붙여 둔다 — 스트림은 한 번만 읽히는데, 진단 로그는
-    # 짧게 자른 것이 아니라 전문을 봐야 한다(`_full_error_body`).
-    exc._full_body = raw  # noqa: SLF001 — 우리가 만든 자리다
+    # 전문은 예외에 보관(`_full_error_body`)
+    exc._full_body = raw  # noqa: SLF001
     text = " ".join(raw.split())
     return text[:ERROR_BODY_LIMIT] + ("…" if len(text) > ERROR_BODY_LIMIT else "")
 
 
 def _retryable(code: int) -> bool:
-    """다시 던지면 결과가 달라질 수 있는 에러인가. 429 와 5xx 만 그렇다."""
+    """재시도 대상 여부(429·5xx)."""
     return code == 429 or 500 <= code < 600
 
 
 def _backoff(exc: urllib.error.HTTPError, attempt: int) -> tuple[float, bool]:
-    """다음 시도까지 프로세스 전체가 쉴 초와, 그 값이 서버가 알려준 것인지(True).
-
-    서버가 Retry-After 를 주면 **그 값을 그대로** 쓴다(상한 MAX_RETRY_AFTER) — 서버가 아는
-    회복 시각을 우리가 추측으로 덮을 이유가 없고, 더 짧게 끊으면 다음 시도가 같은 429 를
-    맞아 재시도 횟수만 축난다(상한 상수 주석의 실측). 없으면 지수 백오프에 지터를 섞는다
-    (상한 MAX_BACKOFF). 지터가 필요한 이유: 동시에 맞은 스레드들이 같은 시간을 기다리면
-    같은 순간에 한꺼번에 다시 몰려가 또 같이 맞는다.
-    """
+    """(대기 초, 서버 제공 여부). Retry-After 우선, 없으면 지수 백오프 + 지터(동시 재시도 분산)."""
     retry_after = (exc.headers.get("Retry-After") or "").strip() if exc.headers else ""
     try:
         return min(float(retry_after), MAX_RETRY_AFTER), True
@@ -595,12 +395,7 @@ def _backoff(exc: urllib.error.HTTPError, attempt: int) -> tuple[float, bool]:
 
 def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
                     temperature: float) -> tuple[str, dict]:
-    """Google generativelanguage :generateContent 를 표준 라이브러리로 호출한다.
-
-    Gemma 모델은 이 API 에서 systemInstruction 을 받지 않으므로(요청이 거부된다)
-    시스템 프롬프트는 사용자 프롬프트 앞에 이어 붙인다 — 사내 vLLM 서빙으로 넘어가면
-    _generate_genai 가 system 메시지로 제대로 실어 보내니, 이 접합은 이 경로에만 있다.
-    """
+    """generativelanguage :generateContent 호출(urllib). systemInstruction 거부 — 프롬프트 앞에 접합."""
     text = f"{system}\n\n{prompt}" if system else prompt
     body = {
         "contents": [{"parts": [{"text": text}]}],
@@ -624,7 +419,7 @@ def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
     if not candidates:
         raise LLMError(f"gemma 응답에 candidates 가 없습니다: {payload}")
     parts = candidates[0].get("content", {}).get("parts", [])
-    # thought=True 인 hidden reasoning 파트는 답변이 아니다 — 제외한다.
+    # thought 파트 제외
     text_out = "".join(
         p.get("text", "") for p in parts
         if isinstance(p, dict) and "text" in p and not p.get("thought")
@@ -639,7 +434,7 @@ def _generate_gemma(prompt: str, system: str | None, max_tokens: int,
 
 def _generate_anthropic(prompt: str, system: str | None, max_tokens: int,
                         temperature: float) -> tuple[str, dict]:
-    """Anthropic SDK 호출 (테스트 경로). 패키지는 이 분기에서만 lazy import 한다."""
+    """Anthropic SDK 호출(테스트 경로, 지연 임포트)."""
     global _anthropic_client
     if _anthropic_client is None:
         from anthropic import Anthropic  # noqa: PLC0415 — genai 전용 환경엔 미설치일 수 있음
@@ -665,24 +460,12 @@ def _generate_anthropic(prompt: str, system: str | None, max_tokens: int,
 def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str | None = None,
              temperature: float = 0.2, x_client_user: str = "",
              name: str = "llm.generate") -> str:
-    """단발 생성. 응답 본문 문자열을 반환하며, 실패는 전부 `LLMError` 로 올린다.
+    """단발 생성. 응답 문자열 반환, 모든 실패는 `LLMError`(원인 문자열 보존).
 
-    프로바이더별 예외(urllib 의 HTTPError·socket.timeout, anthropic SDK 의 APIError,
-    응답 스키마가 어긋났을 때의 KeyError …)를 한 종류로 모으는 이유는 호출부가 "삼켜도
-    되는 예외"와 "삼키면 안 되는 예외"를 구분할 수 있어야 하기 때문이다(LLMError 주석).
-    원인 문자열은 그대로 보존한다 — 진단이 화면에서 끝나야 한다.
-
-    name: Langfuse 대시보드에 뜨는 이 호출의 이름(예: "briefing.talking_scripts").
-    브리핑 한 건이 11연쇄, 대화 한 턴이 4~7회라 이름이 없으면 어느 호출이 어느 단계인지
-    구분되지 않는다. 호출부가 자기 단계 이름을 준다 — 관측이 꺼져 있으면 쓰이지 않는다.
-
-    x_client_user: 비우면 이 턴의 주체(client_user 컨텍스트)로 채운다. 진입점이 턴 전체를
-    감싸므로 호출부는 대개 주지 않는다.
+    name: 관측용 호출 이름. x_client_user: 비우면 client_user 컨텍스트.
     """
-    system = system or None   # "" 은 시스템 메시지 없음으로 본다(프로바이더가 빈 문자열을 싫어한다)
-    # 헤더에도 관측 메타데이터에도 같은 값이 실려야 한다 — 여기서 한 번만 정한다.
-    # 쿼터 버킷 분산은 **여기 한 곳**에서 건다 — main.py 는 x_client_user 를 직접 넘기므로
-    # current_client_user() 안에서만 붙이면 실서비스 경로가 통째로 빠진다.
+    system = system or None   # "" 은 시스템 메시지 없음
+    # 버킷 분산은 여기 한 곳에서 — main.py 는 x_client_user 를 직접 넘김
     x_client_user = spread_client_user(x_client_user or current_client_user())
     if not available():
         raise LLMError(
@@ -691,8 +474,7 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
             "어느 .env 가 읽혔는지는 python -m pension_agent.common.env 로 봅니다."
             % PROVIDER
         )
-    # 가리는 것은 **여기 한 곳**이다 — 모든 호출이 이 함수를 지나므로, 새 프롬프트가 생겨도
-    # 빠지지 않는다(프로바이더별 함수에 두면 genai 만 고치고 gemma 를 빠뜨린다).
+    # 마스킹은 여기 한 곳에서(프로바이더 공통)
     prompt, system, _masked = _scrub(prompt, system)
     started = time.time()
     try:
@@ -703,8 +485,6 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
         else:
             text, meta = _generate_genai(prompt, system, max_tokens, temperature, x_client_user)
     except Exception as exc:
-        # 실패도 남긴다 — 대시보드에 «호출이 아예 없었다» 와 «호출이 깨졌다» 가 같은
-        # 모양으로 보이면 장애를 되짚을 수 없다.
         _observe(name, started, prompt, system, max_tokens, temperature, x_client_user,
                  meta={}, output=None, error=f"{type(exc).__name__}: {exc}")
         if isinstance(exc, LLMError):
@@ -718,24 +498,12 @@ def generate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str |
 def _observe(name: str, started: float, prompt: str, system: str | None, max_tokens: int,
              temperature: float, x_client_user: str, *, meta: dict, output: str | None,
              error: str | None) -> None:
-    """호출 한 건을 관측에 남긴다. 관측이 꺼져 있으면 즉시 돌아온다(observability).
+    """호출 한 건 관측 기록 + `prompt_chars` 점수(입력 크기 분포용).
 
-    **입력 크기를 점수로도 찍는다**(`prompt_chars` — 시스템 프롬프트 포함 글자 수). 행내
-    모델(gemma4-31b)의 컨텍스트 부담이 어느 호출에서 오는지는 트레이스를 한 건씩 열어서는
-    못 센다 — 대화 맥락은 12턴에 455자인데 고객 재료 블록 하나가 3천 자, 작성 시스템
-    프롬프트가 3.8천 자다(2026-09-10 측정). 줄일 자리를 정하려면 호출별 분포가 먼저 있어야
-    한다(consult CLAUDE.md §13 「고객 재료 블록 축소」). 값은 코드가 아는 사실이고, 토큰 수는
-    프로바이더가 줄 때만 `usage` 로 따로 실린다 — 글자 수는 프로바이더와 무관하게 늘 있다.
-
-    **system 이 있는 호출은 채팅 메시지 꼴로 싣는다.** Langfuse 는 `[{role, content}, …]`
-    를 대화로 알아보고 역할별로 갈라 렌더하지만, 그 밖의 dict 는 JSON 한 덩어리로
-    직렬화해 보여준다 — `\\n`·`\\"` 가 이스케이프된 채 한 칸에 들어차서 프롬프트를 읽을
-    수 없다. 대시보드에서 되짚으라고 남기는 기록이니 읽히는 꼴이 요건이다.
-    system 이 없는 호출은 문자열 그대로 둔다(그쪽은 이미 본문으로 렌더된다).
+    system 이 있으면 채팅 메시지 꼴로 기록(Langfuse 가 역할별 렌더).
     """
     observability.score("prompt_chars", prompt_chars(prompt, system), comment=name)
-    # 호출 한 건의 로그 줄은 DEBUG 다 — 한 턴에 4~8줄이라 INFO 흐름을 가린다. 입력 크기 분포는
-    # 위 점수(Langfuse)로 보고, 로그에서는 턴 끝 합계(graph.ask)만 INFO 로 남는다.
+    # 호출별 로그는 DEBUG, INFO 는 턴 끝 합계만
     observability.tally_llm(prompt_chars(prompt, system))
     observability.step("llm", name, chars=prompt_chars(prompt, system),
                        elapsed=f"{time.time() - started:.1f}초", error=error,
@@ -756,15 +524,10 @@ def _observe(name: str, started: float, prompt: str, system: str | None, max_tok
     )
 
 
-# ─────────────────────────────────────────────────────────────
-# 응답에서 JSON 꺼내기 — 네 모듈(계획·쪽지·브리핑 수정·브리핑 생성)이 각자 같은 함수를
-# 갖고 있던 것을 여기로 모았다. 응답 형식은 프로바이더가 정하므로 클라이언트가 소유한다.
-# 코드블록·전후 설명이 붙어도 처리하고, 못 찾으면 «없음»으로 답한다 — 부르는 쪽이 그것을
-# «규격 밖 응답»으로 다룬다(조용히 빈 값으로 넘기지 않는다).
-# ─────────────────────────────────────────────────────────────
+# 응답에서 JSON 추출(코드블록·전후 설명 허용). 못 찾으면 «없음» — 호출부가 규격 밖 응답으로 처리
 
 def json_object(text: str) -> dict | None:
-    """응답에서 첫 JSON 객체를 꺼낸다. 없거나 깨졌거나 객체가 아니면 None."""
+    """첫 JSON 객체. 없음·파손·비객체면 None."""
     m = re.search(r"\{.*\}", text or "", re.S)
     if not m:
         return None
@@ -776,7 +539,7 @@ def json_object(text: str) -> dict | None:
 
 
 def json_list(text: str) -> list:
-    """응답에서 JSON 배열을 꺼낸다. 없거나 깨졌거나 배열이 아니면 빈 목록(= 고른 것 없음)."""
+    """JSON 배열. 없음·파손·비배열이면 빈 목록."""
     m = re.search(r"\[.*\]", text or "", re.S)
     if not m:
         return []
@@ -788,12 +551,12 @@ def json_list(text: str) -> list:
 
 
 def prompt_chars(prompt: str, system: str | None) -> int:
-    """호출 입력의 글자 수(시스템 프롬프트 포함). 한글은 대략 2자가 1토큰이다(kb.INDEX_BUDGET_CHARS)."""
+    """입력 글자 수(시스템 프롬프트 포함)."""
     return len(prompt or "") + len(system or "")
 
 
 def _default_model_label() -> str:
-    """응답이 모델명을 안 주거나(게이트웨이 기본 라우팅) 호출이 깨졌을 때 쓸 표기."""
+    """응답에 모델명이 없을 때의 표기."""
     if PROVIDER == "anthropic":
         return ANTHROPIC_MODEL
     if PROVIDER == "gemma":
@@ -804,11 +567,7 @@ def _default_model_label() -> str:
 async def agenerate(prompt: str, *, max_tokens: int = DEFAULT_MAX_TOKENS, system: str | None = None,
                     temperature: float = 0.2, x_client_user: str = "",
                     name: str = "llm.agenerate") -> str:
-    """비동기 호출. 동기 구현을 스레드로 넘겨 blocking I/O 를 이벤트 루프에서 뺀다.
-
-    `asyncio.to_thread` 는 현재 컨텍스트를 복사해 넘기므로 트레이스 묶음(ContextVar)도
-    그대로 따라간다 — 이 경로로 부른 호출도 같은 트레이스 아래 붙는다.
-    """
+    """비동기 호출 — `generate` 를 스레드로(컨텍스트 복사로 트레이스 유지)."""
     return await asyncio.to_thread(
         generate, prompt, max_tokens=max_tokens, system=system,
         temperature=temperature, x_client_user=x_client_user, name=name,

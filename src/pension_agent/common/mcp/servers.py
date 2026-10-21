@@ -1,22 +1,7 @@
-"""행내 MCP 서버 카탈로그 — 어디에 붙나.
+"""행내 MCP 서버 카탈로그 — 서버별 주소 경로.
 
-한 곳에 모아 두는 이유는 **새 기능을 붙일 때 고칠 자리를 하나로 만들기 위해서다.** 지금
-쓰는 것은 WorkB 쪽지 하나지만 행내 MCP 게이트웨이에는 서버가 여럿 붙어 있고(사내 DB·뉴스·
-메일·통계·공공데이터·전자공시), 그중 하나를 쓰게 될 때 고치는 것은 **이 표 한 줄과 도구
-어댑터 파일 하나**다. 연결·인증(`client.py`)은 건드리지 않는다.
-
-━━ 표에 있다고 붙지 않는다 ━━
-등록하는 것은 `MCP_SERVERS` 에 적힌 서버뿐이고 기본값은 `workb` 하나다. 쓰지도 않는
-서버까지 등록하면 도구 목록을 읽을 때마다 그 서버에도 접속하게 되고, 행내 감사 기록에는
-«이 에이전트가 그 서버에 붙었다»가 남는다. 나중에 «누가 왜 붙었나»를 되짚을 때 그 기록이
-그대로 잡음이 된다.
-
-━━ 설정이 모자란 서버는 빼고 이유를 남긴다 ━━
-`sybase` 는 경로에 접속 id 가 하나 더 붙는다(`/sybase/{client_id}:{conn_id}`). 그 값이
-비어 있는 채로 켜면 `:` 로 끝나는 주소가 만들어지고, 접속 실패는 «설정이 없다»가 아니라
-«서버가 없다»로 보인다. 그래서 서버마다 «무엇이 더 있어야 켜지나»(`needs`)를 선언하고,
-모자라면 그 서버만 빼고 경고를 남긴다 — 넣어 두면 도구 목록 읽기가 통째로 실패해서
-멀쩡한 WorkB 까지 못 쓰게 된다.
+- 등록은 `MCP_SERVERS` 에 적힌 서버만(기본 workb). 미사용 서버 접속은 행내 감사 기록 잡음
+- 서버별 추가 설정(`needs`)이 비면 그 서버만 제외 — 포함 시 도구 목록 읽기 전체 실패
 """
 
 from __future__ import annotations
@@ -30,22 +15,17 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Server:
-    """MCP 서버 한 대.
-
-    `label` 은 `MultiServerMCPClient` 에 등록되는 이름이고 행내 예제 표기를 그대로 쓴다 —
-    도구 이름이 어느 서버에서 왔는지 로그·오류 메시지에서 그 이름으로 나타난다.
-    """
+    """MCP 서버 한 대."""
 
     key: str                        # MCP_SERVERS 에 적는 이름 · 코드가 부르는 이름
     label: str                      # MultiServerMCPClient 등록 이름(행내 예제 표기)
     path: str                       # 경로 템플릿 — {client_id} · {conn_id}
-    what: str                       # 무엇을 하는 서버인가(사람이 읽는 한 줄)
+    what: str                       # 서버 설명 한 줄
     needs: tuple[str, ...] = ()     # 이 서버에만 더 필요한 설정 이름
     transport: str = "sse"
 
 
-#: 게이트웨이에 붙어 있는 서버들. **여기 있다고 켜지는 것이 아니다**(위 머리말).
-#: 아직 안 써 본 서버는 경로만 적어 둔 상태이고, 쓰기로 하면 도구 어댑터를 함께 만든다.
+#: 게이트웨이 서버 목록. 등록 여부는 MCP_SERVERS 가 결정.
 CATALOG: tuple[Server, ...] = (
     Server("workb", "workb-mcp-server", "/workb/{client_id}",
            "행내 직원용 작업툴 — 쪽지 발송(send_memo)"),
@@ -58,18 +38,14 @@ CATALOG: tuple[Server, ...] = (
     Server("dart", "dart-mcp-server", "/opendart/{client_id}", "전자공시(OpenDART)"),
 )
 
-#: 아무것도 적지 않았을 때 켜는 서버. 지금 이 저장소가 실제로 쓰는 것은 이것 하나다.
+#: MCP_SERVERS 미지정 시 기본 서버.
 DEFAULT: tuple[str, ...] = ("workb",)
 
 _BY_KEY = {s.key: s for s in CATALOG}
 
 
 def parse(raw: str) -> tuple[str, ...]:
-    """`MCP_SERVERS` 값(쉼표 목록)을 서버 이름들로. 비어 있으면 기본값.
-
-    모르는 이름은 **버리고 경고를 남긴다.** 오타 하나로 기동이 죽으면 안 되지만, 조용히
-    버리면 «켠 줄 알았는데 안 켜진» 상태가 된다.
-    """
+    """`MCP_SERVERS`(쉼표 목록) → 서버 이름들. 비면 기본값. 모르는 이름은 경고 후 제외."""
     names = tuple(n.strip() for n in (raw or "").split(",") if n.strip())
     if not names:
         return DEFAULT
@@ -84,11 +60,7 @@ def parse(raw: str) -> tuple[str, ...]:
 def endpoints(names: tuple[str, ...], *, base_url: str, client_id: str,
               conn_id: str = "", headers: dict[str, str] | None = None,
               ) -> dict[str, dict[str, Any]]:
-    """`MultiServerMCPClient` 에 넘길 서버 목록.
-
-    설정이 모자란 서버는 빼고 경고를 남긴다(머리말) — 넣어 두면 도구 목록 읽기가 통째로
-    실패해서, 설정이 멀쩡한 서버까지 함께 못 쓰게 된다.
-    """
+    """`MultiServerMCPClient` 용 서버 목록. 설정 부족 서버는 경고 후 제외."""
     values = {"MCP_CONN_ID": conn_id}
     out: dict[str, dict[str, Any]] = {}
     for name in names:

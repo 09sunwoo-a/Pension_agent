@@ -1,7 +1,4 @@
-"""설정 — 첫 사용 시점에 한 번 읽는다
-
-`observability.py` 에서 갈라낸 모듈 — 공개 표면은 패키지 `__init__` 이다.
-"""
+"""Langfuse 설정 — 첫 사용 시 한 번 읽음(임포트 시점 아님 — `.env` 적재 순서 무관하게)."""
 
 from __future__ import annotations
 
@@ -12,24 +9,17 @@ import threading
 from pension_agent.common import env
 
 
-#: Langfuse Cloud. 자체 호스팅이면 LANGFUSE_HOST 로 덮는다.
+#: Langfuse Cloud. 자체 호스팅이면 LANGFUSE_HOST 로 덮어씀.
 DEFAULT_HOST = "https://cloud.langfuse.com"
 INGESTION_PATH = "/api/public/ingestion"
 
-#: 큐 상한. 넘치면 새 이벤트를 버린다 — 호출부를 막느니 관측을 잃는다.
+#: 큐 상한. 넘치면 새 이벤트 버림(호출부 차단 금지).
 MAX_QUEUE = 2000
-#: 한 번에 보내는 이벤트 수. Langfuse 수집 API 는 배치를 받는다.
+#: 배치당 이벤트 수.
 BATCH_SIZE = 50
-#: 배치가 덜 찼을 때 기다리는 시간(초). 이 시간이 지나면 있는 것만 보낸다.
+#: 배치 미충족 시 대기 시간(초). 지나면 있는 것만 전송.
 FLUSH_INTERVAL = 1.0
 
-
-# ─────────────────────────────────────────────────────────────
-# 설정 — 첫 사용 시점에 한 번 읽는다
-#
-# 임포트 시점에 읽지 않는 이유: `.env` 를 언제 읽었는지에 설정이 좌우되면 안 된다.
-# 모듈이 임포트되는 순서는 호출자가 정하지만, 첫 트레이스는 항상 그 뒤다.
-# ─────────────────────────────────────────────────────────────
 
 class _Conf:
     __slots__ = ("enabled", "host", "auth", "release", "environment",
@@ -79,12 +69,12 @@ def conf() -> _Conf:
 
 
 def enabled() -> bool:
-    """관측을 보낼 수 있는가. 키가 없거나 스위치가 꺼져 있으면 False."""
+    """관측 전송 가능 여부. 키 없음·스위치 꺼짐이면 False."""
     return conf().enabled
 
 
 def reset() -> None:
-    """설정을 다시 읽게 한다. 환경변수를 바꿔 가며 도는 테스트용."""
+    """설정 재적재(테스트용)."""
     global _CONF
     with _CONF_LOCK:
         _CONF = None

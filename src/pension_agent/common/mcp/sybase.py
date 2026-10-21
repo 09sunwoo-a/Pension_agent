@@ -1,18 +1,9 @@
 """행내 Sybase IQ 조회 — MCP `sybase` 서버의 `sybaseiq_query` 도구 어댑터.
 
-메인 브리핑(tools/branch_briefing)이 검사를 마친 SELECT 문 하나를 넘기면 행 목록을 돌려준다.
-SQL 을 고치거나 검사하지 않는다 — 그것은 부르는 쪽의 일이다.
+    query(sql, emp_no)  →  list[dict]   # 검사 끝난 SELECT 만 받음(SQL 검사는 호출부 몫)
 
-    query(sql, emp_no)  →  list[dict]
-
-설정이 모자라면(`MCP_*` · `MCP_CONN_ID` · `MCP_SERVERS` 에 sybase) `MCPUnavailable` 을 낸다 —
-부르는 쪽은 «DB 미연결»로 답한다. 조회는 부수효과가 없으므로 붙는 단계의 실패는 다시 시도한다
-(`idempotent=True`).
-
-━━ 확인되지 않은 것 ━━
-도구의 인자 이름과 응답 꼴은 행내에서 아직 실측하지 않았다. 인자 이름은 도구가 스스로 밝힌
-이름에 맞추고(workb 와 같은 방식), 응답은 흔한 꼴 몇 가지를 읽는다 — 못 읽으면 그 사실을
-오류로 낸다(빈 결과로 접지 않는다: «0건»과 «못 읽음»은 다르다).
+- 설정 부족 시 `MCPUnavailable`. 조회라 재시도 허용(`idempotent=True`)
+- 인자 이름·응답 꼴 미실측 — 도구가 밝힌 인자 이름에 맞춤, 못 읽으면 오류(빈 결과로 접지 않음)
 """
 
 from __future__ import annotations
@@ -29,11 +20,11 @@ ARG_QUERY = os.getenv("MCP_SYBASE_QUERY_ARG", "query")
 
 
 class UnreadableResult(RuntimeError):
-    """응답을 행 목록으로 읽지 못했다."""
+    """응답을 행 목록으로 읽지 못함."""
 
 
 def _rows(raw: Any) -> list[dict]:
-    """응답 → 행 목록. 문자열(JSON) · {data|rows|result: [...]} · [...] 를 읽는다."""
+    """응답 → 행 목록. 문자열(JSON) · {data|rows|result: [...]} · [...] 지원."""
     for _ in range(3):
         if isinstance(raw, str):
             try:

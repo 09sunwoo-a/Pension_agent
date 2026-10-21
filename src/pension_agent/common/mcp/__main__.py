@@ -1,17 +1,10 @@
-"""행내 MCP 연결 진단 — `python -m pension_agent.common.mcp`
+"""행내 MCP 연결 진단 — 설정·패키지·접속·도구 목록 확인.
 
-「설정을 넣었는데 왜 쪽지가 안 나가나」를 한 화면에서 끝내려고 둔다. 갈리는 자리가
-넷이고 처방이 전부 다르기 때문이다 — 설정이 비었나 · 행내 패키지가 없나 · 게이트웨이에
-못 붙나 · 붙었는데 도구가 없나.
+    python -m pension_agent.common.mcp            # 설정·패키지만(접속 안 함)
+    python -m pension_agent.common.mcp --connect  # 접속 후 도구 목록
+    python -m pension_agent.common.mcp --send     # 본인(WORKB_EMP_NO)에게 시험 쪽지 실제 발송
 
-    python -m pension_agent.common.mcp            # 설정·패키지까지만 본다(접속하지 않는다)
-    python -m pension_agent.common.mcp --connect  # 실제로 붙어서 도구 목록을 읽는다
-    python -m pension_agent.common.mcp --send     # 본인에게 시험 쪽지를 **실제로 보낸다**
-
-`--send` 는 되돌릴 수 없다(루트 CLAUDE.md 규칙 5). 그래서 기본 동작이 아니고, 받는 사람도
-`WORKB_EMP_NO`(본인)로 고정한다 — 다른 사번을 인자로 받지 않는다.
-
-키·토큰·서명은 찍지 않는다. 설정 «여부»와 주소까지다(`/health` 와 같은 규약).
+키·토큰·서명 출력 금지.
 """
 
 from __future__ import annotations
@@ -43,7 +36,7 @@ async def _connect(emp_no: str) -> None:
 
 async def _send(emp_no: str) -> None:
     msg = note.Note(title=TEST_TITLE, body=TEST_BODY)
-    from pension_agent.common.mcp import workb as adapter  # noqa: PLC0415 — 보낼 때만 필요하다
+    from pension_agent.common.mcp import workb as adapter  # noqa: PLC0415 — 보낼 때만 필요
 
     result = await note.send_note([emp_no], msg, send=adapter.send_memo)
     print(f"발송            {result.get('status')} · {result.get('detail')}")

@@ -1,7 +1,4 @@
-"""전송 — 백그라운드 워커 하나
-
-`observability.py` 에서 갈라낸 모듈 — 공개 표면은 패키지 `__init__` 이다.
-"""
+"""Langfuse 전송 — 백그라운드 워커 하나."""
 
 from __future__ import annotations
 
@@ -20,33 +17,28 @@ from pension_agent.common.observability._conf import BATCH_SIZE, FLUSH_INTERVAL,
 from pension_agent.common.observability._payload import _now
 
 
-# ─────────────────────────────────────────────────────────────
-# 전송 — 백그라운드 워커 하나
-# ─────────────────────────────────────────────────────────────
-
 _QUEUE: queue.Queue[dict] = queue.Queue(maxsize=MAX_QUEUE)
 _WORKER: threading.Thread | None = None
 _WORKER_LOCK = threading.Lock()
 
-#: 큐에 들어갔지만 아직 전송이 끝나지 않은 이벤트 수. flush() 가 이걸 보고 기다린다.
+#: 큐 투입 후 전송 미완료 이벤트 수(flush() 대기 기준).
 _pending = 0
 _IDLE = threading.Condition()
 
 _STATS = {"queued": 0, "sent": 0, "dropped": 0, "failed": 0}
 
-#: 마지막 전송 실패의 원인. 전송은 백그라운드라 예외를 호출부로 올릴 수 없어서, 진단은
-#: 이 값과 아래 «첫 실패 한 줄»이 전담한다.
+#: 마지막 전송 실패 원인(백그라운드라 예외 대신 이 값으로 진단).
 _LAST_ERROR: str | None = None
 _warned = False
 
 
 def stats() -> dict[str, int]:
-    """보낸/버린/실패한 이벤트 수. 관측이 도는지 확인할 때 본다."""
+    """보낸/버린/실패한 이벤트 수."""
     return dict(_STATS)
 
 
 def last_error() -> str | None:
-    """마지막 전송 실패 원인. 실패가 없었으면 None."""
+    """마지막 전송 실패 원인. 없으면 None."""
     return _LAST_ERROR
 
 
@@ -81,7 +73,7 @@ def _ensure_worker() -> None:
 
 
 def _run() -> None:
-    """큐를 배치로 묶어 보낸다. 배치가 덜 차도 FLUSH_INTERVAL 이 지나면 보낸다."""
+    """큐를 배치로 전송. 미충족이어도 FLUSH_INTERVAL 경과 시 전송."""
     global _pending
     while True:
         batch = [_QUEUE.get()]
@@ -126,11 +118,7 @@ def _send(batch: list[dict]) -> None:
             with contextlib.suppress(Exception):
                 detail = " " + exc.read().decode("utf-8", "replace")[:300]
         _LAST_ERROR = f"{type(exc).__name__}: {exc}{detail}"
-        # **첫 실패는 반드시 한 줄 알린다.** 삼키는 것은 «에이전트를 세우지 않기» 위해서지
-        # «아무 말도 하지 않기» 위해서가 아니다 — 조용히 실패하면 «전송이 깨졌다»와 «애초에
-        # 안 켜졌다»가 화면에서 구별되지 않고, 그 상태로 대시보드만 들여다보게 된다.
-        # 두 번째부터는 잠잠하다(턴마다 같은 줄이 쌓이면 그게 다시 노이즈다). 전부 보려면
-        # LANGFUSE_DEBUG=1.
+        # 첫 실패만 한 줄 출력(조용한 실패 방지). 전부 보려면 LANGFUSE_DEBUG=1
         if not _warned or conf().debug:
             _warned = True
             print(f"[langfuse] 전송 실패 — {_LAST_ERROR}\n"
@@ -147,10 +135,7 @@ def _batch_metadata(c: _Conf) -> dict:
 
 
 def flush(timeout: float = 5.0) -> bool:
-    """큐가 빌 때까지 기다린다. 프로세스 종료 직전(atexit)과 테스트가 부른다.
-
-    반환값은 «시간 안에 다 보냈는가». 못 보냈다고 예외를 던지지는 않는다.
-    """
+    """큐가 빌 때까지 대기(atexit·테스트). 시간 내 완료 여부 반환, 예외 없음."""
     with _IDLE:
         return _IDLE.wait_for(lambda: _pending == 0, timeout=timeout)
 

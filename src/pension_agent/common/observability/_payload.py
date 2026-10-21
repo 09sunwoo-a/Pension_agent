@@ -1,7 +1,4 @@
-"""본문 가공 — 자를 것은 자르고, 끌 수 있으면 끈다
-
-`observability.py` 에서 갈라낸 모듈 — 공개 표면은 패키지 `__init__` 이다.
-"""
+"""트레이스 본문 가공 — 길이 제한·본문 끄기·JSON 변환."""
 
 from __future__ import annotations
 
@@ -13,16 +10,8 @@ import time
 from pension_agent.common.observability._conf import conf
 
 
-# ─────────────────────────────────────────────────────────────
-# 본문 가공 — 자를 것은 자르고, 끌 수 있으면 끈다
-# ─────────────────────────────────────────────────────────────
-
 def _payload(value: Any) -> Any:
-    """input·output 을 보낼 수 있는 모양으로 만든다.
-
-    `LANGFUSE_CAPTURE_CONTENT=0` 이면 본문 대신 길이만 남긴다 — 개인정보를 외부로
-    내보내지 않으면서 «호출은 있었다 · 얼마나 길었다»는 볼 수 있게 하는 자리다.
-    """
+    """input·output 을 전송 가능한 꼴로 변환. `LANGFUSE_CAPTURE_CONTENT=0` 이면 길이만."""
     if value is None:
         return None
     c = conf()
@@ -37,7 +26,7 @@ def _text(value: Any) -> str:
 
 
 def _jsonable(value: Any) -> Any:
-    """JSON 으로 실을 수 있는 값으로 낮춘다. 못 낮추는 것은 문자열로 떨어뜨린다."""
+    """JSON 가능 값으로 변환. 불가하면 문자열."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, dict):
@@ -69,6 +58,6 @@ def _now() -> str:
 
 
 def _iso(ts: float | None) -> str:
-    """Langfuse 가 받는 ISO 8601 UTC. `datetime.UTC` 는 3.11+ 라 쓰지 않는다."""
+    """ISO 8601 UTC. `datetime.UTC` 는 3.11+ 라 미사용."""
     moment = datetime.fromtimestamp(ts if ts is not None else time.time(), tz=timezone.utc)
     return moment.isoformat().replace("+00:00", "Z")
