@@ -18,7 +18,7 @@
     응답     isStream=true : SSE — "data: {...}" 줄, "data: [DONE]" 으로 끝난다. **기본.**
                              "data:" 없이 JSON 줄만 오는 경우도 같은 방식으로 읽는다.
              isStream=false: JSON 하나.
-             어느 쪽이든 각 content 는 **에이전트 이벤트(JSON 객체)** 다 — src/main.py 머리말 «출력 형식»:
+             어느 쪽이든 각 content 는 **에이전트 이벤트(JSON 객체)** 다 — client/README.md:
                progress(진행 문구) → answer(본문·intent) → [action | clarify] → sources → followups → done
              `_events_in` 이 content 에서 이벤트를 꺼내고 `_render` 가 type 별로 그린다. 프론트가 할 일과 같다.
              content 를 하나도 못 찾으면 받은 원문을 stderr 에 찍는다 — 형태가 다를 때 그것을 보고 고친다.
@@ -143,7 +143,7 @@ _DECODER = json.JSONDecoder()
 def _events_in(text: str) -> Iterator[dict]:
     """게이트웨이 content 문자열에서 에이전트 이벤트(JSON 객체, `type` 키)를 차례로 꺼낸다.
 
-    프론트가 그대로 따라 하면 되는 참조 구현이다(src/main.py 머리말 «출력 형식»).
+    프론트가 그대로 따라 하면 되는 참조 구현이다(client/README.md).
       · content 하나에 이벤트가 하나인 것이 정상이지만, 게이트웨이가 여러 개를 합쳐 보내지
         않는다는 확인이 없어 객체를 **연달아** 읽는다(`raw_decode` 반복).
       · 게이트웨이 오류 문구 안에 에이전트의 CHUNK 원문이 통째로 실려 오는 경우가 있었다

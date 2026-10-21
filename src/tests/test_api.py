@@ -6,7 +6,7 @@ genai-platform.md «API I/O 스키마 (고정)»). 이 스키마가 어긋나면
 
   · input_value 는 JSON «문자열» 이고, 그 안에 message·x_client_user 가 있어야 한다
   · 필수 키가 없으면 422 (500 이 아니다 — 호출자가 무엇이 빠졌는지 알아야 한다)
-  · 응답은 SSE 프레임의 CHUNK 이고, 각 content 는 JSON 이벤트 하나다(main.py «출력 형식»):
+  · 응답은 SSE 프레임의 CHUNK 이고, 각 content 는 JSON 이벤트 하나다(client/README.md):
     progress… → answer → [action | clarify] → sources → followups → done. 출처는 «항상»
     실린다(0건이면 빈 목록) — 근거를 못 보여주면 이 에이전트의 답이 아니다
   · 진행 표시는 항상, 답변보다 **먼저** 흐른다
@@ -74,7 +74,7 @@ def _events(resp, sse: bool = True) -> list[dict]:
         if not line.strip():
             continue
         if sse:
-            # 게이트웨이는 SSE 파서다 — `data:` 없는 줄은 버린다(main.py 머리말 «응답 프레이밍»).
+            # 게이트웨이는 SSE 파서다 — `data:` 없는 줄은 버린다.
             check(line.startswith("data: "), "스트림 이벤트는 SSE 프레임(data: …)이다", line[:40])
             line = line[len("data:"):]
         d = json.loads(line)
@@ -256,7 +256,7 @@ try:
     check(_seen.get("on_progress") is not None, "진행 콜백을 넘긴다", str(_seen.get("on_progress")))
     # 행내에서 보인 로그가 접속 로그 한 줄뿐이었다 — 루트 로거에 핸들러가 없어서 log.info
     # 가 어디에도 안 나갔다. 요청 한 건이 «request → (agent 단계 줄) → done»으로 묶여
-    # 찍히는지 본다. HTTP 경계 줄의 로거는 `api` 다(main.py 머리말 «로그»).
+    # 찍히는지 본다. HTTP 경계 줄의 로거는 `api` 다.
     _logs = [r for r in _captured if r.name == "api"]
     _rid = next((m.split("]")[0][1:] for m in (r.getMessage() for r in _logs)
                  if m.startswith("[") and "] request " in m), None)
@@ -293,7 +293,7 @@ try:
     _events(r)
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
-    # 하이픈 없는 13자리 — 받기는 한다(main.py 머리말 customer_id).
+    # 하이픈 없는 13자리 — 받기는 한다(client/README.md customer_id).
     _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
                                             customer_id="1548214938201")))
     check(_seen.get("customer_id") == "154821-4938201",
@@ -572,7 +572,7 @@ try:
     main.consult_graph.ask = _fake_ask
     _captured.clear()
 
-    # ── 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다(main.py 머리말 «로그 이벤트») ──
+    # ── 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다 ──
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
     check("log" not in _types(_events(r)) and "trace" not in _types(_events(r)),
           "로그 이벤트·절차 기록은 기본으로 꺼져 있다", str(_types(_events(r))))

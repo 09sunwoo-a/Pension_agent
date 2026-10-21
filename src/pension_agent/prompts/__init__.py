@@ -1,28 +1,27 @@
-"""LLM 프롬프트 — 쓰는 모듈과 같은 이름으로 나눠 둔다. 문구만 고칠 때 로직을 건드리지 않기 위해서다.
+"""LLM 프롬프트 — 쓰는 모듈과 같은 이름의 파일. 전부 여기서 재노출(`prompts.COMPOSE_SYSTEM`).
 
-이름은 전부 여기서 재노출한다(`prompts.COMPOSE_SYSTEM`). `*_BLOCK` 은 조건이 맞을 때만
-코드가 끼우는 조각이고, 끼울지는 전부 코드가 판정한다.
+`*_BLOCK` 은 조건이 맞을 때 코드가 끼우는 조각(판정은 코드).
 
     라우팅
     understand.py   ROUTE_PROMPT               질문을 어느 기능으로 보낼지
 
     근거 수집
     plan.py         PLAN_PROMPT                다음에 부를 도구 하나
-                    PLAN_MISSES_BLOCK          빗나간 호출 목록 — 같은 호출을 반복하지 않게
+                    PLAN_MISSES_BLOCK          빗나간 호출 목록(반복 방지)
                     PLAN_BUDGET_BLOCK          남은 바퀴 수 한 줄
-                    PLAN_RETRY_BLOCK           근거 0건으로 끝내려 할 때의 재계획 지시
+                    PLAN_RETRY_BLOCK           근거 0건 종료 시도 시 재계획 지시
     select.py       BUCKET_PROMPT · SELECT_PROMPT   버킷 → 카드 2단 선택
     pitch.py        SITUATION_PROMPT           화법 검색용 상황 슬롯 추출
     adequacy.py     ADEQUACY_PROMPT            고른 근거가 질문에 답이 되는가
 
     답변 작성
     compose.py      COMPOSE_SYSTEM · COMPOSE_PROMPT   원장만으로 답변 작성
-                    ANSWER_SHAPES · SHAPE_BLOCK  도구별 «답에 꼭 들어갈 것»과 그 블록
+                    ANSWER_SHAPES · SHAPE_BLOCK  도구별 답 필수 요소와 그 블록
                     MUST_BLOCK                 필수 인용 스팬이 있을 때
                     COMPOSE_RETRY_BLOCK        검증에서 잘린 뒤 다시 쓸 때
                     COMPOSE_PREMISE_BLOCK      전제를 밝히고 답할 때
                     COMPOSE_MISSING_BLOCK      핵심 대상이 없을 때
-                    REPEAT_BLOCK               직전 턴과 같은 재료일 때 — 다시 세우지 않게
+                    REPEAT_BLOCK               직전 턴과 같은 재료일 때
                     REWRITE_BLOCK              이전 답변을 다시 쓰는 턴(줄여줘·쉽게)
                     ACCEPTED_BLOCK             승낙받아 실은 참고자료 턴
     clarify.py      CLARIFY_PROMPT             답의 형태 판정
@@ -33,15 +32,15 @@
                     BRANCH_SQL_RETRY_BLOCK     검사·실행에 걸린 SQL 을 다시 쓸 때
 
     특수 턴 · 쪽지
-    meta.py         HELP_SYSTEM · HELP_PROMPT  에이전트 자신에 대한 질문 — 코드가 준 사실 안에서
+    meta.py         HELP_SYSTEM · HELP_PROMPT  에이전트 자신에 대한 질문
     correction.py   CORRECTION_SYSTEM · CORRECTION_PROMPT   브리핑 산문 수정
     memo.py         MEMO_SYSTEM · MEMO_PROMPT  이번 턴의 재료로 제목·본문
                     MEMO_SELF_GUIDE · MEMO_OTHER_GUIDE   받는 사람이 본인 / 다른 직원
                     MEMO_TABLE_BLOCK           코드가 값 표를 붙일 때
-                    MEMO_ADDRESSEE_LINE        받는 사람을 부를 호칭(이름·직급)을 코드가 알 때
-                    MEMO_EDIT_SYSTEM · MEMO_EDIT_PROMPT  걸려 있는 초안을 직원의 지시대로 고친다
-                    MEMO_EDIT_RECIPIENT_BLOCK  받는 사람이 바뀌어 호칭을 맞출 때
-                    MEMO_EDIT_ECHO_BLOCK       고친 본문에 직원의 말이 통째로 들어갔을 때 다시 쓰기
+                    MEMO_ADDRESSEE_LINE        받는 사람 호칭(이름·직급)을 알 때
+                    MEMO_EDIT_SYSTEM · MEMO_EDIT_PROMPT  걸린 초안을 직원 지시대로 수정
+                    MEMO_EDIT_RECIPIENT_BLOCK  받는 사람 변경 시 호칭 맞춤
+                    MEMO_EDIT_ECHO_BLOCK       직원 말이 본문에 통째로 들어갔을 때 재작성
 """
 
 from __future__ import annotations

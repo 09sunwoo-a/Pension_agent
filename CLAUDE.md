@@ -107,7 +107,7 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | 실행·테스트·구조 | `src/README.md` — `src/` 만 행내로 옮기므로 그 안에서 완결되는 메인 문서다. 바깥(루트·`docs/`)을 링크하지 않는다 |
 | 행내 배포 | `src/main.py`(FastAPI 진입점) · `src/Dockerfile`(내부망) · `src/.env.example`. 외부망용 `Dockerfile.local` · `requirements-dev.txt` 는 저장소에 넣지 않는다 |
 | 행내 시스템 연동(MCP) | `src/pension_agent/common/mcp/` — 서버 표(`servers.py`) · 연결과 호출(`client.py`) · 도구 어댑터(`workb.py` · `sybase.py`). 붙는 것은 WorkB 쪽지 발송과 Sybase IQ 조회(메인 브리핑)이고, 설정(`MCP_*`)이 없으면 보내지 않고 «미연결»로 답한다. 진단은 `python -m pension_agent.common.mcp` |
-| 호출 계약(프론트·게이트웨이) | `client/README.md` — 요청 키 · 응답 이벤트(`type`) · 파싱 규칙 · 멀티턴. 참조 구현은 `client/call_agent.py`. 원천은 `src/main.py` 머리말이고 이벤트를 바꾸면 함께 고친다(`tests/test_api.py` 가 검사) |
+| 호출 계약(프론트·게이트웨이) | `client/README.md` — 요청 키 · 응답 이벤트(`type`) · 파싱 규칙 · 멀티턴. 참조 구현은 `client/call_agent.py`. `src/main.py` 머리말은 요청 키·이벤트 type 요약만 둔다. 이벤트를 바꾸면 이 문서를 함께 고친다(`tests/test_api.py` 가 type 목록을 검사) |
 | 에이전트 기준 | `src/pension_agent/CLAUDE.md` — 대화 동작의 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
 | 지식 데이터 기준 | `src/pension_agent/knowledge/CLAUDE.md` — 카드가 선언해야 하는 관계 5종 · 실측 · 이행 순서 |
 

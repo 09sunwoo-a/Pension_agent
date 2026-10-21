@@ -1,16 +1,8 @@
-"""situation_slots 노드용(pitch.py 전용) — intent 가 situation/guide 로 확정된 뒤에만
-
-`prompts.py` 에서 갈라낸 모듈 — 공개 표면은 패키지 `__init__` 이다.
-"""
+"""화법 검색용 상황 슬롯(고객유형·거절유형·상담단계) 추출 프롬프트(pitch.py 전용)."""
 
 from __future__ import annotations
 
 
-# ─────────────────────────────────────────────────────────────
-# situation_slots 노드용(pitch.py 전용) — intent 가 situation/guide 로 확정된 뒤에만
-# 호출된다. 화법 카드 검색(retrieve)에 필요한 고객유형·거절유형·상담단계만 분해한다 —
-# 라우팅과 무관한 이 도메인 어휘를 ROUTE_PROMPT 에서 떼어낸 이유가 여기 있다.
-# ─────────────────────────────────────────────────────────────
 
 SITUATION_PROMPT = """아래 질문을 화법 카드 검색 조건으로 분해해 JSON만 출력하라. 설명·코드펜스 금지.
 

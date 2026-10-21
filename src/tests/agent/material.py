@@ -1907,12 +1907,8 @@ def check_origin() -> int:
     print(f"{'✓' if hit else '✗'} source_lines — URL·관련도는 있을 때만, compact 는 한 줄")
     ok += hit
 
-    # 네 진입점이 전부 그 함수에 닿는가. 운영 CLI 와 행내 API 는 «답변 + 출처 블록»을
-    # 통째로 텍스트로 펴야 해서 `render.sources_block` 을 경유하고, 그 안에서 source_lines
-    # 를 부른다 — 경유가 하나 늘었을 뿐 표기를 정하는 함수는 여전히 하나다. 그 경유까지
-    # 따라가서 본다(중간에 표기를 복사해 갖는 순간 이 검사가 깨진다).
-    # 운영 CLI 는 모듈 최상위에서 REPL 이 돌아 **임포트하면 안 되므로**(스크립트다)
-    # 파일 텍스트로 확인한다. main.py 도 uvicorn 이 부르는 진입점이라 같게 다룬다.
+    # 텍스트 진입점(운영 CLI·$CAD·$CADR)이 같은 출처 표기 함수에 닿는지 확인.
+    # 운영 CLI 는 임포트 시 REPL 이 돌아 파일 텍스트로 확인. main.py 는 sources 이벤트로 보내 해당 없음.
     import inspect
 
     from pension_agent.actions import render
@@ -1921,13 +1917,11 @@ def check_origin() -> int:
     # 경로를 되짚지 않고 config 에서 받는다(루트 CLAUDE.md 규칙 4).
     from pension_agent.common import config as _config
     ops_src = (_config.PACKAGE_ROOT / "__main__.py").read_text(encoding="utf-8")
-    api_src = (_config.SRC_ROOT / "main.py").read_text(encoding="utf-8")
     hit = ("source_lines" in inspect.getsource(render)
            and "render.sources_block" in ops_src
-           and "render.sources_block" in api_src
            and "source_lines" in inspect.getsource(dbg_main._print_source)
            and "source_lines" in inspect.getsource(dbg_reps._print_source_line))
-    print(f"{'✓' if hit else '✗'} 운영 CLI·행내 API·$CAD·$CADR 이 같은 출처 표기 함수에 닿는다")
+    print(f"{'✓' if hit else '✗'} 운영 CLI·$CAD·$CADR 이 같은 출처 표기 함수에 닿는다")
     ok += hit
 
     # 카드가 밝힌 원천 문서(source.doc)가 레지스트리로 이어져 문서명으로 나온다.

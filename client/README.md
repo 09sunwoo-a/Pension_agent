@@ -10,7 +10,7 @@
 | `call_agent.py` | 참조 구현. 요청을 만들고(`_payload`), 응답에서 이벤트를 꺼내고(`_events_in`), 종류별로 출력한다(`_render`). 프론트는 이 세 함수가 하는 일을 그대로 옮기면 된다 |
 | `requirements.txt` | `requests` 하나 |
 
-응답 형식의 원천은 `src/main.py` 머리말 «출력 형식»이다. 이벤트를 바꾸면 이 문서를 함께 고친다.
+응답 형식의 상세 계약은 이 문서가 맡는다(`src/main.py` 머리말은 요청 키·이벤트 type 요약만). 이벤트를 바꾸면 이 문서를 함께 고친다.
 `src/tests/test_api.py` 가 코드가 내보내는 이벤트 type 이 전부 이 문서에 있는지 검사한다.
 
 ## 0. 실행
@@ -259,7 +259,7 @@ Content-Type: application/json
   `raw` 에 무엇인가 들어 있으면 게이트웨이가 이벤트가 아닌 텍스트를 보낸 것이다.
 - 에이전트 쪽 로그(Grafana)는 요청마다 8자리 id 로 묶여 찍힌다 — `[api] request` 와
   `[api] done` 사이에 `[agent]` 단계 줄(understand · plan · tool · compose · verify · turn)이
-  경과초와 함께 선다(`src/main.py` 머리말 «로그»). request 줄의 `맥락=N턴(저장)` 이 두 번째
+  경과초와 함께 선다. request 줄의 `맥락=N턴(저장)` 이 두 번째
   턴부터 보이면 세션이 이어지고 있는 것이다.
 - Grafana 를 볼 수 없을 때는 요청에 `"log_events": true` 를 넣으면 같은 줄이 `log` 이벤트로
   응답에 실려 온다. 프론트에서 이렇게 찍는다:

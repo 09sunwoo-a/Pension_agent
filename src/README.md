@@ -168,8 +168,8 @@ CUSTOMER_ID=198734-1205842 scripts/test_local.sh "이 고객 왜 관리 대상�
 RAW=1 scripts/test_local.sh "질문"                            # 응답 이벤트 JSON 을 그대로 출력
 ```
 
-요청 키와 응답 이벤트(`progress` · `answer` · `sources` · `done` 등)의 규격은 `main.py` 머리말에
-있다. 프론트·게이트웨이 쪽 설명서는 `client/README.md` 로 따로 배포한다.
+요청 키와 응답 이벤트(`progress` · `answer` · `sources` · `done` 등)의 요약은 `main.py` 머리말에
+있다. 상세 계약(프론트·게이트웨이용)은 `client/README.md` 로 따로 배포한다.
 
 ### 디버그
 

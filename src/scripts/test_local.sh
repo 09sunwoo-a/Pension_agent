@@ -57,7 +57,7 @@ print(json.dumps(payload, ensure_ascii=False))
 ' "$MESSAGE" "$CLIENT_USER" "${CUSTOMER_ID:-}" "${SESSION_ID:-}" "${LOG_EVENTS:-}")
 fi
 
-# 응답은 CHUNK 마다 content 에 JSON 이벤트 하나다(main.py 머리말 «출력 형식»). type 별로 그린다 —
+# 응답은 CHUNK 마다 content 에 JSON 이벤트 하나다(client/README.md). type 별로 그린다 —
 # 프론트가 할 일과 같다. SSE 프레임(data: {...})이 기본이고 CHAT_SSE_FRAMING=0 이면 JSON 줄이다.
 BODY=$("$PYTHON" -c '
 import json, sys
