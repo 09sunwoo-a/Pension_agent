@@ -1,7 +1,6 @@
 """생성물·배선 정합 — 아키텍처 다이어그램 · 노드 라벨 충돌 · 리허설 기대값.
 
-`tests/test_agent.py::main` 이 정해진 순서로 부른다 — 여기 함수를 직접 돌리지 않는다
-(스텁 설치와 정리가 거기 있다).
+`test_agent.py::main` 이 호출(스텁 설치·정리 포함). 직접 실행 금지.
 """
 
 from __future__ import annotations
@@ -12,9 +11,7 @@ from tests.agent._common import print  # noqa: A001 — 집계용 print
 
 
 def check_architecture_doc() -> int:
-    """README 의 아키텍처 다이어그램은 생성물이다 — 코드(그래프 노드·도구·게이트)와
-    어긋난 채 남으면 손그림 시절의 사고(lms_send 개명 뒤에도 옛 이름이 그려져 있던 것)가
-    재발한다. 재생성 결과와 README 의 마커 구간이 같은지 대조한다."""
+    """README 아키텍처 다이어그램(생성물)이 재생성 결과와 일치하는지."""
     from scripts import render_architecture as RA
 
     ok = 0
@@ -32,12 +29,7 @@ def check_architecture_doc() -> int:
 
 
 def check_node_label_collision() -> int:
-    """그래프 노드 라벨이 상태 키와 겹치지 않는가.
-
-    행내 환경의 langgraph(구버전)는 add_node 에서 라벨이 상태 키와 같으면 거부한다
-    ("'answer' is already being used as a state key"). 개발 환경(1.x)은 그 검사가 없어
-    여기서만 통과하고 행내에서 임포트가 죽었다 — answer 노드를 compose 로 개명한
-    이유다. 같은 충돌이 다시 들어오면 행내에 가서야 터지므로 여기서 잡는다."""
+    """노드 라벨·상태 키 충돌 없음 — 행내 구버전 langgraph 는 add_node 에서 거부(1.x 는 미검사)."""
     import typing
 
     from pension_agent.state import AgentState
@@ -50,18 +42,12 @@ def check_node_label_collision() -> int:
 
 
 def check_rehearsal_expectations() -> int:
-    """리허설 기대값 — `sees` 중 기계가 판정할 수 있는 부분 (tests/debug/scenarios.EXPECT).
-
-    실 LLM 없이 재는 것은 **판정 장치 자체**다: 기대가 실재하는 턴을 가리키는가 · 무엇을
-    어긋남으로 보는가 · 실행 사실을 어떻게 읽는가. 실제 대본을 도는 것은 `reps` 의 일이고
-    그건 LLM 이 있어야 한다.
-    """
+    """리허설 기대값(scenarios.EXPECT) 판정 장치 검사 — 실 LLM 없이."""
     from tests.debug import reps as REPS, scenarios as SCEN, trace as TR
     ok = 0
     print("\n[리허설 기대값 — sees 를 기계가 판정한다]")
 
-    # 기대는 실재하는 턴을 가리켜야 한다. 없는 라벨을 적으면 그 기대는 영원히 판정되지
-    # 않으면서 통과처럼 보인다 — 검사 표가 거짓말하는 가장 나쁜 형태다.
+    # 없는 턴 라벨은 영원히 미판정인데 통과처럼 보임
     hit = bool(SCEN.EXPECT) and all(
         label in SCEN._labels_of(script) for script, label in SCEN.EXPECT)
     print(f"{'✓' if hit else '✗'} 모든 기대가 실재하는 턴을 가리킨다 ({len(SCEN.EXPECT)}건)")
@@ -81,7 +67,7 @@ def check_rehearsal_expectations() -> int:
     print(f"{'✓' if raised else '✗'} 없는 턴을 가리키면 임포트가 실패한다(조용히 지나가지 않는다)")
     ok += raised
 
-    # ── diff 의 규약 ──────────────────────────────────────
+    # diff 규약
     want = SCEN.Expect(tools=("fact",), outcome="answer", verdict="assume", sources=True)
     base = {"tools": ["fact", "customer"], "outcome": "answer", "verdict": "assume",
             "sources": True}
@@ -102,7 +88,7 @@ def check_rehearsal_expectations() -> int:
     print(f"{'✓' if hit else '✗'} 참/거짓 항목은 False 도 기대로 판정한다")
     ok += hit
 
-    # ── 실행 사실을 어떻게 읽나(_observed) ────────────────
+    # 실행 사실 읽기(_observed)
     def turn(nodes):
         t = TR.Turn(question="q")
         t.nodes.extend(nodes)
@@ -125,8 +111,7 @@ def check_rehearsal_expectations() -> int:
     print(f"{'✓' if hit else '✗'} 되묻기 턴 — 답변으로 세지 않는다")
     ok += hit
 
-    # LLM 이 죽은 턴은 «되묻지도 답하지도 않은» 세 번째 결말이다(§11). 답변으로 세면
-    # 장애가 난 실행이 통과로 보고된다 — 실제로 리허설 11턴 중 10턴이 그랬던 날이 있다.
+    # LLM 실패 턴은 세 번째 결말 — 답변으로 세면 장애 실행이 통과로 보고됨
     dead = turn([TR.Node(name="plan_step", delta={"llm_error": "HTTPError"}),
                  TR.Node(name="answer", delta={})])
     got = REPS._observed({"history": [{"tools": []}], "sources": []}, dead)
@@ -148,7 +133,6 @@ def check_rehearsal_expectations() -> int:
     print(f"{'✓' if hit else '✗'} 재계획이 돌았는지 읽는다 (gap 23 이 만든 경로)")
     ok += hit
 
-    # 기대가 없는 턴은 아무것도 찍지 않는다 — 대부분의 턴이 그렇다.
     line, misses = REPS._expect_line("cases", "9", {}, answered)
     hit = line == "" and misses == []
     print(f"{'✓' if hit else '✗'} 기대가 없는 턴은 판정하지 않는다")

@@ -1,12 +1,4 @@
-"""메인 브리핑(tools/branch_briefing) 회귀 테스트 — LLM 을 스텁으로 갈아끼우므로 API 키 없이 돌아간다.
-
-여기서 재는 것:
-  · 검사(check) — SELECT 하나 · 고정 뷰만 · 쓰기·시스템 낱말 없음 · 문자열 안의 낱말은 오판하지 않음
-  · 부점 범위 — 사번으로 조회한 부점의 고객만 보이고, LLM 이 다른 부점을 적어도 바뀌지 않음
-  · 행 수 상한 — TOP n 번역 · MAX_ROWS 초과 시 잘림 표시
-  · 사번이 없거나 모르는 사번 · 백엔드 off · Sybase 고정 SQL 미작성이면 조회하지 않음(«확인하지 못함»)
-  · 검사에 걸리면 이유를 실어 다시 쓰게 함 · 끝내 못 쓰면 도구 고장
-  · 결과가 원장 근거가 되고 SQL 이 출처에 남음 · 고객 식별번호가 결과에 없음
+"""메인 브리핑(tools/branch_briefing) 회귀 테스트 — SQL 검사 · 부점 범위 · 행 수 상한 · 미조회 조건 · 재작성 · 원장·출처. LLM 스텁.
 
 실행: python -m tests.test_branch
 """
@@ -37,7 +29,7 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 
 
 class _LLM:
-    """tool.generate 를 갈아끼운다. replies 를 차례로 돌려주고 프롬프트를 남긴다."""
+    """tool.generate 교체 — replies 순차 반환, 프롬프트 기록."""
 
     def __init__(self, *replies: str):
         self.replies = list(replies)
@@ -65,7 +57,6 @@ def _state(emp: str | None = EMP, q: str = "질문") -> dict:
     return {"question": q, "employee_id": emp}
 
 
-# ─────────────────────────────────────────────────────────────
 def check_checker() -> None:
     ok = ["SELECT customer_name FROM v_irp_customer",
           "select count(*) from v_irp_customer where default_option = '미설정'",
@@ -110,7 +101,7 @@ def check_scope() -> None:
     _, rows, _ = run.execute("SELECT DISTINCT branch_name FROM v_irp_customer", "0001", EMP)
     check([r["branch_name"] for r in rows] == ["여의도"], "고객 뷰에는 직원 부점 고객만 있다",
           str(rows))
-    # LLM 이 다른 부점을 조건으로 적어도 범위는 바뀌지 않는다 — 결과가 비거나 자기 부점뿐이다.
+    # LLM 이 다른 부점을 적어도 범위 불변
     _, rows, _ = run.execute("SELECT customer_name FROM v_irp_customer WHERE branch_name = '강남'",
                              "0001", EMP)
     check(rows == [], "다른 부점을 조건으로 적어도 다른 부점 고객은 안 보인다", str(rows[:3]))
@@ -228,7 +219,6 @@ def check_registry() -> None:
     check("branch" in ANSWER_SHAPES, "답변 형태 요구가 있다")
 
 
-# ─────────────────────────────────────────────────────────────
 def main() -> int:
     check_checker()
     check_scope()

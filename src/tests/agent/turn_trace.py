@@ -1,7 +1,6 @@
-"""턴 절차 기록(`turn_trace`) — 응답의 `trace` 이벤트가 싣는 것을 진짜 그래프로 잰다.
+"""턴 절차 기록(`turn_trace`) 검사 — 응답 `trace` 이벤트를 진짜 그래프로 측정.
 
-LLM 만 스크립트한다(`tests/debug/script.py` — 검색·근거 조립·게이트는 진짜 코드다). 그래야
-«패널에 서는 것이 코드가 실제로 판정한 것»인지를 잴 수 있다.
+LLM 만 스크립트(`tests/debug/script.py`), 검색·근거·게이트는 실코드.
 """
 
 from __future__ import annotations
@@ -16,9 +15,7 @@ from tests.debug import script as SC
 
 
 def _ask(name: str) -> dict:
-    """진짜 노드로 그래프를 새로 만들어 한 턴 돌린다. `test_agent.main` 이 노드를
-    전역 스텁으로 바꿔 두므로(그래프도 그 스텁으로 캐시돼 있다) 원래대로 돌려놓고 부르고,
-    끝나면 그 상태를 되돌린다."""
+    """진짜 노드로 한 턴 실행. 전역 스텁(`test_agent.main`)을 잠시 원복 후 복구."""
     scn = SC.SCENARIOS[name]
     saved = (G.understand, G.plan_step, G._AGENT)
     G.understand, G.plan_step, G._AGENT = U.understand, P.plan_step, None
@@ -37,7 +34,7 @@ def check_turn_trace() -> int:
         print(f"{'✓' if hit else '✗'} {label}" + ("" if hit or not detail else f" — {detail}"))
         ok += bool(hit)
 
-    # ── 통과한 턴 ─────────────────────────────────────────────
+    # 통과한 턴
     r = _ask("tax_credit_clean")
     t = r.get("trace") or {}
     say(set(t) >= {"started_at", "finished_at", "intent", "timeline", "rounds", "evidence",
@@ -65,10 +62,10 @@ def check_turn_trace() -> int:
     say(any(not s["matches"] for s in t.get("sentences", [])),
         "trace: 코드가 대응을 증명하지 못한 문장은 대응이 빈 목록이다(지어내지 않는다)",
         str([s["matches"] for s in t.get("sentences", [])]))
-    json.dumps(t, ensure_ascii=False)   # 직렬화가 되어야 응답에 실린다 — 안 되면 여기서 죽는다
+    json.dumps(t, ensure_ascii=False)   # 직렬화 불가 시 응답 미적재 — 여기서 실패
     say(True, "trace: JSON 으로 직렬화된다")
 
-    # ── 검증에 걸린 턴 — 사유는 싣고 초안은 싣지 않는다 ─────────
+    # 검증에 걸린 턴 — 사유만, 초안 미포함
     r = _ask("out_of_ledger")
     t = r.get("trace") or {}
     verifies = [s for s in t.get("timeline", []) if s["stage"] == "verify"]
@@ -80,7 +77,7 @@ def check_turn_trace() -> int:
     say(drafted not in json.dumps(t, ensure_ascii=False),
         "trace: 폐기된 초안 전문은 싣지 않는다", drafted)
 
-    # ── LLM 이 죽은 턴 — 있는 단계만 ─────────────────────────
+    # LLM 실패 턴
     r = _ask("llm_dead")
     t = r.get("trace") or {}
     say(isinstance(t.get("sentences"), list) and isinstance(t.get("rounds"), list)

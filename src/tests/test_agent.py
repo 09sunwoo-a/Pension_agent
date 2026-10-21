@@ -1,10 +1,6 @@
-"""검색 정확도 · 그래프 라우팅 · 계획 루프 테스트 — 진입점.
+"""검색 정확도 · 그래프 라우팅 · 계획 루프 테스트 진입점. LLM 자리는 스텁(API 키 불필요).
 
-LLM 을 부르는 자리(understand·계획·문장생성)를 스텁으로 갈아끼우므로 API 키가 없어도 돌아간다.
-검사 본문은 `tests/agent/` 아래 주제별 모듈에 있고(그 패키지 머리말에 지도가 있다), 이
-파일은 스텁을 설치하고 그것들을 **정해진 순서로** 부른 뒤 잔여물을 지우는 일만 한다.
-순서가 뜻이 있다 — 앞 검사가 갈아끼운 것을 뒤 검사가 되돌려 놓는 자리가 있다.
-
+`tests/agent/` 검사를 정해진 순서로 호출 후 잔여물 정리(순서 의존).
 실행:  cd src && python -m tests.test_agent
 """
 
@@ -96,23 +92,21 @@ from tests.agent.meta import (
     check_rehearsal_expectations,
 )
 
-#: main() 시작 시점에 이미 있던 상담이력 파일. 끝에서 이번 실행이 만든 것만 지운다.
+#: main() 시작 전 상담이력 파일 — 이번 실행 생성분만 삭제용
 _SESSIONS_BEFORE: set = set()
 
 
 def main() -> int:
-    # 정리할 것과 원래 있던 것을 가른다(아래 끝부분).
     global _SESSIONS_BEFORE
     _SESSIONS_BEFORE = set(config.SESSION_DATA_DIR.glob("*.json")) \
         if config.SESSION_DATA_DIR.exists() else set()
 
-    # build_agent() 는 호출 시점에 모듈 전역에서 노드 함수를 찾으므로 치환이 그대로 먹는다
-    # 화법 슬롯 분해는 이제 노드가 아니라 화법 도구가 부른다 — 모듈 함수를 갈아끼운다.
+    # build_agent() 는 호출 시점에 모듈 전역에서 노드 함수 조회 — 치환 유효
     pitch_slots.extract_slots = stub_slots
     G.understand = stub_understand
-    G.plan_step = stub_plan_pitch          # 계획은 고정 — CASES 는 카드 채점을 잰다
-    plan.generate = stub_talk              # compose 의 화법 생성
-    meta.generate = stub_talk              # agent_help 의 능력 안내 작성
+    G.plan_step = stub_plan_pitch          # 계획 고정 — CASES 는 카드 채점 측정
+    plan.generate = stub_talk              # compose 화법 생성
+    meta.generate = stub_talk              # agent_help 능력 안내
     tools.fits_question = lambda q, h, kind="", history=None, query=None, sink=None: h
     agent = G.build_agent()
 
@@ -127,9 +121,7 @@ def main() -> int:
             found = ", ".join(f"{s['id'].split('.')[-1]}({s['score']})" for s in out["sources"]) or "→ FALLBACK"
         print(f"{'✓' if ok else '✗'} {question[:32]:<34} {found}")
 
-    # 검사 도중 예외가 나도 정리는 돈다. try/finally 가 없던 동안, 실패한 실행이
-    # 남긴 세션 파일(TEST_ACT.json)이 저장소에 그대로 커밋될 뻔했다 — 정리를
-    # 성공 경로에만 두면 «정리가 필요한 상황»에서만 정리가 안 된다.
+    # 예외 시에도 정리 — 실패 실행의 세션 파일 커밋 방지
     try:
         check_pitch_stages()
         check_verify_gate()
@@ -204,10 +196,7 @@ def main() -> int:
         check_turn_trace()
         check_node_label_collision()
     finally:
-        # 위 테스트들(특히 lms_link)이 상담이력 저장소에 기록을 남기므로 **이번 실행이 만든
-        # 것만** 지운다. 예전에는 디렉터리를 통째로 지웠는데, 경로가 옮겨진 뒤로는 존재하지
-        # 않는 곳을 지우고 있어서 실제로는 아무것도 정리되지 않았다(루트 CLAUDE.md 규칙 4의
-        # 같은 사고 — 경로를 하드코딩하면 한 칸 움직였을 때 조용히 빗나간다).
+        # 이번 실행이 만든 상담이력만 삭제(경로는 config 기준)
         for fp in set(config.SESSION_DATA_DIR.glob("*.json")) - _SESSIONS_BEFORE:
             fp.unlink()
 

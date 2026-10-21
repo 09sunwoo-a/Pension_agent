@@ -1,12 +1,4 @@
-"""고객별 솔루션(solution.py) 회귀 테스트 — LLM 을 스텁으로 갈아끼우므로 API 키 없이 돌아간다.
-
-전체 브리핑은 사실 부분(코드가 계산 결과를 옮긴 표)과 서술 부분(LLM 1회 + 검증)으로 나뉜다.
-여기서 재는 것:
-  · 한 편에 LLM 호출이 1회인가 · 같은 고객이면 다시 만들지 않는가
-  · 서술에서 계산 결과 밖의 값이 든 문장만 버리는가 · 보여준 값은 인용할 수 있는가
-  · LLM 이 죽거나 응답을 못 읽으면 서술 없이 사실 표만 나오고, 그 문서를 붙잡아 두지 않는가
-  · 고객 식별번호·요건 코드가 프롬프트·문서에 실리지 않는가
-  · 전체 브리핑 문서가 답변 작성(compose)을 거치지 않고 그대로 답이 되는가
+"""고객별 솔루션(solution.py) 회귀 테스트 — LLM 1회·캐시 · 서술 검증 · 실패 처리 · 개인정보 · 그래프 직답. LLM 스텁.
 
 실행: python -m tests.test_customer_solution
 """
@@ -33,7 +25,7 @@ def check(cond: bool, label: str, detail: str = "") -> None:
 
 
 class _Stub:
-    """solution.llm 의 available·generate 를 갈아끼우고, 끝나면 되돌린다. 호출 기록을 남긴다."""
+    """solution.llm 의 available·generate 교체·복원, 호출 기록."""
 
     def __init__(self, reply=None, *, available: bool = True, raises: Exception | None = None):
         self.reply, self.available, self.raises = reply, available, raises
@@ -63,9 +55,7 @@ def _reply(**fields) -> str:
     return json.dumps({**base, **fields}, ensure_ascii=False)
 
 
-# ─────────────────────────────────────────────────────────────
 # 호출 횟수 · 캐시
-# ─────────────────────────────────────────────────────────────
 
 def check_one_call_and_cached() -> None:
     p = _BY_NAME["오세훈"]
@@ -84,7 +74,7 @@ def check_one_call_and_cached() -> None:
 
 
 def check_facts_are_copied_not_rewritten() -> None:
-    """사실 부분의 값은 계산 결과 그대로다 — LLM 을 거치지 않는다."""
+    """사실 부분 값은 계산 결과 그대로(LLM 미경유)."""
     p = _BY_NAME["오세훈"]
     f = solution.facts(p)
     md = solution.render(p, f, None, "테스트")
@@ -94,9 +84,7 @@ def check_facts_are_copied_not_rewritten() -> None:
         check(f"| {label} | {value} |" in md, f"문서의 «{label}» 칸이 계산 결과와 같다", value)
 
 
-# ─────────────────────────────────────────────────────────────
 # 서술 검증
-# ─────────────────────────────────────────────────────────────
 
 def check_fabricated_line_dropped() -> None:
     p = _BY_NAME["이준호"]
@@ -112,8 +100,7 @@ def check_fabricated_line_dropped() -> None:
 
 
 def check_shown_values_are_quotable() -> None:
-    """프롬프트가 보여준 값(계좌 상태·기준일)은 서술이 옮겨 적어도 버리지 않는다.
-    넓힌 폭은 보여준 값까지다 — 지어낸 값·계산한 값은 여전히 막힌다."""
+    """프롬프트에 보여준 값은 허용, 지어낸·계산한 값은 차단."""
     p = _BY_NAME["오세훈"]
     f = solution.facts(p)
     extra = solution._extra(f)
@@ -125,7 +112,7 @@ def check_shown_values_are_quotable() -> None:
 
 
 def check_owned_products_are_quotable() -> None:
-    """이 고객이 가진 상품 이름은 말할 수 있고, 지어낸 이름은 막힌다."""
+    """보유 상품 이름 허용, 지어낸 이름 차단."""
     p = _BY_NAME.get("송도윤")
     if p is None:
         check(False, "보유 상품 인용: 전제조건 불충족 — 송도윤 없음")
@@ -141,9 +128,7 @@ def check_owned_products_are_quotable() -> None:
     check(not ok, "지어낸 상품 이름은 막힌다")
 
 
-# ─────────────────────────────────────────────────────────────
 # 실패
-# ─────────────────────────────────────────────────────────────
 
 def check_failure_not_kept() -> None:
     p = _BY_NAME["이준호"]
@@ -164,9 +149,7 @@ def check_failure_not_kept() -> None:
         check(not stub.prompts and doc["reason"] == "LLM 미설정", "LLM 미설정이면 부르지 않는다")
 
 
-# ─────────────────────────────────────────────────────────────
 # 개인정보·개발 용어
-# ─────────────────────────────────────────────────────────────
 
 def check_no_id_or_codes() -> None:
     p = _BY_NAME["오세훈"]
@@ -180,9 +163,7 @@ def check_no_id_or_codes() -> None:
     check(not leaked, "요건 코드(isa·nod …)는 프롬프트에 없다", str(leaked))
 
 
-# ─────────────────────────────────────────────────────────────
 # 그래프 — 문서는 그대로 답이 된다
-# ─────────────────────────────────────────────────────────────
 
 def check_document_passthrough() -> None:
     from pension_agent.nodes import answer as ANS
@@ -207,7 +188,6 @@ def check_document_passthrough() -> None:
     check(not any(p.id in i for i in ids), "출처 id 에도 식별번호가 없다", str(ids))
 
 
-# ─────────────────────────────────────────────────────────────
 def main() -> int:
     check_one_call_and_cached()
     check_facts_are_copied_not_rewritten()
