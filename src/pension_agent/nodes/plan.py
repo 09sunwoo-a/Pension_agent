@@ -456,6 +456,10 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # 얻었을 때의 이야기다.
     if last and found is not None:
         update["plan_done"] = True
+    # 완성된 문서(전체 브리핑)를 받았으면 더 모으지 않는다 — 그 문서가 그대로 답이 된다
+    # (`document_answer`). 계획 LLM 이 더 부르면 그 재료는 쓰이지 않고 시간만 든다.
+    if found is not None and found["meta"].get("document"):
+        update["plan_done"] = True
     return update
 
 
@@ -850,6 +854,25 @@ def screen(answer: str, evidence: list[tools.Evidence], question: str,
 # ─────────────────────────────────────────────────────────────
 # Node. compose — 원장만으로 답을 만든다
 # ─────────────────────────────────────────────────────────────
+
+def document_answer(state: AgentState) -> dict[str, Any] | None:
+    """원장에 **완성된 문서**(`meta["document"]`)가 있으면 그것을 그대로 답으로 낸다.
+
+    전체 브리핑(`briefing` 도구)이 그 자리다. 사실 부분은 코드가 계산 결과를 옮긴 표이고
+    서술은 도구 안에서 이미 검사를 거쳤다 — compose 가 다시 쓰면 양식이 흐트러지고 표의
+    값을 LLM 이 옮겨 적게 된다. 출처와 「하지 말 것」 가드는 compose 와 같은 함수로 붙인다.
+    문서가 없으면 None — 평소 경로(compose)로 간다.
+    """
+    evidence: list[tools.Evidence] = list(state.get("evidence") or [])
+    doc = next((e["meta"].get("document") for e in evidence if e["meta"].get("document")), None)
+    if not doc:
+        return None
+    conds = guard.conditions_of(state.get("customer_id"))
+    guards = guard.cautions_for(KB, conds) if conds else []
+    alts = guard.sensitive_cards(KB, conds) if conds else []
+    observability.step("compose", evidence=f"{len(evidence)}건", answer="문서", draft=f"{len(doc)}자")
+    return {"answer": doc, "sources": _sources(evidence, guards, alts, doc), "fallback": ""}
+
 
 def compose(state: AgentState) -> dict[str, Any]:
     """모은 근거로 답을 만든다 — 도구 종류에 따라 방식이 갈리지 않는다.

@@ -44,12 +44,18 @@ from typing import Any
 
 from pension_agent.common import progress
 from pension_agent.nodes.clarify import applicable, clarify
-from pension_agent.nodes.plan import compose
+from pension_agent.nodes.plan import compose, document_answer
 from pension_agent.state import AgentState
 
 
 def answer(state: AgentState) -> dict[str, Any]:
-    """판정과 답변 작성을 함께 끝낸다. 되묻기로 결정되면 작성분은 버린다."""
+    """판정과 답변 작성을 함께 끝낸다. 되묻기로 결정되면 작성분은 버린다.
+
+    원장에 완성된 문서(전체 브리핑)가 있으면 판정도 작성도 하지 않고 그 문서를 낸다.
+    """
+    doc = document_answer(state)
+    if doc is not None:
+        return doc
     if not applicable(state):
         # 판정이 아예 없는 턴(근거 0건·갈래를 만들 수 없는 재료·직전 턴이 되물음).
         # 스레드를 띄울 이유가 없다 — 지금까지와 완전히 같은 경로다.

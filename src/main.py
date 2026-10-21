@@ -187,7 +187,6 @@ from pension_agent.common import config, llm, mcp, observability, privacy
 from pension_agent import context_store
 from pension_agent import graph as consult_graph
 from pension_agent.nodes import act as consult_act
-from pension_agent.tools.customer_solution import briefing_store
 from pension_agent.tools.customer_solution import customer as strategy_customer
 
 
@@ -567,12 +566,6 @@ def health() -> dict[str, Any]:
             "timeout_sec": llm.TIMEOUT,
             **_host_check(),
         },
-        # 미리 만들어 둔 브리핑을 **지금 실제로 읽고 있나.** 대화형은 브리핑이 이미 있다고
-        # 보고 답하는데(고객 재료 도구가 `strategy_agent.propose()` 를 부른다), 그것을 이
-        # 컨테이너가 직접 만들면 고객당 순차 LLM 11 회다. 미리 구워 넣었는지, 그게 지금
-        # 지문으로 읽히는지, 런타임에 만든 것을 저장할 수 있는지 — 셋 다 어긋나도 답변은
-        # 정상으로 나가고 «느리다»로만 보인다(briefing_store.stats 머리말).
-        "briefing_cache": briefing_store.stats(),
         # 진행 중인 대화 맥락이 몇 세션 살아 있나(메모리 · 머리말 «대화 맥락»).
         "context_store": context_store.stats(),
         # 행내 MCP(쪽지 발송)가 붙었나. 안 붙었으면 무엇이 비어 있는지까지 말한다 —

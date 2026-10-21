@@ -29,13 +29,13 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
     customer_id = state.get("customer_id")
     if not customer_id:
         return None
-    from pension_agent.tools.customer_solution import agent as strategy_agent  # noqa: PLC0415
     from pension_agent.tools.customer_solution import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import solution  # noqa: PLC0415
     try:
         profile = strategy_customer.get_profile(customer_id)
         if profile is None:
             return None
-        facts = strategy_agent.propose(profile)["facts"]
+        facts = solution.facts(profile)
     except Exception:
         return None
 

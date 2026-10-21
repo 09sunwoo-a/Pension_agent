@@ -598,29 +598,6 @@ def main(argv: list[str]) -> int:
             show_progress = rehearsal and not brief
             on_progress = (lambda text: print(f"   ⋯ {text}")) if show_progress else None
             with session(customer_id=customer, on_progress=on_progress) as (ask, tr):
-                # 고객 화면을 **여는 순간**을 재현한다 — 실서비스·Streamlit 화면은 브리핑을
-                # 열 때 AI 브리핑(LLM 11회)을 생성하고(app.py), 대화 턴의 customer 도구는
-                # 그 캐시를 읽는다(strategy_agent.propose 의 브리핑 캐시). 여기서 건너뛰면
-                # 첫 고객 질문(T4·T13)이 그 생성을 통째로 떠안아 수십 초 걸린다 — 그건
-                # 시연에는 없는 대기다. 화면을 여는 시점의 비용은 화면을 여는 자리에 둔다.
-                #
-                # 그 비용은 **리허설을 돌릴 때마다** 든다(캐시는 프로세스와 함께 사라진다).
-                # `python -m scripts.prebuild_briefings` 를 한 번 돌려 두면 여기서 읽어 쓴다 —
-                # 건너뛰는 것이 아니라 같은 자리에서 같은 산출을 읽는 것이라, 리허설이
-                # 예행하는 경로는 그대로다.
-                if rehearsal and customer:
-                    from pension_agent.tools.customer_solution import agent as SA        # noqa: PLC0415
-                    from pension_agent.tools.customer_solution import customer as CUST  # noqa: PLC0415
-                    t0 = time.monotonic()
-                    prof = CUST.get_profile(customer)
-                    if prof is not None:
-                        SA.propose(prof)
-                    if timing and not brief:
-                        from pension_agent.tools.customer_solution import briefing_store  # noqa: PLC0415
-                        how = ("미리 만들어 둔 것을 읽음" if briefing_store.enabled()
-                               else "이번에 생성 — scripts.prebuild_briefings 로 미리 만들 수 있다")
-                        print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 · {how} — "
-                              "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
                     if pause and i:
                         # 턴 사이 대기 — 같은 세션 안에서만 쉰다. 블록 첫 턴은 화면을 여는

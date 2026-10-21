@@ -148,8 +148,8 @@ def check_tax_credit_calc() -> int:
     ok += hit
 
     # 브리핑과 계산기가 같은 산식을 쓴다 — 두 곳이 각자 곱하면 화면과 답변이 갈린다.
-    from pension_agent.tools.customer_solution import agent as SA
-    shown = SA.propose(room)["facts"]["briefing"]["예상_세액공제액"]
+    from pension_agent.tools.customer_solution import solution as SOL
+    shown = SOL.facts(room)["briefing"]["예상_세액공제액"]
     now = CUST.tax_credit(room.pension_paid_ytd, room.tax_credit_rate)
     hit = f"{now // 10_000:,}만원" in shown or f"{now:,}" in shown
     print(f"{'✓' if hit else '✗'} 화면의 예상 세액공제액과 같은 산식을 쓴다 ({shown})")

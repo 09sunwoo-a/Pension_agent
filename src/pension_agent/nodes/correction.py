@@ -4,8 +4,8 @@
 남지만, 다음 브리핑 생성 시 자동 반영되는 재적용 루프는 만들지 않는다(그 루프는 "코드=사실"
 경계를 실제로 어떻게 지킬지 더 구체적인 설계가 필요하다고 판단된 다음 단계 항목).
 
-편집 가능/불가능 경계(strategy_agent.agent.EDITABLE_FIELDS 참고)는 코드가 강제한다 — LLM 은
-요청을 세 가지 편집 가능 항목(AI브리핑 문장·근거해설·카드 한줄혜택) 중 하나로 분류하거나
+편집 가능/불가능 경계(tools/customer_solution/solution.py::EDITABLE_FIELDS)는 코드가 강제한다 — LLM 은
+요청을 편집 가능 항목(브리핑 AI 분석의 서술 네 항목·카드 한줄혜택) 중 하나로 분류하거나
 "not_editable"로 분류할 뿐, 분류 결과와 무관하게 이 노드가 최종적으로 반영 여부를 판정한다.
 수치·상품명·조건 판정처럼 시스템이 계산한 값을 고쳐달라는 요청은 절대 조용히 수용하지 않고
 명확히 거절한다.
@@ -32,7 +32,7 @@ from pension_agent.state import AgentState, format_history
 from pension_agent.tools import last_answered
 from pension_agent.common.llm import generate, json_object
 from pension_agent.common.session_store import append_turn
-from pension_agent.tools.customer_solution import agent as strategy_agent, customer as strategy_customer, engine
+from pension_agent.tools.customer_solution import customer as strategy_customer, engine, solution
 
 #: 분류 LLM 이 «화면 문장이 아니라 방금 한 답변을 고쳐 달라는 것»이라고 판정한 값.
 NOT_BRIEFING = "not_briefing"
@@ -41,13 +41,12 @@ NOT_BRIEFING = "not_briefing"
 #: 비워 두는 것이 곧 분기 신호다(routing.route_correction 은 코드가 아는 값만 본다).
 _FALL_THROUGH: dict[str, Any] = {"intent": DEFAULT_INTENT}
 
-def _before_value(target: str, item_id: str | None, result: dict) -> str | None:
-    if target == "ai_briefing_sentence":
-        return result["sentence"]
-    if target == "ai_briefing_insight":
-        return result["insight"]
+def _before_value(target: str, item_id: str | None, facts: dict, narrative: dict) -> str | None:
+    if target.startswith("narrative."):
+        value = narrative.get(target.split(".", 1)[1])
+        return " / ".join(value) if isinstance(value, list) else value
     if target == "card_benefit":
-        item = next((it for it in result["facts"]["items"] if it["id"] == item_id), None)
+        item = next((it for it in facts["items"] if it["id"] == item_id), None)
         return item["card"]["benefit"] if item else None
     return None
 
@@ -73,11 +72,12 @@ def correction(state: AgentState) -> dict[str, Any]:
             return dict(_FALL_THROUGH)
         return {"answer": "지금 조회 중인 고객을 찾을 수 없어요. 고객 화면을 먼저 열어주세요.", "sources": []}
 
-    result = strategy_agent.propose(profile)
-    facts = result["facts"]
+    facts = solution.facts(profile)
+    # 서술은 전체 브리핑을 만든 적이 있을 때만 있다 — 고칠 문장이 없으면 서술 항목은
+    # 고를 수 없다(아래 EDITABLE 판정에서 걸린다). 여기서 새로 만들지 않는다.
+    narrative = solution.peek(profile) or {}
     prompt = CORRECTION_PROMPT.format(
-        facts=json.dumps({**facts, "sentence": result["sentence"], "insight": result["insight"]},
-                         ensure_ascii=False, indent=1),
+        facts=json.dumps({**facts, "narrative": narrative}, ensure_ascii=False, indent=1),
         # 이전 대화를 준다 — 「좀 더 짧게 줄여줘」가 화면 문장인지 방금 한 답변인지는 앞 턴에
         # 무엇을 물었는지를 봐야 갈린다. 없던 동안 이 프롬프트는 화면 사실과 이번 요청만
         # 보고 화법 답변을 줄여 달라는 말을 브리핑 문장 수정으로 읽었다.
@@ -99,7 +99,8 @@ def correction(state: AgentState) -> dict[str, Any]:
         # 화면 문장이 아니라 방금 한 답변을 고쳐 달라는 것 — 여기서 고칠 것이 없다. 아무것도
         # 반영하지 않고 기록도 남기지 않는다(고친 것이 없다). 답은 계획 루프가 낸다.
         return dict(_FALL_THROUGH)
-    if target not in strategy_agent.EDITABLE_FIELDS:
+    if target not in solution.EDITABLE_FIELDS or (
+            str(target).startswith("narrative.") and not narrative.get(target.split(".", 1)[1])):
         reason = (str(data.get("reject_reason") or "").strip()
                   or "이 값은 시스템이 계산한 사실이라 대화로 고칠 수 없어요. 값 자체를 바꾸려면 데이터 저작(담당 부서)을 통해야 해요.")
         _log_correction(customer_id, field=target or "unknown", before=None, after=None,
@@ -113,7 +114,7 @@ def correction(state: AgentState) -> dict[str, Any]:
         return {"answer": "수정 문장이 사실 범위를 벗어나 반영할 수 없어요. 다시 표현해서 말씀해주시겠어요?", "sources": []}
 
     item_id = data.get("item_id")
-    before = _before_value(target, item_id, result)
+    before = _before_value(target, item_id, facts, narrative)
     field_path = target if target != "card_benefit" else f"card_benefit:{item_id}"
     _log_correction(customer_id, field=field_path, before=before, after=revised,
                     status="applied_this_session")

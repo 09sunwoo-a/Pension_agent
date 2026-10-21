@@ -382,13 +382,11 @@ def _has_material(lead: str, probes: tuple[str, ...], state: dict) -> bool:
         if lead in _KB_KINDS:
             return any(KBMOD.retrieve(KB, top_k=1, kinds=[lead], utterance=q) for q in probes)
         if lead == "customer":
-            # `customer` 도구 자체는 부르지 않는다 — 그 안의 strategy_agent.propose 가
-            # LLM 을 쓴다. 재료의 유무를 가르는 것은 프로파일 존재이므로 그것만 본다.
+            # 재료의 유무를 가르는 것은 프로파일 존재이므로 그것만 본다(도구를 부를 필요가 없다).
             from pension_agent.tools.customer_solution import customer as strategy_customer  # noqa: PLC0415
             return strategy_customer.get_profile(state.get("customer_id") or "") is not None
         if lead == "outreach":
-            # 도구를 그대로 부르지 않는다 — 그 안의 strategy_agent.propose() 가 LLM 을
-            # 쓴다(`customer` 를 프로파일 존재로만 재는 것과 같은 이유). 여기서 가르는 것은
+            # 도구를 그대로 부르지 않는다 — 여기서 가르는 것은
             # «이 고객 상태에 걸린 콘텐츠가 열려 있는가»이고, 그 판정은 규칙이라 LLM 이
             # 필요 없다. **관련도 0 인 폴백은 세지 않는다** — 화면 ⑨ 는 섹션을 비우지 않으려
             # 임박 순으로 한 건을 세우지만, 그걸 «있다»로 세면 칩이 어느 고객에게나 뜨고

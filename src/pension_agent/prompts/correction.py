@@ -10,13 +10,15 @@ from __future__ import annotations
 # correction 노드용 — 브리핑 수정 요청을 편집 가능 필드로 분류하고, 가능하면 재작성
 # ─────────────────────────────────────────────────────────────
 
-CORRECTION_SYSTEM = """당신은 퇴직연금(IRP) AI브리핑 화면의 수정 요청을 분류하고, 편집
+CORRECTION_SYSTEM = """당신은 퇴직연금(IRP) 고객 브리핑의 수정 요청을 분류하고, 편집
 가능한 항목이면 수정 문장을 작성하는 사내 에이전트입니다.
 
-편집 가능한 항목은 이 세 가지뿐입니다 — 전부 LLM 이 쓴 산문(의견)이지, 시스템이 계산한
-숫자·상품명·조건 판정이 아닙니다.
-  - "ai_briefing_sentence": AI 브리핑 문장(종합 제안)
-  - "ai_briefing_insight": AI 브리핑의 근거 해설(insight)
+편집 가능한 항목은 브리핑의 «AI 분석» 서술과 전략 카드 문구뿐입니다 — 전부 LLM 이 쓴
+산문이지, 시스템이 계산한 숫자·상품명·조건 판정이 아닙니다.
+  - "narrative.recent": 최근 금융상황
+  - "narrative.focus": 이번 상담에서 확인할 점
+  - "narrative.why_now": 왜 지금?
+  - "narrative.confirm": 고객과 확인할 것
   - "card_benefit": 개별 전략 카드의 '한 줄 혜택' 문구
 
 평가금액·수익률·백분위·포트폴리오 비중·세액공제 금액·상품명·전략 선정 여부 등은 시스템이
@@ -38,7 +40,7 @@ CORRECTION_SYSTEM = """당신은 퇴직연금(IRP) AI브리핑 화면의 수정 
 
 출력은 JSON 객체 하나만 반환합니다. 다른 설명을 덧붙이지 않습니다."""
 
-CORRECTION_PROMPT = """## 현재 AI브리핑 사실(facts) — 이 안의 값만 근거로 삼습니다
+CORRECTION_PROMPT = """## 현재 브리핑 사실(facts)과 AI 분석(narrative) — 이 안의 값만 근거로 삼습니다
 {facts}
 
 ## 이전 대화 — 직원이 이 에이전트와 방금 나눈 턴들 (화면의 문장이 아니다)
@@ -47,8 +49,8 @@ CORRECTION_PROMPT = """## 현재 AI브리핑 사실(facts) — 이 안의 값만
 {question}
 
 ## 지시
-1. `target`: "ai_briefing_sentence" | "ai_briefing_insight" | "card_benefit" | "not_editable"
-   | "not_briefing" 중 하나.
+1. `target`: "narrative.recent" | "narrative.focus" | "narrative.why_now" | "narrative.confirm"
+   | "card_benefit" | "not_editable" | "not_briefing" 중 하나.
 2. `item_id`: target 이 "card_benefit" 일 때만, 어느 전략 카드인지 items 의 id. 아니면 null.
 3. `revised_text`: target 이 편집 가능한 값이면 수정된 문장(원래 톤 유지, facts 밖 수치·
    상품명 창작 금지). "not_editable"·"not_briefing" 이면 빈 문자열.

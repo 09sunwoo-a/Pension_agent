@@ -126,7 +126,7 @@ try:
         _raised_exc = exc
     check(_raised is not None and "429" in _raised,
           "llm: 계속 429 면 상한에서 멈추고 LLMError 로 올린다", str(_raised))
-    # 호출부가 «속도 제한»을 문자열 검색 없이 가르는 자리 — prebuild_briefings 가 429 면 멈춘다.
+    # 호출부가 «속도 제한»을 문자열 검색 없이 가르는 자리 — 일괄 실행 스크립트가 429 면 멈춘다.
     check(getattr(_raised_exc, "status", None) == 429,
           "llm: LLMError 가 HTTP 상태 코드를 싣는다(status)", str(getattr(_raised_exc, "status", None)))
 

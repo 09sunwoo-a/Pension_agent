@@ -33,10 +33,7 @@
 
        PENSION_TODAY=2026-09-29 python -m scripts.run_question_map --new --grade ◎
 
-② **브리핑을 미리 만든다.** 고객을 여는 첫 턴은 브리핑 생성(LLM 11회)을 치른다. 분당
-   한도가 있는 키면 그 11회가 한도를 소진해 답변 작성이 429 로 죽는다.
-   `python -m scripts.prebuild_briefings` 를 한 번 돌려 두면 읽어 쓴다. 그래도 나면
-   `--pause=20`.
+② **분당 한도가 있는 키면 쉬어 간다.** 답변 작성이 429 로 죽으면 `--pause=20`.
 
 ③ **상담 기록을 더럽히지 않는다.** 실행은 `tests.debug.runner.session()` 을 그대로 쓰므로
    세션마다 기록이 남았다가 나갈 때 걷힌다(그 함수 주석). `git status src/runtime/session_data/`

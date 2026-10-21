@@ -17,98 +17,84 @@ from tests.agent._common import print, _vt  # noqa: A001 — 집계용 print
 
 
 def check_briefing_shared() -> int:
-    """브리핑을 **화면과 대화형이 같은 것으로** 본다 (§3 · 지워진 gap 25).
+    """전체 브리핑은 **한 번 만들어 대화가 같은 것을 본다** (§3 · 지워진 gap 25).
 
-    `propose()` 는 LLM 으로 산문을 쓰므로 부를 때마다 다른 문장이 나온다. 그런데 그 산출을
-    화면(브리핑)과 대화형(`customer` 도구가 sentence·insight 를 재료에 그대로 싣는다)이
-    함께 읽는다 — 각자 생성하면 "화면에 저렇게 써 있는데 왜 다르게 말하느냐"가 된다.
-
-    부수 효과가 지연이다. 브리핑 한 편이 순차 LLM 11 회인데 대화형이 고객 질문마다 그걸
-    새로 돌리고 있었다("이 고객 평가금액 얼마야" 한 마디가 순차 14 회).
+    서술(AI 분석)은 LLM 산출이라 부를 때마다 다르다. 직원은 전체 브리핑을 본 뒤 이어서
+    묻고, 그 질문에 `customer` 도구가 같은 서술을 재료로 싣는다 — 각자 만들면 "브리핑에
+    저렇게 써 있는데 왜 다르게 말하느냐"가 된다. 부분 질문은 서술을 만들지 않는다(LLM 0회).
 
     캐시가 «같은 값을 준다»만으로는 부족하다 — 돌려받은 것을 고쳤을 때 다음 호출자가
     고쳐진 브리핑을 받으면, 공유하려던 장치가 도리어 둘을 갈라놓는다. 그것도 함께 잰다.
     """
-    from pension_agent.tools.customer_solution import agent as SA
     from pension_agent.tools.customer_solution import customer as CUST
+    from pension_agent.tools.customer_solution import solution as SOL
 
     ok = 0
     calls: list[str] = []
-    orig_gen, orig_avail = SA.llm.generate, SA.llm.available
+    orig_gen, orig_avail = SOL.llm.generate, SOL.llm.available
     profile = CUST.PERSONAS[0]
 
-    # 파일 저장소(runtime/briefing_cache/)를 끈다 — `scripts.prebuild_briefings` 를 돌린 체크아웃에는
-    # 저장분이 있어 첫 호출이 LLM 0회로 그것을 읽고, «한 번만 만든다»의 1회차가 0 이 된다.
-    # 여기서 재는 것은 프로세스 캐시이지 파일 저장소가 아니다(test_engine 의 같은 격리).
-    from pension_agent.common import config as _cfg
-    saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
-    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir / "__off__"   # 없는 디렉터리 = 꺼짐
-
-    SA.clear_briefing_cache()
-    SA.llm.available = lambda: True
+    SOL.clear_cache()
+    SOL.llm.available = lambda: True
     # 부를 때마다 다른 문장을 내는 LLM — 캐시가 없으면 두 호출이 갈린다.
-    SA.llm.generate = lambda prompt, **kw: (
+    SOL.llm.generate = lambda prompt, **kw: (
         calls.append("llm"),
-        json.dumps({"insight": f"해설 {len(calls)}", "sentence": f"문장 {len(calls)}"},
+        json.dumps({"recent": [], "focus": f"확인할 점 {len(calls)}", "why_now": "", "confirm": []},
                    ensure_ascii=False))[1]
     try:
-        first = SA.propose(profile)
+        first = SOL.document(profile)
         n_first = len(calls)
-        second = SA.propose(profile)
+        second = SOL.document(profile)
         n_second = len(calls) - n_first
+        # 부분 질문의 재료(customer 도구)는 LLM 을 부르지 않는다.
+        before = len(calls)
+        tools.run("customer", {"customer_id": profile.id}, "평가금액 얼마야?")
+        n_partial = len(calls) - before
     finally:
-        SA.llm.generate, SA.llm.available = orig_gen, orig_avail
-        SA.clear_briefing_cache()
+        SOL.llm.generate, SOL.llm.available = orig_gen, orig_avail
 
-    hit = n_first > 0 and n_second == 0
+    hit = n_first == 1 and n_second == 0
     print(f"{'✓' if hit else '✗'} 같은 고객 브리핑은 한 번만 만든다 "
           f"(1회차 LLM {n_first}회 → 2회차 {n_second}회)")
     ok += hit
 
-    hit = first["sentence"] == second["sentence"] and first["insight"] == second["insight"]
-    print(f"{'✓' if hit else '✗'} 두 번째 호출이 같은 문장을 받는다(화면·대화형이 같은 브리핑)")
+    hit = first["markdown"] == second["markdown"]
+    print(f"{'✓' if hit else '✗'} 두 번째 호출이 같은 문서를 받는다")
+    ok += hit
+
+    hit = n_partial == 0
+    print(f"{'✓' if hit else '✗'} 부분 질문의 재료(customer)는 LLM 을 부르지 않는다 ({n_partial}회)")
     ok += hit
 
     # 돌려받은 것을 고쳐도 캐시가 오염되지 않는다.
-    SA.clear_briefing_cache()
-    SA.llm.available, SA.llm.generate = (lambda: True), (
-        lambda prompt, **kw: '{"insight": "해설", "sentence": "문장"}')
-    try:
-        a = SA.propose(profile)
-        before = (a["sentence"], dict(a["facts"]["customer"]))
-        a["sentence"] = "호출부가 고친 문장"      # 최상위 값
-        a["facts"]["customer"] = {}              # 중첩된 값(얕은 복사로는 못 막는다)
-        b = SA.propose(profile)
-        hit = (b["sentence"], b["facts"]["customer"]) == before and bool(before[1])
-    finally:
-        SA.llm.generate, SA.llm.available = orig_gen, orig_avail
-        SA.clear_briefing_cache()
+    a = SOL.document(profile)
+    kept = a["markdown"]
+    a["markdown"] = "호출부가 고친 문서"
+    a["narrative"]["focus"] = "고친 서술"
+    f1 = SOL.facts(profile)
+    f1["customer"] = {}
+    hit = SOL.document(profile)["markdown"] == kept and bool(SOL.facts(profile)["customer"])
+    SOL.clear_cache()
     print(f"{'✓' if hit else '✗'} 돌려받은 브리핑을 고쳐도 다음 호출자는 원본을 받는다")
     ok += hit
 
     # 입력이 다르면 다른 브리핑이다 — id 가 같아도 내용이 다르면 캐시를 공유하지 않는다.
-    # (`dataclasses.replace` 로 요건을 걷어낸 합성 고객이 실제로 같은 id 를 갖는다.)
     import dataclasses
     other = dataclasses.replace(profile, room=0, isa=None, bal=profile.bal + 1)
-    hit = SA._cache_key(profile, True, 1) != SA._cache_key(other, True, 1)
+    hit = SOL._key(profile) != SOL._key(other)
     print(f"{'✓' if hit else '✗'} 캐시 키는 id 가 아니라 프로파일 내용이다")
     ok += hit
 
-    # 무한히 쌓이지 않는다 — 실서비스는 고객 수만큼 부른다(시연 로스터 9명으로는 안 드러난다).
-    SA.clear_briefing_cache()
+    # 무한히 쌓이지 않는다 — 실서비스는 고객 수만큼 부른다.
     try:
-        for i in range(SA._BRIEFING_MAX + 5):
-            SA._BRIEFING_CACHE[f"key-{i}"] = {"x": i}
-            while len(SA._BRIEFING_CACHE) > SA._BRIEFING_MAX:
-                SA._BRIEFING_CACHE.popitem(last=False)
-        hit = len(SA._BRIEFING_CACHE) == SA._BRIEFING_MAX \
-            and "key-0" not in SA._BRIEFING_CACHE \
-            and f"key-{SA._BRIEFING_MAX + 4}" in SA._BRIEFING_CACHE
+        for i in range(SOL._CACHE_MAX + 5):
+            SOL._remember(SOL._DOCS, f"key-{i}", {"x": i})
+        hit = len(SOL._DOCS) == SOL._CACHE_MAX and "key-0" not in SOL._DOCS \
+            and f"key-{SOL._CACHE_MAX + 4}" in SOL._DOCS
     finally:
-        SA.clear_briefing_cache()
-    print(f"{'✓' if hit else '✗'} 캐시가 상한({SA._BRIEFING_MAX})에서 오래된 것부터 밀어낸다")
+        SOL.clear_cache()
+    print(f"{'✓' if hit else '✗'} 캐시가 상한({SOL._CACHE_MAX})에서 오래된 것부터 밀어낸다")
     ok += hit
-    _cfg.BRIEFING_CACHE_DIR = saved_cache_dir
     return ok
 
 
@@ -141,20 +127,20 @@ def check_customer_material() -> int:
     print(f"{'✓' if hit else '✗'} customer 도구가 브리핑 재료(값·요건)를 싣는다")
     ok += hit
 
-    # 화면에 뜬 AI 산문(제안 문장·근거 해설)도 재료에 실린다 — briefing_qa 노드가 갖고
-    # 있던 노출 수준이다. 직원은 그 문장을 보면서 묻기 때문에, 재료에 없으면 "화면엔
-    # 저렇게 써 있는데 왜 다르게 말하느냐"가 된다. LLM 없이는 산문이 비므로 스텁을 쓴다.
-    from pension_agent.tools.customer_solution import agent as SA
-    orig_propose = SA.propose
-    SA.propose = lambda profile: {**orig_propose(profile),
-                                  "sentence": "만기 예금을 이렇게 제안해 보세요.",
-                                  "insight": "만기 자금이 대기 중이라 수익 기회를 놓칩니다."}
+    # 전체 브리핑에 나간 AI 분석도 재료에 실린다 — 직원은 그 문서를 보면서 묻기 때문에,
+    # 재료에 없으면 "브리핑엔 저렇게 써 있는데 왜 다르게 말하느냐"가 된다.
+    from pension_agent.tools.customer_solution import solution as SOL
+    orig_peek = SOL.peek
+    SOL.peek = lambda profile: {"recent": ["만기 자금이 대기 중입니다."],
+                                "focus": "만기 자금의 운용 방향을 확인합니다.",
+                                "why_now": "", "confirm": []}
     try:
         found = tools.run("customer", {"customer_id": "198734-1205842"}, "브리핑 요약해줘")
-        hit = bool(found) and "AI브리핑 문장" in found["text"] and "AI브리핑 근거해설" in found["text"]
+        hit = bool(found) and "브리핑 최근 금융상황" in found["text"] \
+            and "브리핑 이번 상담에서 확인할 점" in found["text"]
     finally:
-        SA.propose = orig_propose
-    print(f"{'✓' if hit else '✗'} customer 도구가 화면에 뜬 AI브리핑 산문까지 재료로 싣는다")
+        SOL.peek = orig_peek
+    print(f"{'✓' if hit else '✗'} customer 도구가 전체 브리핑의 AI 분석까지 재료로 싣는다")
     ok += hit
 
     # ── CLAUDE.md §3 「고객 정보 질의응답 — 되어야 하는 것」 재료 요건 ──────────────
@@ -1195,8 +1181,8 @@ def check_account_state() -> int:
     ok += hit
 
     # 화면은 건드리지 않았다 — 계좌 상태는 briefing(화면 요건)이 아니라 별도 키다.
-    from pension_agent.tools.customer_solution import agent as SA
-    facts = SA.propose(CUST.PERSONAS[0])["facts"]
+    from pension_agent.tools.customer_solution import solution as SOL
+    facts = SOL.facts(CUST.PERSONAS[0])
     hit = ("account_state" in facts
            and not (set(facts["account_state"]) & set(facts["briefing"]))
            and not (set(facts["account_state"]) & set(facts["customer"])))
@@ -1228,13 +1214,6 @@ def check_account_state() -> int:
            and CUST.tenure_text(None) is None)
     print(f"{'✓' if hit else '✗'} tenure_text 는 「n년」·「n년 m개월」만 만든다 "
           f"({CUST.tenure_text('2023-10-02')})")
-    ok += hit
-
-    # 상품추천 LLM 스냅샷도 같은 표기를 쓴다 — 프롬프트에 실린 말이 답변에 그대로 나온다.
-    from pension_agent.tools.customer_solution import agent as _SA
-    hit = all(_re.fullmatch(r"(\d+년( \d+개월)?|\d+개월|미확인)", _SA._tenure(p))
-              for p in CUST.PERSONAS)
-    print(f"{'✓' if hit else '✗'} 상품추천 스냅샷의 「투자기간」도 소수점을 쓰지 않는다")
     ok += hit
 
     # 실린 값은 인용할 수 있고, 안 실린 날짜는 여전히 막힌다(경계는 넓어지지 않았다).

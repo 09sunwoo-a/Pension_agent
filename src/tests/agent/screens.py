@@ -148,9 +148,9 @@ def check_outreach() -> int:
     ok += hit
 
     # 문구는 대화가 새로 만들지 않는다 — 화면 ⑨ 와 같은 값이어야 같은 문자가 나간다.
-    from pension_agent.tools.customer_solution import agent as strategy_agent
+    from pension_agent.tools.customer_solution import solution as strategy_agent
     from pension_agent.tools.customer_solution import customer as strategy_customer
-    facts = strategy_agent.propose(strategy_customer.get_profile(cid))["facts"]
+    facts = strategy_agent.facts(strategy_customer.get_profile(cid))
     hit = all(ev["meta"]["lms"][k]["message"] == facts["outreach"][k]["lms_message"]
               for k in ev["meta"]["lms"])
     print(f"{'✓' if hit else '✗'} 대화가 싣는 문구가 브리핑 ⑨ 의 문구와 같다")
@@ -181,8 +181,7 @@ def check_outreach() -> int:
               f"추천 사유를 싣지 않는다")
         ok += hit
         # 폴백 문구로는 발송 화면을 제안하지 않는다 — 답변이 이름을 그대로 불러도.
-        fb_name = (facts_none := strategy_agent.propose(
-            strategy_customer.get_profile(none_cid))["facts"].get("outreach") or {})
+        fb_name = (facts_none := strategy_agent.facts(strategy_customer.get_profile(none_cid)).get("outreach") or {})
         fb_name = next((v["name"] for v in fb_name.values() if v), "")
         hit = (bool(none_ev) and not none_ev["meta"]["lms"]
                and not act.offer({**none_state, "evidence": [none_ev],
@@ -271,7 +270,7 @@ def check_outreach() -> int:
         p_ev = tools.run("outreach", {"customer_id": persona.id, "question": "다른 건 없어?"}, "다른 후보")
         if not p_ev:
             continue
-        p_facts = strategy_agent.propose(strategy_customer.get_profile(persona.id))["facts"]
+        p_facts = strategy_agent.facts(strategy_customer.get_profile(persona.id))
         relevant = {r["name"] for r in strategy_support.relevant_outreach(
             p_facts.get("problem_situations") or [], name=persona.nm)}
         cand = [ln.strip()[2:] for ln in p_ev["text"].splitlines()

@@ -54,9 +54,3 @@ DATA_ROOTS: list[Path] = [STRATEGY_DATA_DIR, KB_DATA_DIR]
 
 # 상담 세션 기록 위치 (session_store.py). 데모는 파일, 실서비스는 DB 로 바뀔 자리다.
 SESSION_DATA_DIR = SRC_ROOT / "runtime" / "session_data"
-
-# 미리 만들어 둔 브리핑 위치 (tools/customer_solution/briefing_store.py).
-# **시연·리허설을 빨리 시작하기 위한 자리이지 실서비스 캐시가 아니다** — 프로세스 경계를
-# 넘는 브리핑 공유는 아직 정해지지 않았다(pension_agent/CLAUDE.md §13). 저장소에 커밋하지
-# 않는다(.gitignore): 브리핑은 LLM 산문이라 사람이 검토하지 않은 문장이 자산으로 굳는다.
-BRIEFING_CACHE_DIR = SRC_ROOT / "runtime" / "briefing_cache"

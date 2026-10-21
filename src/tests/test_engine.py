@@ -198,7 +198,7 @@ check(abs(Profile(id="T", nm="T", ag=40, bal=1, rk="안정형", grade="낮은위
 # 드러난다. 원본 xlsx 를 교체했다면 이 표를 새 데이터 기준으로 함께 갱신한다.
 # ─────────────────────────────────────────────────────────────
 
-from pension_agent.tools.customer_solution import agent
+from pension_agent.tools.customer_solution import solution
 from pension_agent.tools.customer_solution.customer import PERSONAS
 
 BY_NAME = {p.nm: p for p in PERSONAS}
@@ -419,86 +419,55 @@ if _dep:
              if r["name"] in [n.split("(")[0] for n in _dep["products"].values()]]
     check(all(v > _base_rate for v in _rets), "김현수: 기준선 초과 상품만 제안", str(_rets))
 
-# Tier2 — 미매칭 시 '제안 항목 없음', LLM 스텁으로 승격·재료 이탈 폴백.
-import contextlib
-import io
-from dataclasses import replace as _replace
+# 전체 브리핑 — 사실은 코드, 서술은 LLM 1회 + 검증(solution.py).
+import contextlib  # noqa: E402,F401
+import io  # noqa: E402,F401
+from dataclasses import replace as _replace  # noqa: E402
 
-check(agent.propose(BY_NAME["이준호"], use_llm=False)["tier"] == "행내전략",
+check(solution.tier(solution.facts(BY_NAME["이준호"])) == "행내전략",
       "매칭 전략 있으면 tier=행내전략")
 # 요건이 하나도 없는 고객을 합성한다 — 9케이스에는 그런 고객이 없어서(전원 관리 사유 보유)
 # 실존 고객에서 요건 원인을 걷어내 만든다. 새 요건이 늘면 여기도 함께 비워야 한다.
 _calm = _replace(BY_NAME["한지우"], room=0, isa=None)
 check(not conditions(_calm), "합성 무요건 고객: 요건 0건", str(conditions(_calm)))
-_r = agent.propose(_calm, use_llm=False)
-check(_r["tier"] == "미매칭" and _r["sentence"].startswith("제안 가능한 실행 항목이 없습니다"),
-      "미매칭 시 '제안 항목 없음' 규칙 문장", _r["tier"])
-# 같은 프로파일에 LLM 스텁을 갈아끼워 두 산출을 비교한다. 브리핑은 프로세스당 한 번만
-# 만들어지므로(agent.propose 캐시 — 화면과 대화형이 같은 문장을 보게 하는 장치),
-# **입력이 바뀐 셈인 스텁 교체 때마다 캐시를 비운다.** 실행 중에 LLM 이 바뀌는 것은
-# 테스트에서만 있는 일이라, 이 호출이 필요한 것도 여기뿐이다.
-_saved = (agent.llm.available, agent.llm.generate)
-# 파일 저장소(briefing_store)도 끈다 — `scripts.prebuild_briefings` 를 한 번이라도 돌린
-# 체크아웃에는 `runtime/briefing_cache/` 가 있어 저장소가 켜지고, 그러면 첫 스텁이 만든 브리핑이
-# 파일로 남아 두 번째 스텁의 propose 가 **그 파일을 읽는다**(프로세스 캐시만 비워서는
-# 안 지워진다). 재료 이탈 검사가 «LLM판단 · rejected 없음»으로 갈리는 것이 그 증상이다.
-from pension_agent.common import config as _cfg  # noqa: E402
-_saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
-_cfg.BRIEFING_CACHE_DIR = _cfg.BRIEFING_CACHE_DIR / "__off__"   # 없는 디렉터리 = 꺼짐
+check(solution.tier(solution.facts(_calm)) == "미매칭", "요건이 없으면 tier=미매칭")
+
+_saved = (solution.llm.available, solution.llm.generate)
+_calls: list[str] = []
 try:
-    agent.llm.available = lambda: True
-    agent.llm.generate = lambda prompt, system="", **kw: (
-        '{"insight": "현 구성 양호", '
-        '"sentence": "보유 구성과 수익률이 양호해 특별한 조치는 필요하지 않습니다."}')
-    agent.clear_briefing_cache()
-    _r2 = agent.propose(_calm, use_llm=True)
-    check(_r2["tier"] == "LLM판단" and _r2["source"] == "LLM",
-          "미매칭 + LLM → tier=LLM판단", f'{_r2["tier"]}/{_r2["source"]}')
-    agent.llm.generate = lambda prompt, system="", **kw: (
-        '{"insight": "x", "sentence": "KB 특판 정기예금 연 9.99% 가입을 권합니다."}')
-    agent.clear_briefing_cache()
-    _r3 = agent.propose(_calm, use_llm=True)
-    check(_r3["tier"] == "미매칭" and bool(_r3["rejected"]),
-          "재료 이탈 산출은 폴백(tier=미매칭)", str(_r3["rejected"])[:40])
+    solution.llm.available = lambda: False
+    solution.clear_cache()
+    _d0 = solution.document(_calm)
+    check(_d0["narrative"] is None and "제안 가능한 실행 항목이 없습니다" in _d0["markdown"],
+          "LLM 없이: 서술 없이 사실 표 + '제안 항목 없음' 규칙 문장", _d0["reason"])
+    check("### 고객 정보" in _d0["markdown"] and "### IRP 계좌 현황" in _d0["markdown"],
+          "LLM 없이도 사실 부분(고객 정보·계좌 현황 표)은 나온다")
+
+    solution.llm.available = lambda: True
+
+    def _gen(prompt, system="", **kw):
+        _calls.append(kw.get("name", ""))
+        return ('{"recent": ["평가금액은 ' + BY_NAME["이준호"].nm + ' 고객 기준 재료의 값입니다.", '
+                '"KB 특판 정기예금 연 9.99% 상품이 있습니다."], '
+                '"focus": "만기 자금의 운용 방향을 확인합니다.", '
+                '"why_now": "", "confirm": ["계속 운용할 계획인지"]}')
+    solution.llm.generate = _gen
+    solution.clear_cache()
+    _d1 = solution.document(BY_NAME["이준호"])
+    check(_calls == ["solution.narrative"], "전체 브리핑 한 편에 LLM 호출은 1회", str(_calls))
+    check(_d1["narrative"] is not None and len(_d1["narrative"]["recent"]) == 1,
+          "재료 밖 수치(9.99%)가 든 서술 문장만 버린다", str(_d1["narrative"]))
+    check(any("9.99" in r for r in _d1["rejected"]), "버린 사유가 남는다", str(_d1["rejected"])[:80])
+    check("9.99" not in _d1["markdown"] and "- [ ] 계속 운용할 계획인지" in _d1["markdown"],
+          "문서에는 통과한 서술만 실린다")
+    _again = solution.document(BY_NAME["이준호"])
+    check(_calls == ["solution.narrative"] and _again["markdown"] == _d1["markdown"],
+          "같은 고객·같은 날이면 다시 만들지 않는다(같은 서술)", str(_calls))
+    check(solution.peek(BY_NAME["이준호"]) == _d1["narrative"], "peek(): 만든 서술을 돌려준다")
+    check(solution.peek(BY_NAME["한지우"]) is None, "peek(): 만든 적 없으면 None (LLM 을 부르지 않는다)")
 finally:
-    agent.llm.available, agent.llm.generate = _saved
-    _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
-    # 스텁이 만든 브리핑을 뒤 검사에 물려주지 않는다.
-    agent.clear_briefing_cache()
-
-# ── 미리 만들어 둔 브리핑(briefing_store) ────────────────────────────
-# 프로세스 캐시는 프로세스가 끝나면 사라져서, 리허설이 매 실행 앞에서 브리핑 생성(LLM 11회)을
-# 다시 치른다. 파일로 남겨 그것을 건너뛰되, **입력이 달라진 저장분은 절대 읽지 않는다** —
-# 낡은 브리핑이 화면에 뜨는 것은 이 저장소가 가장 경계하는 «화면과 값이 갈리는» 실패의
-# 조용한 형태다(캐시라서 아무도 안 본다).
-import pathlib as _pathlib  # noqa: E402
-import shutil as _shutil  # noqa: E402
-import tempfile as _tempfile  # noqa: E402
-
-from pension_agent.common import config as _config  # noqa: E402
-from pension_agent.tools.customer_solution import briefing_store as _store  # noqa: E402
-
-_saved_dir, _saved_fp = _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT
-_tmp = _pathlib.Path(_tempfile.mkdtemp(prefix="briefing-store-"))
-try:
-    # 디렉터리가 없으면 저장소는 통째로 꺼진 것이다 — 돌린 적 없는 사람에게는 무변경이다.
-    _config.BRIEFING_CACHE_DIR = _tmp / "none"
-    check(not _store.enabled(), "디렉터리가 없으면 브리핑 저장소는 꺼져 있다")
-
-    _config.BRIEFING_CACHE_DIR = _tmp
-    _store._FINGERPRINT = "fp-A"
-    _store.save("k1", {"sentence": "저장본"})
-    check((_store.load("k1") or {}).get("sentence") == "저장본", "저장한 브리핑을 다시 읽는다")
-
-    # 지식 카드·프롬프트·날짜 중 하나라도 바뀌면 지문이 달라진다.
-    _store._FINGERPRINT = "fp-B"
-    check(_store.load("k1") is None, "입력(지문)이 바뀐 저장분은 읽지 않는다")
-
-    _store._FINGERPRINT = "fp-A"
-    check(_store.load("없는키") is None, "저장된 적 없는 키는 None")
-finally:
-    _config.BRIEFING_CACHE_DIR, _store._FINGERPRINT = _saved_dir, _saved_fp
-    _shutil.rmtree(_tmp, ignore_errors=True)
+    solution.llm.available, solution.llm.generate = _saved
+    solution.clear_cache()
 
 # dorm=None 이어도 브리핑이 죽지 않는다 (김현수는 실제로 상담이력이 없어 dorm=None 이다).
 check(BY_NAME["김현수"].dorm is None, "김현수: 상담이력 없음 → dorm=None")
@@ -506,13 +475,10 @@ check("dor" not in conditions(BY_NAME["김현수"]), "dorm=None 이면 dor 요�
 check("None" not in str(FACTS["김현수"]["customer"]["최근접촉"]),
       "dorm=None 이 화면 문자열로 새지 않음", str(FACTS["김현수"]["customer"]["최근접촉"]))
 
-# 산출물(문자열) 형식 — 원화 기대효과 미노출 · 신규 섹션 존재 (이준호 기준).
-_buf = io.StringIO()
-with contextlib.redirect_stdout(_buf):
-    agent._print(agent.propose(BY_NAME["이준호"], use_llm=False))
-_art = _buf.getvalue()
+# 산출물(문자열) 형식 — 원화 기대효과 미노출.
+_art = solution.render(BY_NAME["이준호"], solution.facts(BY_NAME["이준호"]), None)
 check("기대효과" not in _art, "산출물에 '기대효과' 표기 없음")
-check(all(sec in _art for sec in ("판단근거", "근거 문서")), "산출물에 판단근거·근거 문서 섹션")
+check(BY_NAME["이준호"].id not in _art, "산출물에 고객 식별번호를 싣지 않는다(게이트웨이 개인정보 필터)")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -651,11 +617,11 @@ check(engine._value_tag({"kind": "운용", "reduces_risk": True}, "—") == "위
 check(engine._value_tag({"kind": "납입", "impact": {"kind": "tax_credit"}}, "—") == "세제 혜택",
       "tag: 세액공제 → 세제 혜택")
 
-# 출력 포맷 변경은 프롬프트(prompts.py)에 계약으로 반영된다.
-_ptxt = prompts.SYSTEM + prompts.WRITE_PROMPT
-check("카드" in _ptxt, "프롬프트: 카드형 포맷 계약 명시")
-check(("2~3문장" in _ptxt) or ("짧게" in _ptxt), "프롬프트: 간결 요약 지시(AI 브리핑 2~3문장 길이 제약)")
-check(("명령" in _ptxt) and ("제안" in _ptxt), "프롬프트: 매수 명령이 아닌 제안 어조 지시")
+# 서술 프롬프트의 계약 — 재료 밖 값 금지 · 재계산 금지 · 권유 금지.
+_ptxt = prompts.NARRATIVE_SYSTEM + prompts.NARRATIVE_PROMPT
+check("재료" in _ptxt and "계산하지 않습니다" in _ptxt, "프롬프트: 재료 밖 값·재계산 금지")
+check("권유" in _ptxt, "프롬프트: 권유·수익 약속 금지")
+check(all(k in _ptxt for k in ("recent", "focus", "why_now", "confirm")), "프롬프트: 서술 네 항목")
 
 
 # ─────────────────────────────────────────────────────────────

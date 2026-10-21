@@ -9,13 +9,13 @@
     data/            상품·전략·안내 콘텐츠 카탈로그
 
     도구 (plan 이 부른다)
-    briefing.py      customer      브리핑 재료 — 잔액·수익률·요건·타겟 근거
+    briefing.py      customer      브리핑 재료 — 잔액·수익률·요건·타겟 근거 (LLM 없음)
+                     briefing      전체 브리핑 문서 — 그대로 답이 된다
     suitability.py   suitable      투자성향으로 어디까지 안내할 수 있는지
     outreach.py      outreach      안내할 세미나·이벤트와 발송 문구
     targets.py       targets       오늘의 타겟 고객 목록
     guard.py                       고객 요건으로 찾는 「하지 말 것」 카드
 
     브리핑 생성
-    agent.py         propose       ①~⑨ 브리핑 [LLM]
-    sections.py · briefing_store.py
+    solution.py      facts · document · peek   계산 결과 · 전체 브리핑 문서(서술만 LLM 1회)
 """

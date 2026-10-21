@@ -157,32 +157,14 @@ python -m scripts.demo_status                      # docs/DEMO_STATUS.md 갱신
 | `HTTP 429` | 호출이 몰림 | `.env` 「호출 게이트」 구역 — 간격을 늘리거나(`LLM_MIN_INTERVAL_SEC`) 버킷을 나눈다(`LLM_CLIENT_USER_SPREAD`). 재시작 필요 |
 | `HTTP 400 민감정보 감지됨` | 게이트웨이 앞단의 개인정보 필터. 응답의 `rule_name` 이 어느 룰인지 말한다 | 그 꼴을 **프롬프트 재료에서** 뺀다(고객 식별번호가 그랬다 — `pension_agent/common/privacy.py` 머리말). 나가기 직전에 가리는 문은 이미 서 있고, 무엇이 가려졌는지는 로그의 `llm 개인정보 가림 가린룰=…` 줄이 말한다. 걸린 값을 직접 보려면 `LLM_PII_SCRUB=0` 으로 끄고 재현한다 |
 
-**STG 는 분당 10회다.** 브리핑 한 편이 순차 11회라 한 편이 한도를 넘는다 —
-`LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=6.5` 로 조이면 한 편이 약 70초에 완주하고,
-그 속도에서는 호출 중에 브리핑을 만들 수 없으니 **미리 만들어 둔다**(§5).
+**STG 는 분당 10회다.** `LLM_MAX_CONCURRENCY=1` · `LLM_MIN_INTERVAL_SEC=6.5` 로 조인다.
+전체 브리핑 한 편은 LLM 1회다.
 
-## 5. 브리핑을 미리 만들어 둔다
+## 5. 브리핑은 미리 만들어 둘 것이 없다
 
-대화형은 브리핑이 **이미 있다고 보고** 답한다. 배포 컨테이너가 직접 만들면 고객당 순차
-LLM 11회를 외부 호출마다 물기 때문에 `runtime/briefing_cache/` 를 이미지에 함께 넣는다. 왜 그런지,
-무엇이 저장되고 안 되는지는 `scripts/prebuild_briefings.py` 머리말과 `.gitignore` 주석에 있다.
-
-```bash
-# 게이트를 STG 한도 아래로 조인 뒤(§4), 코드·데이터를 확정하고
-python -m scripts.prebuild_briefings          # 고객당 11회 · 12명이면 20분 넘게 걸린다
-python -m scripts.prebuild_briefings --status # 전원 «있음(지문 일치)» 인지 확인
-git add briefing_cache && git commit          # 커밋 전에 읽는다 — 그 파일이 곧 화면에 뜨는 문장이다
-```
-
-- 코드·데이터를 한 줄이라도 고치면 지문이 어긋나 저장분이 버려진다 — 다시 만들어 다시 커밋한다.
-- 지문에는 **오늘 날짜**가 들어간다. 같은 이미지를 다음 날 부르면 고객당 첫 호출이 다시
-  11회를 치른다(컨테이너 안에 저장되어 두 번째부터는 읽힌다). 피하려면 `.env` 에
-  `PENSION_TODAY` 를 고정해 빌드한다 — 대신 만기 D-day 가 그 날짜로 굳는다.
-- 지금 무엇이 읽히는지는 `/health` 의 `briefing_cache` 가 답한다:
-  `{"enabled": true, "stored": 12, "usable": 12, "writable": true, "today": "2026-09-08"}`.
-  `usable < stored` 면 그만큼이 낡은 지문, `usable: 0` 이면 하나도 안 읽히는 상태,
-  `writable: false` 면 재기동할 때마다 처음부터 다시 만든다. 셋 다 답변은 정상으로 나가고
-  화면에는 «느리다»로만 보인다.
+전체 브리핑은 «이 고객 브리핑 해줘» 요청이 올 때 만든다 — 사실 부분은 계산 결과를 옮긴 표이고,
+서술 부분만 LLM 1회다(`pension_agent/tools/customer_solution/solution.py`). 부분 질문(«수익률
+얼마야»)은 LLM 으로 브리핑을 만들지 않는다. 같은 고객·같은 날의 서술은 프로세스 안에서 한 번만 만든다.
 
 ## 6. 배포
 

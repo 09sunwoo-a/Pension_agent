@@ -1,4 +1,8 @@
-"""고객 브리핑 재료 도구(customer) — strategy_agent 가 계산한 것을 그대로 옮긴다.
+"""고객 도구 둘 — 계산 결과를 그대로 옮긴다.
+
+    customer   부분 질문(«수익률 얼마야»·«왜 타겟이야»)의 재료. LLM 을 부르지 않는다
+    briefing   전체 브리핑 문서. 이 도구가 실은 문서는 답변 작성(compose)을 거치지 않고
+               그대로 답이 된다(nodes/answer.py)
 
 tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말한다.
 """
@@ -24,14 +28,16 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
     customer_id = state.get("customer_id")
     if not customer_id:
         return None
-    from pension_agent.tools.customer_solution import agent as strategy_agent  # noqa: PLC0415
     from pension_agent.tools.customer_solution import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import solution  # noqa: PLC0415
     try:
         profile = strategy_customer.get_profile(customer_id)
         if profile is None:
             return None
-        result = strategy_agent.propose(profile)
-        facts = result["facts"]
+        facts = solution.facts(profile)
+        # 전체 브리핑을 이미 만들었으면 그 서술을 함께 싣는다 — 직원은 그 문서를 보면서
+        # 묻는다. 없으면 만들지 않는다(부분 질문에 LLM 을 쓰지 않는다).
+        narrative = solution.peek(profile) or {}
     except Exception:
         return None
 
@@ -112,12 +118,13 @@ def _customer(state: AgentState, query: str) -> Evidence | None:
                 # 화법 다섯 장이 근거로 따라 섰다(2026-09-17 실측, 박정호).
                 card_keys.setdefault(item["card_id"], []).extend([head, body])
     lines += card_lines
-    # 화면에 뜬 AI 산문. 직원은 이걸 보면서 묻기 때문에 재료에 없으면 "화면에 저렇게
-    # 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 산문이므로 원문 스팬은 아니다.
-    for label, text in (("AI브리핑 문장", result.get("sentence")),
-                        ("AI브리핑 근거해설", result.get("insight"))):
-        if text:
-            lines.append(f"· {label}: {text}")
+    # 전체 브리핑에 나간 AI 분석. 직원은 그 문서를 보면서 묻기 때문에 재료에 없으면
+    # "브리핑에 저렇게 써 있는데 왜 다르게 말하느냐"가 된다. 값이 아니라 서술이므로 원문 스팬은 아니다.
+    for key, label in solution.NARRATIVE_FIELDS.items():
+        value = narrative.get(key)
+        for text in (value if isinstance(value, list) else [value]):
+            if text:
+                lines.append(f"· 브리핑 {label}: {text}")
     # allow 에는 facts 전체를 넣는다 — 화면에 안 띄운 값도 '재료'이므로 인용 자체는 이탈이 아니다.
     # atomic·notices 를 비워 둔다. 고객 재료는 항목이 많아 전부 원문으로 요구하면 답변이 표 덤프가
     # 되고, 항목별로 고르면 무엇을 고를지에 근거가 없다. 수치 집합 검사만 걸린다
@@ -191,7 +198,7 @@ def _citable(facts: dict) -> dict:
 
 
 def _cond_labels(conditions: list[str]) -> list[str]:
-    """브리핑 산출의 성립 요건(`코드:이름`)에서 이름만. 화면(`app.py`)이 하는 것과 같은 처리.
+    """브리핑 산출의 성립 요건(`코드:이름`)에서 이름만.
 
     코드(`isa`·`tax`·`add`)를 재료에 그대로 실었던 동안 답변이 그것을 옮겼다 — 「세액공제
     활용 가능(tax)과 추가입금 여력 보유(add) 요건이 성립되어 있어서」(2026-09-03 실측,
@@ -200,3 +207,29 @@ def _cond_labels(conditions: list[str]) -> list[str]:
     뜻이 없다.
     """
     return [c.split(":", 1)[1] if ":" in c else c for c in conditions]
+
+
+def _briefing(state: AgentState, query: str) -> Evidence | None:
+    """전체 브리핑 문서 — «이 고객 브리핑 해줘»·«전체 정리해줘».
+
+    문서는 `solution.document()` 가 만든다(사실은 코드, 서술은 LLM 1회 + 검증). 이 도구의
+    산출은 답변 작성을 거치지 않고 그대로 답이 된다(`meta["document"]` — nodes/answer.py).
+    compose 가 다시 쓰면 양식이 흐트러지고 표의 값도 LLM 이 옮겨 적게 된다.
+    """
+    customer_id = state.get("customer_id")
+    if not customer_id:
+        return None
+    from pension_agent.tools.customer_solution import customer as strategy_customer  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import solution  # noqa: PLC0415
+    profile = strategy_customer.get_profile(customer_id)
+    if profile is None:
+        return None
+    doc = solution.document(profile)
+    facts = solution.facts(profile)
+    return _ev("briefing", query, doc["markdown"],
+               [{"id": "customer", "title": f"{profile.nm} 고객 브리핑",
+                 "doc": "고객 정보 — 계좌 원장 조회값과 AI 분석",
+                 "score": None, "page": None}],
+               allow=[doc["markdown"], json.dumps(_citable(facts), ensure_ascii=False, default=str)],
+               meta={"document": doc["markdown"], "tier": doc["tier"],
+                     "narrative": bool(doc["narrative"])})

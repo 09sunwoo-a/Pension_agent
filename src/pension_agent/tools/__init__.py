@@ -19,8 +19,9 @@ evidence/record.py. 못 찾으면 None, 죽으면 ToolFailure — tools/base.py.
     pitch.py        pitch                    고객의 말·반응으로 화법을 찾는다 [LLM]
     playbook.py     playbook                 이 고객 상태에 걸린 참고자료(화면 ⑥⑦⑧)
 
-    현재 고객 도구 — strategy_agent 가 계산한 것을 그대로
+    현재 고객 도구 — customer_solution 이 계산한 것을 그대로
     briefing.py     customer                 브리핑 재료 — 잔액·수익률·요건·타겟 근거
+                    briefing                 전체 브리핑 문서 — 그대로 답이 된다 [LLM 1회]
     suitability.py  suitable                 투자성향으로 어디까지 안내할 수 있는지
     outreach.py     outreach                 안내할 세미나·이벤트와 발송 문구
     history.py      history transcript       지난 상담 · 이번 상담의 대화
@@ -89,6 +90,7 @@ from pension_agent.tools.customer_solution.briefing import (  # noqa: F401
     _citable,
     _cond_labels,
     _customer,
+    _briefing,
 )
 from pension_agent.tools.general.history import (  # noqa: F401
     HISTORY_DIALOG_SESSIONS,
@@ -238,6 +240,13 @@ TOOLS: dict[str, Tool] = {
              "매매·입금·최근 1개월 고유계정대 증감)·계좌 상태·성립 요건, 그리고 이 고객이 "
              "왜 관리 대상(타겟)으로 선정됐는지의 근거)를 돌려준다", _customer,
              progress="고객 브리핑 자료"),
+        # `customer` 와 갈라 두는 축은 **답의 꼴**이다 — 그쪽은 부분 질문의 재료이고 답은
+        # compose 가 쓴다. 이쪽은 정해진 양식의 문서 한 편이고 그대로 답이 된다(nodes/answer.py).
+        Tool("briefing", "지금 열려 있는 고객의 **전체 브리핑 문서**(고객 정보·계좌 현황 표와 "
+             "AI 분석)를 만든다 — 「이 고객 브리핑 해줘」·「전체 정리해줘」처럼 브리핑 전체를 "
+             "요청할 때만 쓴다. 값 하나·이유 하나를 묻는 질문은 customer 다. 이 도구를 부르면 "
+             "다른 도구는 부르지 않고 끝낸다",
+             _briefing, progress="고객 브리핑 문서"),
         Tool("history", "이 고객과 **지난** 상담(이전 세션)에서 무슨 얘기를 했는지(날짜·질문·"
              "안내 요지) 돌려준다 — 지금 진행 중인 상담은 들어 있지 않다",
              _history, progress="지난 상담 기록"),
@@ -308,7 +317,7 @@ TOOLS: dict[str, Tool] = {
 }
 
 #: 열려 있는 고객이 있어야 성립하는 도구. 어느 고객인지가 재료의 전제다(§3).
-_NEEDS_CUSTOMER = frozenset({"customer", "history", "transcript", "suitable", "tax_credit",
+_NEEDS_CUSTOMER = frozenset({"briefing", "customer", "history", "transcript", "suitable", "tax_credit",
                              "playbook", "outreach"})
 
 #: 직전 답변이 있어야 성립하는 도구. 첫 턴이나 되묻기 직후처럼 다시 쓸 답이 없으면 카탈로그에

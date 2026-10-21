@@ -384,9 +384,7 @@ class LLMError(RuntimeError):
     안 되어 있다'는 한 가지 안내로 끝난다.
 
     status: 원인이 HTTP 응답이면 그 상태 코드(429·500 …), 아니면 None. 호출부가 «속도
-    제한이라 조금 뒤에 다시 하면 되는 실패»와 나머지를 문자열 검색 없이 가르는 자리다 —
-    `scripts.prebuild_briefings` 가 429 를 만나면 다음 고객으로 넘어가지 않고 멈추는 데 쓴다
-    (넘어가 봐야 같은 429 를 재시도 횟수만큼 더 맞을 뿐이다).
+    제한이라 조금 뒤에 다시 하면 되는 실패»와 나머지를 문자열 검색 없이 가르는 자리다.
     """
 
     def __init__(self, message: str, *, status: int | None = None) -> None:

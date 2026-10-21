@@ -604,11 +604,13 @@ def check_last_answer() -> int:
     print(f"{'✓' if hit else '✗'} 다시 쓸 답변도 없으면 예전대로 고객 화면을 먼저 열라고 답한다")
     ok += hit
 
-    from pension_agent.tools.customer_solution import agent as SA, customer as SC
-    orig_profile, orig_propose, orig_gen, logged = SC.get_profile, SA.propose, CORR.generate, []
+    from pension_agent.tools.customer_solution import customer as SC, solution as SOL
+    orig_profile, orig_facts, orig_peek, orig_gen, logged = (SC.get_profile, SOL.facts, SOL.peek,
+                                                             CORR.generate, [])
     SC.get_profile = lambda cid: object()
-    SA.propose = lambda p: {"facts": {"items": []}, "sentence": "만기 예정 예금이 있어 빠른 운용 결정이 필요합니다.",
-                            "insight": "i"}
+    SOL.facts = lambda p: {"items": []}
+    SOL.peek = lambda p: {"recent": ["만기 예정 예금이 있어 빠른 운용 결정이 필요합니다."],
+                          "focus": "", "why_now": "", "confirm": []}
     CORR.generate = lambda prompt, **kw: (logged.append(prompt) or
                                           '{"target": "not_briefing", "item_id": null, "revised_text": "", "reject_reason": ""}')
     orig_log = CORR._log_correction
@@ -616,7 +618,8 @@ def check_last_answer() -> int:
     try:
         out = CORR.correction({**state, "customer_id": "CX"})
     finally:
-        SC.get_profile, SA.propose, CORR.generate, CORR._log_correction = orig_profile, orig_propose, orig_gen, orig_log
+        SC.get_profile, SOL.facts, SOL.peek, CORR.generate, CORR._log_correction = (
+            orig_profile, orig_facts, orig_peek, orig_gen, orig_log)
     hit = (not out.get("answer") and out.get("intent") == routing.DEFAULT_INTENT
            and "LOGGED" not in logged and "ETF 상품 종류" in logged[0]
            and "not_briefing" in prompts.CORRECTION_SYSTEM)
