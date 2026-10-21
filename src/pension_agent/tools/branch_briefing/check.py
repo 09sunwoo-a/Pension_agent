@@ -1,13 +1,7 @@
-"""LLM 이 쓴 SQL 검사 — 실행 전에 코드가 막는다.
+"""LLM 이 쓴 SQL 의 실행 전 검사.
 
-통과 조건은 넷이다.
-  ① SELECT 문 하나 — 세미콜론으로 이은 여러 문장 · 주석 · WITH(고정 뷰 이름을 덮어쓸 수 있다)를 막는다
-  ② 쓰기·실행 낱말이 없다 — INSERT·UPDATE·DELETE·DROP·EXEC·SELECT INTO 등
-  ③ FROM·JOIN 이 가리키는 것은 고정 뷰뿐이다 — 원본 테이블·시스템 테이블·다른 스키마를 못 본다
-  ④ 시스템 프로시저·변수(sp_·xp_·@@)를 부르지 않는다
-
-이것은 문자열 검사라 SQL 문법 전체를 이해하지 못한다 — 판정이 애매하면 막는 쪽으로 기운다.
-행외 목업 DB 는 연결 자체가 읽기 전용이고(demo_db), 행내는 DB 계정 권한이 마지막 문이다.
+통과 조건: SELECT 한 문장(주석·WITH 금지 — WITH 는 고정 뷰를 덮어씀) · 쓰기 낱말 없음 ·
+FROM/JOIN 은 고정 뷰만 · 시스템 객체(sp_·xp_·@@) 없음. 문자열 검사라 애매하면 거부.
 """
 
 from __future__ import annotations
@@ -18,7 +12,7 @@ from pension_agent.tools.branch_briefing.views import VIEWS
 
 
 class SQLRejected(ValueError):
-    """검사에 걸린 SQL. 메시지는 LLM 에게 돌려줘 다시 쓰게 하는 데 쓴다."""
+    """검사 거부. 메시지는 LLM 재작성 지시용."""
 
 
 _FORBIDDEN = re.compile(
@@ -32,12 +26,12 @@ _TOKEN = re.compile(r"[A-Za-z_][\w.]*|\(|\)|,|\S")
 
 
 def _mask_strings(sql: str) -> str:
-    """문자열 리터럴 안을 지운다 — 값 안의 낱말(«'DELETE'»)로 오판하지 않게."""
+    """문자열 리터럴 내용 제거(값 안 낱말 오판 방지)."""
     return re.sub(r"'(?:[^']|'')*'", "''", sql)
 
 
 def _tables(sql: str) -> list[str]:
-    """FROM·JOIN 뒤에 오는 테이블 이름들. 괄호(하위 질의)는 건너뛴다."""
+    """FROM·JOIN 뒤 테이블 이름들(하위 질의 괄호 제외)."""
     toks = _TOKEN.findall(sql)
     out: list[str] = []
     i = 0
@@ -66,7 +60,7 @@ def _tables(sql: str) -> list[str]:
 
 
 def check(sql: str) -> str:
-    """통과하면 정리한 SQL 을, 아니면 SQLRejected 를 낸다."""
+    """통과 시 정리한 SQL 반환, 아니면 SQLRejected."""
     text = (sql or "").strip().rstrip(";").strip()
     if not text:
         raise SQLRejected("SQL 이 비어 있습니다")

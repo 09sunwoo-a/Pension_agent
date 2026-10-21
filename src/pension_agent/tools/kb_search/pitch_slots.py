@@ -1,27 +1,6 @@
-"""화법 검색 전용 슬롯 분해 — `situation_slots` 와 그것이 만드는 '파악된 상황' 한 줄.
+"""화법 검색용 슬롯 분해(고객유형·거절유형·단계)와 '파악된 상황' 한 줄.
 
-예전에는 이 파일이 화법 검색 흐름 전체(llm_select·retrieve·broaden·verify·respond·fallback)를
-갖고 있었다. 그 여섯 노드는 계획 루프가 들어오면서 자리를 옮겼다 —
-
-  llm_select·retrieve·broaden  →  tools.py::_pitch (화법 도구의 3단 선택)
-  verify                       →  tools.py::fits_question (오답 게이트 — 지금은 모든 도구가 쓴다)
-  respond                      →  nodes/plan.py::_talk (compose 가 대사를 쓸 때)
-  fallback                     →  nodes/plan.py::NO_EVIDENCE (원장이 비었을 때)
-
-옮긴 이유는 그 흐름이 **그래프의 한 갈래**였기 때문이다. 화법이 하나의 도구가 되면 다른
-재료(수치·절차·고객)와 한 답변에 섞일 수 있는데, 그래프 갈래로 있으면 END 로 직행해서 섞일
-자리가 없었다.
-
-남은 것은 화법 검색에만 필요한 고객유형·거절유형·상담단계 분해다. 뽑은 슬롯은 화법 도구의
-n-gram 폴백 후보를 좁히는 데 쓰이고, 답변 작성 프롬프트의 '파악된 상황' 한 줄이 된다.
-
-━━ 노드가 아니라 도구 안에서 돈다 ━━
-한때 이것이 계획 루프 앞의 노드였다(`situation_slots`) — 모든 턴이 화법 검색을 한다고
-전제한 배선이다. 능력 표면이 도구 목록이 되면서 그 전제가 깨졌다: "이 고객 예금 잔액
-얼마지"는 `customer` 도구 하나면 끝나는데도 화법 슬롯 분해에 LLM 호출을 한 번 썼다.
-값 하나 묻는 턴이 6번의 순차 LLM 호출로 끝나던 이유 중 하나가 이것이다.
-
-지금은 `_pitch` 가 필요할 때 한 번 부른다. 화법을 안 부르는 턴은 이 호출 자체가 없다.
+슬롯은 화법 n-gram 폴백의 후보 축소용. _pitch 가 필요할 때만 호출.
 """
 
 from __future__ import annotations
@@ -34,10 +13,6 @@ from pension_agent.prompts import SITUATION_PROMPT
 from pension_agent.state import KB, AgentState, format_history
 from pension_agent.common.llm import LLMError, generate
 
-
-# ─────────────────────────────────────────────────────────────
-# 화법 검색 전용 슬롯 분해 — 화법 도구가 필요할 때만 부른다
-# ─────────────────────────────────────────────────────────────
 
 def extract_slots(state: AgentState) -> dict[str, Any]:
     prompt = SITUATION_PROMPT.format(
@@ -52,9 +27,7 @@ def extract_slots(state: AgentState) -> dict[str, Any]:
     try:
         text = generate(prompt, max_tokens=150, name="consult.pitch")
     except LLMError:
-        # 슬롯 분해가 실패해도 화법 검색은 원문(utterance)만으로 돈다 — 슬롯은 n-gram
-        # 폴백의 후보를 좁히는 보조 정보다. LLM 이 정말 죽었다면 뒤이은 적합성 판정·
-        # 답변 작성이 같은 이유로 실패하고, 턴은 'LLM 연결이 안 되어 있다'로 끝난다(§11).
+        # LLM 장애는 삼키지 않음 — 턴이 «LLM 미연결»로 끝나야 함
         raise
 
     try:
@@ -70,17 +43,8 @@ def extract_slots(state: AgentState) -> dict[str, Any]:
     }
 
 
-# ─────────────────────────────────────────────────────────────
-# 프롬프트에 넣는 '파악된 상황' 한 줄
-# ─────────────────────────────────────────────────────────────
-
 def situation_line(intent: str | None, slots: dict[str, Any] | None) -> str:
-    """답변 작성 프롬프트에 넣을 '파악된 상황' 한 줄.
-
-    화법 도구가 슬롯을 뽑았을 때만 만든다 — 값·절차만 물은 턴에 "고객유형 미파악 / 거절유형
-    미파악"을 실어 보내면 LLM 이 있지도 않은 상담 상황을 상상하게 된다. guide 질문엔 애초에
-    없는 고객유형·거절유형을 '미파악'으로 채워 보여주지 않는 것과 같은 이유다.
-    """
+    """작성 프롬프트용 '파악된 상황' 한 줄. 슬롯 없으면 빈 문자열 — 없는 상담 상황 상상 방지."""
     if not slots:
         return ""
     stage = slots.get("stage") or "미파악"

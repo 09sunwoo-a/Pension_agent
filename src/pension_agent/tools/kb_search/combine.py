@@ -1,16 +1,6 @@
-"""카드 묶음 → 원장 항목 하나 — **종류마다 그 종류의 도구가 쓰는 렌더러·선언을 그대로** 쓴다.
+"""여러 종류의 카드 묶음 → 원장 항목 하나(playbook · last_answer 용).
 
-한 원장 항목에 여러 종류의 카드가 섞이는 자리가 둘이다.
-  · `playbook` — 화면 ⑥⑦⑧ 후보군(화법·절차·방법론)에서 고른 것
-  · `last_answer` — 직전 답변이 근거로 썼던 카드를 id 로 되싣는 것(어느 종류든 올 수 있다)
-
-종류를 무시하고 한 렌더러에 태우면 두 가지가 깨진다: `cautions` 가 역할 구분 없이 뿌려져
-저작 메모가 직원에게 노출되고(§12 지워진 gap 17 의 재발), 화면번호·값 스팬이 `atomic`
-강제를 받지 않아 LLM 이 옮겨 적다 틀려도 아무도 못 잡는다. 그래서 종류별 도구가 검색
-뒤에 하는 일(`fact_evidence`·`procedure_evidence` …)을 그대로 부르고 결과만 합친다 —
-선언이 두 곳에 있으면 한쪽만 빠지는 날이 온다.
-
-tools 패키지 머리말(`tools/__init__.py`)이 도구 전체의 규약을 말한다.
+종류별 빌더를 그대로 사용 — 한 렌더러로 합치면 저작 메모 노출·atomic 강제 누락.
 """
 
 from __future__ import annotations
@@ -34,9 +24,7 @@ def _pitch_evidence(query: str, hits: Hits, tool: str) -> Evidence | None:
                cards=[c for _s, c in hits])
 
 
-#: 종류 → 그 종류의 원장 항목을 만드는 함수. **순서가 곧 블록 순서다**(화법이 먼저 —
-#: 직원이 상담 중에 읽는 것은 할 말이고 나머지는 그 근거다). 여기 없는 종류는 실리지 않는다 —
-#: 렌더러 없이 싣는 경로를 두면 위 머리말의 사고가 그 종류로 되살아난다.
+#: 종류 → 원장 항목 빌더. 순서 = 블록 순서(화법 먼저). 없는 종류는 예외.
 _BUILDERS: dict[str, Callable[..., Evidence | None]] = {
     "pitch": _pitch_evidence,
     "fact": fact_evidence,
@@ -53,9 +41,7 @@ _BUILDERS: dict[str, Callable[..., Evidence | None]] = {
 
 def evidence_from_cards(tool: str, query: str, hits: Hits, *,
                         customer_id: str | None = None) -> Evidence | None:
-    """(관련도, 카드) 목록 → `tool` 이름의 원장 항목 하나. 종류마다 그 종류의 빌더를 부르고
-    본문·스팬·표시·출처를 합친다. 렌더러가 없는 종류는 조용히 빠지지 않고 예외다 —
-    «카드는 실렸는데 선언이 안 실린» 항목이 원장에 서면 안 된다."""
+    """(관련도, 카드) 목록 → 종류별 빌더 결과를 합친 원장 항목. 빌더 없는 종류는 ValueError."""
     if not hits:
         return None
     unknown = sorted({c["_kind"] for _s, c in hits} - set(_BUILDERS))

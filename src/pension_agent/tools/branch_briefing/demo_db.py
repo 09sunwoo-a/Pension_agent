@@ -1,12 +1,7 @@
-"""행외 개발·테스트용 목업 DB(sqlite, 메모리) — 행내 Sybase 대신 같은 질문을 돌려 보는 자리.
+"""행외 목업 DB(sqlite 메모리) — 전부 시연값.
 
-**전부 시연값이다.** 부점 4곳·직원·고객 300명 중 288명은 이 파일이 고정 시드로 만든 가짜이고,
-나머지 12명은 고객별 솔루션의 목업 고객(customers.json)을 같은 값으로 옮긴 것이다 — 같은 고객에
-대해 메인 브리핑과 고객별 솔루션이 다른 숫자를 말하지 않게 하려는 것이다. 무엇이 더미인지는
-`docs/DEMO_STATUS.md` 가 적는다.
-
-테이블 세 개는 행내 원본 테이블을 흉내 낸 것이다. 질문에 답하는 SQL 은 이 테이블을 직접 보지
-않고 `sql/sqlite/*.sql` 의 고정 뷰만 본다 — 행내로 갈 때 바뀌는 것은 고정 뷰 SQL 과 실행부뿐이다.
+고객 300명 = 고정 시드 합성 288명 + 목업 고객 12명(customers.json 과 같은 값 — 화면 간 수치 일치).
+질의는 sql/sqlite 고정 뷰 경유만.
 """
 
 from __future__ import annotations
@@ -18,9 +13,9 @@ from datetime import date, timedelta
 
 from pension_agent.tools.customer_solution import customer as C
 
-#: 시연 부점. 첫 부점에 목업 고객 12명을 둔다.
+#: 시연 부점(첫 부점에 목업 고객 12명).
 BRANCHES = (("0001", "여의도"), ("0002", "강남"), ("0003", "판교"), ("0004", "부산"))
-#: 시연 직원 — 사번 → 부점. 3902172 는 저장소 문서·테스트가 쓰는 개발 사번이다.
+#: 시연 직원(사번 · 이름 · 부점). 3902172 는 문서·테스트용 개발 사번.
 EMPLOYEES = (("3902172", "김국민", "0001"), ("3902173", "이하나", "0001"),
              ("3902201", "박서준", "0002"), ("3902301", "최유리", "0003"),
              ("3902401", "정민호", "0004"))
@@ -104,7 +99,7 @@ def _synthetic_rows() -> list[tuple]:
 
 
 def connection() -> sqlite3.Connection:
-    """목업 DB 연결(프로세스에 하나). 읽기 전용으로 쓴다 — 쓰기 문장은 검사가 먼저 막는다."""
+    """목업 DB 연결(프로세스당 하나, 읽기 전용)."""
     global _CONN
     with _LOCK:
         if _CONN is None:
@@ -116,14 +111,14 @@ def connection() -> sqlite3.Connection:
             conn.executemany(f"INSERT INTO irp_customer_base VALUES ({', '.join('?' * 18)})",
                              _persona_rows() + _synthetic_rows())
             conn.commit()
-            # 이 연결로는 더 쓰지 않는다 — 검사를 빠져나간 쓰기 문장이 있어도 데이터는 그대로다.
+            # 검사를 빠져나간 쓰기 문장 대비
             conn.execute("PRAGMA query_only = ON")
             _CONN = conn
     return _CONN
 
 
 def reset() -> None:
-    """다시 만든다 — 테스트가 «오늘»을 바꿨을 때."""
+    """연결 재생성(테스트의 «오늘» 변경 시)."""
     global _CONN
     with _LOCK:
         if _CONN is not None:
