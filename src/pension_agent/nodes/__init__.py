@@ -1,19 +1,17 @@
-"""그래프 노드 — LangGraph 에 add_node 되는 함수만. 조립은 ../graph.py, 분기는 ../routing.py.
+"""그래프 노드 — LangGraph add_node 대상 함수만. 조립은 ../graph.py, 분기는 ../routing.py.
 
-한 턴은 understand → (plan ⇄ tools) → compose → offer 로 흐르고, 나머지는 understand 가
-가려낸 특수 턴이다. [LLM] 이 없는 노드는 LLM 을 부르지 않는다.
+흐름: understand → (plan ⇄ tools) → compose → offer. [LLM] 없는 노드는 LLM 미호출.
 
-    understand.py   understand      질문에서 intent·utterance 만 가린다. 라우팅 전용 [LLM]
-    plan.py         plan_step       도구 하나를 고르고 실행해 원장에 쌓는다. 상한 MAX_STEPS [LLM]
-                    compose         원장만으로 답을 쓰고 코드가 근거와 대조한다 [LLM]
-                    screen          화면 답변과 쪽지 초안이 같이 거치는 근거 검사
-                    llm_down        LLM 미연결 턴 — 답 대신 원인을 말한다
-    answer.py       answer          clarify 와 compose 를 동시에 돌리고 하나를 고른다 [LLM×2]
-    clarify.py      clarify         답의 형태 — 답한다·전제를 밝힌다·되묻는다·없다 [LLM]
-    meta.py         agent_help      「뭘 도와줄 수 있어」·「기억해」·「문자 보내줄 수 있어」 — 코드가 만든
-                                    «나에 대한 사실» 안에서 질문에 맞춰 쓴다 [LLM]
-    lms.py          lms_link        인용된 문구로 LMS 발송 화면 연계를 제안한다. 보내지 않는다
-    correction.py   correction      브리핑 산문 수정. 편집 불가 필드면 거절 [LLM]
-    act.py          offer           답변이 가리키는 화면이 있으면 「연계해드릴까요」
+    understand.py   understand      intent·utterance 분류. 라우팅 전용 [LLM]
+    plan.py         plan_step       도구 하나 선택·실행 후 원장 적재. 상한 MAX_STEPS [LLM]
+                    compose         원장만으로 답변 작성 + 근거 대조 [LLM]
+                    screen          화면 답변·쪽지 초안 공용 근거 검사
+                    llm_down        LLM 미연결 턴 — 원인 안내
+    answer.py       answer          clarify·compose 동시 실행 후 택일 [LLM×2]
+    clarify.py      clarify         답 형태 판정 — 답함·전제·되물음·없음 [LLM]
+    meta.py         agent_help      에이전트 자신에 대한 질문 응답 [LLM]
+    lms.py          lms_link        인용 문구로 LMS 발송 화면 연계 제안. 발송 안 함
+    correction.py   correction      브리핑 산문 수정. 편집 불가 필드는 거절 [LLM]
+    act.py          offer           답변이 가리키는 화면 연계 제안
                     confirm_action  직전 제안에 대한 네/아니오 — 연계 또는 철회
 """
