@@ -26,7 +26,7 @@ from pension_agent.common import config
 MARK_START = "<!-- generated:architecture:start — python -m scripts.render_architecture 가 갱신한다. 손으로 고치지 않는다 -->"
 MARK_END = "<!-- generated:architecture:end -->"
 
-README = config.PACKAGE_ROOT / "README_graph.md"
+README = config.SRC_ROOT / "README.md"
 
 #: 그래프 노드의 화면 라벨 — «영문 노드명 — 기능명» 한 줄 + 하는 일 한 줄. 기능은 점검
 #: 자리에서 읽는 사람 기준으로 쓰되, 코드로 찾아갈 수 있게 노드명은 남긴다. 그 밖의 개발
@@ -144,7 +144,7 @@ def render_block() -> str:
         "실선은 고정된 흐름, 점선은 질문에 따라 갈리는 분기다. 자료 도구와 답변 점검 상자는",
         "LangGraph 노드가 아니라 근거 수집·답변 작성 **안**에서 도는 것을 꺼내 그린 것이다 —",
         "`get_graph()` 출력에 도구가 보이지 않는 이유가 그것이다. 어떤 도구가 있는지와 답변을",
-        "내보낼지는 코드가 정하고, 이번 질문에 무엇을 쓸지는 LLM 이 정한다(루트 CLAUDE.md 규칙 2).",
+        "내보낼지는 코드가 정하고, 이번 질문에 무엇을 쓸지는 LLM 이 정한다(1절 «역할 분담»).",
         "코드 대응: 도구 레지스트리 `tools.TOOLS` · 점검 `verify_texts`/`relations`/`span` ·",
         "분기 `routing.py`.",
     ])

@@ -1,15 +1,15 @@
-"""LangGraph 기반 IRP 상담 화법 에이전트 — 그래프 조립 · 실행 진입점.
+"""연금 에이전트 — 그래프 조립 · 실행 진입점.
 
 직원이 "이런 상황인데 뭐라고 답변하지?" 라고 자연어로 물으면
 지식베이스에서 관련 화법을 찾아 핵심 포인트와 근거를 짚어주는 코칭 조언을 만들어 준다.
 후속 질문(이전 대화 맥락 이어가기)도 지원한다.
 
-    from graph import ask
+    from pension_agent import ask
     r = ask("사업자 고객인데 수수료 부담된다고 하시네요")
     print(r["answer"])
     r2 = ask("그럼 안 된다고 하면요?", history=r["history"])   # 후속 질문
 
-그래프 구조(노드·분기 다이어그램)는 README.md 참고. 이 파일은 그래프를
+그래프 구조(노드·분기 다이어그램)는 src/README.md 6절 참고. 이 파일은 그래프를
 조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
 노드 함수는 기능별로 나뉘어 있다 — 상태정의는 state.py, 분기 predicate 는 routing.py,
 화법 슬롯 분해는 pitch.py, 계획 루프는 plan.py, 되묻기 판정·답변 작성은 answer.py,
