@@ -1,6 +1,6 @@
-"""시연 대본의 판 이력 — tests/debug/scenarios.py
+"""시연 대본 판 이력 — tests/debug/scenarios.py.
 
-`tests/test_infra.py` 가 번호 순서로 임포트해 돌린다 — 이 파일을 따로 돌리지 않는다.
+실행: python -m tests.test_infra (번호 순서 임포트, 단독 실행 금지)
 """
 
 from __future__ import annotations
@@ -8,15 +8,9 @@ from __future__ import annotations
 from tests.infra._common import check
 
 
-# ─────────────────────────────────────────────────────────────
-# 시연 대본의 판 이력 — tests/debug/scenarios.py
-#
-# 판은 첫 판에 변경을 접어서 만든다. 변경이 가리키는 라벨이 그 시점 판에 없으면 이력이
-# 조용히 거짓말을 하므로 `_apply` 가 예외를 낸다 — 여기서 **모든 판을 한 번 만들어** 그
-# 예외를 잡는다. 이 모듈은 langgraph 를 타지 않아 키·설치 없이 돈다.
-# ─────────────────────────────────────────────────────────────
+# 모든 판을 한 번씩 생성해 `_apply` 예외(없는 라벨) 포착. langgraph 불필요
 
-from tests.debug import scenarios as _SCEN  # noqa: E402 — 위 임포트 경계 검사 뒤에 온다
+from tests.debug import scenarios as _SCEN  # noqa: E402 — 임포트 경계 검사 뒤
 
 _built: dict[str, tuple] = {}
 _build_error = ""
@@ -50,8 +44,7 @@ for _v in _SCEN.REVIEW:
             _bad_edits.append(f"{_v.name} {_e.label}: 왜 바꿨는지가 없다")
 check(not _bad_edits, "시연 대본: 변경마다 무엇을·왜 가 채워져 있다", " · ".join(_bad_edits))
 
-# 판이 실제로 갈라져 있어야 «이전 것과 비교»가 뜻을 갖는다 — 변경을 적고 질문은 그대로면
-# 이력만 늘어난다.
+# 변경을 적은 판은 직전 판과 실제로 달라야 함
 _same = [v.name for v in _SCEN.REVIEW[1:]
          if _built[v.name] == _built[_SCEN.REVIEW[_SCEN.REVIEW.index(v) - 1].name]]
 check(not _same, "시연 대본: 변경을 적은 판은 직전 판과 실제로 다르다", " ".join(_same))

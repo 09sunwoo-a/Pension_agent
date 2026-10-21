@@ -1,11 +1,6 @@
-"""한 번 돌리고 트레이스를 돌려준다 — CLI 와 회귀 검사가 같은 경로를 쓰게 하는 자리.
+"""계측 세션 실행 — CLI·회귀 검사 공용. 운영 진입점 `graph.ask()` 그대로 호출(히스토리·상담이력 포함).
 
-실행은 **운영 진입점 `graph.ask()` 를 그대로** 부른다. 그래프를 직접 조립해 부르면
-그때부터는 "운영과 같은 경로"라고 말할 수 없다 — `ask()` 가 하는 일(히스토리 갱신·상담이력
-기록)까지 포함해서 봐야 화면에서 본 것과 같은 실행이다.
-
-계측을 **세션 단위로** 연다. REPL 은 턴마다 열고 닫을 수 없다 — 그래프를 매번 다시
-컴파일하게 되고, 무엇보다 히스토리가 이어지지 않으면 그건 멀티턴 재현이 아니다.
+계측은 세션 단위 — 턴마다 열면 재컴파일·히스토리 단절.
 """
 
 from __future__ import annotations
@@ -14,8 +9,8 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 
-from pension_agent import session_store
-from pension_agent.consult_agent import graph as G
+from pension_agent.common import session_store
+from pension_agent import graph as G
 from tests.debug import script, trace as TR
 
 
@@ -27,32 +22,17 @@ def session(*, customer_id: str | None = None,
             session_id: str | None = None,
             employee_id: str | None = None,
             ) -> Iterator[tuple[Callable[[str], dict], TR.Trace]]:
-    """계측을 걸어둔 채 여러 턴을 이어 묻는다. 반환: (ask 함수, 트레이스).
+    """계측을 건 채 여러 턴 질의. 반환: (ask 함수, 트레이스).
 
-    스크립트를 먼저 걸고 그 위에 계측을 얹는다 — 계측이 스텁을 감싸므로 스텁 호출도
-    트레이스에 남는다. 나갈 때는 역순으로 풀린다.
-
-    on_progress: 진행 표시 콜백(graph.ask 와 같다). 리허설이 운영과 같은 경로로 돌려면
-    화면이 대기 중에 보여주는 진행 줄까지 같은 배선으로 받아야 한다 — 넘기지 않으면
-    emit 은 no-op 이라(progress.py) 리허설 출력에 진행 표시가 아예 안 나온다.
-
-    session_id 를 넘기지 않으면 **이 컨텍스트마다 새 id** 를 만든다. 여기서 여는 것은
-    «독립된 상담 한 건»이고(reps 는 케이스마다 세션을 새로 연다), 예전처럼 전부 "default"
-    로 두면 관측 대시보드에서 어제 리허설과 오늘 리허설이 한 세션으로 뭉쳐 어느 실행의
-    턴인지 갈리지 않는다. `history` 도구가 «지난번»에서 현재 세션을 제외하는 판정도 이
-    id 로 하므로, 실행마다 갈리는 편이 실제 상담에 가깝다.
-
-    history / session_id: 대화 상태를 **자기가 들고 있는 호출자**를 위한 자리다. CLI 는
-    한 프로세스 안에서 여러 턴을 이어 물으므로 이 컨텍스트가 히스토리를 직접 들면 되지만,
-    Streamlit 은 턴마다 스크립트를 처음부터 다시 돌리므로 컨텍스트가 턴 하나보다 오래
-    살지 못한다. 그런 호출자가 앞 턴 히스토리를 넘겨 «이어지는 대화»로 계측할 수 있게
-    받는다. 넘기지 않으면 예전처럼 빈 히스토리로 시작한다.
+    - 스크립트 위에 계측 — 스텁 호출도 트레이스에 기록
+    - on_progress: 진행 표시 콜백(graph.ask 와 동일). 미지정 시 진행 줄 미출력
+    - session_id 미지정 시 컨텍스트마다 새 id — 실행별 세션 분리
+    - history / session_id: 대화 상태를 직접 드는 호출자(Streamlit 등)용
     """
     tr = TR.Trace()
-    # 우리가 만든 id 인지 기억한다 — 나갈 때 걷어낼지가 여기서 갈린다(아래).
+    # 직접 만든 id 만 종료 시 정리
     ours = session_id is None
-    # **첫 턴이 돌기 전에** 재 둔다. 아래 finally 에서 재면 그때는 이미 우리가 쓴 뒤라
-    # 언제나 «있었다»가 된다.
+    # 첫 턴 전에 측정 — finally 에서 재면 항상 «있었다»
     existed = bool(customer_id) and session_store._path(customer_id).is_file()
     session_id = session_id or f"debug-{uuid.uuid4().hex[:8]}"
     outer = script.installed(scenario) if scenario else nullcontext()
@@ -63,8 +43,6 @@ def session(*, customer_id: str | None = None,
             def ask(question: str) -> dict:
                 nonlocal turns
                 tr.begin_turn(question)
-                # employee_id: 이 상담을 하는 직원의 사번 — 쪽지의 받는 사람 기본값이자 보내는
-                # 주체(운영 CLI 의 -e · 행내 API 의 x_client_user 자리). 없으면 환경변수로 떨어진다.
                 r = G.ask(question, history=turns, customer_id=customer_id,
                           session_id=session_id, on_progress=on_progress,
                           employee_id=employee_id)
@@ -73,24 +51,10 @@ def session(*, customer_id: str | None = None,
 
             yield ask, tr
     finally:
-        # 리허설이 남긴 기록을 걷어낸다. 운영 진입점을 그대로 부르므로 턴마다 기록이
-        # 남는데(§2), 그 파일은 **시연용 시드 세션과 같은 파일**이고 저장소에 커밋된다 —
-        # 걷어내지 않으면 리허설을 돌 때마다 추적 파일이 더러워지고, 그대로 커밋되면 다음
-        # 시연에서 T5 「지난번엔 무슨 얘기 했지?」가 리허설의 오류 문장을 «지난 상담»으로
-        # 읽는다(tests/test_consult_agent.py 가 자기 잔여물을 지우는 것과 같은 자리다).
-        #
-        # **호출자가 준 id 는 건드리지 않는다.** 그건 그쪽이 이어 가는 상담이라 우리 것이
-        # 아니다. 정리가 실패해도 리허설 결과를 죽이지 않는다 — 잔여물은 손으로 지울 수
-        # 있지만 결과는 다시 돌려야 나온다.
-        # 기록이 아예 없던 고객이면 **파일째** 걷는다. drop_session 은 세션 하나를 빼고
-        # 문서를 다시 쓰므로, 우리가 만든 파일이 `{"sessions": []}` 만 남아 추적되지 않는
-        # 파일로 남는다 — 리허설을 돌 때마다 `git status src/session_data/` 가 더러워지고,
-        # 그건 «걷어낸다»는 이 블록의 약속이 지켜지지 않은 것이다(기록 없는 고객 3명이
-        # 매번 그랬다). 있던 파일은 건드리지 않는다 — 시연용 시드가 거기 들어 있다.
-        # 에이전트는 **고정 id 의 별도 세션**에도 쓴다 — 브리핑 수정 내역은 `correction-log`,
-        # 화면 연계·쪽지 실행은 `tool-log`. 우리 id 만 지우면 그 둘이 추적 파일에 남고, 실제로
-        # 커밋까지 갔다(2026-09-20 — 송도윤 픽스처에 9/19·9/20 실행 기록 3턴). 리허설이 남긴
-        # 것은 전부 걷는다.
+        # 리허설 기록 정리 — 시연 시드와 같은 커밋 파일이라 남으면 «지난 상담»으로 읽힘
+        # - 호출자가 준 id 는 미정리 · 정리 실패는 무시
+        # - 고정 id 세션(correction-log·tool-log)도 함께 제거
+        # - 기록 없던 고객은 파일째 삭제(빈 `{"sessions": []}` 잔존 방지), 있던 파일은 시드라 유지
         if ours and customer_id:
             try:
                 for sid in (session_id, "correction-log", "tool-log"):
@@ -103,6 +67,6 @@ def session(*, customer_id: str | None = None,
 
 def run(questions: list[str], *, customer_id: str | None = None,
         scenario: script.Scenario | None = None) -> tuple[list[dict], TR.Trace]:
-    """질문을 순서대로 한 턴씩 돌린다(멀티턴). 반환: (턴별 결과, 트레이스)."""
+    """멀티턴 실행. 반환: (턴별 결과, 트레이스)."""
     with session(customer_id=customer_id, scenario=scenario) as (ask, tr):
         return [ask(q) for q in questions], tr

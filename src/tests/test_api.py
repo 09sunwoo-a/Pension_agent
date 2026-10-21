@@ -1,21 +1,7 @@
-"""HTTP 진입점(main.py) 회귀 테스트 — 플랫폼 I/O 스키마를 지키는가.
+"""HTTP 진입점(main.py) 회귀 테스트 — 행내 GenAI 플랫폼 고정 I/O 스키마 준수.
 
-행내 GenAI 플랫폼은 요청·응답 형태를 고정해 두었다(skills/genai-platform-agent-dev/refs/
-genai-platform.md «API I/O 스키마 (고정)»). 이 스키마가 어긋나면 에이전트가 아무리 잘 답해도 플랫폼이 못 읽는다 —
-그런데 그 사실은 **행내에 들고 가서야** 드러난다. 여기서 미리 잡는다.
-
-  · input_value 는 JSON «문자열» 이고, 그 안에 message·x_client_user 가 있어야 한다
-  · 필수 키가 없으면 422 (500 이 아니다 — 호출자가 무엇이 빠졌는지 알아야 한다)
-  · 응답은 SSE 프레임의 CHUNK 이고, 각 content 는 JSON 이벤트 하나다(main.py «출력 형식»):
-    progress… → answer → [action | clarify] → sources → followups → done. 출처는 «항상»
-    실린다(0건이면 빈 목록) — 근거를 못 보여주면 이 에이전트의 답이 아니다
-  · 진행 표시는 항상, 답변보다 **먼저** 흐른다
-  · x_client_user 가 에이전트(graph.ask)까지 실제로 도달한다 — 거기서 이 턴의 모든
-    LLM 호출 주체가 된다(그 배선 자체는 test_consult_agent 가 본다)
-
-LLM 은 부르지 않는다 — graph.ask 를 갈아끼워 위 계약만 본다.
-
-실행: python -m tests.test_api   (src/ 에서)
+input_value JSON 문자열 · 필수 키 누락 422 · SSE CHUNK 당 이벤트 1개(client/README.md) · 진행 표시 선행 · x_client_user 전달.
+LLM 미호출(graph.ask 교체). 실행: python -m tests.test_api   (src/ 에서)
 """
 
 from __future__ import annotations
@@ -36,9 +22,8 @@ if hasattr(sys.stdout, "reconfigure"):
 from fastapi.testclient import TestClient
 
 import main
-from pension_agent import config as _cfg
-from pension_agent import llm, observability
-from pension_agent.strategy_agent import briefing_store
+from pension_agent.common import config as _cfg
+from pension_agent.common import llm, observability
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -52,7 +37,7 @@ def _body(**payload) -> dict:
 
 
 def _events_in(text: str) -> list[dict]:
-    """content 문자열 안의 JSON 이벤트들 — 프론트 파서와 같은 규칙(연달아 있어도 읽는다)."""
+    """content 문자열 속 JSON 이벤트들 — 프론트 파서와 같은 규칙(연속 허용)."""
     dec = json.JSONDecoder()
     out, i = [], 0
     while True:
@@ -69,13 +54,13 @@ def _events_in(text: str) -> list[dict]:
 
 
 def _events(resp, sse: bool = True) -> list[dict]:
-    """스트림 응답 → 이벤트 목록. CHUNK 하나에 이벤트 하나여야 한다."""
+    """스트림 응답 → 이벤트 목록. CHUNK 하나에 이벤트 하나."""
     out = []
     for line in resp.text.splitlines():
         if not line.strip():
             continue
         if sse:
-            # 게이트웨이는 SSE 파서다 — `data:` 없는 줄은 버린다(main.py 머리말 «응답 프레이밍»).
+            # 게이트웨이는 SSE 파서 — `data:` 없는 줄 무시
             check(line.startswith("data: "), "스트림 이벤트는 SSE 프레임(data: …)이다", line[:40])
             line = line[len("data:"):]
         d = json.loads(line)
@@ -113,15 +98,15 @@ def _fake_ask(question, history=None, **kw):
     if cb:
         for line in PROGRESS:
             cb(line)
-    # 실물처럼 단계 줄 한 건 — 진입점이 연 request_id 컨텍스트가 스레드 안까지 따라오는지 본다.
+    # 단계 줄 1건 — request_id 컨텍스트의 스레드 전파 확인
     observability.step("fake", result="answer")
-    # 실물처럼: 추천질문은 answer 끝에 블록으로도 붙고 followups 로도 온다(graph.ask).
+    # 추천질문은 answer 끝 블록 + followups 양쪽(graph.ask)
     out = {"answer": ANSWER + "\n\n" + main.consult_graph.FOLLOWUP_HEADER + "\n"
            + "\n".join(f"· {q}" for q in FOLLOWUPS),
            "sources": SOURCES, "followups": FOLLOWUPS, "intent": "situation",
            "pending_action": None, "clarify": None,
            "history": [*(history or []), {"question": question, "tools": []}],
-           # 절차 기록(consult_agent/turn_trace) — 모양만 흉내 낸다. 가림을 재려고 원장 표기를 싣는다.
+           # 절차 기록(turn_trace) 모양만 — 가림 측정용 원장 표기 포함
            "trace": {"intent": "situation", "timeline": [{"stage": "fake", "text": "고객=171203-4815062"}],
                      "rounds": [], "evidence": [], "sources": SOURCES, "sentences": []}}
     if question == "연계":
@@ -137,7 +122,7 @@ _saved_ask = main.consult_graph.ask
 main.consult_graph.ask = _fake_ask
 client = TestClient(main.app)
 
-# 로그 캡처 — 루트에 핸들러를 하나 더 단다(main 이 잡아 둔 stdout 핸들러는 그대로).
+# 로그 캡처 — 루트에 핸들러 추가(main 의 stdout 핸들러 유지)
 _captured: list[logging.LogRecord] = []
 
 
@@ -149,7 +134,7 @@ class _Capture(logging.Handler):
 logging.getLogger().addHandler(_Capture())
 
 try:
-    # ── /health ──────────────────────────────────────────────
+    # /health
     r = client.get("/health")
     h = r.json()
     check(r.status_code == 200 and h["status"] == "ok", "/health 200", str(r.status_code))
@@ -157,59 +142,23 @@ try:
           "/health 는 키 «설정 여부»만 내보내고 값은 내보내지 않는다", r.text[:120])
     check(h["rate_gate"]["max_concurrency"] == llm.MAX_CONCURRENCY,
           "/health 가 429 게이트 설정을 보여준다", str(h.get("rate_gate")))
-    # 「.env 를 고쳤는데 먹었나」가 화면에서 끝나야 한다 — 안 먹은 것과 안 듣는 것은
-    # 처방이 정반대다(버킷을 나누는 설정이 그렇다).
+    # 설정 반영 여부 노출 — 미반영과 무시는 처방이 반대
     check(h["rate_gate"].get("client_user_spread") == llm.CLIENT_USER_SPREAD,
           "/health 가 쿼터 버킷 분산 설정을 보여준다", str(h.get("rate_gate")))
-    # «키를 넣었는데 왜 안 되나»의 첫 질문은 어느 파일이 읽혔나다.
+    # 읽힌 .env 파일 경로
     check("exists" in h["env"], "/health 가 설정 파일 유무를 보여준다", str(h.get("env")))
-    # 행내 .env 에는 URL 이 두 벌(trnn·serv)이라, 배포된 컨테이너가 train URL 을 보고 있는
-    # 사고를 여기서 바로 잡아야 한다.
+    # 행내 .env URL 두 벌(trnn·serv) — train URL 오사용 탐지
     check(h["llm"].get("stage") in ("train", "serving"),
           "/health 가 어느 단계(ENV_PATH)의 URL 을 읽었는지 보여준다", str(h["llm"].get("stage")))
-    # 행내 MCP(쪽지 발송)가 붙었나. 안 붙어 있으면 쪽지는 보내지 않고 «미연결»로 답하는데,
-    # 화면에는 초안까지 똑같이 뜨므로 승낙 뒤에야 드러난다 — 여기서 먼저 갈려야 한다.
-    # 여기서도 키 값은 나가지 않는다(설정 «여부»와 무엇이 비었는지의 이름까지).
+    # MCP(쪽지 발송) 연결 여부 — 미연결은 승낙 뒤에야 드러남. 키 값은 미노출
     check(set(h["mcp"]) >= {"configured", "missing", "servers"}
           and isinstance(h["mcp"]["configured"], bool),
           "/health 가 행내 MCP 연결 상태를 보여준다", str(h.get("mcp")))
 
-    # 미리 만들어 둔 브리핑을 지금 읽고 있나. 저장소는 실패가 전부 조용해서(꺼짐 · 지문
-    # 불일치 · 쓰기 불가) 어느 쪽이든 답변은 정상으로 나가고 «느리다»로만 보인다 —
-    # 배포된 컨테이너에서 그 셋을 로그 없이 가르는 수단이 여기 말고 없다.
-    # 체크아웃에는 briefing_cache/ 가 있으므로(커밋한다) 여기서는 켜져 있는 것이 정상이다.
-    check(h["briefing_cache"]["enabled"] is True and h["briefing_cache"]["dir"].endswith(
-        "briefing_cache"), "/health: 저장소가 어디를 보고 있는지 말한다", str(h.get("briefing_cache")))
-    _saved_cache_dir = _cfg.BRIEFING_CACHE_DIR
-    try:
-        # 디렉터리가 없으면 통째로 꺼진 것이다 — 그때는 지문 계산까지 가지 않는다.
-        _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir / "__none__"
-        off = client.get("/health").json()["briefing_cache"]
-        check(off["enabled"] is False and "stored" not in off,
-              "/health: 디렉터리가 없으면 꺼졌다고만 말한다(지문 계산도 안 한다)", str(off))
-    finally:
-        _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
-    with tempfile.TemporaryDirectory() as _tmp:
-        try:
-            _cfg.BRIEFING_CACHE_DIR = Path(_tmp)
-            # 한 건은 지금 지문, 한 건은 낡은 지문 — «있다»와 «읽힌다»는 다른 수다.
-            (Path(_tmp) / "now.json").write_text(json.dumps(
-                {"fingerprint": briefing_store.fingerprint(), "briefing": {}}), encoding="utf-8")
-            (Path(_tmp) / "old.json").write_text(json.dumps(
-                {"fingerprint": "어제만든것", "briefing": {}}), encoding="utf-8")
-            bc = client.get("/health").json()["briefing_cache"]
-            check(bc["enabled"] is True and bc["stored"] == 2 and bc["usable"] == 1,
-                  "/health: 저장된 건수와 «지금 지문으로 읽히는» 건수를 갈라 보여준다", str(bc))
-            # 파일시스템이 읽기전용이면 런타임 저장이 조용히 실패한다(save 가 예외를 삼킨다).
-            # 그러면 재기동할 때마다 고객당 LLM 11 회를 처음부터 다시 치른다.
-            check(bc["writable"] is True,
-                  "/health: 런타임 저장이 가능한지 보여준다", str(bc))
-        finally:
-            _cfg.BRIEFING_CACHE_DIR = _saved_cache_dir
+    # 제거된 브리핑 파일 캐시 칸 금지
+    check("briefing_cache" not in h, "/health: 없앤 브리핑 파일 캐시 칸이 없다", str(sorted(h)))
 
-    # 행내 첫 연결에서 실제로 걸린 자리 — 인증도 쿼터도 아니고 DNS 였다. LLM Gateway 의
-    # base_url 은 *.svc.cluster.local 이라 그 쿠버네티스 클러스터 안에서만 풀리는데,
-    # 실패는 첫 대화 턴에 가서야 «LLM 호출이 실패했습니다»로 나타나 원인이 안 보인다.
+    # LLM Gateway DNS 확인 — base_url 이 *.svc.cluster.local 이라 클러스터 밖에선 첫 턴에야 실패
     _saved_base = llm.BASE_URL
     try:
         llm.BASE_URL = "http://litellm.aidc-prod.svc.cluster.local:4000"
@@ -222,7 +171,7 @@ try:
     finally:
         llm.BASE_URL = _saved_base
 
-    # ── 필수 키 검증 ─────────────────────────────────────────
+    # 필수 키 검증
     r = client.post("/chat", json=_body(message="안녕"))
     check(r.status_code == 422 and "x_client_user" in r.text,
           "x_client_user 가 없으면 422", f"{r.status_code} {r.text[:80]}")
@@ -237,8 +186,7 @@ try:
 
     r = client.post("/chat", json={"input_value": "이건 JSON 이 아니다", "message_hists": None})
     check(r.status_code == 422, "input_value 가 JSON 문자열이 아니면 422", str(r.status_code))
-    # 거부된 요청도 모양을 남긴다 — 행내에서 4턴째에 이 422 가 났을 때 게이트웨이가 무엇을
-    # 보냈는지(빈 문자열인지 · 질문 원문인지) 로그로 알 수 없었다.
+    # 거부된 요청도 모양 로그 — 게이트웨이 전송 내용 파악용
     rejected = next((rec.getMessage() for rec in reversed(_captured)
                      if "] reject " in rec.getMessage() and "모양=" in rec.getMessage()), "")
     check('"input_value_raw"' in rejected and '"len": 13' in rejected
@@ -254,7 +202,7 @@ try:
     r = client.post("/chat", json={"input_value": json.dumps(["배열"]), "message_hists": None})
     check(r.status_code == 422, "input_value 가 JSON «객체»가 아니면 422", str(r.status_code))
 
-    # ── 정상 턴 ──────────────────────────────────────────────
+    # 정상 턴
     r = client.post("/chat", json=_body(message="IRP 수수료 질문", x_client_user="emp-0417"))
     check(r.status_code == 200, "정상 요청은 200", str(r.status_code))
     check(r.headers["content-type"].startswith("text/event-stream"),
@@ -271,8 +219,7 @@ try:
           "answer.text 는 본문만이다 — 추천질문 블록은 떼어낸다 · intent 가 실린다", repr(answer["text"][-60:]))
     check(main.consult_graph.FOLLOWUP_HEADER not in answer["text"],
           "answer.text 에 추천질문 헤더가 남지 않는다")
-    # 링크는 **항상** 실린다 — 키가 있을 때와 없을 때를 프론트가 갈라 처리하지 않게
-    # (`sources`·`followups` 가 0건에도 빈 목록을 보내는 것과 같은 규약).
+    # 링크는 항상 포함(0건이면 빈 목록) — sources·followups 와 같은 규약
     check("links" in answer and isinstance(answer["links"], list),
           "answer 에 links 가 항상 있다 — 링크가 없으면 빈 목록", str(answer.get("links")))
     check("messages" in answer and isinstance(answer["messages"], list),
@@ -285,9 +232,7 @@ try:
     check([s["role"] for s in src["items"]] == ["근거", "주의"],
           "role 로 «근거»와 «주의(지켜야 할 것)»를 가를 수 있다")
     check(_seen.get("on_progress") is not None, "진행 콜백을 넘긴다", str(_seen.get("on_progress")))
-    # 행내에서 보인 로그가 접속 로그 한 줄뿐이었다 — 루트 로거에 핸들러가 없어서 log.info
-    # 가 어디에도 안 나갔다. 요청 한 건이 «request → (agent 단계 줄) → done»으로 묶여
-    # 찍히는지 본다. HTTP 경계 줄의 로거는 `api` 다(main.py 머리말 «로그»).
+    # 요청 한 건이 «request → (agent 단계 줄) → done» 으로 묶여 출력. HTTP 경계 로거는 `api`
     _logs = [r for r in _captured if r.name == "api"]
     _rid = next((m.split("]")[0][1:] for m in (r.getMessage() for r in _logs)
                  if m.startswith("[") and "] request " in m), None)
@@ -308,8 +253,7 @@ try:
           "정상 턴의 로그는 전부 INFO 다", str([r.levelname for r in _logs]))
     check(logging.getLogger().handlers, "루트 로거에 핸들러가 잡혀 있다(stdout → 수집기)",
           str(logging.getLogger().handlers))
-    # httpx 는 요청마다 주소를 INFO 로 찍고 MCP 주소에는 클라이언트 id 가 경로에 있다 —
-    # 루트가 INFO 여도 그 줄은 나가지 않아야 한다(main._QUIET_LOGGERS).
+    # httpx 주소 INFO 로그 차단(MCP 주소에 클라이언트 id) — main._QUIET_LOGGERS
     check(all(logging.getLogger(n).level >= logging.WARNING for n in main._QUIET_LOGGERS),
           "바깥 라이브러리(httpx·MCP SDK)의 INFO 는 stdout 으로 나가지 않는다",
           str({n: logging.getLogger(n).level for n in main._QUIET_LOGGERS}))
@@ -324,13 +268,13 @@ try:
     _events(r)
     check(_seen.get("customer_id") == "154821-4938201" and _seen.get("session_id") == "S-1",
           "customer_id·session_id 가 전달된다", str(_seen))
-    # 하이픈 없는 13자리 — 받기는 한다(main.py 머리말 customer_id).
+    # 하이픈 없는 13자리도 허용(client/README.md customer_id)
     _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
                                             customer_id="1548214938201")))
     check(_seen.get("customer_id") == "154821-4938201",
           "customer_id 는 하이픈 없는 13자리로 와도 원장 표기로 되돌린다", str(_seen.get("customer_id")))
-    # b64 — 프론트가 보내는 꼴이다.
-    from pension_agent.strategy_agent import customer as _sc
+    # b64 — 프론트 전송 형태
+    from pension_agent.tools.customer_solution import customer as _sc
     _enc = _sc.encode_id("154821-4938201")
     _events(client.post("/chat", json=_body(message="이 고객 왜 타겟", x_client_user="emp-0417",
                                             customer_id=_enc)))
@@ -346,18 +290,14 @@ try:
     check(_seen.get("customer_id") == "C-없음",
           "customer_id 의 다른 꼴은 손대지 않는다 — 없는 고객을 있는 고객으로 읽지 않는다")
 
-    # ── 사번(employee_id) ────────────────────────────────────
-    # 쪽지의 수신자이자 발송 주체이고 상담이력에 «누가 상담했나»로 남는다. x_client_user
-    # 는 쿼터 버킷 이름이라 사번이라는 보장이 없어서, 진입점은 **판정하지 않고 그대로**
-    # 넘기고 사번 꼴 판정은 graph.employee_no 한 곳이 한다(두 곳이 판정하면 로그에 찍힌
-    # 사번과 실제로 쪽지가 나가는 사번이 갈린다).
+    # 사번(employee_id) — 진입점은 판정 없이 전달, 사번 판정은 graph.employee_no 한 곳
+    # (x_client_user 는 쿼터 버킷 이름이라 사번 보장 없음)
     r = client.post("/chat", json=_body(message="쪽지 보내줘", x_client_user="emp-0417",
                                         employee_id="3902172"))
     _events(r)
     check(_seen.get("employee_id") == "3902172",
           "input_value 의 employee_id 가 에이전트까지 전달된다", str(_seen.get("employee_id")))
-    # x_client_user 는 사번 뒤에 접미(LLM 호출을 가르는 uuid 등)가 붙어 올 수 있다 —
-    # 구분자로 이었으면 앞의 사번을 읽는다(note.as_emp_no).
+    # x_client_user 의 사번 뒤 접미(uuid 등)는 구분자 앞 사번만 사용(note.as_emp_no)
     check(main.consult_graph.employee_no("3902172", "emp-0417") == "3902172"
           and main.consult_graph.employee_no(
               None, "3902172-550e8400-e29b-41d4-a716-446655440000") == "3902172"
@@ -379,7 +319,7 @@ try:
           "사번을 못 찾으면 «-» 로 남긴다 — 환경변수 폴백으로 떨어졌다는 뜻이다(위험 10)",
           _last_request_log())
 
-    # 연계 제안 — 본문 끝 문장은 남고, action 이벤트가 버튼용으로 따로 간다(실행 인자는 안 실린다).
+    # 연계 제안 — 본문 끝 문장 유지, action 이벤트는 버튼용(실행 인자 미포함)
     evs = _events(client.post("/chat", json=_body(message="연계", x_client_user="emp-1")))
     check(_types(evs)[3:] == ["answer", "action", "sources", "followups", "done"],
           "연계 제안 턴은 answer 다음에 action 이 온다", str(_types(evs)))
@@ -392,22 +332,22 @@ try:
     check(next(e for e in evs if e["type"] == "followups")["items"] == [],
           "연계 제안 턴에는 추천질문이 없다(빈 목록으로는 온다)")
 
-    # 동명이인 목록 턴 — 네/아니오 턴이 아니라 action 을 내지 않는다(버튼이 서지 않게).
+    # 동명이인 목록 턴 — action 미발행(버튼 없음)
     picking = main._turn_events({"answer": "a", "pending_action": {**ACTION, "candidates": [{"user_id": "1"}]}})
     check("action" not in _types(picking), "동명이인 목록 턴에는 action 이벤트가 없다", str(_types(picking)))
 
-    # 되묻기 — 선택지가 clarify 이벤트로 간다.
+    # 되묻기 — 선택지는 clarify 이벤트
     evs = _events(client.post("/chat", json=_body(message="되묻기", x_client_user="emp-1")))
     clar = next((e for e in evs if e["type"] == "clarify"), None)
     check(clar == {"type": "clarify", **CLARIFY}, "되묻기 턴은 clarify 에 질문·선택지가 실린다", str(clar))
 
-    # 근거 0건 — 이벤트는 그래도 온다(«근거 없음»을 화면이 말해야 한다).
+    # 근거 0건이어도 이벤트 발행
     evs = _events(client.post("/chat", json=_body(message="근거없음", x_client_user="emp-1")))
     check(next(e for e in evs if e["type"] == "sources")["items"] == [],
           "근거가 0건이어도 sources 이벤트가 빈 목록으로 온다", str(_types(evs)))
 
-    # ── 대화 맥락 — 게이트웨이 경로는 history 를 돌려줄 자리가 없어 진입점이 세션별로 맡아 둔다 ──
-    from pension_agent.consult_agent import context_store
+    # 대화 맥락 — 게이트웨이는 history 반환 자리 없음, 진입점이 세션별 보관
+    from pension_agent import context_store
     context_store.clear()
     r = client.post("/chat", json=_body(message="첫 질문", x_client_user="emp-7", session_id="S-7"))
     _events(r)
@@ -426,13 +366,13 @@ try:
     _events(r)
     check(_seen.get("history") is None, "직원이 다르면 같은 session_id 라도 맥락이 섞이지 않는다",
           str(_seen.get("history")))
-    # 호출자가 Turn 형식을 실어 보내면 저장본보다 우선한다 — 프론트가 맥락을 들고 다니게 될 때 자리.
+    # 호출자 Turn 형식 history 가 저장본보다 우선
     r = client.post("/chat", json={**_body(message="셋째", x_client_user="emp-7", session_id="S-7"),
                                    "message_hists": [{"question": "프론트가 든 턴"}]})
     _events(r)
     check(_seen.get("history") == [{"question": "프론트가 든 턴"}],
           "message_hists 가 Turn 형식이면 저장본보다 우선한다", str(_seen.get("history")))
-    # Turn 이 아닌 형식(OpenAI 식)은 버리고 저장본을 쓴다 — 넘기면 format_history 가 500 을 낸다.
+    # 비 Turn 형식(OpenAI 식)은 무시 — format_history 500 방지
     r = client.post("/chat", json={**_body(message="넷째", x_client_user="emp-7", session_id="S-7"),
                                    "message_hists": [{"role": "user", "content": "x"}]})
     _events(r)
@@ -442,7 +382,7 @@ try:
     check(client.get("/health").json()["context_store"]["sessions"] >= 3,
           "/health 가 살아 있는 맥락 세션 수를 보여준다", str(client.get("/health").json().get("context_store")))
 
-    # 저장소 자체 — 만료·상한·비우기.
+    # 저장소 — 만료·상한·비우기
     import time as _time
     context_store.clear()
     context_store.put("e", "s1", [{"question": "a"}])
@@ -469,7 +409,7 @@ try:
         context_store.time.monotonic = _saved_mono
         context_store.clear()
 
-    # ── 비스트림 — 게이트웨이가 본문 전체를 json.loads 한다(행내 실측). JSON 하나로 답한다 ──
+    # 비스트림 — 게이트웨이가 본문 전체를 json.loads, JSON 하나로 응답
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"),
                     headers={"Accept": "application/json"})
     check(r.status_code == 200 and r.headers["content-type"].startswith("application/json"),
@@ -500,7 +440,7 @@ try:
     check(r.headers["content-type"].startswith("text/event-stream"),
           "stream=true 는 스트림이다", r.headers.get("content-type", ""))
 
-    # 요청 모양 로그 — 게이트웨이가 무엇을 보내는지 보는 유일한 자리. 비밀 헤더 값은 가린다.
+    # 요청 모양 로그 — 비밀 헤더 값 가림
     r = client.post("/chat", json={**_body(message="q", x_client_user="emp-1"), "isStream": False},
                     headers={"x-openapi-token": "Bearer SECRET-1", "x-generative-ai-client": "cli"})
     shape = next(rec.getMessage() for rec in reversed(_captured) if "] request " in rec.getMessage() and "모양=" in rec.getMessage())
@@ -510,7 +450,7 @@ try:
           and '"input_value_keys": ["message", "x_client_user"]' in shape and "응답=json" in shape,
           "요청 모양 로그에 헤더·본문 추가 키·input_value 키·응답 방식이 실린다", shape[:300])
 
-    # 문서 형식(줄마다 JSON)으로 되돌리는 스위치.
+    # 문서 형식(줄마다 JSON) 전환 스위치
     main.SSE_FRAMING = False
     try:
         r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
@@ -519,7 +459,7 @@ try:
     finally:
         main.SSE_FRAMING = True
 
-    # ── 계약 문서와 코드가 갈리지 않는다 — client/README.md 는 프론트가 읽는 계약이다 ──
+    # 계약 문서(client/README.md)와 코드 일치
     _readme = (_cfg.SRC_ROOT.parent / "client" / "README.md").read_text(encoding="utf-8")
     _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done",
                 "log", "trace"}
@@ -531,22 +471,19 @@ try:
     check(not _missing, "client/README.md 가 모든 이벤트 type 을 설명한다", str(_missing))
     _keys = ["message", "x_client_user", "customer_id", "session_id"]
     check(all(f"`{k}`" in _readme for k in _keys), "client/README.md 가 요청 키 4개를 설명한다")
-    # 이벤트 type 만으로는 안 잡히는 자리 — `links` 는 새 type 이 아니라 answer 의 필드다.
+    # `links` 는 새 type 이 아닌 answer 필드 — type 검사로 미검출
     check("`links`" in _readme and "mystar-link://" in _readme,
           "client/README.md 가 answer.links 와 딥링크 스킴을 설명한다")
     check("`answer.messages`" in _readme and "`copy`" in _readme,
           "client/README.md 가 answer.messages(고객 발송 문구)와 복사 값을 설명한다")
 
-    # ── 호출자가 중간에 끊어도 맥락은 남는다 ─────────────────
-    # 게이트웨이 타임아웃으로 답을 다 받기 전에 끊기면 generate 는 멈추지만 ask() 스레드는
-    # 끝까지 돈다. 그 턴의 맥락(연계 제안)이 다음 «네»에 이어져야 한다 — 예전에는 맥락 기억이
-    # 답을 다 흘려보낸 뒤에 있어서, 끊긴 턴은 상담이력에만 남고 맥락에서는 빠졌다.
-    from pension_agent.consult_agent import context_store as _ctx
+    # 호출자가 끊어도 맥락 유지 — ask() 스레드는 끝까지 돌고 연계 제안이 다음 «네»로 이어져야 함
+    from pension_agent import context_store as _ctx
 
     _release, _slow_done = threading.Event(), threading.Event()
 
     def _slow_ask(question, history=None, **kw):
-        kw["on_progress"]("검색 중")          # 한 줄은 흘려보낸 뒤 — 호출자가 끊을 틈
+        kw["on_progress"]("검색 중")          # 호출자가 끊을 틈
         _release.wait(timeout=10)
         try:
             return _fake_ask(question, history, **{k: v for k, v in kw.items() if k != "on_progress"})
@@ -554,9 +491,7 @@ try:
             _slow_done.set()
 
     async def _drive_then_disconnect(payload: dict) -> list[dict]:
-        """앱을 ASGI 로 직접 몬다 — TestClient 는 스트림을 닫아도 서버 쪽 생성기를 취소하지
-        않아 끊김이 재현되지 않는다. 첫 본문 조각이 나가면 http.disconnect 를 보낸다(uvicorn 이
-        소켓이 닫혔을 때 하는 일 그대로 — StreamingResponse 가 그것을 듣고 생성기를 취소한다)."""
+        """앱을 ASGI 로 직접 구동, 첫 본문 조각 후 http.disconnect 전송 — TestClient 는 끊김 미재현."""
         sent: list[dict] = []
         first_chunk = asyncio.Event()
         state = {"body_sent": False}
@@ -572,7 +507,7 @@ try:
             sent.append(msg)
             if msg["type"] == "http.response.body" and msg.get("body"):
                 first_chunk.set()
-                # 끊긴 뒤에도 ask() 스레드는 돈다 — 잠시 뒤 풀어 준다(이 루프가 닫히기 전에 끝나게)
+                # 끊긴 뒤에도 ask() 스레드 진행 — 루프 종료 전 해제
                 threading.Timer(0.2, _release.set).start()
 
         scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
@@ -590,7 +525,7 @@ try:
     check(sum(1 for m in _sent if m["type"] == "http.response.body" and m.get("body")) == 1,
           "끊기 전에 나간 것은 진행 한 조각뿐이다(답변은 나가지 않았다)", str(len(_sent)))
     _kept = None
-    for _ in range(100):                       # 기억은 워커 스레드가 한다 — 잠깐 기다린다
+    for _ in range(100):                       # 기억은 워커 스레드 — 대기
         _kept = _ctx.get("emp-cut", "cut-1")
         if _kept:
             break
@@ -603,7 +538,7 @@ try:
     main.consult_graph.ask = _fake_ask
     _captured.clear()
 
-    # ── 로그 이벤트 — 같은 로그 줄을 응답에도 싣는다(main.py 머리말 «로그 이벤트») ──
+    # 로그 이벤트 — 로그 줄을 응답에도
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1"))
     check("log" not in _types(_events(r)) and "trace" not in _types(_events(r)),
           "로그 이벤트·절차 기록은 기본으로 꺼져 있다", str(_types(_events(r))))
@@ -656,7 +591,7 @@ try:
     finally:
         main.LOG_EVENTS = False
 
-    # ── 실패해도 스트림은 끊지 않는다 ────────────────────────
+    # 실패해도 스트림 유지
     def _boom(*a, **k):
         raise llm.LLMError("LLM 미설정 — 테스트")
 
@@ -676,7 +611,7 @@ try:
           str([rec.getMessage() for rec in _captured if rec.levelno >= logging.WARNING][-2:]))
     check(not any("] disconnect " in rec.getMessage() for rec in _captured),
           "정상 완료·실패 응답에는 «연결 끊김» 경고가 찍히지 않는다")
-    # 실패 줄(`[api] error`)은 이벤트 루프에서 찍힌다 — error 이벤트보다 먼저 실려야 한다.
+    # 실패 줄(`[api] error`)이 error 이벤트보다 먼저
     r = client.post("/chat", json=_body(message="q", x_client_user="emp-1", log_events=True))
     evs = _events(r)
     _err_log = next((i for i, e in enumerate(evs) if e["type"] == "log" and "] error " in e["text"]), None)

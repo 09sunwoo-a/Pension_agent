@@ -1,6 +1,6 @@
-"""observability — Langfuse 관측
+"""observability — Langfuse 관측 · 단계 로그.
 
-`tests/test_infra.py` 가 번호 순서로 임포트해 돌린다 — 이 파일을 따로 돌리지 않는다.
+실행: python -m tests.test_infra (번호 순서 임포트, 단독 실행 금지)
 """
 
 from __future__ import annotations
@@ -9,20 +9,12 @@ import json
 import os
 
 from tests.infra._common import check
-from tests.infra.s10_llm_retry import _FakeResp, _http_error, _llm   # 앞 구간의 것을 이어받는다
+from tests.infra.s10_llm_retry import _FakeResp, _http_error, _llm   # 앞 구간에서 이어받음
 
 
-# ─────────────────────────────────────────────────────────────
-# observability — Langfuse 관측
-#
-# 고정하는 것은 셋이다.
-#   ① 키가 없으면 통째로 꺼진다 — 테스트·시연이 키 없이 그대로 돈다.
-#   ② 켜지면 LLM 호출 한 건이 이벤트 한 건으로 나가고, 트레이스 안에서 부른 호출은
-#      같은 traceId 로 묶인다(브리핑 11연쇄·대화 4~7회를 되짚는 근거가 이 묶음이다).
-#   ③ 전송이 깨져도 LLM 호출은 성공한다 — 관측은 부산물이지 기능이 아니다.
-# ─────────────────────────────────────────────────────────────
+# ① 키 없으면 전체 꺼짐 ② 호출 한 건 = 이벤트 한 건, 트레이스 안 호출은 같은 traceId ③ 전송 실패에도 LLM 호출 성공
 
-from pension_agent import observability as _obs  # noqa: E402
+from pension_agent.common import observability as _obs  # noqa: E402
 
 _obs.reset()
 check(not _obs.enabled(), "observability: 키가 없으면 꺼져 있다")
@@ -30,11 +22,8 @@ with _obs.trace("noop") as _null:
     _null.update(output="버려진다")
 check(_obs.current_trace_id() is None, "observability: 꺼져 있으면 트레이스 id 도 없다")
 
-# «단계» 로그 — step() 은 Langfuse 가 꺼져 있어도 로그 한 줄을 남긴다. 행내 컨테이너에는
-# 키가 없어 대시보드가 꺼져 있고, 그때 «에이전트가 무엇을 했나»를 보는 자리가 Grafana 다.
-# 줄의 꼴은 하나다:  [요청id] 경과초 단계  키=값 …  — 키·판정 값은 한글 표(STEP_KEYS·
-# STEP_VALUES)로만 나가고, 식별자(도구·의도·카드 id)는 영문 그대로다. score() 는 로그를 남기지
-# 않는다(점수 이름은 대시보드 집계용이라 영문 그대로 둔다).
+# 단계 로그 — step() 은 Langfuse 꺼져도 로그 한 줄(Grafana 용). 형식: [요청id] 경과초 단계 키=값
+# 키·판정 값은 한글 표(STEP_KEYS·STEP_VALUES), 식별자는 영문. score() 는 로그 없음
 import logging as _logging  # noqa: E402
 _state_records: list = []
 
@@ -86,9 +75,7 @@ try:
     check(_msgs[8][0] == _logging.DEBUG and "consult.plan 입력=2410" in _msgs[8][1],
           "observability: LLM 호출 한 건의 줄은 DEBUG 다", str(_msgs[8]))
     check(_obs.current_request_id() is None, "observability: 컨텍스트를 나오면 요청 id 가 지워진다")
-    # 표는 닫혀 있다 — 코드가 step() 에 쓰는 키가 전부 표에 있어야 한다. 표 밖의 키는 조용히
-    # 안 찍히므로(위 검사), 새 키를 붙이고 표에 안 넣으면 그 사실이 로그에서 «빠진 칸»으로만
-    # 보인다. 소스를 훑어 호출부의 키워드 인자를 전부 모아 잰다.
+    # STEP_KEYS 표는 닫힘 — 표 밖 키는 조용히 누락되므로 소스의 step() 키워드 인자를 전수 대조
     import ast as _ast
     from pathlib import Path as _Path
     _used: dict[str, set[str]] = {}
@@ -118,10 +105,7 @@ _sent: list[dict] = []
 
 
 def _fake_urlopen(req, timeout=None):
-    """LLM 게이트웨이와 Langfuse 수집 API 를 URL 로 갈라 받는다.
-
-    둘 다 같은 `urllib.request.urlopen` 을 쓰므로(같은 모듈 객체) 한 자리에서 갈라야 한다.
-    """
+    """LLM 게이트웨이·Langfuse 수집 API 를 URL 로 분기(같은 urlopen 공유)."""
     if "langfuse" in req.full_url:
         _sent.append(json.loads(req.data.decode("utf-8")))
         return _FakeResp()
@@ -163,7 +147,7 @@ try:
           "observability: 상담 세션 id 가 여는·닫는 이벤트 양쪽에 실린다",
           str([t["body"].get("sessionId") for t in _traces]))
 
-    # span 중첩 — 트레이스가 평면이 아니라 실행 구조를 닮은 트리가 된다
+    # span 중첩 — 실행 구조를 닮은 트리
     _sent.clear()
     with _obs.trace("test.turn2") as _tr2:
         with _obs.span("tool:fact", input="세액공제") as _sp:
@@ -189,8 +173,7 @@ try:
           {("compose_passed", 1, "BOOLEAN"), ("retries", 2, "NUMERIC"),
            ("outcome", "answer", "CATEGORICAL")},
           "observability: 점수가 bool·숫자·문자열별로 형을 갈라 나간다", str(_scores))
-    # LLM 호출마다 입력 크기가 점수로 남고(llm._observe — gemma 부담이 어느 호출에서 오는지
-    # 볼 자리), 그 점수는 호출이 일어난 span 밑에 붙는다.
+    # LLM 호출마다 입력 크기 점수(prompt_chars)가 호출 span 밑에 기록
     _size = next((s for s in _scores if s["name"] == "prompt_chars"), None)
     check(bool(_size) and _size["value"] == len("q") and _size["dataType"] == "NUMERIC"
           and _size.get("observationId") == (_span or {}).get("id")
@@ -199,7 +182,7 @@ try:
     check(all(s["traceId"] == _tr2.id for s in _scores),
           "observability: 점수가 그 트레이스에 붙는다")
 
-    # 고객 표기 — Users 목록이 user_id 문자열 하나만 보여주므로 이름을 거기 넣는다
+    # 고객 표기 — Users 목록은 user_id 문자열만 표시하므로 이름 포함
     _who = _obs.customer_ref("171203-4815062", "김서연", ["isa", "tax"])
     check(_who["user_id"] == "김서연(171203-4815062)",
           "observability: user_id 에 이름과 id 가 함께 실린다", str(_who["user_id"]))
@@ -211,14 +194,14 @@ try:
     check(_obs.customer_ref(None, None) == {"user_id": None, "metadata": {}, "tags": []},
           "observability: 고객이 없으면 아무것도 붙지 않는다")
 
-    # 트레이스가 없으면 점수는 나가지 않는다 — 붙을 데가 없는 점수는 찾을 방법이 없다
+    # 트레이스 밖 점수는 미전송
     _sent.clear()
     _obs.score("orphan", 1)
     _obs.flush(timeout=5.0)
     check(not [e for batch in _sent for e in batch["batch"]],
           "observability: 트레이스 밖 점수는 보내지 않는다")
 
-    # 본문 차단 — 개인정보를 외부로 내보내지 않는 스위치
+    # 본문 차단 스위치(개인정보 외부 미전송)
     _sent.clear()
     os.environ["LANGFUSE_CAPTURE_CONTENT"] = "0"
     _obs.reset()
@@ -226,9 +209,7 @@ try:
     _llm.generate(_secret, name="test.masked")
     _obs.flush(timeout=5.0)
     _masked = [e for batch in _sent for e in batch["batch"] if e["type"] == "generation-create"]
-    # 그 스위치는 «개인정보를 내보내지 않는다»는 약속이다. 본문만 가리고 이름을 user_id·
-    # 태그로 내보내면 약속이 거짓이 된다 — id 만 남고 이름은 전부 빠져야 한다.
-    # 요건 코드는 이름이 아니지만 «그 고객의 상태»라 함께 가린다.
+    # 본문 차단 시 고객 이름·요건 코드도 제외(id 만 유지)
     _masked_who = _obs.customer_ref("171203-4815062", "김서연", ["isa", "tax"])
     check(_masked_who == {"user_id": "171203-4815062",
                           "metadata": {"customer_id": "171203-4815062"}, "tags": []},
@@ -240,7 +221,7 @@ try:
           "observability: CAPTURE_CONTENT=0 이면 본문 대신 길이만 나간다",
           str(_masked[0]["body"]["input"]) if _masked else "이벤트 없음")
 
-    # 전송이 깨져도 LLM 호출은 산다
+    # 전송 실패에도 LLM 호출 성공
     os.environ.pop("LANGFUSE_CAPTURE_CONTENT", None)
     _obs.reset()
     _before = _obs.stats()["failed"]
@@ -256,7 +237,7 @@ try:
     _obs.flush(timeout=5.0)
     check(_obs.stats()["failed"] > _before,
           "observability: 전송 실패는 예외 대신 stats 에 쌓인다")
-    # 삼키되 침묵하지는 않는다 — 원인이 남아야 «전송이 깨졌다»와 «안 켜졌다»가 갈린다.
+    # 원인 기록 — «전송 실패»와 «미활성» 구분
     check("HTTP Error 500" in (_obs.last_error() or ""),
           "observability: 실패 원인이 last_error 에 남는다", str(_obs.last_error()))
 finally:

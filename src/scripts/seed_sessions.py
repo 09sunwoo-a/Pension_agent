@@ -1,23 +1,9 @@
 """엑셀 10_상담이력 → 더미 상담 세션(session_data) 시딩 (멱등).
 
-목업 9케이스에는 "과거에 이런 상담을 했다"는 기록이 딸려 있다(원본 xlsx 10_상담이력,
-데이터사전: "과거 상담 의사·불만·관심사항을 LLM이 현재 솔루션과 화법에 함께 반영").
-시연에서 그 상태를 재현하려면 상담 기록이 **실제로 저장소에 있어야** 한다 — 그래야
-브리핑 §14 와 대화형 history 도구가 평소 경로 그대로 읽는다.
+브리핑·history 도구가 평소 경로로 읽도록 세션에 저장. 목업 — 실데이터 전환 시 삭제 필요.
 
-**왜 별도 재료로 두지 않고 세션에 심나.** 직원이 "지난번에 무슨 얘기 했지" 로 묻는 것은
-한 사건이다. 원장용 경로와 세션용 경로를 따로 두면 도구가 둘이 되고, 어느 쪽을 부를지
-LLM 이 정하게 되어 한쪽만 불린 턴은 나머지가 없는 것이 된다. 읽는 곳을 하나로 두려고
-기록 쪽을 맞춘다 — 실서비스에서도 CRM 상담 기록이 같은 자리에 적재될 자리다.
-
-주의: 여기서 만드는 것은 **목업**이다. `session_data/` 에는 원래 직원 발화 원문 같은
-개인정보에 준하는 내용이 쌓이므로, 실데이터 전환 시 이 시딩 결과를 지우고 저장소에서도
-제외해야 한다(`.gitignore`).
-
-실행 (src/ 에서):
-
-    python -m scripts.seed_sessions           # 없는 것만 심는다
-    python -m scripts.seed_sessions --force   # 이미 있어도 다시 심는다
+    python -m scripts.seed_sessions           # 없는 것만
+    python -m scripts.seed_sessions --force   # 다시 심기
 """
 
 from __future__ import annotations
@@ -25,19 +11,17 @@ from __future__ import annotations
 import json
 import sys
 
-from pension_agent import config, session_store
+from pension_agent.common import config, session_store
 
-#: 시딩으로 만든 세션임을 식별하는 접두. 이 접두가 붙은 세션만 --force 로 갈아엎는다 —
-#: 사람이 실제로 나눈 대화까지 지우면 안 된다.
+#: 시딩 세션 접두 — --force 는 이 접두 세션만 교체(실제 대화 보호).
 SEED_PREFIX = "past-"
 
-#: 과거 상담 기록의 역할. 직원·에이전트의 «발화»가 아니라 상담 결과 «요약»이라 따로 둔다
-#: (consult_agent/tools.py::_HISTORY_ROLE 이 이 값을 사람이 읽는 이름으로 옮긴다).
+#: 과거 상담 요약의 역할(발화 아님). 표시명은 tools.py::_HISTORY_ROLE.
 RECORD_ROLE = "record"
 
 
 def _seed_customer(rec: dict, *, force: bool) -> int:
-    """한 고객의 과거 상담을 세션으로 심는다. 심은 건수를 돌려준다."""
+    """한 고객의 과거 상담 시딩. 심은 건수 반환."""
     pin = rec["id"]
     existing = {s["session_id"] for s in session_store.list_sessions(pin)}
     made = 0
@@ -49,8 +33,7 @@ def _seed_customer(rec: dict, *, force: bool) -> int:
             _drop_session(pin, session_id)
         session_store.append_turn(
             pin, session_id,
-            {   # 상담일을 그대로 타임스탬프로 쓴다 — 심은 날짜가 아니라 상담한 날짜여야
-                # "지난 상담" 순서와 경과일이 맞는다.
+            {   # ts = 상담일(시딩일 아님) — 순서·경과일 기준
                 "ts": f"{entry['상담년월일']}T09:00:00+00:00",
                 "role": RECORD_ROLE,
                 "text": entry["상담이력내용"],
@@ -63,7 +46,7 @@ def _seed_customer(rec: dict, *, force: bool) -> int:
 
 
 def _drop_session(customer_id: str, session_id: str) -> None:
-    """세션 하나를 지운다. --force 재시딩에서만 쓴다(session_store 는 삭제 API 가 없다)."""
+    """세션 하나 삭제. --force 전용(session_store 삭제 API 없음)."""
     fp = config.SESSION_DATA_DIR / f"{customer_id}.json"
     doc = json.loads(fp.read_text(encoding="utf-8"))
     doc["sessions"] = [s for s in doc["sessions"] if s["session_id"] != session_id]

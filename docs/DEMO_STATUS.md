@@ -9,7 +9,7 @@
 ## 1. 안내 콘텐츠 — 시연용 9건 · 게이트가 막는 더미 0건
 
 ⑨ 「고객님께 안내해보세요」의 이벤트·세미나다. 출처가 있는 콘텐츠(`source`)는
-`dummy` 를 달지 않으므로 `consult_agent/effects/actions.py::open_lms_screen()` 게이트가 막지 않고,
+`dummy` 를 달지 않으므로 `actions/actions.py::open_lms_screen()` 게이트가 막지 않고,
 발송 화면 연계까지 이어진다. **일정·링크·수신거부 번호는 시연을 위해 구성된 값이다** —
 화면과 발송문에는 그 표시가 없으므로(발표용 데모라 딱지를 붙이지 않는다) 여기가
 유일한 기록이다. 실제 콘텐츠 캘린더가 붙으면 이 표가 그대로 실제 일정으로 바뀐다.
@@ -17,7 +17,7 @@
 - 안내 링크: `https://obank.kbstar.com/demo/...` — 시연용 경로
 - 수신거부 번호: `무료수신거부 080-XXX-XXXX` — 실제 회선 미정, 자리표시자
 - LMS 문구의 골격(광고 표기·인사말·링크·수신거부)은 코드가 조립하고
-  (`support/outreach.py::lms_frame`), 가운데 본문만 LLM 이 쓴다
+  (`support/assets.py::lms_frame`), 가운데 본문만 LLM 이 쓴다
 
 | id | 이름 | 종류 | 일정 | 매칭 키워드 | 게이트 |
 |---|---|---|---|---|---|
@@ -36,7 +36,7 @@
 
 요건(`customer.CONDS`)에 대응이 없어 관련도를 잴 수 없는 키워드다. 그 콘텐츠는
 다른 후보가 없을 때만 노출된다 — 대응 컬럼이 확인되면
-`support/outreach.py::KEYWORD_CONDS` 에 한 줄 더한다.
+`support/assets.py::KEYWORD_CONDS` 에 한 줄 더한다.
 
 | 키워드 | 쓰는 콘텐츠 |
 |---|---|
@@ -112,19 +112,20 @@
 | pension_started | 연금수령 개시 여부 | '연금개시가능잔여일'은 만55-연령이라 개시 여부가 아님 | §7 추가납 권유 금지 (민원 방지 규칙) |
 | grade | 고객 위험등급(가입 상한) | 딕셔너리·목업 v3 모두 컬럼 없음 — 현재 PREF[투자성향] 파생값 | 적합성 게이트 (상품 위험등급 하드 상한) |
 
-## 5. 데모 상수 — 9건
+## 5. 데모 상수 — 10건
 
 | 자리 | 현재값 | 전환 시 |
 |---|---|---|
 | customer.AS_OF | 2026-08-24 | 목업 원장 스냅샷 기준일(잔액·수익률이 찍힌 날). customers.json meta.as_of 와 묶여 있어 실데이터 조인 전까지는 안 움직인다 |
-| customer.today() | 2026-09-23 (원장보다 30일 뒤) | 상담 시점의 오늘 — 잔여일수·경과일의 기준. 기본은 실제 날짜이고 PENSION_TODAY=YYYY-MM-DD 로 고정한다(테스트는 AS_OF 로 고정한 채 돈다) |
+| customer.today() | 2026-10-21 (원장보다 58일 뒤) | 상담 시점의 오늘 — 잔여일수·경과일의 기준. 기본은 실제 날짜이고 PENSION_TODAY=YYYY-MM-DD 로 고정한다(테스트는 AS_OF 로 고정한 채 돈다) |
 | data/assets.json 이벤트·세미나 창 | 이벤트 4건 (마지막 종료 2026-12-30) · 세미나 5건 (마지막 종료 2026-11-17) | ⑨ 후보는 종료되지 않은 콘텐츠만 남는다. 시연용 캘린더라 오늘이 창을 지나가면 후보가 마른다 — 발표일을 창 안으로 고정하려면 PENSION_TODAY 를 쓰고, 실제 콘텐츠 캘린더가 붙으면 이 자리가 사라진다 |
 | customer.PERSONAS | 12명 (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx 9케이스 + scripts/demo_cases.json 3명) | 시연용 목업. scripts/import_customers.py 로 재생성 — 실데이터 조인으로 교체 |
 | data/portfolios.json | 1건 | 채권40+채권30+주식30 예시를 실제 카탈로그로 재구성한 자리표시자 — 실제 추천 포트폴리오로 교체. 교체할 원문은 05_시황_상품_기반지식/02_상품/01_퇴직연금펀드_포트폴리오 다(대화형에는 market 카드로 이미 적재돼 있다). 옮기려면 그 문서의 펀드 40여 종을 먼저 product 레코드로 저작해야 한다 — allocation[].product_id 가 그것을 참조하고, 적합성 게이트가 타입드 필드로 비교하기 때문이다 |
 | engine.TOP_N / ALT_N | 1 / 1 | 제안 1개 + 예비 1개 (07_에이전트_기능정의/01 ① 4) |
-| consult_agent.effects.screens.MODE | D (개발) | 단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, 화면번호 자체는 지식베이스 절차 카드에서 온다 |
-| consult_agent.effects.actions 예약 실행기 | demo (시연용 — 접수 즉시 발송) | 예약 쪽지(«10월 5일에 보내줘»)를 누가 실행하나. **기본값이 demo 다** — 예약을 접수하는 순간 한 통을 즉시 보낸다. 화면은 «예약했어요»라고 말하지만 실제로는 이미 나간 것이다(시연에서 쪽지가 도착하는 것을 보이려는 것). 실서비스로 옮길 때는 PENSION_MEMO_SCHEDULER=off(보내지 않고 «미연결»)이나 actions.SCHEDULERS 에 더한 실제 실행기 이름을 넣는다 |
-| consult_agent.effects.screens.link() 파라미터 | scnNo · mode | 규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 consult_agent/effects/screens.py 의 조립부에 추가 |
+| actions.screens.MODE | D (개발) | 단말 딥링크의 mode 파라미터. 지금은 개발 모드로 링크를 만든다 — 운영 전환 시 TERMINAL_SCREEN_MODE=O(스테이징 S). 스킴·scnNo 형식은 단말 연동 규격이고, 화면번호 자체는 지식베이스 절차 카드에서 온다 |
+| actions.actions 예약 실행기 | demo (시연용 — 접수 즉시 발송) | 예약 쪽지(«10월 5일에 보내줘»)를 누가 실행하나. **기본값이 demo 다** — 예약을 접수하는 순간 한 통을 즉시 보낸다. 화면은 «예약했어요»라고 말하지만 실제로는 이미 나간 것이다(시연에서 쪽지가 도착하는 것을 보이려는 것). 실서비스로 옮길 때는 PENSION_MEMO_SCHEDULER=off(보내지 않고 «미연결»)이나 actions.SCHEDULERS 에 더한 실제 실행기 이름을 넣는다 |
+| tools/branch_briefing 부점 DB | demo (행외 목업 DB — 전부 시연값) | 메인 브리핑(부점 데이터 질의)이 조회하는 DB. **기본값이 demo 다** — 행외 목업 DB(sqlite 메모리, 부점 4곳 · 직원 5명 · 고객 300명 중 288명은 고정 시드로 만든 가짜, 12명은 목업 고객을 옮긴 것). 행내로 옮길 때는 BRANCH_DB=sybase 로 바꾸고 sql/sybase/ 의 고정 뷰 SQL 세 개(사번→부점 · 고객 뷰 · 부점 집계 뷰)를 실제 테이블로 채운다 — 채우기 전에는 «DB 미연결»로 답한다. MCP 서버 sybase(MCP_SERVERS · MCP_CONN_ID)와 sybaseiq_query 의 인자 이름·응답 꼴도 행내 실측이 필요하다 |
+| actions.screens.link() 파라미터 | scnNo · mode | 규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 actions/screens.py 의 조립부에 추가 |
 
 ## 6. 기준시점 미기재 사실 — 0 / 64건
 

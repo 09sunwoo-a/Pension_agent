@@ -1,20 +1,10 @@
-"""캔드 LLM 시나리오 — 키 없이 같은 현상을 결정론적으로 재현한다.
+"""캔드 LLM 시나리오 — 키 없이 결정론적 재현. LLM 만 스텁, 검색·근거·게이트·폴백은 실코드.
 
-**LLM 만 스크립트한다.** KB 검색·근거 조립·게이트·폴백은 전부 진짜 코드가 돈다 — 그래야
-트레이스가 "이 코드가 이렇게 판정한다"의 기록이 된다. 스텁이 게이트까지 흉내 내면 그건
-운영 동작이 아니라 스텁의 동작을 재는 것이다.
-
-스텁을 거는 자리는 기존 `tests/test_consult_agent.py` 와 같은 규약이다:
-  understand.generate   의도 분류 — `"{}"` 면 기본 의도(계획 루프)로 떨어진다
-  plan.generate         계획 JSON 과 답변 문장 둘 다. 프롬프트로 갈린다
-  clarify.generate      되묻기 판정 — `{"ask": null}` = 되묻지 않는다
-  tools.fits_question   적합성 게이트 — 시나리오가 지정한 카드만 남긴다
-  select.llm_pick       카드 선택 1차(LLM) 끄기 — n-gram 검색만으로 재현하기 위해
-
-되묻기 판정까지 스크립트하는 이유: 이 자리를 비워 두면 키 없는 환경에서 `clarify` 가 진짜
-LLM 을 부르다 죽는다. 코드가 그 실패를 삼키고 compose 로 흘려보내므로 답은 같게 나오지만,
-트레이스에는 시나리오와 무관한 LLM 실패가 찍힌다 — **재현하려는 사건이 아닌 것이 기록에
-섞이면 그 기록은 진단에 쓸 수 없다.**
+  understand.generate   의도 분류 — `"{}"` 면 기본 의도(계획 루프)
+  plan.generate         계획 JSON·답변 문장 둘 다(프롬프트로 구분)
+  clarify.generate      되묻기 판정 — `{"ask": null}` 고정(비우면 트레이스에 무관한 LLM 실패 기록)
+  tools.fits_question   적합성 게이트 — 시나리오 지정 카드만 유지
+  select.llm_pick       카드 선택 1차(LLM) 끄기 — n-gram 검색만 사용
 """
 
 from __future__ import annotations
@@ -23,47 +13,37 @@ import json
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from pension_agent.consult_agent.evidence import select as S
-from pension_agent.consult_agent import tools as T
-from pension_agent.consult_agent.nodes import clarify as CL
-from pension_agent.consult_agent.nodes import plan as P
-from pension_agent.consult_agent.nodes import understand as U
-from pension_agent.llm import LLMError
+from pension_agent.tools.kb_search import select as S
+from pension_agent import tools as T
+from pension_agent.nodes import clarify as CL
+from pension_agent.nodes import plan as P
+from pension_agent.nodes import understand as U
+from pension_agent.common.llm import LLMError
 from tests.debug import trace as TR
 
-#: 세액공제 카드(fact.k04.f2)를 근거로 받은 답변들. 게이트가 무엇을 어떻게 가르는지
-#: 눈으로 대조하려고 **한 글자 차이**로 갈리게 만들어 뒀다.
+#: 세액공제 카드(fact.k04.f2) 근거 답변들 — 게이트 판정 대조용으로 최소 차이만 둠
 _CLEAN = (
     "세액공제 한도는 연 900만원이에요(연금저축 포함). 총급여 5,500만원 이하면 16.5%, "
     "초과면 13.2%라서 900만원을 다 채우면 각각 1,485,000원 / 1,188,000원을 돌려받아요. "
     "다만 결정세액이 공제액보다 적으면 최대 환급액을 다 못 받으니, 소득이 낮은 고객에게는 "
     "그 단서를 꼭 함께 말씀해 주세요."
 )
-#: 위 문장에 **오기를 오기라고 짚는 한 문장**을 더한 것. 카드의 `verify_points` 가 직원에게
-#: 바로 그렇게 안내하라고 적어둔 내용인데, 예전에는 이 문장 때문에 답변이 통째로 폐기됐다
-#: (문자열이 들어 있기만 하면 '알려진 오답'으로 봤다). 지금은 인용부호 + 정정 표지를 보고
-#: 정정으로 판정해 통과한다.
+#: 오기를 정정하는 문장 추가 — 인용부호 + 정정 표지로 정정 판정, 통과해야 함
 _CORRECTION = _CLEAN + ' 안내하실 때 "5,500만원 이상 13.2%"는 오기니까 "초과"로 말씀해 주세요.'
 
-#: 같은 문구를 **주장한** 답변. 정정과 주장을 갈라 보는지 확인하는 반대짝이다.
+#: 같은 문구를 주장한 답변 — 정정과의 반대짝
 _ASSERTS_WRONG = (
     "세액공제 한도는 연 900만원이에요. 총급여 5,500만원 이상 13.2% 로 안내하시면 돼요."
 )
-#: 위와 **같은 표기인데 값이 하나 틀린** 답변(148만 6천원 = 1,486,000원). 단위를 접어
-#: 준다고 아무 금액이나 통과하는 것이 아님을 고정한다.
+#: 같은 표기, 값 하나 오류(148만 6천원) — 단위 접기가 아무 금액이나 통과시키지 않음 고정
 _KOREAN_UNITS_WRONG = (
     "세액공제 한도는 연 900만원이에요. 900만원을 채우면 148만 6천원을 돌려받아요."
 )
 
-#: 원장에 없는 수치를 지어낸 답변. 걸리는 게이트가 달라지는 것을 보려고 둔다.
+#: 원장 밖 수치 답변
 _OUT_OF_LEDGER = "세액공제 한도는 연 1,200만원이에요. 공제율은 총급여에 따라 갈려요."
 
-#: **실제 LLM 이 쓴 문장의 형태.** 값은 원장 그대로인데 표기가 다르다 — 원장은
-#: "1,485,000원"·"148.5만원"·"2026.06" 이고, LLM 은 직원이 실제로 말하는 대로
-#: "148만 5천원"·"2026년 6월" 이라고 쓴다. 예전에는 숫자 토큰의 집합 비교라 만·천으로
-#: 끊긴 표기가 원장에 없는 토큰(148 · 5 · 118 · 8 · 6)을 만들어 **맞는 답변이 통째로
-#: 버려졌다**. 지금은 `verify._measures()` 가 덩이로 읽어 통과한다 — 이 시나리오가
-#: 그 회귀 고정이다.
+#: 원장 값 그대로, 표기만 만·천·«년 월» — `verify._measures()` 덩이 읽기로 통과해야 함
 _KOREAN_UNITS = (
     "세액공제 한도는 연 900만원이에요. 총급여 5,500만원 이하면 16.5%라 148만 5천원, "
     "초과면 13.2%라 118만 8천원을 돌려받아요. 2026년 6월 기준입니다."
@@ -72,13 +52,13 @@ _KOREAN_UNITS = (
 
 @dataclass(frozen=True)
 class Scenario:
-    """LLM 이 이렇게 답했을 때 파이프라인이 어떻게 되는가."""
+    """LLM 응답 스크립트 한 건."""
     name: str
     question: str
-    plan: tuple[dict, ...]              # 계획 단계 응답(순서대로). 떨어지면 done
-    compose: str | None                 # None 이면 compose 단계에서 LLM 이 죽는다
+    plan: tuple[dict, ...]              # 계획 단계 응답(순서대로), 소진 시 done
+    compose: str | None                 # None 이면 compose 단계 LLM 실패
     keep: tuple[str, ...] = ()          # 적합성 게이트가 남길 카드 id
-    expect: str = ""                    # 사람이 읽을 기대. 검사는 test_trace.py 가 한다
+    expect: str = ""                    # 사람용 기대 설명(검사는 test_trace.py)
     route: str = "{}"
     customer_id: str | None = None
     follow_ups: tuple[str, ...] = field(default=())
@@ -136,7 +116,7 @@ SCENARIOS: dict[str, Scenario] = {
 
 @contextmanager
 def installed(scn: Scenario):
-    """시나리오의 LLM 응답을 걸고, 나갈 때 원래대로 돌려놓는다."""
+    """시나리오 LLM 응답 설치, 종료 시 복원."""
     saved = [(U, "generate", U.generate), (P, "generate", P.generate),
              (CL, "generate", CL.generate), (T, "fits_question", T.fits_question),
              (T, "llm_pick", T.llm_pick), (S, "llm_pick", S.llm_pick)]
@@ -153,11 +133,7 @@ def installed(scn: Scenario):
         U.generate = lambda prompt, **kw: scn.route
         P.generate = plan_generate
         CL.generate = lambda prompt, **kw: '{"ask": null}'
-        # 적합성 게이트는 이 스위트의 관심사가 아니다 — 시나리오가 지정한 카드만 남긴다.
-        # **나머지 인자는 `**kw` 로 흘려보낸다.** 진짜 서명을 베껴 두면 거기에 인자가 하나
-        # 늘 때마다(history → query → sink) 이 스텁만 조용히 뒤처지고, 그때는 게이트가
-        # TypeError 로 죽어 «도구 고장»으로 둔갑한다(실제로 sink 에서 그랬다). 이 스텁이
-        # 신경 쓰는 것은 앞의 둘뿐이므로 뒤는 알 필요가 없다.
+        # 나머지 인자는 `**kw` — 실서명 복사 시 인자 추가마다 TypeError 로 «도구 고장» 둔갑
         T.fits_question = lambda q, hits, kind="지식", **kw: (
             [(s, c) for s, c in hits if c.get("id") in scn.keep] if scn.keep else hits)
         T.llm_pick = S.llm_pick = lambda kinds, query: []

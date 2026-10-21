@@ -1,26 +1,9 @@
-"""계측 본체 — 밖에서 감싸서 보기만 한다.
+"""계측 본체 — 원본 호출·반환값 무변경, 기록만.
 
-━━ 원칙 ━━
-래퍼는 **원본을 그대로 부르고 반환값에 손대지 않는다.** 계측이 동작을 바꾸면 그 트레이스는
-진단이 아니라 다른 실행의 기록이다. 기록만 하고 값은 통과시킨다.
-
-━━ 무엇을 감싸나 ━━
-  노드 10개       `graph` 모듈 전역 이름. `build_agent()` 가 `add_node` 에 넘기는 것이
-                  이 이름이라, **컴파일 전에** 갈아끼워야 잡힌다.
-  LLM 5자리       `understand.generate` · `plan.generate` · `clarify.generate` ·
-                  `tools.generate` · `select.llm_pick`
-  compose 게이트  `plan.verify_texts` · `plan.relations` · `plan._span_verdict`
-
-━━ 비공개 이름에 붙는다는 것 ━━
-`_span_verdict` 도 `_AGENT` 도 비공개다. 운영 쪽에서 이름이 바뀌거나 검사가 인라인되면
-래퍼는 **조용히 덜 보게 된다** — 트레이스가 "게이트 통과"를 찍는데 실은 게이트를 못 본
-것이면, 이 도구는 없는 것만 못하다. 그래서 `instrument()` 는 대상 속성이 하나라도 없으면
-즉시 예외를 던진다. 덜 보는 쪽이 아니라 크게 실패하는 쪽으로 기운다.
-
-━━ relations 는 모듈이라 조심한다 ━━
-`plan.relations` 는 모듈 객체다. 진짜 모듈의 `check` 를 갈아끼우면 같은 모듈을 쓰는
-`tools/base.py`·`tools/cards.py`(`import relations as REL`)까지 오염된다. 그래서 **plan 쪽 바인딩만**
-`SimpleNamespace` 로 바꾼다.
+  노드        `graph` 모듈 전역 — 컴파일 전에 교체해야 포착
+  LLM         `understand`·`plan`·`clarify`·`tools` 의 generate · `select.llm_pick`
+  게이트      `plan.verify_texts` · `plan.relations`(plan 쪽 바인딩만 교체 — 모듈 공유 오염 방지) · `plan._span_verdict`
+대상 속성이 하나라도 없으면 `instrument()` 즉시 예외 — 조용히 덜 보는 것 방지.
 """
 
 from __future__ import annotations
@@ -31,43 +14,30 @@ import unicodedata
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from pension_agent.consult_agent import graph as G
-from pension_agent.consult_agent import prompts as PROMPTS
-from pension_agent.consult_agent.evidence import select as S
-from pension_agent.consult_agent import tools as T
-from pension_agent.consult_agent.nodes import clarify as CL
-from pension_agent.consult_agent.nodes import plan as P
-from pension_agent.consult_agent.nodes import understand as U
+from pension_agent import graph as G
+from pension_agent import prompts as PROMPTS
+from pension_agent.tools.kb_search import select as S
+from pension_agent import tools as T
+from pension_agent.nodes import clarify as CL
+from pension_agent.nodes import plan as P
+from pension_agent.nodes import understand as U
 
-#: 그래프에 실리는 노드 **함수** 이름 — `graph.py::build_agent` 가 `add_node` 에 넘기는
-#: 전역들. 계측은 함수를 감싸므로 그래프 라벨과 달라도 된다 — answer 함수의 라벨은
-#: `compose` 다(상태 키 `answer` 와 겹치면 구버전 langgraph 가 add_node 를 거부한다).
-#: 되묻기 판정과 답변 작성은 노드 하나(`answer`)에서 **동시에** 끝난다(nodes/answer.py) —
-#: 예전의 `clarify`·`compose` 두 노드 자리다. 두 LLM 호출이 서로 다른 스레드에서 나므로
-#: 한 노드의 호출 목록에 함께 실리는데, 정체는 프롬프트로 갈리므로(_stage) 구분은 남는다.
+#: `graph.build_agent` 가 `add_node` 에 넘기는 노드 함수 이름(그래프 라벨과 다를 수 있음 — answer 의 라벨은 compose)
 NODE_NAMES = ("understand", "plan_step", "answer", "agent_help",
               "lms_link", "correction", "llm_down", "confirm_action", "offer")
 
-#: 답변을 낸 노드. 게이트 트리와 처분 한 줄이 이 노드에 붙는다.
+#: 답변 노드 — 게이트 트리·처분이 붙는 자리
 ANSWER_NODE = "answer"
 
-#: LLM 이 죽어 분류조차 못 한 턴의 노드(§11). 「되묻지도 답하지도 않은」 세 번째 결말이라
-#: 기대값 판정이 이것을 답변으로 세면 안 된다(reps._observed).
+#: LLM 실패로 분류도 못 한 턴의 노드 — 답변으로 집계 금지(reps._observed)
 LLM_DOWN_NODE = "llm_down"
 
-#: compose 가 순서대로 거는 검사. 이 순서를 여기 적어두는 이유는 **실행되지 않은 게이트**를
-#: 말하기 위해서다 — 앞에서 끊기면 뒤는 아예 안 불리고, 그 사실이 진단의 핵심이다.
+#: compose 게이트 순서 — «실행 안 됨» 표시용
 GATES = ("verify_texts", "relations", "span")
 
-#: 프롬프트로 LLM 호출의 정체를 가른다. 한 함수(plan.generate)가 계획과 작성 둘 다 쓰므로
-#: 프롬프트를 봐야 갈린다.
-#:
-#: **표식을 손으로 적지 않고 프롬프트 상수에서 뽑는다.** 예전에는 `"<지식베이스>"` 처럼
-#: 본문 한 조각을 적어 뒀는데, 운영 쪽에서 그 머리글이 `<재료>` 로 바뀌자 계측이 조용히
-#: 어긋났다 — 작성 호출을 계획 호출로 분류했고, 그러면 트레이스가 다른 실행을 그린다.
-#: 상수에서 뽑으면 프롬프트 문구가 바뀌어도 따라간다(없어지면 아래에서 크게 실패한다).
+# LLM 호출 구분 표식은 프롬프트 상수에서 추출 — 손으로 적으면 문구 변경 시 오분류
 def _head(template: str) -> str:
-    """포맷 자리표시자 앞의 **첫 줄**. 다섯 프롬프트가 이것만으로 서로 갈린다."""
+    """포맷 자리표시자 앞 첫 줄."""
     return template.split("{")[0].strip().splitlines()[0].strip()
 
 
@@ -93,7 +63,7 @@ def _stage(prompt: str) -> str:
 
 
 def is_compose_prompt(prompt: str) -> bool:
-    """답변 작성 호출인가 — 캔드 시나리오(script.py)도 같은 판정을 쓴다."""
+    """답변 작성 호출 여부(script.py 공용)."""
     return _stage(prompt) == "compose"
 
 
@@ -101,14 +71,14 @@ def is_compose_prompt(prompt: str) -> bool:
 class Call:
     """LLM 호출 한 건."""
     stage: str
-    text: str = ""          # 응답 원문. compose 면 이것이 '폐기됐을지도 모르는 생성문'이다
+    text: str = ""          # 응답 원문(compose 면 폐기됐을 수 있는 생성문)
     error: str = ""
-    seconds: float = 0.0    # 소요 시간. 어느 호출을 줄일지는 추측이 아니라 이 값으로 정한다
+    seconds: float = 0.0    # 소요 시간
 
 
 @dataclass
 class Gate:
-    """compose 검사 한 건. `passed=False` 면 이 자리에서 생성문이 버려졌다."""
+    """compose 검사 한 건. `passed=False` 면 생성문 폐기."""
     name: str
     passed: bool
     detail: list = field(default_factory=list)
@@ -121,7 +91,7 @@ class Node:
     delta: dict = field(default_factory=dict)      # 노드가 돌려준 상태 변경(요약)
     calls: list[Call] = field(default_factory=list)
     gates: list[Gate] = field(default_factory=list)
-    note: str = ""                                 # 사람이 읽을 한 줄
+    note: str = ""                                 # 요약 한 줄
     seconds: float = 0.0                           # 노드 전체 소요 시간(LLM 대기 포함)
 
 
@@ -132,17 +102,15 @@ class Turn:
 
 
 class Trace:
-    """한 실행의 기록. 턴 단위로 묶는다(멀티턴 시나리오를 한 줄로 재현하므로)."""
+    """한 실행의 턴별 기록."""
 
     def __init__(self) -> None:
         self.turns: list[Turn] = []
-        # 실행 자체에 대한 경고(예: 이 체크아웃에 없는 고객 id). 턴에 속하지 않으므로
-        # 따로 들고 있다가 트레이스 맨 위에 찍는다 — 트레이스만 붙여 보내도 원인이 보이게.
+        # 실행 단위 경고(예: 없는 고객 id) — 트레이스 맨 위 출력
         self.notes: list[str] = []
         self._calls: list[Call] = []   # 다음 노드가 가져갈 LLM 호출
         self._gates: list[Gate] = []   # 다음 노드가 가져갈 게이트 판정
 
-    # ── 기록 ──────────────────────────────────────────────
     def note(self, text: str) -> None:
         if text and text not in self.notes:
             self.notes.append(text)
@@ -162,13 +130,11 @@ class Trace:
         self._gates.append(gate)
 
     def add_node(self, node: Node) -> None:
-        # 노드가 끝나는 시점에 그 노드가 부른 LLM·게이트를 붙여준다. 노드 래퍼가 원본을
-        # 부른 뒤에 기록하므로, 그 사이에 쌓인 것이 곧 그 노드가 한 일이다.
+        # 노드 종료 시점까지 쌓인 LLM·게이트를 그 노드에 귀속
         node.calls, self._calls = self._calls, []
         node.gates, self._gates = self._gates, []
         self._turn().nodes.append(node)
 
-    # ── 조회 (테스트가 쓴다) ────────────────────────────────
     def node_names(self, turn: int = -1) -> list[str]:
         return [n.name for n in self.turns[turn].nodes]
 
@@ -183,14 +149,14 @@ class Trace:
         return {g.name: g for g in (node.gates if node else [])}
 
     def blocked_by(self, turn: int = -1) -> str | None:
-        """생성문을 버린 게이트 이름. 아무 게이트도 안 걸렸으면 None."""
+        """생성문을 폐기한 게이트 이름, 없으면 None."""
         for gate in self.gates(turn).values():
             if not gate.passed:
                 return gate.name
         return None
 
     def draft(self, turn: int = -1) -> str:
-        """compose 가 LLM 에게 받은 문장. 폐기됐어도 여기 남는다."""
+        """compose 가 받은 LLM 문장(폐기 포함)."""
         node = self.node(ANSWER_NODE, turn)
         for call in (node.calls if node else []):
             if call.stage == "compose":
@@ -198,11 +164,7 @@ class Trace:
         return ""
 
 
-# ─────────────────────────────────────────────────────────────
-# 계측
-# ─────────────────────────────────────────────────────────────
-
-#: (모듈, 속성) — 이 중 하나라도 없으면 계측을 시작하지 않는다.
+#: (모듈, 속성) — 하나라도 없으면 계측 거부
 _TARGETS: tuple[tuple[object, str], ...] = (
     *((G, name) for name in NODE_NAMES),
     (G, "_AGENT"),
@@ -213,14 +175,7 @@ _TARGETS: tuple[tuple[object, str], ...] = (
 
 
 def missing_targets() -> list[str]:
-    """계측 대상 중 사라진 것. 비어 있으면 계측을 걸 수 있다.
-
-    `instrument()` 는 하나라도 없으면 예외를 던진다 — 덜 보는 쪽이 아니라 크게 실패하는
-    쪽으로 기운다는 이 파일의 원칙 그대로다. 다만 그 «크게 실패»를 **답변 차단**으로
-    번역하면 안 되는 호출자가 있다: 평가 화면(app.py)의 디버그 토글은 켜져 있을 뿐이고,
-    계측이 망가졌다고 상담 테스트 자체를 못 하게 만들 이유는 없다. 그런 호출자가 미리
-    물어보고 «트레이스만 끄고 답변은 낸다»를 고를 수 있게 판정을 따로 낸다.
-    """
+    """사라진 계측 대상 목록 — 예외 대신 «트레이스만 끄기»를 고를 호출자(app.py)용."""
     return [f"{getattr(mod, '__name__', mod)}.{attr}"
             for mod, attr in _TARGETS if not hasattr(mod, attr)]
 
@@ -234,19 +189,15 @@ def _check_targets() -> None:
 
 
 def _summary(delta: dict) -> dict:
-    """상태 변경 중 트레이스에 남길 것만. 답변 원문은 길어서 길이만 남긴다."""
-    # judge_verdict 가 여기 없으면 리허설이 «되물었나»만 보고 «전제를 밝히고 답했나»·
-    # «없다고 답했나»를 못 본다 — 판정이 넷으로 갈린 뒤로는 그 셋이 다른 사건이다.
+    """트레이스에 남길 상태 변경 요약. 답변은 길이만."""
+    # judge_verdict 필수 — 없으면 리허설이 판정 네 갈래를 구분 못 함
     out = {k: v for k, v in delta.items()
            if k in ("intent", "plan_done", "llm_error", "clarify", "judge_verdict",
                     "plan_retry")}
-    # 게이트가 표시한 갈래(tools.record_branches). 이게 안 보이면 «판정이 왜 되물었나»를
-    # 되짚을 수 없다 — 갈래 블록은 판정 프롬프트에 실리는 가장 센 신호인데, 트레이스에는
-    # 판정 «결과»만 있고 그 입력이 없었다.
+    # 갈래(tools.record_branches) — 판정 입력의 가장 센 신호
     if delta.get("branches"):
         out["branches"] = " / ".join(b.get("axis", "?") for b in delta["branches"])
-    # 전제·빠진 대상은 블록 통째로 찍으면 트레이스 한 줄이 열 줄이 된다. 판정이 무엇을
-    # 정했는지만 남긴다 — 답변 원문에 그 전제가 실제로 실렸는지는 답변을 보면 된다.
+    # 전제 블록은 60자로 절단
     if delta.get("judge_note"):
         out["judge_note"] = " ".join(delta["judge_note"].split())[:60] + "…"
     if delta.get("pending_action"):
@@ -259,8 +210,7 @@ def _summary(delta: dict) -> dict:
 
 
 def _plan_note(state: dict, delta: dict) -> str:
-    """이 계획 단계가 무엇을 했는지 한 줄. 도구·질의·채택 카드는 상태 차분에서 읽는다 —
-    `tools.run` 을 따로 감싸지 않아도 여기 다 나온다."""
+    """계획 단계 요약 한 줄 — 도구·질의·채택 카드를 상태 차분에서 추출."""
     before = len(state.get("steps") or [])
     steps = delta.get("steps") or []
     if len(steps) <= before:
@@ -270,7 +220,7 @@ def _plan_note(state: dict, delta: dict) -> str:
 
     step = steps[-1]
     signature = f"{step.get('tool')}:{step.get('query')}"
-    # 고장은 «자료 없음»과 다른 사건이다(§3) — 장부가 갈라 적으므로 트레이스도 갈라 읽는다.
+    # 도구 고장 ≠ 자료 없음
     if step.get("outcome") == "failed":
         return f"{signature} → 도구 고장: {step.get('reason') or '원인 미상'}"
     ev_before = len(state.get("evidence") or [])
@@ -285,13 +235,7 @@ def _plan_note(state: dict, delta: dict) -> str:
 
 
 def _compose_note(state: dict, delta: dict) -> str:
-    """최종 답이 생성문인지 폴백인지. **말투가 달라지는 자리가 여기다.**
-
-    판정은 폴백이 앞에 세우는 머리말(`plan.RAW_EVIDENCE`)로 한다 — 그 뒤에 근거 원문이
-    붙는다. 예전에는 «답변이 근거 원문으로 시작하는가»로 쟀는데, 폴백이 자기가 폴백이라고
-    밝히게 된 뒤로는 그 판정이 조용히 «생성문 그대로»로 뒤집혔다(문구를 두 곳에 두면
-    한쪽만 고쳐진다 — 아래 LLM 안내 머리말도 같은 이유로 plan 에서 가져온다).
-    """
+    """최종 답 처분(생성문/폴백/LLM 실패/자료 0건). 머리말 문구는 plan 상수에서 참조 — 복사 금지."""
     answer = delta.get("answer") or ""
     evidence = state.get("evidence") or []
     if answer.startswith(P.RAW_EVIDENCE.split("{", 1)[0]):
@@ -305,7 +249,7 @@ def _compose_note(state: dict, delta: dict) -> str:
 
 @contextmanager
 def instrument(trace: Trace):
-    """계측을 걸고, 나갈 때 무조건 원래대로 돌려놓는다."""
+    """계측 설치, 종료 시 무조건 복원."""
     _check_targets()
     saved = [(mod, attr, getattr(mod, attr)) for mod, attr in _TARGETS]
 
@@ -329,7 +273,7 @@ def instrument(trace: Trace):
             started = time.perf_counter()
             try:
                 text = fn(prompt, **kw)
-            except Exception as exc:                     # noqa: BLE001 — 기록하고 그대로 올린다
+            except Exception as exc:                     # noqa: BLE001 — 기록 후 재발생
                 trace.add_call(Call(stage=stage, error=f"{type(exc).__name__}: {exc}",
                                     seconds=time.perf_counter() - started))
                 raise
@@ -364,8 +308,7 @@ def instrument(trace: Trace):
     real_span = P._span_verdict
 
     def span_wrapper(found, answer, *args, **kwargs):
-        # 인자를 그대로 넘긴다 — 판정 함수가 «원장이 아는 화면» 집합을 세 번째 인자로 받는다
-        # (plan._ledger_screens). 래퍼가 그것을 떨어뜨리면 계측을 건 실행만 다른 판정을 한다.
+        # 인자 전부 전달 — 누락 시 계측 실행만 판정이 달라짐
         verdict, gaps = real_span(found, answer, *args, **kwargs)
         trace.add_gate(Gate(name="span", passed=verdict != P.DISCARD,
                             detail=[verdict, *[label for label, _ in gaps]]))
@@ -374,7 +317,7 @@ def instrument(trace: Trace):
     try:
         for name in NODE_NAMES:
             setattr(G, name, node_wrapper(name, getattr(G, name)))
-        # 컴파일된 그래프에는 감싸기 전 노드가 박혀 있다. 비워서 다시 만들게 한다.
+        # 컴파일된 그래프 폐기 — 감싸기 전 노드가 박혀 있음
         G._AGENT = None
         U.generate = llm_wrapper(U.generate)
         P.generate = llm_wrapper(P.generate)
@@ -383,31 +326,27 @@ def instrument(trace: Trace):
         T.llm_pick = pick_wrapper(T.llm_pick)
         S.llm_pick = pick_wrapper(S.llm_pick)
         P.verify_texts = verify_wrapper
-        # 모듈 자체를 건드리지 않는다 — plan 의 바인딩만 갈아끼운다(tools.py 오염 방지).
+        # 모듈 대신 plan 바인딩만 교체(공유 모듈 오염 방지)
         P.relations = types.SimpleNamespace(check=relations_wrapper)
         P._span_verdict = span_wrapper
         yield trace
     finally:
         for mod, attr, value in saved:
             setattr(mod, attr, value)
-        # 계측된 노드가 박힌 그래프를 다음 실행에 물려주지 않는다.
+        # 계측 노드가 박힌 그래프 폐기
         G._AGENT = None
 
-
-# ─────────────────────────────────────────────────────────────
-# 출력
-# ─────────────────────────────────────────────────────────────
 
 _TREE = ("├", "└")
 
 
 def _secs(seconds: float) -> str:
-    """소요 시간 한 조각. 계측이 없던 기록(0.0)도 그대로 찍는다 — 빈칸과 0 은 다르다."""
+    """소요 시간 문자열. 0.0 도 표시."""
     return f"{seconds:.2f}s"
 
 
 def _pad(text: str, width: int) -> str:
-    """한글은 두 칸을 차지한다. `str.ljust` 로 맞추면 트리가 어긋난다."""
+    """한글 두 칸 폭 고려 패딩(`str.ljust` 사용 금지)."""
     used = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
     return text + " " * max(0, width - used)
 
@@ -432,8 +371,7 @@ def _gate_lines(node: Node) -> list[str]:
 
 
 def render(trace: Trace, show_llm: bool = False, last_only: bool = False) -> str:
-    """`last_only` 는 REPL 용이다 — 매 턴 전체 기록을 다시 찍으면 화면이 밀려서
-    방금 물은 턴이 어디 있는지 못 찾는다."""
+    """트레이스 텍스트 출력. `last_only` 는 REPL 용(마지막 턴만)."""
     turns = list(enumerate(trace.turns))
     if last_only:
         turns = turns[-1:]
@@ -456,8 +394,7 @@ def render(trace: Trace, show_llm: bool = False, last_only: bool = False) -> str
                 + f" {_secs(c.seconds)}"
                 for c in node.calls)
             fields = " ".join(f"{k}={v}" for k, v in node.delta.items())
-            # compose 의 한 줄 요약(처분)은 아래 게이트 트리의 마지막 줄에 있다 — 같은 말을
-            # 두 번 세우지 않는다.
+            # 답변 노드 처분은 게이트 트리 마지막 줄에 표시 — 중복 금지
             note = fields if node.name == ANSWER_NODE else (node.note or fields or "변화 없음")
             out.append(f"  {step} {_pad(label, 13)}[{_secs(node.seconds)}] {note}"
                        + (f"   ({calls})" if calls else ""))

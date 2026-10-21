@@ -17,7 +17,7 @@
 
 ## 1. 상담이력 저장소가 동시 쓰기를 견디지 못한다 — 🔴 데이터 유실
 
-**어디** `pension_agent/session_store.py::_save` · `append_turn`
+**어디** `pension_agent/common/session_store.py::_save` · `append_turn`
 
 파일 통째로 읽어 고치고 통째로 다시 쓴다. **잠금도, 원자적 교체(temp → `os.replace`)도
 없다.** 그리고 `graph.ask()` 는 한 턴에 두 번 쓴다(직원 발화 · 에이전트 답변).
@@ -34,27 +34,27 @@
 
 **최소 조치** 임시 파일에 쓰고 `os.replace` 로 교체(원자적) + 고객 단위 잠금.
 **진짜 조치** 상담이력을 DB 로 옮긴다. 실서비스에서는 CRM 이 같은 자리를 채운다는 것이
-이미 기준서의 전제다(consult_agent/CLAUDE.md 「상담 이력 — 소스가 둘이다」).
+이미 기준서의 전제다(pension_agent/CLAUDE.md 「상담 이력 — 소스가 둘이다」).
 
 ## 2. 브리핑 공유가 프로세스 안에서만 성립한다 — 🔴 화면과 다른 답
 
-**어디** `pension_agent/strategy_agent/agent.py::propose` 의 `_BRIEFING_CACHE`
+**어디** `pension_agent/tools/customer_solution/solution.py::document` 의 `_DOCS`
 
-브리핑의 제안 문장·근거 해설은 LLM 이 쓰는 산문이라 **다시 만들면 다른 문장이 나온다.**
-화면과 대화형이 같은 문장을 보게 하는 장치가 이 캐시인데, 캐시는 프로세스 안에만 있다.
+전체 브리핑의 AI 분석(서술)은 LLM 이 쓰는 글이라 **다시 만들면 다른 문장이 나온다.**
+브리핑 문서와 이어지는 대화가 같은 서술을 보게 하는 장치가 이 캐시인데, 캐시는 프로세스 안에만 있다.
 
 **어떻게 깨지나** 워커가 여럿이면 브리핑 화면 요청과 대화 요청이 다른 프로세스에 떨어져
 각자 생성한다 → 직원이 화면을 보며 물었는데 **화면에 없는 문장을 인용해** 답한다
-(consult_agent/CLAUDE.md §3 «화면에 뜬 것과 다른 값을 말하지 않는다» 위반). 캐시
-상한(`_BRIEFING_MAX`)에서 밀려나도 같은 일이 벌어진다.
+(pension_agent/CLAUDE.md §3 «화면에 뜬 것과 다른 값을 말하지 않는다» 위반). 캐시
+상한(`_CACHE_MAX`)에서 밀려나도 같은 일이 벌어진다.
 
 **최소 조치** 브리핑 생성과 대화형을 한 프로세스에서 서비스한다(워커 1개 또는 세션 고정).
 **진짜 조치** 생성된 브리핑을 저장소에 남겨 대화형이 읽는다. 정해야 할 것은
-consult_agent/CLAUDE.md §13 「실서비스 프론트와 브리핑 공유」에 있다.
+pension_agent/CLAUDE.md §13 「실서비스 프론트와 브리핑 공유」에 있다.
 
 ## 2-b. 대화 맥락이 프로세스 메모리에만 있다 — 🟡 후속 질문이 첫 질문처럼 읽힘
 
-**어디** `pension_agent/consult_agent/context_store.py` · `main.py::chat` 의 `_remember`
+**어디** `pension_agent/context_store.py` · `main.py::chat` 의 `_remember`
 
 게이트웨이 경로에서는 `history`(이전 턴의 슬롯·pending 플래그)를 돌려줄 자리가 없어서,
 진입점이 `(x_client_user, session_id)` 키로 **메모리**에 맡겨 두고 다음 턴에 되찾는다
@@ -87,7 +87,7 @@ consult_agent/CLAUDE.md §13 「실서비스 프론트와 브리핑 공유」에
 
 ## 4. 고객 데이터가 기동 시 메모리에 고정된다 — 🟡 교체 지점은 이미 있다
 
-**어디** `pension_agent/strategy_agent/customer.py::get_profile` (`_BY_ID` 조회) ·
+**어디** `pension_agent/tools/customer_solution/customer.py::get_profile` (`_BY_ID` 조회) ·
 `AS_OF = date(2026, 8, 24)`
 
 `get_profile` 은 **이미 교체 지점으로 설계돼 있다**(그 함수 주석이 그렇게 적고 있고,
@@ -113,7 +113,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 ## 6. 429 호출 게이트가 **프로세스 안에서만** 성립한다 — 🔴 다중 워커에서 무력화
 
-**어디** `pension_agent/llm.py` (`_SLOTS` · `_next_free` · `_slow_down`)
+**어디** `pension_agent/common/llm.py` (`_SLOTS` · `_next_free` · `_slow_down`)
 
 행내 게이트웨이가 몰린 호출에 429 를 내던 문제는 세 겹으로 막아 두었다 — 동시성 상한
 (`LLM_MAX_CONCURRENCY`) · 최소 간격(`LLM_MIN_INTERVAL`) · 429 를 맞으면 프로세스 전체가
@@ -137,7 +137,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 ## 6-b. LLM 커넥션을 재사용하지 않는다 — 🟡 지연
 
-**어디** `pension_agent/llm.py::_generate_genai`
+**어디** `pension_agent/common/llm.py::_generate_genai`
 
 `urllib.request.urlopen` 을 호출마다 새로 쓴다 → **매 호출이 TCP+TLS 핸드셰이크부터**
 시작한다. 한 턴에 3~14 회면 그만큼 반복된다.
@@ -148,7 +148,7 @@ FastAPI 가 스레드풀에서 돌린다.
 
 ## 7. 턴마다 스레드를 만든다 — 🟢 부하가 커지면 본다
 
-**어디** `pension_agent/consult_agent/nodes/answer.py`
+**어디** `pension_agent/nodes/answer.py`
 
 되묻기 판정과 답변 작성을 동시에 돌리려고 턴마다 `ThreadPoolExecutor(max_workers=1)` 를
 만든다. 동시 요청 수만큼 스레드가 생기고 상한이 없다. 시연 규모에서는 문제가 아니지만,
@@ -156,16 +156,16 @@ FastAPI 가 스레드풀에서 돌린다.
 
 ## 8. 프로세스마다 지식베이스를 한 벌씩 든다 — 🟢 위험이 아니라 비용
 
-**어디** `pension_agent/consult_agent/state.py::KB` (모듈 임포트 시 적재) ·
+**어디** `pension_agent/state.py::KB` (모듈 임포트 시 적재) ·
 `graph._AGENT`(컴파일된 그래프)
 
 실측 **0.23초 · 카드 569장 · 약 6MB**. 워커 수만큼 곱해지지만 이 규모에서는 문제가 아니다.
 기동 시간과 메모리 산정에 넣어두라는 뜻으로만 적는다. 프로세스당 한 번이라는 성질 자체는
-의도된 것이다(같은 카드를 여러 벌 들면 시효성 판정이 노드마다 갈린다 — `state.py` 주석).
+의도된 것이다(같은 카드를 여러 벌 들면 시효성 판정이 노드마다 갈린다. 그래서 `state.py` 에서 한 번만 적재한다).
 
 ## 9. 관측이 프롬프트를 외부로 내보낸다 — 🔴 실데이터 전환 시 개인정보 유출
 
-**어디** `pension_agent/observability/`(전송은 `_transport.py`) · 켜는 스위치는 `.env` 의 `LANGFUSE_PUBLIC_KEY` ·
+**어디** `pension_agent/common/observability/`(전송은 `_transport.py`) · 켜는 스위치는 `.env` 의 `LANGFUSE_PUBLIC_KEY` ·
 `LANGFUSE_SECRET_KEY`
 
 LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간다. 프롬프트에는 고객 원장이
@@ -192,22 +192,22 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 
 ## 10. 호출자가 사번을 주지 않으면 쪽지가 한 사람 이름으로 나간다 — 🟡 배포 설정에 달렸다
 
-**어디** `pension_agent/consult_agent/graph.py::employee_no` ·
-`pension_agent/note.py::employee_id` · `pension_agent/mcp/workb.py::send_memo`
+**어디** `pension_agent/graph.py::employee_no` ·
+`pension_agent/common/note.py::employee_id` · `pension_agent/common/mcp/workb.py::send_memo`
 
 행내 MCP 인증에는 **사번이 들어간다**(MCP-User-Key). 그 사번이 «누가 이 쪽지를 보냈나»의
 행내 기록이고 받는 사람의 기본값이기도 하다.
 
 **배선은 끝났다**(2026-09-10): 진입점이 받은 사번이 `AgentState["employee_id"]` 를 거쳐
 발송(`send_memo(as_employee=…)`)과 상담이력까지 같은 값으로 내려간다. 회귀는
-`tests/test_api.py`(진입점 → 에이전트) · `tests/test_consult_agent.py`(받는 사람 ·
+`tests/test_api.py`(진입점 → 에이전트) · `tests/test_agent.py`(받는 사람 ·
 보내는 사람) · `tests/infra/s15_mcp.py`(인증에 실리는 사번)가 잡는다.
 
 **남은 것은 «x_client_user 가 사번으로 시작한다»는 전제다 — 아직 실물로 확인하지
 못했다.** 플랫폼 규격(`skills/genai-platform-agent-dev/refs/genai-platform.md`)은 이
 값을 «호출 사용자 식별자»라고만 적고 꼴을 정하지 않으며, 예시는 `user-id-123` 이다.
 저장소의 호출 클라이언트가 보내는 값은 개발자 사번(`client/call_agent.py` ·
-`src/bin/test_local.sh`)인데, **그건 우리가 정한 값이지 게이트웨이가 보낸 값이 아니다** —
+`src/scripts/test_local.sh`)인데, **그건 우리가 정한 값이지 게이트웨이가 보낸 값이 아니다** —
 운영에서 로그인 사번이 이 자리에 실리는 것은 아직 앞의 일이다.
 지금 코드는 **사번 7자리로 시작하고 그
 뒤가 끝이거나 구분자일 때만** 사번으로 읽는다(`note.as_emp_no`). 그 꼴이 아니면
@@ -229,7 +229,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 
 ## 10-b. MCP 요청 컨텍스트가 SDK 전역이다 — 🟢 프로세스 단위 잠금으로 막았다, 남는 것은 처리량
 
-**어디** `pension_agent/mcp/client.py::MCPClient.call` · `connect` (`mcp_sdk.set_request_context`)
+**어디** `pension_agent/common/mcp/client.py::MCPClient.call` · `connect` (`mcp_sdk.set_request_context`)
 
 행내 SDK 의 요청 컨텍스트는 **모듈 전역**이다 — 마지막에 세운 사람이 남는다. 컨텍스트
 세우기와 도구 호출(그리고 세우기와 세션 열기)을 **프로세스 단위** 잠금 `_CALL_LOCK`
@@ -270,7 +270,7 @@ LLM 호출마다 **프롬프트 전문과 응답 전문**이 Langfuse 로 나간
 워크스페이스에서 확인할 수 있다:
 
 ```bash
-ENV_PATH=serving python -m pension_agent.env     # 어느 변수의 키를 읽는지
+ENV_PATH=serving python -m pension_agent.common.env     # 어느 변수의 키를 읽는지
 ```
 
 401 이 나면 화면이 무엇을 말하는지는 `llm._auth_hint()` 가 정한다 — 폐기·재발급도 그
@@ -287,7 +287,7 @@ ENV_PATH=serving python -m pension_agent.env     # 어느 변수의 키를 읽�
 
 행내 GenAI 플랫폼 게이트웨이(`agent-messages`) 앞뒤로 개인정보 필터가 선다. 고객 id(KB-PIN
 `171203-4815062`)는 앞자리가 생년월일이라 **주민등록번호와 같은 꼴**이고, 그 필터에 걸린다.
-실측으로 걸린 자리가 셋이다 — LLM 호출 프롬프트(APIM 400, `pension_agent/privacy.py`) ·
+실측으로 걸린 자리가 셋이다 — LLM 호출 프롬프트(APIM 400, `pension_agent/common/privacy.py`) ·
 프론트로 가는 응답의 `sources` 이벤트 · **그리고 요청 본문**(2026-09-22, «기본필터» policy 350 ·
 `FR-400` — 질문이 「d」한 글자여도 `FILTER_INVALID`, 에이전트 로그에는 아무것도 남지 않았다).
 앞의 둘은 번호를 싣지 않는 것으로 고쳤고 `tests/infra/s17_privacy.py` 가 막는다.
@@ -298,7 +298,7 @@ ENV_PATH=serving python -m pension_agent.env     # 어느 변수의 키를 읽�
 에이전트 코드가 막을 수 없고 프론트 안내 문구의 몫이다.
 
 **최소 조치(적용됨)** 프론트가 `b64:` + base64(원장 표기)(`b64:MTcxMjAzLTQ4MTUwNjI=`)로 보내고
-진입점이 원장 표기로 되돌린다(`strategy_agent/customer.py::normalize_id` · `main._parse`). 연속된
+진입점이 원장 표기로 되돌린다(`tools/customer_solution/customer.py::normalize_id` · `main._parse`). 연속된
 숫자열이 없어 숫자열을 보는 룰에 걸리지 않는다. 하이픈 없는 13자리도 받기는 한다.
 `client/call_agent.py` 가 그렇게 보내고 `tests/test_api.py` 가 세 꼴을 다 받는 것을 고정한다.
 **실서비스 프론트도 b64 로 보내야 한다**(`client/README.md` 요청 표). base64 는 암호화가
@@ -313,7 +313,7 @@ ENV_PATH=serving python -m pension_agent.env     # 어느 변수의 키를 읽�
 
 - **무엇이 더미 데이터인가** — `DEMO_STATUS.md`(생성물)가 전담한다. 안내 콘텐츠, 금리
   자리표시자, 단말 딥링크 `mode=D`, 타겟 룰베이스 근거등급이 거기 있다.
-- **기준과 구현의 차이** — `src/pension_agent/consult_agent/CLAUDE.md` §12(gap 표)가
+- **기준과 구현의 차이** — `src/pension_agent/CLAUDE.md` §12(gap 표)가
   전담한다. 이 문서는 «기준을 지키고 있지만 단일 프로세스라서 지켜지는» 것을 적는다.
 - **아직 하기로 정하지 않은 기능** — 같은 문서 §13.
 
@@ -321,4 +321,4 @@ ENV_PATH=serving python -m pension_agent.env     # 어느 변수의 키를 읽�
 
 위 항목을 실제로 고치면 **여기서 지우고**, 어디서 막는지(회귀 테스트·운영 설정)를 함께
 적는다. 지우지 않으면 다음 사람이 이 문서를 안 믿게 되고, 안 믿는 문서는 없는 것과 같다
-(consult_agent/CLAUDE.md §14 와 같은 규칙이다).
+(pension_agent/CLAUDE.md §14 와 같은 규칙이다).

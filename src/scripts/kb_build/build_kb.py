@@ -1,29 +1,13 @@
-"""지식베이스 원문 폴더 → knowledge/data 레코드 변환기.
-
-06 폴더의 추출지식 문서는 사람이 읽는 검토용 마크다운이다. 그 안의 항목을 지식베이스 레코드
-(kinds.json 선언)로 결정론적으로 옮긴다. 손으로 옮기지 않는 이유는 두 가지다 — 항목이 수백 건이라
-누락·오타가 생기고, 원문이 개정될 때마다 다시 대조할 방법이 없어진다.
-
-05_시황_상품_기반지식은 구조가 다르다 — 항목 인덱스가 없고 **문서 자체가 원문**이라,
-front-matter 와 `##` 절을 그대로 카드로 옮긴다(build_market).
-
-원칙
-  · 결정론·멱등 — 같은 입력이면 같은 출력. 생성 JSON 을 손으로 고치지 않는다(고칠 값은 config.py 로).
-  · 무손실 출처 — 원문의 출처 표기 줄을 `source_text` 로 그대로 보존하고, 해석에 성공한 것만
-    `doc` 레지스트리 id 로 함께 남긴다. 해석 실패는 값을 지어내지 않고 리포트로 알린다.
-  · 검토 게이트 — `_draft_` 접두로 쓴다(common/kb_base.iter_knowledge_files 가 `_` 파일을 건너뛴다).
-    사람이 확인한 뒤 `--activate` 로 접두를 뗀다.
-  · 개인정보 미이관 — 작성자 실명·부점·직급은 옮기지 않는다(AUTHORING.md §4). 출처 추적은
-    doc 레지스트리의 글번호·게시일로 한다.
+"""지식베이스 원문 폴더 → knowledge/data 레코드 변환기 CLI(순서·리포트). 결정론·멱등, 출력은 `_draft_` 접두.
 
 실행 (src/ 에서)
     python -m scripts.kb_build.build_kb             # _draft_kb_*.json 생성 + 변환 리포트
     python -m scripts.kb_build.build_kb --activate  # 검토 끝난 _draft_ 파일을 활성화(접두 제거)
 
-구성 — 이 파일은 CLI(순서·리포트)만 갖고, 변환은 종류별 모듈이 한다:
+구성
     common.py      경로 상수 · 리포트 · 텍스트 유틸 · 역할 분류 · 레코드 · 상호참조 · 쓰기
     docs.py        원천 문서 레지스트리 · 출처 해석(DocResolver)
-    parse.py       05 계열 문서 공통 파싱(인덱스 · 항목 블록 · 필드)
+    parse.py       추출지식 문서 공통 파싱(인덱스 · 항목 블록 · 필드)
     segments.py · pitches.py · methods.py · fieldtips.py · facts.py   종류별 변환기
     market.py      05 시황·상품 → doc + market + lineup, 표 → 관계 선언
     procedures.py  06/05 업무처리절차 → screen(표A) · channel(표B) · procedure
@@ -47,10 +31,6 @@ from scripts.kb_build.procedures import build_channels, build_procedures, build_
 from scripts.kb_build.segments import build_segments
 
 
-# ─────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────
-
 def activate() -> None:
     moved = 0
     for path in sorted(OUT_DIR.glob("_draft_kb_*.json")):
@@ -70,8 +50,7 @@ def main() -> int:
         return 0
 
     docs, by_base = build_docs()
-    # 05 는 문서 자체가 원문이라 doc 레지스트리에 함께 실린다 — 카드가 source.doc 로
-    # 그 문서를 가리키고, 신뢰 표시(tier)·고객 안내 가능 여부도 거기서 한 번만 관리된다.
+    # 05 는 문서 자체가 원문 — doc 레지스트리에 함께 등록
     market_docs, market_by_kind = build_market()
     market_cards = market_by_kind["market"]
     lineup_cards = market_by_kind["lineup"]
@@ -86,9 +65,7 @@ def main() -> int:
     methods = inherit_parent_source(build_methods(resolver))
     fieldtips = build_fieldtips(resolver)
 
-    # 항목 상호참조는 **전 종류가 만들어진 뒤**에 잇는다 — 05 의 표A(screen)가 05 의 절차
-    # 항목을 가리키듯, 번호는 같은 원문 파일 안의 다른 카드를 가리킨다. 가리키는 종류는
-    # 원문 파일이 정한다(06/01 → seg · 02 → m · 03 → pitch · 05 → proc).
+    # 상호참조는 전 종류 생성 후 연결 — 번호는 같은 원문 파일 안의 카드(06/01→seg · 02→m · 03→pitch · 05→proc)
     xrefs = xref_index(segments, methods, pitches, procedures)
     xref_report: list[str] = []
     for group, target in ((segments, "seg"), (methods, "m"), (pitches, "pitch"),
@@ -106,14 +83,12 @@ def main() -> int:
           channels, "2025-03-31")
     write("kb_fieldtips", "fieldtip", "현장의 목소리 — 08_인사이트", fieldtips, "2026-08",
           origin_dir=config.INSIGHT_DIR)
-    # 시황·상품은 카드마다 as_of 가 다르다(주간 8월 3주차 · 월간 9월 · 상품 8월). 파일
-    # meta.as_of 하나로 접으면 어느 회차 수치인지가 사라지므로 여기는 "폴더 기준"만 적고,
-    # 답변에 나가는 기준시점은 카드의 as_of 다(tools.stale_mark).
+    # 시황·상품은 카드마다 as_of 상이 — 여기는 폴더 기준, 답변 기준시점은 카드 as_of
     write("kb_market", "market", "시황 기반지식 — 05_시황_상품_기반지식/01_시황",
           market_cards, "2026-09", origin_dir=config.MARKET_DIR)
     write("kb_lineup", "lineup", "운용 상품 기반지식 — 05_시황_상품_기반지식/02_상품",
           lineup_cards, "2026-08", origin_dir=config.MARKET_DIR)
-    # 보류 팩트는 활성화하지 않는다 — 04 규칙상 확인 전에는 검증 기준으로 쓸 수 없다.
+    # 보류 팩트는 활성화 금지 — 확인 전 검증 기준 사용 불가
     path = OUT_DIR / "_hold_kb_facts_pending.json"
     path.write_text(json.dumps(
         {"meta": {"kind": "fact", "title": "제도·상품 팩트(확인 필요) — 활성화 금지",
@@ -126,8 +101,7 @@ def main() -> int:
     built = (segments + methods + pitches + facts + procedures + screens_
              + channels + fieldtips + market_cards + lineup_cards)
 
-    # 검색 예시 보강표(config.TRIGGER_EXTRA) 검증 — 없는 카드를 가리키거나, 그 카드의 주제어를
-    # 담지 않은 문장은 알린다. 표는 원문 주제어를 옮긴 파생 텍스트여야 하고 지어낸 것이면 안 된다.
+    # TRIGGER_EXTRA 검증 — 없는 카드·주제어 없는 문장 리포트
     by_id = {r["id"]: r for r in built}
     for cid, extras in config.TRIGGER_EXTRA.items():
         r = by_id.get(cid)
@@ -146,8 +120,7 @@ def main() -> int:
     matched = sum(1 for s in built if (s.get("source") or {}).get("doc"))
     print(f"출처 해석: {matched}/{len(built)}건에 원천 문서 연결")
 
-    # 주의 역할 분류 리포트 — caution 은 답변에 강제 표시되는 문장이므로 활성화 전에 전부
-    # 눈으로 검토한다. 규칙이 틀린 항목은 config 의 *_ROLES 예외표에 넣고 다시 생성한다.
+    # caution 은 답변 강제 표시 — 활성화 전 전수 검토, 오분류는 config *_ROLES 예외표로
     counts: dict[str, dict[str, int]] = {}
     forced: list[str] = []
     for kind_name, cards, field in (("segment", segments, "note"),

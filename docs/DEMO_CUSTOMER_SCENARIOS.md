@@ -294,7 +294,7 @@ J2 는 에이전트가 권유를 밀어붙이는 도구가 아니라는 것을 �
 
 ```bash
 cd src && python -m scripts.seed_sessions     # 멱등 — 없는 것만 심는다
-python -c "from pension_agent.consult_agent import suggest; print(suggest.history_chips('168450-7293815'))"
+python -c "from pension_agent import suggest; print(suggest.history_chips('168450-7293815'))"
 ```
 
 기록 있는 고객은 박정호·송도윤·정민석이고, **김서연·이수민은 원장에 기록이 없어 칩이 안
@@ -302,7 +302,7 @@ python -c "from pension_agent.consult_agent import suggest; print(suggest.histor
 `tests.debug` CLI 로 연습했으면 시연 직전에 픽스처를 되돌린다(`reps` 는 스스로 되돌린다).
 
 ```bash
-git checkout src/session_data/     # 되돌리지 않으면 「어제 연습」이 지난 상담으로 읽힌다
+git checkout src/runtime/session_data/     # 되돌리지 않으면 「어제 연습」이 지난 상담으로 읽힌다
 ```
 
 **② 이수민은 날짜를 탄다.** 만기 2026-10-17 이고 만기 요건은 30일 전부터 선다(만기일은 시연일

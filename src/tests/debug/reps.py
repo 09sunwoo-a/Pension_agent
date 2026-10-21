@@ -1,13 +1,7 @@
-"""대본을 실 LLM 으로 한 번 돌려 **답변과 트레이스를 나란히** 본다.
+"""대본 리허설 — 실 LLM 으로 돌려 답변과 트레이스를 나란히 표시. 채점 없음(회귀는 tests/test_agent.py).
 
     cd src
     python -m tests.debug.reps --help       # 대본·옵션 전부
-
-**인자는 두 축뿐이다** — 첫째는 «어떤 대본을 도나»(위치 인자 하나), 둘째는 «얼마나 보여
-주나»(`--` 옵션). 예전에는 대본도 `--demo`·`--scenario`·`--final` 이라 옵션처럼 생겼는데
-셋은 함께 쓸 수 없는 배타 선택이었고, 표시 옵션과 한 줄에 섞여 어느 것이 무엇인지 갈리지
-않았다. 지금은 대본이 이름이다.
-
     python -m tests.debug.reps                     # cases — 검토 12케이스 (기본)
     python -m tests.debug.reps cases 4 7           # 케이스 골라서
     python -m tests.debug.reps demo                # 전체 시연 대본  (docs/DEMO_SCENARIO.md)
@@ -18,57 +12,10 @@
     python -m tests.debug.reps --versions          # 중간점검본 판 이력
     python -m tests.debug.reps --diff v5 v6        # 두 판의 질문 차이와 바꾼 이유
 
-표시 옵션(겹쳐 쓸 수 있다): `--brief` 요약표만 · `--why` 턴마다 «무엇을 찾아봤나 → LLM 이
-썼다» · `--show-llm` 폐기된 생성문까지(`--why` 를 켠다) · `--time` 턴별 소요 시간 ·
-`--pause=N` 턴 사이 N초 대기(분당 한도가 있는 키로 길게 돌릴 때) · `--retry-down=N`
-«LLM 호출 실패»로 끝난 턴을 같은 질문으로 N번까지 다시 묻는다(외부 API 의 간헐 5xx).
-
-`qa` 는 다른 리허설과 한 가지가 다르다 — 턴마다 **«기대»** 한 줄(`scenarios.QA_EXPECT`)이
-질문 아래 붙는다. 코드가 아는 값(원장·상담 기록·성립 요건·열려 있는 콘텐츠)으로만 적은
-것이라, 읽는 사람은 «그 값이 그 뜻으로 답에 들어 있는가»만 보면 된다. 채점은 여전히
-하지 않는다(아래 「채점하지 않는다」).
-
-턴에 **기대값**이 달려 있으면(`scenarios.EXPECT`) 그 턴 아래와 맨 끝 요약에 판정이 함께
-찍힌다 — 무슨 도구를 불렀나 · 어떻게 끝났나 · 판정 등급 · 게이트를 통과했나처럼 **코드가
-아는 사실**만 본다(답변 문장의 좋고 나쁨은 사람이 읽는다). 기대가 없는 턴은 아무것도
-찍지 않는다. 이게 없던 동안 리허설의 회귀 탐지는 «누가 로그를 끝까지 읽었는가»에 달려
-있었다.
-
-`--why` 는 예전 이름이 `--debug` 였다. 같은 이름이 `python -m tests.debug` 에서는 **전체
-트레이스**(노드·게이트 트리)를 뜻해 두 CLI 에서 다른 것을 가리켰다 — 이름이 같으면 뜻도
-같아야 한다. `--show-llm`(폐기된 생성문)은 두 CLI 에서 뜻이 같아 이름을 그대로 둔다.
-
-왜 `tests.debug` 와 따로 있나: 저쪽 CLI 는 **한 세션**이라 질문을 여러 개 주면 맥락이
-이어진다(멀티턴 재현이 목적이다). 대표 질문 11개는 서로 독립이어야 하므로 케이스마다
-세션을 새로 연다 — 8번(모호 → 되묻기)이 앞 케이스의 맥락을 물려받으면 되물을 이유가
-사라져 그 케이스가 무의미해진다. 후속 질문을 보는 7번과 제안 → 승낙을 보는 11번만 한 케이스 안에 두 턴이다.
-
-무엇을 재나 — 케이스마다 `sees` 에 적어둔 한 줄이 그 케이스의 존재 이유다. 축은 일곱이다:
-**단일 도구**(1·2·3) · **복합**(4·5·6) · **후속 질문**(7) · **모호 → 되묻기**(8) ·
-**지식베이스에 없는 것**(9) · **가드·반론**(10) · **제안·연계**(11 — 두 턴이다. 첫 턴에
-발송 제안이 붙어야 둘째 턴 「응, 열어줘」가 딥링크로 이어진다). 답변 품질만 보면 1번도 10번도 그냥
-"괜찮네"로 읽히지만, 에이전틱한지는 **도구를 몇 개 어떤 순서로 골랐는가**에서만 갈린다.
-
-**채점하지 않는다.** 통과·실패를 코드가 정하면 그건 회귀 테스트지 검토가 아니다
-(회귀는 `tests/test_consult_agent.py` 가 이미 315건 재고 있다). 여기는 사람이 읽고
-판단하는 자리라, 요약표는 «무엇이 일어났나»만 찍는다.
-
-`cases` 말고 셋(`demo`·`library`·`review`)은 검토가 아니라 **리허설**이다. 문서의 대본을
-그 순서로, 고객 블록마다 한 세션으로 돌린다 — 후속 질문(T2·T3b·T8b·T11b)이 앞 턴을
-이어받아야 대본대로이기 때문이다. 화면에 나가는 것만 보여주고, `--why` 를 붙이면 턴마다
-**어떤 재료가 들어가서 LLM 이 뭐라고 썼는지**를 짧게 붙인다(`_log`) — 시연에서 «지어낸 게
-아니다»를 보여주는 자리다. 검토용의 전체 트레이스(노드·게이트 트리)는 진단 도구라
-청중에게 띄울 것이 아니다.
-
-**상담 기록을 남기지 않는다.** `graph.ask()` 는 턴마다 상담이력을 기록하는데(기준서 §2 —
-진입점 한 곳에서 빠짐없이), `session_data/` 에는 시연 픽스처가 들어 있다
-(`scripts/seed_sessions.py`). 그대로 돌리면 리허설 턴이 픽스처에 덧붙고, 대본 T5
-(「지난번엔 무슨 얘기 했지?」)가 **10개월 전 고객 발언 대신 방금 리허설을 읽는다** —
-돌릴수록 시연이 망가진다. 그래서 실행 전후로 디렉터리를 통째로 되돌린다. 기록 기능
-자체는 그대로 돈다(끄면 그 경로를 예행하지 못한다) — 남은 것만 지운다.
-
-**오늘은 2026-08-24 로 고정된다**(`tests/__init__.py` — 원장 스냅샷 기준일). 만기
-잔여일수·미접촉 일수가 실행일마다 달라지면 두 번의 실행을 비교할 수 없다.
+- 위치 인자 = 대본, `--` 옵션 = 표시(--brief · --why · --show-llm · --time · --pause=N · --retry-down=N)
+- cases 는 케이스마다 새 세션 + 전체 트레이스, 리허설(demo·library·review·qa)은 고객 블록마다 한 세션
+- 기대값(`scenarios.EXPECT`)이 달린 턴만 코드가 아는 사실로 판정 · qa 는 턴마다 «기대» 한 줄 표시
+- 실행 전후 `runtime/session_data/` 통째 복원 — 리허설 턴이 시연 픽스처에 남지 않도록
 """
 
 from __future__ import annotations
@@ -82,8 +29,8 @@ import time
 import unicodedata
 from contextlib import contextmanager
 
-from pension_agent import config
-from pension_agent import llm as LLM
+from pension_agent.common import config
+from pension_agent.common import llm as LLM
 from tests.debug import scenarios as SCEN
 from tests.debug import trace as TR
 from tests.debug.runner import session
@@ -93,13 +40,12 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def _tools(turn: TR.Turn) -> str:
-    """이 턴이 부른 도구를 순서대로. 계획 노드의 한 줄에서 도구 이름만 뽑는다."""
+    """턴이 부른 도구 순서(계획 노드 요약에서 추출)."""
     out = []
     for node in turn.nodes:
         if node.name != "plan_step" or "→" not in node.note:
             continue
-        # 마지막 화살표가 구분자다 — LLM 이 쓴 질의 안에 "→" 가 들어올 수 있다(실측:
-        # «DB/DC → IRP 소급 적용»을 담은 질의가 첫 화살표에서 잘려 질의 낱말이 카드처럼 찍혔다).
+        # 마지막 화살표로 분리 — 질의 안에 "→" 가 들어올 수 있음
         signature, _, result = node.note.rpartition("→")
         name = signature.split(":")[0].strip()
         out.append(name + ("✗" if "자료 없음" in result else ""))
@@ -107,33 +53,21 @@ def _tools(turn: TR.Turn) -> str:
 
 
 def _stopped(node: TR.Node | None) -> TR.Gate | None:
-    """생성문을 실제로 버린 게이트. 없으면 None.
-
-    **같은 게이트가 한 턴에 여러 번 찍힌다** — 걸린 생성문을 한 번 다시 쓰기 때문이다
-    (`plan.COMPOSE_RETRIES`). 목록을 앞에서부터 훑으면 «첫 시도가 걸렸다»가 그대로
-    처분으로 읽혀, 다시 써서 통과한 턴이 폐기된 턴으로 보고된다. 마지막 판정이 처분이다
-    (`trace.Trace.gates` 도 같은 규약이다 — 이름으로 덮어쓴다).
-    """
+    """생성문을 최종 폐기한 게이트, 없으면 None. 재작성으로 게이트가 여러 번 기록되므로 마지막 판정 기준."""
     if node is None:
         return None
     return next((g for g in {g.name: g for g in node.gates}.values() if not g.passed), None)
 
 
 def _retries(node: TR.Node | None) -> int:
-    """이 턴이 답변을 다시 쓴 횟수. compose LLM 호출 수에서 첫 시도를 뺀 값이다."""
+    """답변 재작성 횟수(compose 호출 수 − 1)."""
     if node is None:
         return 0
     return max(0, sum(1 for c in node.calls if c.stage == "compose") - 1)
 
 
 def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
-    """시연용 한 줄 로그 — **어떤 재료가 들어가서 LLM 이 뭐라고 썼나**, 그것만.
-
-    트레이스 전체(`TR.render`)는 노드 순서와 게이트 트리까지 그리는 진단 도구다. 시연에서
-    청중이 알고 싶은 건 그게 아니라 «지어낸 게 아니라 이 자료를 보고 쓴 것»이라는 사실
-    하나이고, 그건 도구가 무엇을 어떤 질의로 찾아왔는지와 그 카드가 뭔지면 다 보인다.
-    검토용(`CASES`)은 폐기 사유를 봐야 하므로 그쪽은 여전히 전체 트레이스를 쓴다.
-    """
+    """시연용 로그 — 찾아본 재료와 LLM 작성 결과만(전체 트레이스는 cases 전용)."""
     titles = {s["id"]: (s.get("title") or "") for s in result.get("sources") or []}
     out = ["   ┌ 무엇을 찾아봤나"]
     step = 0
@@ -141,7 +75,7 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
         if node.name != "plan_step" or "→" not in node.note:
             continue
         step += 1
-        # 마지막 화살표가 구분자다(_tools 와 같은 이유 — 질의 안의 "→" 에 잘리지 않게).
+        # 마지막 화살표로 분리(_tools 와 동일)
         signature, _, found = node.note.rpartition("→")
         tool, _, query = signature.strip().partition(":")
         out.append(f"   │ {step}. {tool.strip()} «{query.strip()}»")
@@ -162,15 +96,10 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
     verdict = (f"검증에서 걸림({stopped.name}) — 생성문 폐기" if stopped else
                "근거와 대조 통과" if (node and node.gates) else "대조할 수치 없음")
     if _retries(node):
-        # 걸린 자리를 실어 다시 쓴 턴이다(plan.COMPOSE_RETRIES). 이걸 안 적으면 위 «통과»가
-        # 첫 시도부터 통과한 것으로 읽히고, 리허설에서 무엇이 아슬아슬했는지가 사라진다.
+        # 재작성 표시 — 없으면 첫 시도 통과로 오독
         verdict = f"{verdict} (한 번 걸려 다시 씀)"
     out.append(f"   └ 위 자료만 보고 LLM 이 {len(result.get('answer') or '')}자 작성 · {verdict}")
-    # 폐기된 턴에서 **무엇이 걸렸는지**까지 적는다. 이름만 남기면 화면에 떨어진 원문
-    # 덤프를 보고도 «왜 잘렸나»를 알 수 없어, 고칠 것이 질문인지 자료인지 검증기인지
-    # 가려지지 않는다 — 리허설에서 제일 먼저 알아야 하는 값이다.
-    # span 게이트의 detail 첫 칸은 판정 상수(discard/append)라 사람이 읽을 값이 아니다 —
-    # 걸린 스팬·카드만 남긴다.
+    # 폐기 사유 표시 — span detail 의 판정 상수(discard/append/ok)는 제외
     if stopped is not None and stopped.detail:
         readable = [str(d) for d in stopped.detail if str(d) not in ("discard", "append", "ok")]
         shown = readable[:6]
@@ -188,12 +117,7 @@ def _log(turn: TR.Turn, result: dict, show_llm: bool = False) -> str:
 
 @contextmanager
 def _fixtures_intact():
-    """`session_data/` 를 실행 전 상태로 되돌린다.
-
-    골라서 지우지 않고 **통째로 스냅샷·복원**하는 이유는, 무엇이 픽스처이고 무엇이 이번
-    실행이 만든 것인지 이 스크립트가 알 필요가 없어서다. 새 고객이 픽스처에 추가돼도
-    여기는 손대지 않아도 된다.
-    """
+    """`runtime/session_data/` 통째 스냅샷·복원 — 픽스처 구분 불필요."""
     src = config.SESSION_DATA_DIR
     backup = pathlib.Path(tempfile.mkdtemp(prefix="reps-session-"))
     if src.exists():
@@ -208,7 +132,7 @@ def _fixtures_intact():
 
 
 def _pad(text: str, width: int) -> str:
-    """한글은 두 칸을 차지한다 — `str.ljust` 로 맞추면 표가 어긋난다."""
+    """한글 두 칸 폭 고려 패딩(`str.ljust` 사용 금지)."""
     used = sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
     return text + " " * max(0, width - used)
 
@@ -218,34 +142,26 @@ def _width(text: str) -> int:
 
 
 def _observed(result: dict, turn: TR.Turn) -> dict:
-    """이 턴에서 «코드가 아는 사실»만 모은다 — 기대값 판정의 입력(scenarios.Expect).
+    """턴의 «코드가 아는 사실» — 기대값 판정 입력(scenarios.Expect). 답변 문장은 미사용.
 
-    **답변 문장은 보지 않는다.** 여기서 재는 것은 무슨 도구를 불렀나 · 어떻게 끝났나 ·
-    판정 등급 · 게이트를 통과했나 · 출처가 실렸나 · 연계를 제안했나 · 게이트가 갈래를
-    표시했나뿐이다. 답이 좋은지는 사람이 읽어야 하고, LLM 에게 자기 답을 채점시키지 않는다.
-
-    값의 출처가 둘이다 — 진입점 반환값(`graph.ask`)과 계측(trace). 도구 목록·출처·연계는
-    앞쪽이 그대로 주고, 판정 등급·재계획·게이트 판정은 상태 차분에만 있어 뒤쪽에서 뽑는다.
+    출처: `graph.ask` 반환값(도구·출처·연계) + 계측 상태 차분(판정·재계획·게이트).
     """
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
     delta = node.delta if node is not None else {}
-    # LLM 이 죽은 턴은 «되묻지도 답하지도 않은» 세 번째 결말이다(§11) — 답변으로 세면
-    # 장애가 난 실행이 통과로 보고된다. 원인은 어느 노드에서든 남을 수 있다.
+    # LLM 실패 턴은 별도 결말 — 답변으로 집계 금지. 어느 노드에서든 남을 수 있음
     failed = any(n.delta.get("llm_error") or n.name == TR.LLM_DOWN_NODE for n in turn.nodes)
     gates = [g for n in turn.nodes for g in n.gates]
     return {
-        # 진입점이 턴 기록에 남기는 도구 이름(state.Turn 의 tools). 원장을 다시 세지 않는다.
+        # state.Turn 의 tools 사용
         "tools": ((result.get("history") or [{}])[-1] or {}).get("tools") or [],
         "outcome": "llm_down" if failed else "clarify" if result.get("clarify") else "answer",
         "verdict": delta.get("judge_verdict") or "",
         "replanned": any(n.delta.get("plan_retry") for n in turn.nodes),
-        # 게이트가 **한 번도 안 돈** 턴을 통과로 세지 않는다 — LLM 이 죽어 작성까지 못 간
-        # 턴이 «검증 통과»로 보고되면 그 표는 거짓말이다.
+        # 게이트 미실행 턴은 통과로 집계 금지
         "gates_passed": bool(gates) and _stopped(node) is None,
         "sources": bool(result.get("sources")),
         "offered": bool(result.get("pending_action")),
-        # 갈래 표시는 `plan_step` 이 자기 반환값으로 넘긴다(answer 노드가 아니다) — 계획이
-        # 여러 바퀴 돌면 마지막 바퀴에만 실리므로 턴 전체를 훑는다. `replanned` 와 같다.
+        # 갈래는 plan_step 반환값에 실림 — 턴 전체 탐색
         "branches": any(n.delta.get("branches") for n in turn.nodes),
     }
 
@@ -259,12 +175,7 @@ def _expect_line(script: str, label: str, result: dict, turn: TR.Turn) -> tuple[
     return ("✗ 기대 어긋남" if misses else "✓ 기대 통과"), misses
 
 def _print_expectations(judged: list[tuple[str, str, list[str]]]) -> None:
-    """기대값 판정 결과. 기대를 단 턴이 하나도 없으면 아무것도 찍지 않는다.
-
-    **어긋난 것을 맨 아래에 다시 모은다.** 턴마다 찍은 줄은 긴 출력 중간에 묻히는데,
-    이 실행이 무엇을 어겼는지는 스크롤하지 않고 알 수 있어야 한다 — 그 한 가지가
-    「리허설을 끝까지 읽은 사람만 회귀를 안다」는 상태를 없애려는 목적의 전부다.
-    """
+    """기대값 판정 결과 — 어긋난 항목을 맨 아래 재집계. 기대 단 턴 없으면 미출력."""
     if not judged:
         return
     bad = [(label, misses) for label, verdict, misses in judged if misses]
@@ -280,18 +191,13 @@ def _print_expectations(judged: list[tuple[str, str, list[str]]]) -> None:
 
 
 def _row(no: object, sees: str, turn: TR.Turn, secs: float) -> list[str]:
-    """요약표 한 줄. 판정하지 않고 «무엇이 일어났나»만 적는다.
-
-    시간 칸은 항상 채워 두고 표시 여부는 출력 쪽이 정한다(--time) — 여기서 칸을 넣다 뺐다
-    하면 예외 행과 열 수가 어긋난다.
-    """
+    """요약표 한 줄. 시간 칸은 항상 채움(표시는 --time 이 결정 — 예외 행과 열 수 일치)."""
     names = [n.name for n in turn.nodes]
     node = next((n for n in turn.nodes if n.name == TR.ANSWER_NODE), None)
-    stopped = _stopped(node)          # 마지막 판정이 처분이다(재작성 턴 — _stopped 머리말)
+    stopped = _stopped(node)          # 마지막 판정 기준
     blocked = stopped.name if stopped else None
 
-    # 되묻기는 답변 작성과 **같은 노드**에서 끝난다(nodes/answer.py) — 노드 이름으로는
-    # 갈리지 않으므로 상태 차분을 본다. `_compose_note` 는 이 갈래를 따로 적지 않는다.
+    # 되묻기는 답변과 같은 노드 — 상태 차분으로 구분
     if node is not None and node.delta.get("clarify"):
         end = "되묻기로 끝남"
     elif node is not None:
@@ -329,15 +235,14 @@ def _print_answer(r: dict) -> None:
 
 
 def _print_source_line(s: dict) -> None:
-    # 표기는 운영 CLI 와 같은 공용 함수가 정한다(tools.source_lines) — compact 는 이
-    # 묶음 화면의 한 줄 표기. 각자 복사하면 한쪽만 고쳐지는 사고가 재현된다.
-    from pension_agent.consult_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
+    # 운영 CLI 와 같은 공용 함수 사용(복사 금지)
+    from pension_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
 
     for line in source_lines(s, compact=True):
         print(line)
 
 
-#: 대본 이름 → (도는 목록, 문서). `review` 는 판이 있어 목록을 그때 만든다(`SCEN.review_blocks`).
+#: 대본 이름 → (목록, 문서). `review` 목록은 판별로 생성(`SCEN.review_blocks`)
 SCRIPTS: dict[str, tuple[object, str]] = {
     "cases":   (SCEN.CASES,   "(문서 없음 — 케이스마다 `sees` 한 줄이 존재 이유다)"),
     "demo":    (SCEN.DEMO,    "docs/DEMO_SCENARIO.md"),
@@ -347,21 +252,14 @@ SCRIPTS: dict[str, tuple[object, str]] = {
 }
 
 DISPLAY_FLAGS = ("--brief", "--why", "--show-llm", "--time")
-#: 값을 받는 옵션 — `--pause=20`. 턴 사이 대기(초). 무료 gemma 키는 분당 토큰 한도가 있어
-#: 고객 카드가 큰 턴이 연달아 가면 429 로 턴이 죽는다(DEMO_CUSTOMER_SCENARIOS 「그밖에」).
+#: `--pause=20` — 턴 사이 대기(초). 분당 토큰 한도 키의 429 회피
 PAUSE_FLAG = "--pause="
-#: `--retry-down=2`. 턴이 «LLM 호출 실패» 안내로 끝나면 같은 질문을 그만큼 다시 묻는다.
-#: 실화면에서 직원이 그 안내(「잠시 후 다시 시도해주세요」)를 보고 다시 묻는 것과 같은
-#: 경로다 — 실패한 턴도 기록·맥락에 남고, 다음 턴이 그 위에 선다. llm.py 는 429 만 스스로
-#: 재시도하고 5xx 는 올리므로(test_infra 「다른 HTTP 에러는 재시도하지 않는다」), 외부 API
-#: 가 간헐 500 을 내는 날(2026-09-07 gemma 실측 — 7턴 중 2턴) 대본이 그 자리에서 비는 것을
-#: 여기서 메운다. 재시도해도 실패하면 그대로 남긴다(요약표에 «LLM 실패 안내»로 찍힌다).
+#: `--retry-down=2` — «LLM 호출 실패» 턴을 같은 질문으로 재질의(llm.py 는 5xx 미재시도). 실패 턴도 기록에 남음
 RETRY_DOWN_FLAG = "--retry-down="
-#: 다시 묻기 전 대기(초). 간헐 오류는 바로 다시 부르면 같은 답을 받는다.
+#: 재질의 전 대기(초)
 RETRY_DOWN_WAIT = 15.0
 
-#: 대본마다 «리허설에서 볼 것». 요약표 아래에 그대로 찍는다 — 표만 보고는 무엇이
-#: 어긋난 것인지 알 수 없어서다. `review` 것은 **지금 판**(`SCEN.LATEST`) 기준이다.
+#: 대본별 «리허설에서 볼 것» — 요약표 아래 출력. `review` 는 지금 판(`SCEN.LATEST`) 기준
 CHECKS: dict[str, tuple[str, ...]] = {
     "review": (
         "  리허설에서 볼 것: ① 이 중도인출 사유와 세율(16.5%)로 답하는가 ·",
@@ -399,7 +297,7 @@ CHECKS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-#: 예전 이름 → 지금 이름. 그냥 «모르는 옵션»으로 끊으면 어디로 갔는지 알 수 없다.
+#: 바뀐 옵션 이름 안내
 RENAMED = {
     "--demo": "대본 이름 demo",
     "--scenario": "대본 이름 library",
@@ -480,8 +378,7 @@ def _versions_in(argv: list[str]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    """검토(`cases`)와 리허설(나머지 셋)이 **같은 실행 경로**를 쓰고 화면만 갈린다 —
-    리허설이 다른 경로로 돌면 그 리허설은 시연을 예행한 것이 아니다."""
+    """검토·리허설 공용 진입 — 실행 경로 동일, 화면만 다름."""
     if "-h" in argv or "--help" in argv:
         _usage()
         return 0
@@ -529,13 +426,12 @@ def main(argv: list[str]) -> int:
 
     brief = "--brief" in argv
     show_llm = "--show-llm" in argv
-    why = "--why" in argv or show_llm       # 폐기 생성문은 그 로그 안에 붙는다
+    why = "--why" in argv or show_llm       # 폐기 생성문은 --why 로그 안에 표시
     timing = "--time" in argv
     pause = valued[PAUSE_FLAG]
     retry_down = int(valued[RETRY_DOWN_FLAG])
 
-    # 첫 위치 인자가 대본 이름이면 그것이 대본이고, 아니면 cases 다. 나머지 위치 인자는
-    # 블록을 고르는 값(번호 또는 고객 이름)이다.
+    # 첫 위치 인자 = 대본(없으면 cases), 나머지 = 블록 번호·고객 이름
     positional = [a for a in argv if not a.startswith("-")]
     script, version = "cases", ""
     if positional and positional[0].partition("@")[0] in SCRIPTS:
@@ -557,15 +453,12 @@ def main(argv: list[str]) -> int:
         print("  anthropic: ANTHROPIC_API_KEY")
         return 1
 
-    # 대본의 차이는 셋뿐이다: 어떤 목록을 도는가 · 턴 라벨을 데이터가 주는가 ·
-    # 트레이스를 기본으로 붙이는가. 리허설 셋은 도는 목록만 다르고 화면·실행 경로가 같다 —
-    # 다른 경로로 돌면 시연을 예행한 것이 아니다.
+    # 대본 차이: 목록 · 턴 라벨 출처 · 기본 트레이스 여부
     blocks = SCEN.review_blocks(version or None) if script == "review" else SCRIPTS[script][0]
     rehearsal = script != "cases"     # cases 만 라벨 없는 독립 케이스다
     trace_by_default = not rehearsal
 
-    # 아무 블록도 못 고른 값은 여기서 끊는다 — 그냥 두면 대본을 오타 냈을 때(`revew`) 그
-    # 문자열이 «고객 이름»으로 읽혀 한 블록도 안 돌고 빈 요약표만 나온다.
+    # 블록을 못 고른 값은 실패 — 대본 오타가 고객 이름으로 읽혀 빈 요약표가 됨
     missed = ([p for p in picked if not any(str(b[0]) == p for b in blocks)]
               + [n for n in names if not any(n in b[1] for b in blocks)])
     if missed:
@@ -592,45 +485,18 @@ def main(argv: list[str]) -> int:
                 print(f"\n{'━' * 70}\n{sees}"
                       + (f"\n(고객 화면 열림: {customer})" if customer else "\n(고객 화면 없음)"))
 
-            # 시연 리허설에서는 화면이 대기 중에 보여주는 진행 줄("⋯ ○○을 찾고 있어요")까지
-            # 대본에 나와야 한다 — 응답 대기를 UX 로 보완한 것 자체가 시연 포인트다.
-            # ask() 가 도는 동안 콜백이 그 자리에서 찍으므로 질문 줄과 답변 사이에 흐른다.
+            # 리허설은 진행 줄까지 출력(질문과 답변 사이)
             show_progress = rehearsal and not brief
             on_progress = (lambda text: print(f"   ⋯ {text}")) if show_progress else None
             with session(customer_id=customer, on_progress=on_progress) as (ask, tr):
-                # 고객 화면을 **여는 순간**을 재현한다 — 실서비스·Streamlit 화면은 브리핑을
-                # 열 때 AI 브리핑(LLM 11회)을 생성하고(app.py), 대화 턴의 customer 도구는
-                # 그 캐시를 읽는다(strategy_agent.propose 의 브리핑 캐시). 여기서 건너뛰면
-                # 첫 고객 질문(T4·T13)이 그 생성을 통째로 떠안아 수십 초 걸린다 — 그건
-                # 시연에는 없는 대기다. 화면을 여는 시점의 비용은 화면을 여는 자리에 둔다.
-                #
-                # 그 비용은 **리허설을 돌릴 때마다** 든다(캐시는 프로세스와 함께 사라진다).
-                # `python -m scripts.prebuild_briefings` 를 한 번 돌려 두면 여기서 읽어 쓴다 —
-                # 건너뛰는 것이 아니라 같은 자리에서 같은 산출을 읽는 것이라, 리허설이
-                # 예행하는 경로는 그대로다.
-                if rehearsal and customer:
-                    from pension_agent.strategy_agent import agent as SA        # noqa: PLC0415
-                    from pension_agent.strategy_agent import customer as CUST  # noqa: PLC0415
-                    t0 = time.monotonic()
-                    prof = CUST.get_profile(customer)
-                    if prof is not None:
-                        SA.propose(prof)
-                    if timing and not brief:
-                        from pension_agent.strategy_agent import briefing_store  # noqa: PLC0415
-                        how = ("미리 만들어 둔 것을 읽음" if briefing_store.enabled()
-                               else "이번에 생성 — scripts.prebuild_briefings 로 미리 만들 수 있다")
-                        print(f"   (브리핑 화면 생성 {time.monotonic() - t0:.1f}초 · {how} — "
-                              "화면을 열 때의 일이라 대화 턴에는 들어가지 않는다)")
                 for i, (label, question) in enumerate(labelled):
                     if pause and i:
-                        # 턴 사이 대기 — 같은 세션 안에서만 쉰다. 블록 첫 턴은 화면을 여는
-                        # 자리라 이미 시간이 흘렀다.
+                        # 블록 첫 턴은 대기 생략
                         time.sleep(pause)
                     if not brief:
                         if rehearsal:
                             print(f"\n{'─' * 70}\n[{label}] > {question}\n")
-                            # qa 대본만 «기대»가 있다 — 질문 바로 아래 붙여, 답을 읽을 때
-                            # 무엇을 확인할지가 답보다 먼저 보이게 한다.
+                            # qa 대본만 «기대» 표시(질문 바로 아래)
                             expect = SCEN.QA_EXPECT.get(label) if script == "qa" else None
                             if expect:
                                 print(f"   기대: {expect}\n")
@@ -640,8 +506,7 @@ def main(argv: list[str]) -> int:
                     asked = time.monotonic()
                     try:
                         result = ask(question)
-                        # LLM 실패 안내로 끝난 턴은 같은 질문을 다시 묻는다(--retry-down).
-                        # 실패한 턴도 트레이스·기록에 남고, 요약표에는 마지막 시도가 찍힌다.
+                        # --retry-down — 요약표에는 마지막 시도 기록
                         for attempt in range(retry_down):
                             if not any(n.name == "llm_down" for n in tr.turns[-1].nodes):
                                 break
@@ -650,8 +515,8 @@ def main(argv: list[str]) -> int:
                                       f"다시 묻는다 ({attempt + 1}/{retry_down})")
                             time.sleep(RETRY_DOWN_WAIT)
                             result = ask(question)
-                    except Exception as exc:                       # noqa: BLE001 — 한 턴이 죽어도
-                        print(f"   실행 중단 — {type(exc).__name__}: {exc}")    # 나머지는 돈다
+                    except Exception as exc:                       # noqa: BLE001 — 나머지 블록 계속
+                        print(f"   실행 중단 — {type(exc).__name__}: {exc}")
                         rows.append([label, "—", "—", "", "—", f"예외 {type(exc).__name__}", sees])
                         break
                     took = time.monotonic() - asked
@@ -659,11 +524,10 @@ def main(argv: list[str]) -> int:
                         if show_progress:
                             if timing:
                                 print(f"   ⋯ 답변까지 {took:.1f}초")
-                            print()   # 진행 줄과 답변을 가른다
+                            print()   # 진행 줄과 답변 구분
                         _print_answer(result)
                     rows.append(_row(label, sees if i == 0 else "└ 이어서", tr.turns[-1], took))
-                    # 기대값 판정 — `sees` 중 기계가 볼 수 있는 부분만(scenarios.EXPECT).
-                    # 기대가 없는 턴은 아무것도 찍지 않는다.
+                    # 기대값 판정(scenarios.EXPECT) — 기대 없는 턴은 미출력
                     verdict, misses = _expect_line(script, label, result, tr.turns[-1])
                     if verdict:
                         judged.append((label, verdict, misses))
