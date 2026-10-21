@@ -8,7 +8,7 @@
 
 ━━ 무엇을 발송 문구로 보나 ━━
 **`(광고)` 로 시작하는 인용**이다. 이 접두는 LLM 이 쓰는 것이 아니라 발송 문구의 골격을
-조립하는 코드가 붙인다(tools/customer_solution/support/outreach.py::lms_frame · AD_PREFIX). 그래서
+조립하는 코드가 붙인다(tools/customer_solution/support/assets.py::lms_frame · AD_PREFIX). 그래서
 화법 대사가 여기 걸릴 일이 없고, 직원이 「더 짧게」로 다시 쓰게 한 턴(원장에 outreach
 재료가 없는 턴)의 문구도 놓치지 않는다.
 
@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from pension_agent.tools.customer_solution.support.outreach import AD_PREFIX
+from pension_agent.tools.customer_solution.support.assets import AD_PREFIX
 
 from pension_agent.actions.actions import _match_asset
 
@@ -44,7 +44,7 @@ def _squash(text: str) -> str:
 
 
 def canonical(evidence: Iterable[dict]) -> list[str]:
-    """이번 턴 원장의 outreach 재료가 실어 온 발송 문구 원본(tools/customer_solution/outreach.py `meta.messages`)."""
+    """이번 턴 원장의 outreach 재료가 실어 온 발송 문구 원본(tools/customer_solution/tool.py `meta.messages`)."""
     out: list[str] = []
     for ev in evidence or []:
         for text in (ev.get("meta") or {}).get("messages") or []:

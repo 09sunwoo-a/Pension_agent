@@ -181,7 +181,7 @@ RETRY_ATTEMPTS = int(os.getenv("LLM_RETRY_ATTEMPTS", "5"))
 # 아니라(`_retryable`) 그 턴은 답을 한 글자도 못 내보낸다.
 #
 # **경계는 재료에서 먼저 긋는다** — 고객 식별번호는 프롬프트 재료에 싣지 않는다
-# (`tools/customer_solution/briefing.py` 등). 여기 있는 것은 그 뒤의 한 겹이다: 프롬프트에는
+# (`tools/customer_solution/tool.py` 등). 여기 있는 것은 그 뒤의 한 겹이다: 프롬프트에는
 # 직원 질문 원문·상담 기록·카드 원문처럼 **우리가 쓰지 않은 글**도 실리기 때문이다.
 #
 # 가리면 답이 그만큼 어긋날 수 있다. 그래도 400 보다 낫다 — 그쪽은 답이 아예 없다.

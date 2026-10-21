@@ -146,7 +146,7 @@ def build() -> tuple[str, dict[str, int]]:
           f"- 안내 링크: `https://obank.kbstar.com/demo/...` — 시연용 경로",
           f"- 수신거부 번호: `{support.OPT_OUT}` — 실제 회선 미정, 자리표시자",
           "- LMS 문구의 골격(광고 표기·인사말·링크·수신거부)은 코드가 조립하고",
-          "  (`support/outreach.py::lms_frame`), 가운데 본문만 LLM 이 쓴다", ""]
+          "  (`support/assets.py::lms_frame`), 가운데 본문만 LLM 이 쓴다", ""]
     _rows(L, ["id", "이름", "종류", "일정", "매칭 키워드", "게이트"],
           [[a["id"], a.get("name", ""), a.get("content_type", ""),
             f"{a.get('start_date', '?')} ~ {a.get('end_date', '?')}",
@@ -160,7 +160,7 @@ def build() -> tuple[str, dict[str, int]]:
         L += ["", "### 고객 상태로 판정할 수 없는 키워드", "",
               "요건(`customer.CONDS`)에 대응이 없어 관련도를 잴 수 없는 키워드다. 그 콘텐츠는",
               "다른 후보가 없을 때만 노출된다 — 대응 컬럼이 확인되면",
-              "`support/outreach.py::KEYWORD_CONDS` 에 한 줄 더한다.", ""]
+              "`support/assets.py::KEYWORD_CONDS` 에 한 줄 더한다.", ""]
         _rows(L, ["키워드", "쓰는 콘텐츠"],
               [[kw, ", ".join(a["id"] for a in outreach if kw in (a.get("keywords") or []))]
                for kw in unmapped])

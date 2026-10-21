@@ -120,10 +120,10 @@ finally:
 from pension_agent.tools.kb_search import segment_qa as _segment_qa  # noqa: E402
 from pension_agent.evidence.ledger import summarize as _summarize  # noqa: E402
 from pension_agent.state import KB as _KB  # noqa: E402
-from pension_agent.tools.customer_solution.briefing import _customer as _t_customer  # noqa: E402
+from pension_agent.tools.customer_solution.tool import _customer as _t_customer  # noqa: E402
 from pension_agent.tools.general.history import _history as _t_history  # noqa: E402
-from pension_agent.tools.customer_solution.outreach import _outreach as _t_outreach  # noqa: E402
-from pension_agent.tools.customer_solution.suitability import _suitable as _t_suitable  # noqa: E402
+from pension_agent.tools.customer_solution.tool import _outreach as _t_outreach  # noqa: E402
+from pension_agent.tools.customer_solution.tool import _suitable as _t_suitable  # noqa: E402
 from pension_agent.tools.customer_solution import customer as _sc  # noqa: E402
 
 _TOOLS = (("customer", _t_customer), ("suitable", _t_suitable),

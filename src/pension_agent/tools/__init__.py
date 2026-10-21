@@ -12,30 +12,32 @@ evidence/record.py. 못 찾으면 None, 죽으면 ToolFailure — tools/base.py.
     규약
     base.py         Tool · ToolFailure       도구 선언 · «확인하지 못함» 예외
 
-    지식베이스 도구
+    지식베이스 도구 (kb_search/)
     cards.py        fact procedure screen channel segment method fieldtip
                                              수치·절차·화면번호·채널·고객군·방법론·현장 [LLM]
     market.py       market lineup            시황·투자전략 · 추천펀드·디폴트옵션·TDF [LLM]
     pitch.py        pitch                    고객의 말·반응으로 화법을 찾는다 [LLM]
     playbook.py     playbook                 이 고객 상태에 걸린 참고자료(화면 ⑥⑦⑧)
 
-    현재 고객 도구 — customer_solution 이 계산한 것을 그대로
-    briefing.py     customer                 브리핑 재료 — 잔액·수익률·요건·타겟 근거
+    고객별 솔루션 (customer_solution/tool.py) — 계산한 것을 그대로 옮긴다
+                    customer                 브리핑 재료 — 잔액·수익률·요건·타겟 근거
                     briefing                 전체 브리핑 문서 — 그대로 답이 된다 [LLM 1회]
-    suitability.py  suitable                 투자성향으로 어디까지 안내할 수 있는지
-    outreach.py     outreach                 안내할 세미나·이벤트와 발송 문구
-    history.py      history transcript       지난 상담 · 이번 상담의 대화
+                    suitable                 투자성향으로 어디까지 안내할 수 있는지
+                    outreach                 안내할 세미나·이벤트와 발송 문구
+                    targets                  오늘의 타겟 고객 목록 (고객 화면 없이)
 
-    고객 화면 없이 쓰는 도구
-    branch_briefing/tool.py  branch          우리 부점 고객 데이터 질의 — SQL 생성·검사·실행 [LLM]
-    targets.py      targets                  오늘의 타겟 고객 목록
+    메인 브리핑 (branch_briefing/tool.py)
+                    branch                   우리 부점 고객 데이터 질의 — SQL 생성·검사·실행 [LLM]
+
+    일반 (general/) — 파일 하나가 도구 하나
+    history.py      history transcript       지난 상담 · 이번 상담의 대화
     dates.py        date                     오늘 날짜 · 연말까지 남은 일수
     tax_credit.py   tax_credit               «얼마 더 넣으면 얼마 받나» — 코드 계산
     answered.py     last_answer              이번 상담에서 한 답변 원문
 
     도구 위에서 도는 것
     adequacy.py     fits_question            고른 근거가 질문에 답이 되는가 [LLM]
-    combine.py      evidence_from_cards      여러 종류의 카드 묶음 → 원장 항목 하나
+    kb_search/combine.py evidence_from_cards     여러 종류의 카드 묶음 → 원장 항목 하나
 """
 
 from __future__ import annotations
@@ -83,15 +85,15 @@ from pension_agent.tools.kb_search.market import (  # noqa: F401
     _prefer_sections,
     _render_market,
 )
-from pension_agent.tools.customer_solution.suitability import (  # noqa: F401
-    _suitable,
-)
-from pension_agent.tools.customer_solution.briefing import (  # noqa: F401
+from pension_agent.tools.customer_solution.tool import (  # noqa: F401
     _POOL_KEYS,
+    _briefing,
     _citable,
     _cond_labels,
     _customer,
-    _briefing,
+    _outreach,
+    _suitable,
+    _targets,
 )
 from pension_agent.tools.general.history import (  # noqa: F401
     HISTORY_DIALOG_SESSIONS,
@@ -145,12 +147,6 @@ from pension_agent.tools.kb_search.playbook import (  # noqa: F401
     playbook_evidence,
     playbook_hits,
     playbook_ranked,
-)
-from pension_agent.tools.customer_solution.outreach import (  # noqa: F401
-    _outreach,
-)
-from pension_agent.tools.customer_solution.targets import (  # noqa: F401
-    _targets,
 )
 from pension_agent.tools.branch_briefing.tool import (  # noqa: F401
     _branch,

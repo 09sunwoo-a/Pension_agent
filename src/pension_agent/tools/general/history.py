@@ -172,7 +172,7 @@ def _history(state: AgentState, query: str) -> Evidence | None:
     return _ev("history", query, "\n".join(lines),
                # 제목은 화면뿐 아니라 계획 프롬프트의 「이미 모은 재료」로도 나간다
                # (`evidence/ledger.py::summarize`) — 여기에도 KB-PIN 을 넣지 않는다. id 도 같다:
-               # 응답의 sources 이벤트로 프론트까지 나가는 값이다(briefing.py 와 같은 자리).
+               # 응답의 sources 이벤트로 프론트까지 나가는 값이다(customer_solution/tool.py::_customer 와 같은 자리).
                [{"id": "session", "title": "이 고객의 상담 이력",
                  "doc": "상담 이력 기록(과거 상담 + 에이전트가 턴마다 남긴 대화)",
                  "score": None, "page": None}],

@@ -10,11 +10,13 @@
     r2 = ask("그럼 안 된다고 하면요?", history=r["history"])   # 후속 질문
 
 그래프 구조(노드·분기 다이어그램)는 src/README.md 6절 참고. 이 파일은 그래프를
-조립하고(build_agent) 단발 호출 헬퍼(ask)와 CLI 진입점만 담당한다.
-노드 함수는 기능별로 나뉘어 있다 — 상태정의는 state.py, 분기 predicate 는 routing.py,
-화법 슬롯 분해는 pitch.py, 계획 루프는 plan.py, 되묻기 판정·답변 작성은 answer.py,
-메타 질문 응답은 meta.py, LMS 화면 연계는 lms.py, 브리핑수정은 correction.py.
-LLM 프롬프트는 prompts.py.
+조립하고(build_agent) 단발 호출 함수(ask)를 제공한다.
+
+    state.py      그래프 상태
+    routing.py    분기 판정
+    nodes/        노드 함수 — 계획 루프는 nodes/plan.py, 답변 작성은 nodes/answer.py
+    tools/        계획 루프가 부르는 도구 목록(tools/__init__.py::TOOLS)
+    prompts/      LLM 프롬프트 문장
 
 **답변을 만드는 경로는 계획 루프 하나다.** 값·절차·고객군·브리핑 질의가 각자 노드를 갖고
 있던 시절이 있었는데, 같은 재료를 두 경로로 답하면 프롬프트·검증·표시 규약이 갈리고

@@ -31,7 +31,7 @@
 플랫폼 게이트웨이(`agent-messages`)가 막았다(`status=FILTER_INVALID` · «The content was
 blocked by the filter»). 응답의 `sources` 이벤트가 출처 id 로 `customer.171203-4815062` 를
 싣고 있었다. 그쪽도 재료에서 긋는다 — 고객 재료의 출처 id 는 종류 이름만이다
-(`tools/customer_solution/briefing.py` 와 이웃들). 이 모듈의 문(②)은 LLM 호출에만 서 있고
+(`tools/customer_solution/tool.py` 와 이웃들). 이 모듈의 문(②)은 LLM 호출에만 서 있고
 응답에는 걸지 않는다: 그 게이트웨이의 룰 표가 아래 12종과 같은지 확인된 바 없고, 구조화된
 이벤트 JSON 에 일괄 마스킹을 걸면 화면 딥링크·카드 id 같은 값이 깨질 수 있다. 응답에서
 무엇이 나가는지는 `tests/infra/s17_privacy.py` 「응답」 절이 이벤트 스트림 전체를 잰다.

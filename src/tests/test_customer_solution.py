@@ -186,7 +186,7 @@ def check_no_id_or_codes() -> None:
 
 def check_document_passthrough() -> None:
     from pension_agent.nodes import answer as ANS
-    from pension_agent.tools.customer_solution.briefing import _briefing
+    from pension_agent.tools.customer_solution.tool import _briefing
 
     p = _BY_NAME["오세훈"]
     with _Stub(_reply(focus="만기 자금의 운용 방향을 확인합니다.")):

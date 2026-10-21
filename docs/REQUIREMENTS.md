@@ -138,9 +138,9 @@ AI 브리핑 화면은 아래 9개 섹션으로 구성된다. `구현` 열은 `e
 
 | | 누가 |
 |---|---|
-| 종료된 콘텐츠 제외(`end_date >= today()`) · 관련도(keywords→요건) 정렬 | 코드 (`support/outreach.py`) |
+| 종료된 콘텐츠 제외(`end_date >= today()`) · 관련도(keywords→요건) 정렬 | 코드 (`support/assets.py`) |
 | 그중 어느 것을 이 고객에게 안내할지 · 추천 사유 | LLM (`agent._select_outreach`) |
-| LMS 문구의 골격 — 광고 표기·인사말·안내 링크·수신거부 | 코드 (`support/outreach.py::lms_frame`) |
+| LMS 문구의 골격 — 광고 표기·인사말·안내 링크·수신거부 | 코드 (`support/assets.py::lms_frame`) |
 | LMS 문구의 본문 1~2문장 | LLM (`agent._write_lms_messages`) |
 
 골격을 코드가 잡는 이유는 셋이다. ① 광고 표기와 수신거부 안내는 법정 표기라 빠지면 안 되고,
@@ -148,7 +148,7 @@ AI 브리핑 화면은 아래 9개 섹션으로 구성된다. `구현` 열은 `e
 (`engine.verify`)을 **본문에만** 걸 수 있다 — 문구 전체를 생성하면 URL·수신거부 번호의
 숫자까지 재료 대조를 통과해야 하고, 그 값들은 콘텐츠 DB 밖이라 늘 실패한다.
 
-**keywords 는 요건(`customer.CONDS`)으로 내려서 맞댄다**(`support/outreach.py::KEYWORD_CONDS`).
+**keywords 는 요건(`customer.CONDS`)으로 내려서 맞댄다**(`support/assets.py::KEYWORD_CONDS`).
 새 판정 규칙이 아니라 이름의 대응이며, 대응이 없는 키워드는 적지 않는다 — 지금
 `타기관IRP잔액보유`(EVT-002)가 그렇다(원장에 타기관 IRP 잔액 컬럼이 없다). 대응이 없는
 콘텐츠는 관련도 0 으로 뒤에 서고 다른 후보가 없을 때만 노출된다. 무엇이 그런지는

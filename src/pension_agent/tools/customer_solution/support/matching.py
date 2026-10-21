@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pension_agent.knowledge import shared_store
 from pension_agent.knowledge.similarity import ngram_sim
-from pension_agent.tools.customer_solution.support.kb import pitch_kb, pitch_kb_module
+from pension_agent.tools.customer_solution.support.reference_kb import pitch_kb, pitch_kb_module
 
 ASSETS: list[dict] = shared_store().fields_of("asset")
 

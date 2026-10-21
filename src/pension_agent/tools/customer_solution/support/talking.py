@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 from pension_agent.tools.customer_solution.customer import Profile
-from pension_agent.tools.customer_solution.support.kb import pitch_kb
+from pension_agent.tools.customer_solution.support.reference_kb import pitch_kb
 from pension_agent.tools.customer_solution.support.matching import card_source, situation_cards
 
 

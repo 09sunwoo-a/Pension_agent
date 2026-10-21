@@ -939,7 +939,7 @@ HIDDEN: dict[tuple[str, str], str] = {
     # 판정이 아니라 «달라는 것을 달라»인데 줄 수가 없다.
     ("오늘의 타겟 목록", "타겟 목록에 고객번호도 같이 넣어줘"):
         "(나) 고객 식별번호는 싣지 않기로 한 값이다 — 행내 게이트웨이가 주민등록번호로 읽어 "
-        "400 으로 끊는다(tests/infra/s17_privacy.py · tools/customer_solution/targets.py 머리말). 기능이 "
+        "400 으로 끊는다(tests/infra/s17_privacy.py · tools/customer_solution/tool.py 머리말). 기능이 "
         "없는 것이 아니라 하지 않기로 한 것이고, 앞으로도 안 한다",
     ("제도·수치 확인", "타행 IRP 수수료는 우리보다 싼가?"):
         "(나) 타행 수수료는 지식베이스 밖이다 — 당행 수수료율로 대신 답하지만 물은 것은 "

@@ -9,7 +9,7 @@ from __future__ import annotations
 from itertools import zip_longest
 
 from pension_agent.tools.customer_solution.customer import CONDS, Profile
-from pension_agent.tools.customer_solution.support.kb import pitch_kb, pitch_kb_module
+from pension_agent.tools.customer_solution.support.reference_kb import pitch_kb, pitch_kb_module
 from pension_agent.tools.customer_solution.support.objection import _type_eligible
 from pension_agent.tools.customer_solution.support.matching import (
     MAX_RESOURCE_CANDIDATES,

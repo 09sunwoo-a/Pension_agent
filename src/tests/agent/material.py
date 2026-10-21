@@ -252,7 +252,7 @@ def check_customer_material() -> int:
     # 「이 고객 디폴트옵션 등록됐어?」에 "네, 설정되어 있어요" 한 줄로 답하고도 근거가 여섯
     # 건 섰다(2026-09-17 실측, 박정호). customer 도구가 원장 값과 함께 화면 ⑥⑦⑧ 카드를
     # 묶어 싣기 때문인데, 그 다섯 장은 답에 한 글자도 쓰이지 않았다.
-    from pension_agent.tools.customer_solution.briefing import _customer
+    from pension_agent.tools.customer_solution.tool import _customer
     ev = _customer({"customer_id": "198734-1205842"}, "디폴트옵션 등록 여부")
     hit = bool(ev) and bool(ev.get("source_keys"))
     print(f"{'✓' if hit else '✗'} customer 도구가 딸려 보낸 카드마다 «답변이 썼는지» 가릴 스팬을 선언한다")
