@@ -1,12 +1,6 @@
-"""prepare() — 요건 판정부터 상위 N 선정까지의 한 줄기.
+"""prepare() — 요건 판정 → 후보 소집 → 적합성 게이트 → 자금 배분 → 기대효과 → 상위 N 선정.
 
-    요건 판정 → 후보 소집 → 적합성 게이트 → 자금 배분 → 기대효과 산출 → 상위 N 선정
-
-반환값이 LLM 단계(agent.py)의 **유일한** 입력이다. 여기 없는 수치는 문장에 나올 수 없고,
-`compose.verify()` 가 그것을 대조한다.
-
-자금 풀 배분이 이 한 함수 안에 있는 이유는 제약이 전역이기 때문이다 — 복수 전략이 같은
-재원을 중복 사용하지 않게 하려면 배분을 한 곳에서 순서대로 진행해야 한다.
+반환값이 LLM 단계의 유일한 입력. 자금 풀 배분은 전역 제약이라 한 함수 안에서 순차 처리.
 """
 
 from __future__ import annotations
@@ -70,30 +64,10 @@ from pension_agent.tools.customer_solution.support import (
 )
 
 
-# ─────────────────────────────────────────────────────────────
-
 def _owned_product_names(p: Profile) -> list[str]:
-    """이 고객의 원장에 이름이 적혀 있는 상품 — 보유분과 ④ 동연령 상위1% 사례.
+    """원장에 이름이 있는 상품(보유분 + 동연령 상위1%) — verify 인용 허가용, 고유계정대 제외.
 
-    ━━ 왜 인용 허가가 필요한가 ━━
-    이 이름들은 **이미 프롬프트로 나가고 있다** — briefing 의 «보유상품»(「KB 퇴직연금 배당
-    (주식) 8,000만원 수익률 60.0% ⚠판매중단 …」)과 «동연령대비교»(「상위1% 인기 펀드 …」)
-    칸이 그것이고, ①③ 문장·② 선정 사유·③ 코칭·④ 해석이 전부 그 briefing 을 받는다.
-    그런데 검증기의 허용 상품 집합(verify.allowed_facts)은 `items[*].products`, 즉 **이번에
-    권할 상품**만 봤다. 그래서 「판매중단 상품인 KB 퇴직연금 배당 (주식) 8,000만원을 보유하고
-    계세요」처럼 **화면이 이미 띄운 사실을 그대로 옮긴 문장**이 «상품명 미등록»으로 폐기됐다
-    (2026-09-07 실측 · 송도윤 ②·④ 두 곳).
-
-    ━━ 왜 이것이 상품명 상한을 무너뜨리지 않는가 ━━
-    상한을 닫힌 목록이 쥐어야 하는 이유는 순환이다(pension_agent/evidence/verify.py::verify_texts —
-    LLM 이 지어낸 이름이 답변과 재료에 함께 실려 서로를 근거로 통과한다). 여기 실리는 것은
-    `Profile.holdings`·`Profile.peer`, 즉 **코드가 계좌 원장에서 읽은 값**이라 LLM 이 끼어들
-    자리가 없다. 지어낸 이름은 이 목록에도 판매 등록부에도 없으므로 여전히 막힌다.
-
-    허가는 «이 고객»에 한한다 — facts 는 고객 한 명당 하나이므로, 다른 고객이 가진 상품
-    이름이 이 고객의 문장에 실리지 않는다.
-
-    고유계정대는 상품명이 아니라 계정 구분이라 뺀다.
+    원장 값만 사용(LLM 산출 금지 — 지어낸 이름이 재료와 답변에서 서로를 근거로 통과하는 순환 방지).
     """
     names = [h["name"] for h in (p.holdings or [])
              if h.get("name") and h.get("type") != "고유계정대"]
@@ -103,7 +77,7 @@ def _owned_product_names(p: Profile) -> list[str]:
 
 
 def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
-    """고객 프로파일로부터 확정 사실을 산출한다. 반환값이 LLM 단계의 유일한 입력이다."""
+    """고객 프로필 → 확정 사실(LLM 단계의 유일한 입력)."""
     conds = conditions(p)
     blocked: dict[str, str] = {}
     dropped: list[str] = []
@@ -111,11 +85,10 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     needs_confirm: list[str] = []
     cautions: list[str] = []
 
-    # 1) 후보 소집 — 해당 요건이 성립하는 전략만 대상으로 한다.
-    #    요건이 성립하지 않는 전략을 정원 충족 목적으로 추가하지 않는다.
+    # 1) 후보 소집 — 성립 요건 전략만(정원 채우기 금지)
     cands = [s for s in SPECS if s.get("when") in conds]
 
-    # 2) 기능 요구사항 — 지원 여부가 확인되지 않은 기능을 전제한 전략은 제안하지 않는다.
+    # 2) 지원 미확인 기능 전제 전략 보류
     live0 = []
     for s in cands:
         miss = [c for c in s.get("requires", []) if CAPS.get(c, {}).get("status") != "available"]
@@ -125,9 +98,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             continue
         live0.append(s)
 
-    # 3) 흡수 — resolves 선언에 따라 겹치는 전략을 하나로 정리한다.
-    #    target 방식(always/conditional)은 방향성 있는 흡수, group 방식(max_amount)은
-    #    같은 대상을 다투는 전략들 중 조정 폭이 가장 큰 것만 남긴다.
+    # 3) 흡수 — resolves: target(always/conditional) 방향성 흡수, group(max_amount) 최대 조정 폭만
     present = {s["id"] for s in live0}
     absorbed: dict[str, str] = {}
     merged: set[str] = set()
@@ -142,10 +113,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
                 absorbed.setdefault(target, s["id"])
                 merged.add(s["id"])
 
-    # 3-1) 위험자산 목표 비중을 정하는 전략은 조정 폭이 가장 큰 것만 남긴다.
-    #      규정 한도(70%)와 성향 기준(예: 30%)이 동시에 성립할 때 둘을 모두 실행하면
-    #      합산 축소가 되어 성향 목표를 지나치게 밑돈다. 정적 흡수로 고정하면 반대로
-    #      조정 폭이 작은 전략이 큰 전략을 흡수해 목표가 미달된다.
+    # 3-1) 위험자산 목표 전략은 조정 폭 최대만 — 둘 다 실행 시 합산 축소, 정적 흡수 시 목표 미달
     groups: dict[str, list[dict]] = {}
     for s in live0:
         if s["id"] in absorbed:
@@ -171,12 +139,12 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         extra_evidence.setdefault(by, []).append(tid)
     live = [s for s in live0 if s["id"] not in absorbed]
 
-    # 4) 적합성 상한 — '투자성향 불일치' 요건 성립 시 성향 선호 등급까지 상한을 축소한다.
+    # 4) 적합성 상한 — 'mis' 성립 시 성향 선호 등급까지 축소
     cap = p.grade
     if "mis" in conds and PREF.get(p.rk):
         cap = RISK[min(RISK.index(cap), RISK.index(PREF[p.rk]))]
 
-    # 5) 금액 무관 게이트 — 위험등급·거래채널로 후보 상품을 확보한다.
+    # 5) 금액 무관 게이트
     built = []
     for spec in live:
         static = static_candidates(p, spec, cap, blocked)
@@ -187,18 +155,14 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         built.append({"spec": spec, "static": static, "req": amount, "amount": amount,
                       "extra": extra, "urgency": _urgency(p, spec)})
 
-    # 6) 자금 풀 배분 — 동일 재원의 중복 사용을 차단한다.
+    # 6) 자금 풀 배분 — 동일 재원 중복 사용 차단
     pools = {"예금": p.dep_amt, "추가납입": p.room * 10_000, "위험자산": p.risk_amt}
     built.sort(key=lambda b: (-b["spec"].get("pool_priority", 0), -b["urgency"]))
     kept = []
     for b in built:
         pool = b["spec"].get("pool")
         if pool and b["req"] <= 0:
-            # 재원 풀을 선언한 전략(정리·이동·납입)은 전부 금액 산식을 갖는다 — 대상 금액이
-            # 0원이면 요건은 성립해도 이 전략이 움직일 것이 없다. 예: 공격투자형 + 예금 100%
-            # 는 'mis' 요건이지만 위험자산 초과분이 0원이라 축소 전략(mis_fix)이 아니라 편중
-            # 해소(dep_shift)가 답이다. 0원을 그대로 흘리면 "초과분 0원을 매수" 같은 절이
-            # 렌더링된다(9케이스 목업 적재 때 실제로 그랬다).
+            # 대상 0원 제외 — 미제외 시 "초과분 0원을 매수" 같은 절 렌더링
             dropped.append(f"{b['spec']['title']} — 대상 금액 0원 (요건은 성립하나 실행 대상 없음)")
             continue
         if pool:
@@ -210,7 +174,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             b["amount"] = alloc
         kept.append(b)
 
-    # 7) 상품 확정 — 배분액 기준으로 최소가입금액·위험자산 한도 여력을 판정한다.
+    # 7) 상품 확정 — 배분액 기준 최소가입금액·위험자산 여력
     headroom = p.risk_headroom_amt
     final = []
     for b in kept:
@@ -229,15 +193,13 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         b["products"] = products
         final.append(b)
 
-    # 8) 조건부 전략 — 상품 게이트 결과에 의존하는 전략을 추가한다.
+    # 8) 게이트 결과 의존 조건부 전략
     if _perf_branch_blocked(final, dropped, blocked):
         spec = BY_ID["st.risk_reassess"]
         final.append({"spec": spec, "static": {}, "products": {}, "req": 0, "amount": 0,
                       "extra": {}, "urgency": _urgency(p, spec)})
 
-    # 9) 기대효과·점수 산출 및 상위 N 선정
-    #    기대효과(원)는 선정 점수와 검증에 내부적으로 쓰되, 원금 이동 가정에 의존해 근거가
-    #    불명확하므로 산출물에는 노출하지 않는다. 노출용 효과는 수익률 개선폭(yield_delta)이다.
+    # 9) 기대효과·점수·상위 N. 기대효과(원)는 내부용, 노출은 yield_delta
     for b in final:
         b["impact"], b["range"], b["formula"] = _impact(p, b["spec"], b["amount"], b["products"])
         b["yield_delta"] = _yield_delta(b["spec"], b["products"])
@@ -246,21 +208,19 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
     final.sort(key=lambda b: -b["score"])
     selected, rest = final[:top_n], final[top_n:]
 
-    # 메인 문장에 포함되지 않은 전략은 '다른 제안' 으로 노출한다. 수익률 개선폭이 큰 순으로
-    # 정렬해 상위 ALT_N 건만 남기고, 그 밖은 제외 항목으로 기록한다.
+    # 나머지는 개선폭 순 상위 ALT_N 건만 '다른 제안', 그 밖은 제외 기록
     rest.sort(key=lambda b: (-(b["yield_delta"] if b["yield_delta"] is not None else -1.0),
                              -b["score"]))
     alternatives, overflow = rest[:ALT_N], rest[ALT_N:]
     dropped += [f"{b['spec']['title']} — 상위 {top_n}건 미포함 (점수 {b['score']})" for b in overflow]
 
-    # 10) 절·근거 렌더링 — 실행 순서(시급성 내림차순)로 정렬한다.
+    # 10) 절·근거 렌더링(시급성 순)
     selected.sort(key=lambda b: (-b["urgency"], -b["score"]))
     prev_action = ""
     for b in selected:
         spec = b["spec"]
         action = _action(spec, b["products"])
-        # 동일한 분기 문구가 바로 앞 절에서 이미 제시된 경우에만 축약한다.
-        # 인접하지 않은 절을 축약하면 지시 대상이 불명확해진다.
+        # 바로 앞 절과 같은 분기 문구만 축약(비인접 축약 시 지시 대상 불명확)
         if action and action == prev_action and len(b["products"]) > 1:
             action = "앞 항목과 동일한 기준으로 배분"
         prev_action = _action(spec, b["products"])
@@ -274,8 +234,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
         ev = spec["evidence_if_merged"] if (spec["id"] in merged and spec.get("evidence_if_merged")) \
             else spec["evidence"]
         b["evidence"] = ev.format_map(ctx)
-        # 흡수된 전략의 근거는 그 전략 자신의 파생값(초과분·목표 비중 등)으로 렌더링한다.
-        # 흡수한 쪽의 값을 쓰면 정의되지 않은 슬롯이 원문 그대로 남는다.
+        # 흡수된 전략 근거는 자기 파생값으로 렌더링(흡수한 쪽 값 사용 시 미정의 슬롯 잔존)
         b["evidence_extra"] = []
         for t in extra_evidence.get(spec["id"], []):
             tspec = BY_ID[t]
@@ -284,11 +243,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
                           "trim_target": _trim_target(p, tspec, conds, t_extra)})
             b["evidence_extra"].append(tspec["evidence"].format_map(t_ctx))
 
-        # 발송 자료가 등록되지 않은 전략은 `clause`(자료 없는 문구)로 내려가는 것으로 끝난다.
-        # 예전에는 여기서 needs_confirm 에 「assets.json 의 customer_facing 확인 필요」를
-        # 넣었는데, 그 목록은 대화형 `customer` 재료의 «확인 필요»로 실려 직원 안내로 나갔다
-        # (2026-09-07 실측 — 「하면 안 되는 게 뭐야」 답변에 그 문장이 그대로). 저작자에게
-        # 하는 말은 직원 재료가 아니라 docs/DEMO_STATUS.md 가 센다(scripts/demo_status).
+        # needs_confirm 은 직원 재료로 노출 — 저작자용 메모 추가 금지
         if spec.get("impact", {}) and (spec.get("impact") or {}).get("kind") == "tax_credit" \
                 and not p.income_bracket:
             needs_confirm.append(
@@ -303,19 +258,15 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
                     f"{r['name']} — 배분액 {won(b['amount'])} 중 예금자보호 한도"
                     f"({won(PROTECTION_LIMIT)}) 초과분 {won(b['amount'] - PROTECTION_LIMIT)} 안내 필요")
 
-        # 카드 — 긴 지시 문장 대신 항목별 헤드라인·핵심가치·추천상품/대상·한 줄 혜택으로 압축한다.
         products_fmt = {k: _pname(v) for k, v in b["products"].items() if v}
         clause_action = final_clause(
             {"actor": spec["actor"], "kind": spec["kind"], "clause": b["clause"]})
         b["card"] = _card(spec, products_fmt, won(b["amount"]) if b["amount"] else None,
                           _effect_grade(b["yield_delta"]), clause_action,
                           spec.get("benefit") or b["evidence"])
-        # 상담 화법 — pitch_refs 로 연결된 화법 카드를 고객유형에 맞춰 실시간 조회하고,
-        # 참조가 없는 전략은 자체 talk 필드를 쓴다(둘 다 pitch_talk() 안에서 처리).
         b["talk"] = pitch_talk(spec, p.customer_type)
 
-    # 11) 다른 제안 — 메인 문장 밖 전략의 절을 렌더링한다. 선정 항목과 동일한 슬롯 규칙을
-    #     쓰되, 축약(prev_action)·고지/확인 누적 같은 문장용 부수효과는 적용하지 않는다.
+    # 11) 다른 제안 절 렌더링 — 축약·고지/확인 누적 미적용
     alt_items = []
     for b in alternatives:
         spec = b["spec"]
@@ -331,46 +282,35 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
                              or ([spec["regulation"]] if spec.get("regulation") else []),
         })
 
-    # ⑥ 재료 선렌더 — support.pick_talking_points() 가 engine 의 표기 유틸(won·_pname)에 역의존하지
-    #    않도록, 금액·상품명 표기를 여기서 확정해 항목에 실어 넘긴다(support → engine 임포트 금지).
+    # ⑥ 표기 선렌더 — support → engine 임포트 금지
     for b in selected + alternatives:
         b["amount_fmt"] = won(b["amount"]) if b.get("amount") else None
         b["products_fmt"] = [_pname(r) for r in b["products"].values() if r]
 
-    # 문제상황 — 성립 요건(conds)에 걸리는 06/01 고객세그먼트. ⑥⑦⑧ 은 전략이 아니라 여기서
-    # 출발한다(REQUIREMENTS.md §2 "문제상황 정의"). 세그먼트 데이터가 없으면 빈 목록이라
-    # 아래 섹션들은 예전 경로로 그대로 동작한다.
+    # 문제상황 — ⑥⑦⑧ 의 출발점
     situations = problem_situations(p, conds)
 
-    # 판단근거 — 선정 항목의 근거 중 핵심 1~3문장. 메인 제안의 근거를 압축해 제시한다.
+    # 판단근거 — 선정 항목 근거 최대 3문장
     rationale = [b["evidence"] for b in selected if b["evidence"]][:3]
 
     pending = [b["range"] for b in selected if b["range"]]
     return {
         "customer": _customer_header(p),
         "briefing": _briefing(p),
-        # 계좌 상태 — 화면(briefing)이 아니라 **대화형이 읽는 재료**다. 화면은 문제인 항목만
-        # 싣지만 직원은 정상인 항목도 묻는다(render._account_state 주석).
+        # 대화형 재료 — 정상 항목 포함(화면 미표시)
         "account_state": _account_state(p),
         "conditions": [f"{c}:{CONDS[c]}" for c in conds],
-        # 왜 이 고객님인가요 — 최대 3개, 정량 중심(REQUIREMENTS.md ②). 코드가 수치를 산출하고,
-        # agent._write_why_this_customer() 가 LLM 해석 문장으로 교체를 시도한다(REQUIREMENTS.md §15).
-        # LLM 이 없거나 실패하면 이 규칙 문장이 그대로 남는다.
+        # ② 왜 이 고객 — 최대 3개 규칙 문장(LLM 교체 실패 시 그대로)
         "why_this_customer": _why_this_customer(p, conds),
-        # 현재 운용상태 AI 코칭 — 국소 진단 2문장(REQUIREMENTS.md ③ §6.1). REQUIREMENTS.md §15 가 이 섹션을
-        # LLM 전용으로 지정했으므로 규칙 폴백을 두지 않는다 — agent._write_coaching() 이
-        # 채우고, LLM 이 없거나 실패하면 None 으로 남아 화면이 '생성되지 않음'을 표시한다.
-        # ⑤ 추천(_recommend)이 이미 쓰는 방식과 같다.
+        # ③ AI 코칭 — LLM 전용(규칙 폴백 없음), 미생성 시 None
         "coaching": None,
-        # LLM 전용 섹션 중 이번 호출에서 생성되지 않은 것과 그 사유. 화면이 "규칙으로 쓴 문장을
-        # AI 산출로 오인"하지 않도록, 빈 이유를 사람이 읽을 수 있게 남긴다.
+        # LLM 전용 섹션 미생성 사유
         "llm_skipped": {},
-        # 수익률 상위 1% 고객 상품 사례 — 비개인화, 비교 참고용(REQUIREMENTS.md ④).
+        # ④ 상위 1% 상품 사례(비교 참고용)
         "top_holdings": top_reference_products(p),
-        # 이 고객의 원장이 이름을 말하고 있는 상품 — 보유분과 ④ 동연령 상위1% 사례.
-        # **인용 허가 목록이지 추천 목록이 아니다**(verify.allowed_facts 가 읽는다).
+        # 인용 허가 목록(추천 목록 아님) — verify.allowed_facts
         "owned_products": _owned_product_names(p),
-        # 고객님께 안내해보세요 — 문제상황에 맞는 이벤트 1개 + 세미나 1개(REQUIREMENTS.md ⑨).
+        # ⑨ 이벤트 1 + 세미나 1
         "outreach": next_event_and_seminar(situations, name=p.nm),
         "items": [{
             "id": b["spec"]["id"], "title": b["spec"]["title"], "kind": b["spec"]["kind"],
@@ -385,37 +325,24 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
             "source_titles": format_sources(b["spec"].get("sources", [])),
             "regulation": b["spec"].get("regulation", ""),
         } for b in selected],
-        # 이 고객의 문제상황 — ⑥⑦⑧ 후보군의 출발점이자 화면에 한 줄로 노출된다.
         "problem_situations": situations,
-        # 상담 화법 — 정확히 2개를 보장한다(REQUIREMENTS.md ⑥). 렌더러가 별도 섹션으로 노출한다.
         "talking_points": pick_talking_points(p, selected, alternatives, situations),
-        # 예상 반론 — 정확히 2개를 보장한다(REQUIREMENTS.md ⑦).
         "objections": pick_objections(p, selected, situations),
-        # 상담에 참고하세요 — 노하우/가이드 스니펫 최대 2개(REQUIREMENTS.md ⑧).
         "consult_resources": consult_resources(p, conds, situations),
-        # ⑦·⑧·⑨ 의 넓은 후보군. REQUIREMENTS.md §15 가 이 셋을 'DB(Rule) + 선별(LLM)' 으로 지정하므로,
-        # 조회·필터·정렬까지만 여기서 하고 최종 선별은 agent._select_db_sections() 가 맡는다.
-        # 위 세 필드(objections·consult_resources·outreach)는 LLM 선별이 실패했을 때 그대로
-        # 남는 규칙 기본값이다.
+        # ⑦⑧⑨ LLM 선별용 후보군. 위 세 필드는 선별 실패 시 규칙 기본값
         "pools": {
             "objections": objection_candidates(p, selected, situations),
             "consult_resources": consult_resource_candidates(p, situations),
             "outreach": outreach_candidates(situations, name=p.nm),
         },
-        # 상담 이력(REQUIREMENTS.md §14) — 세션 저장소가 유일한 읽기 경로다. 과거 상담
-        # 기록(직원이 고객과 나눈 것)도 거기 들어와 있다: 목업은 scripts/seed_sessions.py
-        # 가 심고, 실서비스에서는 CRM 이 같은 자리를 채운다. strategy_agent 는 읽기만
-        # 한다("코드=사실" 경계를 대화이력에도 유지).
+        # 상담 이력 — 세션 저장소 읽기 전용
         "consult_history": summarize_for_briefing(p.id),
-        # 근거 규정 — 규정 근거가 붙은 선정 항목. 적합성 원칙 등 판단의 출처를 추적 가능하게 한다.
+        # 규정 근거가 붙은 선정 항목
         "regulations": [{"title": b["spec"]["title"], "regulation": b["spec"]["regulation"]}
                         for b in selected if b["spec"].get("regulation")],
         "rationale": rationale,
         "alternatives": alt_items,
-        # 평가를 통과한 전략 전체(점수 내림차순). items 는 그중 상위 TOP_N 건, alternatives 는
-        # 그다음 ALT_N 건이다. 화면 노출은 "제안 1개 + 예비 1개"로 좁히지만(07 기능정의 ① 4),
-        # 어떤 전략이 이 고객에게 성립했는지 자체는 여기 남는다 — 선정 로직의 회귀를 노출
-        # 개수와 분리해 검사할 수 있어야 하고, 노출 개수를 바꿔도 그 검사가 깨지지 않는다.
+        # 평가 통과 전략 전체(점수 순) — 노출 개수와 분리된 선정 회귀 검사용
         "candidates": [{"id": b["spec"]["id"], "title": b["spec"]["title"],
                         "score": b["score"], "urgency": b["urgency"],
                         "yield_delta": b["yield_delta"], "mandatory": b["mandatory"]}
@@ -436,12 +363,7 @@ def prepare(p: Profile, top_n: int = TOP_N) -> dict[str, Any]:
 
 
 def _perf_branch_blocked(final: list[dict], dropped: list[str], blocked: dict) -> bool:
-    """실적배당 경로가 적합성 사유로 전량 차단되었는지 판정한다.
-
-    행내 가이드의 핵심 절차는 실적배당 상품 안내이므로, 이 경로가 통째로 막힌 고객에게는
-    성향 재진단이 선행되어야 한다. 근거 등급이 '추정'이라 플레이북(strategies.json)이 아니라
-    SYSTEM_STRATEGIES(코드)로 따로 관리하는 조건부 안전망이다.
-    """
+    """실적배당 경로가 위험등급 게이트로 전량 차단됐는지(→ st.risk_reassess 발동)."""
     if not any("위험등급" in v for v in blocked.values()):
         return False
     if any("실적배당 분기" in d for d in dropped):

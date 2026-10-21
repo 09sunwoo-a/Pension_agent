@@ -1,9 +1,4 @@
-"""규칙 기반 문장 합성과 섹션 요약 — LLM 폴백이자 검증 기준선.
-
-LLM 이 없거나(망분리·장애) 산출물이 재료를 벗어나면 여기서 만든 문장이 그대로 화면에
-올라간다. 그래서 이 문장은 "임시방편"이 아니라 언제든 고객 앞에 나갈 수 있는 품질이어야
-한다. `verify()` 가 LLM 문장을 재료와 대조하는 것도 이 모듈의 몫이다.
-"""
+"""규칙 기반 문장 합성·섹션 요약·verify() — LLM 미가용·검증 실패 시 그대로 화면 노출되는 폴백."""
 
 from __future__ import annotations
 
@@ -13,25 +8,15 @@ from pension_agent.tools.customer_solution.engine.catalog import ACTOR_SUFFIX, P
 from pension_agent.evidence.verify import verify as _verify
 
 
-# ─────────────────────────────────────────────────────────────
-
 def final_clause(item: dict) -> str:
-    """행위 주체를 반영한 최종 절.
-
-    산출 문장은 직원이 읽고 실행하는 문서이다. 재예치·전환·납입·설정은 고객의 운용지시
-    사항이므로 직원에 대한 지시로 그대로 쓸 수 없고, 제안·안내 행위로 감싼다.
-    """
+    """행위 주체 반영 최종 절 — 고객 운용지시 사항은 제안·안내로 감쌈."""
     if item["actor"] == "직원":
         return item["clause"]
     return item["clause"] + ACTOR_SUFFIX.get(item["kind"], "하도록 제안")
 
 
 def compose_rule(facts: dict) -> str:
-    """절을 연결해 단일 문장을 구성한다.
-
-    절은 명사형 동작으로 종결되므로 접속 규칙만으로 안전하게 결합된다.
-    LLM 미가용 또는 검증 실패 시 본 결과를 최종 응답으로 사용한다.
-    """
+    """절 연결 단일 문장(LLM 폴백)."""
     clauses = [final_clause(it) for it in facts["items"]]
     if not clauses:
         return "제안 가능한 실행 항목이 없습니다. (해당 요건 없음 또는 적합성 게이트에서 전량 제외)"
@@ -44,18 +29,14 @@ def compose_rule(facts: dict) -> str:
 
 
 def _josa(word: str, with_batchim: str, without_batchim: str) -> str:
-    """앞 단어의 받침 유무에 맞는 조사를 고른다('상품을' / '가이드를').
-
-    끝 글자가 한글이 아니면(영문·기호로 끝나는 상품명) 받침 없음으로 본다 — 'CP2-E와'
-    처럼 모음으로 읽히는 경우가 대부분이라 이쪽이 덜 틀린다.
-    """
+    """받침 유무별 조사 선택. 끝 글자가 한글이 아니면 받침 없음."""
     ch = next((c for c in reversed(word) if c.isalnum()), "")
     has = "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28
     return with_batchim if has else without_batchim
 
 
 def _join_ko(names: list[str]) -> str:
-    """항목 이름을 '와/과'로 잇는다. 조사는 바로 앞 이름의 받침을 따른다."""
+    """이름을 '와/과'로 연결."""
     if not names:
         return ""
     if len(names) == 1:
@@ -65,21 +46,12 @@ def _join_ko(names: list[str]) -> str:
 
 
 def _sentences(text: str) -> list[str]:
-    """문장 단위로 쪼갠다. 종결부호 뒤 공백만 경계로 본다."""
+    """문장 분리(종결부호 뒤 공백 기준)."""
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
 
 
 def section_summaries(facts: dict, sentence: str, insight: str) -> dict[str, dict[str, str]]:
-    """섹션별 '접힘 상태' 요약 2줄 — 굵은 요약 한 줄 + 부연 한 줄.
-
-    화면은 ①~⑨ 를 모두 접어두고 이 두 줄만 보여준 뒤 펼치게 한다
-    (docs/REQUIREMENTS.md §2 — 섹션 정의와 접힘 규칙).
-
-    전부 코드 합성이다 — 재료(facts)에 이미 있는 문장·이름·개수만 재배열하므로 LLM 을 태우지
-    않고, 따라서 verify() 도 불필요하다(재료 이탈이 원천적으로 불가능하다). 상품명은 축약하지
-    않고 원문 그대로 쓴다 — 금융상품명을 코드가 임의로 줄이면 다른 상품으로 읽힐 수 있다.
-    내용이 없는 섹션은 키 자체를 만들지 않으므로, 화면은 키 존재 여부로 노출을 판단하면 된다.
-    """
+    """섹션별 접힘 요약(headline + detail) — 코드 합성. 상품명 축약 금지, 빈 섹션은 키 미생성."""
     out: dict[str, dict[str, str]] = {}
 
     lines = _sentences(sentence)
@@ -148,15 +120,6 @@ def section_summaries(facts: dict, sentence: str, insight: str) -> dict[str, dic
     return out
 
 
-# ─────────────────────────────────────────────────────────────
-# 검증 — LLM 산출물의 재료 이탈 여부 판정 (common/verify.py 로 공용화됨)
-# ─────────────────────────────────────────────────────────────
-
-
 def verify(sentence: str, facts: dict, *, extra=()) -> tuple[bool, list[str]]:
-    """재료에 없는 수치 또는 게이트 미통과·미등록 상품명이 포함되었는지 검사한다.
-
-    `extra` 는 facts 스키마 밖의 재료를 실어 주는 자리다(pension_agent/evidence/verify.py 참고).
-    ⑨ LMS 문구가 콘텐츠 DB 의 일정·링크를 인용할 때 쓴다.
-    """
+    """재료 밖 수치·미등록 상품명 검사. `extra` 는 facts 밖 재료(⑨ 일정·링크 등)."""
     return _verify(sentence, facts, known_products={r["name"] for r in PRODUCTS}, extra=extra)

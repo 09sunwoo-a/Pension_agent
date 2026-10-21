@@ -1,13 +1,6 @@
-"""고객 문제상황 정의 — 06/01 고객세그먼트(segment kind)를 요건 판정 결과와 대조해
-"이 고객은 어떤 관리 대상인가"를 확정한다.
+"""고객 문제상황 — 세그먼트 레코드(`conds`·`exclusions`)를 요건 판정 결과와 대조. ⑥~⑨ 의 1차 키.
 
-⑥~⑨(support.py)는 이 결과를 출발점으로 화법·반론·참고자료·안내 콘텐츠 후보를 모은다 — 전략(①~⑤)이
-아니라 '문제상황'이 ⑥~⑨의 1차 키다. 판정 규칙 자체는 customer.conditions() 의 CONDS 그대로이며
-(임계값은 팀 합의 사항 — 여기서 새 판정 로직을 만들지 않는다), 세그먼트는 데이터(data
-의 segment 레코드)로서 "어떤 CONDS 조합이면 이 세그먼트에 해당한다(`conds`)" 와 "이 상태면 제외한다
-(`exclusions`)" 만 선언한다. 세그먼트 데이터가 아직 없으면 빈 목록을 돌려준다(화면은 그 줄을 생략).
-
-의존 방향은 customer ← situations ← support ← engine 이다 — engine 을 임포트하지 않는다.
+판정은 customer.conditions() 그대로(새 판정 금지). engine 임포트 금지.
 """
 
 from __future__ import annotations
@@ -17,13 +10,10 @@ import sys
 from pension_agent.knowledge import shared_store
 from pension_agent.tools.customer_solution.customer import Profile, conditions
 
-# 세그먼트는 공용 지식(knowledge/data/kb_segments.json)이다. 레코드 수준 source 를 함께
-# 쓰기 위해 fields_of() 가 아니라 records() 로 읽는다.
+# 레코드 수준 source 필요 — fields_of() 대신 records()
 SEGMENTS: list[dict] = shared_store().records("segment")
 
-# 화면에 먼저 올릴 문제상황의 그룹 순서(06/01 주제별 인덱스의 9그룹). 규정 위반 점검(컴플라이언스)과
-# 이탈 위험을 앞세우고, 운용 상태 → 수익률 → 납입 → 자금 유입 → 연금개시 → 속성 순으로 내려간다.
-# 같은 그룹 안에서는 세그먼트 번호 순(결정론). 목록에 없는 그룹은 맨 뒤.
+# 문제상황 그룹 표시 순서. 그룹 내 세그먼트 번호 순, 목록 밖 그룹은 맨 뒤
 GROUP_ORDER: tuple[str, ...] = (
     "컴플라이언스·제외 조건",
     "이탈 위험·방어",
@@ -35,7 +25,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "연령·투자성향·등급·행동",
 )
 
-# 제외 조건 이름 → Profile 판정. 세그먼트 레코드의 `exclusions` 에 이 키만 쓴다.
+# 제외 조건 이름 → Profile 판정(`exclusions` 허용 키)
 _EXCLUSIONS = {
     "pension_started": lambda p: bool(getattr(p, "pension_started", False)),
 }
@@ -78,12 +68,7 @@ def _row(rec: dict) -> dict:
 
 
 def problem_situations(p: Profile, conds: list[str] | None = None) -> list[dict]:
-    """이 고객에게 해당하는 문제상황(세그먼트) 목록 — 우선순위 순.
-
-    해당 조건: scope 가 사후관리 ∧ `conds` 가 비어있지 않음 ∧ `conds` ⊆ conditions(p) ∧
-    `exclusions` 미해당. `conds` 가 빈 세그먼트(이벤트형·데이터 미보유)는 자동 매칭에서 빠지되
-    consult_agent 검색에는 남는다. profile_rule(고객 속성식)은 아직 평가하지 않는다.
-    """
+    """해당 문제상황 목록(우선순위 순). 사후관리 ∧ conds≠∅ ∧ conds⊆conditions(p) ∧ 제외 미해당."""
     active = set(conds if conds is not None else conditions(p))
     out: list[dict] = []
     for rec in SEGMENTS:

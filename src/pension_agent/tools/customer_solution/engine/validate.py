@@ -1,8 +1,6 @@
-"""정의 자체의 무결성 검사 — `python -m pension_agent.tools.customer_solution.engine`.
+"""전략·상품 정의 무결성 검사 — `python -m pension_agent.tools.customer_solution.engine`.
 
-근거 정합성은 지식베이스 원문을 열어 대조한다. sources 필드의 **존재 여부**만 검사하면
-세액공제 전략이 리밸런싱 콜 스크립트를 근거로 인용해도 통과한다. 그 구간을 메우는 것이
-이 모듈의 존재 이유다.
+sources 는 존재 여부가 아니라 지식베이스 원문과 topic_keys 대조(근거 오인용 검출).
 """
 
 from __future__ import annotations
@@ -26,31 +24,18 @@ from pension_agent.tools.customer_solution.engine.text import _ret_of
 from pension_agent.tools.customer_solution.support import pitch_kb
 
 
-# ─────────────────────────────────────────────────────────────
-
 def _norm(s: str) -> str:
     return re.sub(r"[^0-9A-Za-z가-힣]", "", s)
 
 
 def _texts(field) -> list[str]:
-    """주의 필드를 문자열 목록으로 편다. 종류에 따라 모양이 둘이다 — 화법은 문자열 목록,
-    절차·방법론은 역할이 붙은 `{role, text}` 목록이다(`knowledge/CLAUDE.md` §3).
-
-    여기서는 **역할을 가리지 않는다.** 이 값은 답변에 표시할 문장이 아니라 "이 카드가
-    무엇에 대한 것인가"를 재는 검색용 blob 이라, 저작 메모도 단서로는 쓸모가 있다.
-    역할로 걸러야 하는 표시 경로는 `knowledge/kb.py::role_texts` 를 쓴다.
-    """
+    """주의 필드(문자열 또는 `{role, text}`) → 문자열 목록. 검색용이라 역할 무관(표시용은 role_texts)."""
     return [e["text"] if isinstance(e, dict) else e
             for e in (field or []) if e and (not isinstance(e, dict) or e.get("text"))]
 
 
 def _source_blob(kb, sid: str) -> str | None:
-    """인용 대상 카드의 검색용 텍스트. 존재하지 않으면 None.
-
-    **종류를 가리지 않는다.** 전략의 근거는 화법·팩트만이 아니라 고객 세그먼트 정의(누가
-    대상인가)·업무 절차(어느 화면에서 확인하나)·관리 방법론(무엇을 먼저 보나)일 수 있다.
-    예전에는 화법과 팩트만 알아서, 그 밖의 카드를 근거로 걸면 '지식베이스에 없음'이 됐다.
-    """
+    """인용 대상 카드(모든 종류)의 검색용 텍스트. 없으면 None."""
     card = next((c for c in kb.cards if c["id"] == sid), None)
     if card:
         parts = [card.get("title") or "", *((card.get("tags") or {}).get("topics") or []),
@@ -72,8 +57,7 @@ def validate() -> tuple[list[str], list[str]]:
 
     errors += check_duplicate_ids(s.get("id", "?") for s in catalog.SPECS + catalog.SYSTEM_STRATEGIES)
 
-    # 구조 검증은 플레이북(catalog.SPECS)과 시스템 전략(catalog.SYSTEM_STRATEGIES)에 함께 적용한다. 근거 정합성
-    # (sources 교차검증·요건 미대응)은 원천 근거를 전제하는 catalog.SPECS 에만 적용한다(아래 별도 루프).
+    # 구조 검증은 SPECS + SYSTEM_STRATEGIES, 근거 정합성은 SPECS 만(아래 별도 루프)
     for s in catalog.SPECS + catalog.SYSTEM_STRATEGIES:
         sid = s.get("id", "?")
 
@@ -108,8 +92,7 @@ def validate() -> tuple[list[str], list[str]]:
             elif not tpl.endswith(CLAUSE_ENDINGS):
                 errors.append(f"[절규약위반] {sid}.{key} — 명사형 동작 종결 아님: …{tpl[-14:]}")
 
-        # 상담 화법(talk) — 직원 접촉 전략의 콜스크립트 요약. 고객 대상 동작(actor=고객)에는
-        # 두지 않으며, 내부 조회 지시어를 담지 않는다(briefing 과 동일 규약).
+        # talk — 직원 접촉 전략 전용, 조회 지시어 금지
         talk = s.get("talk")
         if talk:
             if s.get("actor") != "직원":

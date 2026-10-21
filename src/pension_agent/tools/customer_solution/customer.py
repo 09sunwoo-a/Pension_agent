@@ -1,29 +1,6 @@
-"""고객 프로파일 정의 및 타겟 선정 요건 판정.
+"""고객 프로필(Profile)·원장 매핑·타겟 선정 요건 판정.
 
-요건 판정 규칙은 이 파일이 소유한다. 화면·섹션 요건은 docs/REQUIREMENTS.md 를 따른다.
-
-**임계값의 상위 기준은 타겟 룰베이스**(`targets.json` ← 저장소 루트 xlsx, 생성기는
-`scripts/import_targets.py`)다. 기획자가 행내 원문을 읽고 «누구를 사후관리 타겟으로 볼
-것인가»를 타겟 14종으로 정규화해 확인해준 표이고, 여기 임계값이 그 표와 어긋나면 이
-코드가 틀린 것이다. 판정마다 근거 TARGET_ID 를 주석에 적는다.
-
-룰베이스는 스스로 근거등급을 밝힌다 — A(문서 직접명시) · B(A 의 상위 통합) ·
-C(이탈고객 조사 비중이며 개인 임계값 아님) · D(원문에 없는 기획자 설계 제안, Pilot).
-D 는 «행내 기준»이 아니라 «검증 전 제안값»이므로, 실데이터 전환 때 가장 먼저 흔들릴
-자리다. 어느 값이 D 인지는 각 상수 주석이 밝힌다.
-
-판정 기준 중 근거를 명시해둘 두 건:
-
-    · `mat`(만기예금 보유) — 만기 잔여일수가 남아 있다는 것만으로는 대상이 되지 않는다.
-      본부 가이드가 "만기 1개월 전 반드시 만기 안내"를 필수 행동으로 규정하므로 D-30 이내
-      (`MAT_WINDOW_DAYS`)로 제한한다(06_주제별_추출지식/01_고객세그먼트 9 · 02_IRP관리방법론 18,
-      07_에이전트_기능정의/01 ④ "기한 임박"). 그보다 먼 만기는 지금 접촉해도 고객이 행동할 시점이 아니다.
-    · `lim`(위험자산 한도 초과) — DC·개인형IRP 의 위험자산 투자한도 70%(`RISK_ASSET_CAP_PCT`)는
-      투자성향과 무관한 규정 사항이라, 성향 적합성과 별개로 판정한다.
-
-`matAmt`(만기 도래 예금액)·`income_bracket`(소득 구간)·`pension_paid_ytd`(연금계좌 기납입액)는
-각각 재예치 기대효과·세액공제율·세액공제 대상액 산출의 근거다. 이 필드가 없으면 해당 수치를
-근거 없이 가정하게 되므로, 조인되지 않으면 그 산출을 생략한다.
+임계값 상위 기준은 타겟 룰베이스(targets.json) — 어긋나면 코드 오류. 상수마다 근거 TARGET_ID·근거등급(A~D) 표기.
 """
 
 from __future__ import annotations
@@ -34,46 +11,21 @@ import re
 from dataclasses import dataclass, field
 from datetime import date
 
-from pension_agent.common.clock import TODAY_ENV, today  # noqa: F401 — 오늘은 공용이다
+from pension_agent.common.clock import TODAY_ENV, today  # noqa: F401 — 공용 재노출
 
-# ─────────────────────────────────────────────────────────────
-# 시간축은 **둘**이다. 하나로 붙여 놓으면 원장이 사흘만 묵어도 고객에게 사흘 틀린 말이 나간다.
-#
-#   AS_OF    원장 스냅샷 기준일 — 잔액·수익률·납입액이 «언제 찍힌 값»인가.
-#            시연 데이터 원장(customers.json meta.as_of ← 원본 xlsx 09_데이터사전 "기준일")과
-#            일치해야 하고, 아래 로더가 불일치를 검출한다. 목업을 바꾸지 않는 한 안 움직인다.
-#   today()  상담이 이뤄지는 «오늘» — 잔여일수·경과일의 기준. 만기까지 며칠, 연말까지 며칠,
-#            마지막 접촉 이후 며칠은 원장이 찍힌 날이 아니라 **오늘** 묻는 것이다.
-#
-# 예전에는 이 둘이 `TODAY` 하나였다. 그래서 원장 기준일(2026-08-24)에 고정된 채 사흘이
-# 지나자 화면이 "만기 D-17"(실제 D-14) · "연말까지 129일"(실제 126일)을 말했다 — 둘 다
-# 발송문·상담 대사로 그대로 나가는 수치다. 스냅샷 값(잔액)은 옮길 수 없지만 **날짜 산술은
-# 옮길 수 있다**: 원장에 절대 날짜(약정만기년월일·최근상담일)가 그대로 있기 때문이다.
-#
-# 재현성은 `PENSION_TODAY=YYYY-MM-DD` 로 확보한다. 테스트는 `tests/__init__.py` 가 이 값을
-# AS_OF 로 고정한 채 돌고(그래서 단언이 실행일에 흔들리지 않는다), 데모를 특정 날짜로
-# 얼려 보고 싶을 때도 같은 스위치를 쓴다. 고정하지 않으면 실제 오늘이다.
-#
-# data/assets.json 의 이벤트·세미나 날짜는 아직 이 기준일 언저리에 배치된 더미다 — 실제
-# 오늘이 그 창을 지나가면 ⑨ 후보가 마른다. 남은 여유는 `python -m scripts.demo_status` 가
-# 보고한다(§5).
-# ─────────────────────────────────────────────────────────────
+# 두 시간축 — AS_OF: 원장 스냅샷 기준일(customers.json meta.as_of 와 일치 필수) · today(): 상담일(잔여일수·경과일 기준)
+# 하나로 합치면 원장이 묵은 만큼 잔여일수가 틀림. 재현은 PENSION_TODAY=YYYY-MM-DD
 AS_OF = date(2026, 8, 24)
-
-#: 오늘은 여기 살지 않는다. 두 에이전트와 검증기가 함께 쓰는 값이라 공용(`pension_agent.common.clock`)
-#: 으로 올렸다 — 읽는 곳이 둘이면 한쪽만 고정된 채 갈라진다. 여기서는 도메인 쪽 이름으로
-#: 그대로 쓸 수 있게 재수출만 한다.
 
 
 def ledger_age_days() -> int:
-    """원장 스냅샷이 오늘 기준 며칠 묵었는가. 0 이면 원장과 오늘이 같은 날이다."""
+    """원장 스냅샷 경과 일수(오늘 − AS_OF)."""
     return (today() - AS_OF).days
 
-# 위험등급. 오름차순으로 정의하며, 인덱스 비교로 상한 초과 여부를 판정한다.
+# 위험등급(오름차순, 인덱스 비교로 상한 판정)
 RISK = ["매우낮은위험", "낮은위험", "보통위험", "다소높은위험", "높은위험", "매우높은위험"]
 
-# 투자성향별 선호 위험등급. 가입 가능 상한이 아니라 정렬 선호 기준이다.
-# 하드 상한은 고객 위험등급(Profile.grade)이 담당한다.
+# 투자성향별 선호 위험등급 — 정렬 선호 기준(하드 상한은 Profile.grade)
 PREF = {
     "안정형": "매우낮은위험",
     "안정추구형": "낮은위험",
@@ -82,189 +34,95 @@ PREF = {
     "공격투자형": "높은위험",
 }
 
-# DC·개인형IRP 위험자산 총 투자한도(적립금 대비 %). 투자성향과 무관한 규정 사항이다.
+# DC·개인형IRP 위험자산 투자한도(%) — 성향 무관 규정
 RISK_ASSET_CAP_PCT = 70
 
-# 총급여 구간별 연금계좌 세액공제율(지방소득세 포함). 출처: fact.k04.f2 (kb_facts)
+# 총급여 구간별 세액공제율(지방소득세 포함). fact.k04.f2
 TAX_CREDIT_RATE = {"5500이하": 0.165, "5500초과": 0.132}
 
-# 연금계좌 세액공제 대상 납입액 한도(원). 같은 값이 data/strategies.json 의 `credit_limit` 에도
-# 있고, test_engine.py 가 둘이 어긋나지 않는지 확인한다 — 세법 개정 시 한쪽만 고치면 화면과
-# 대화형 답변이 서로 다른 금액을 말하게 된다.
+# 세액공제 대상 납입액 한도(원). strategies.json `credit_limit` 와 함께 수정(test_engine 검사)
 TAX_CREDIT_CAP_WON = 9_000_000
 
-# ━━ 한도가 셋이다. 섞으면 «500만원이 상한»이 된다 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 아래 세 값은 서로 다른 축이고, 화면·답변이 어느 축을 말하는지 밝히지 않으면 가장 작은
-# 숫자가 상한처럼 읽힌다. 실제로 김서연 케이스에서 그렇게 됐다 — 세액공제 잔여한도
-# 500만원이 브리핑에 «납입여력»이라는 이름으로 한 번 더 실렸고, 대화형은 ISA 만기자금
-# 8,000만원을 옮기는 질문에 900만원 상한으로 답했다.
-#
-#   TAX_CREDIT_CAP_WON        900만원   공제받을 수 있는 납입액 (fact.k04.f2)
-#   DEPOSIT_CAP_WON         1,800만원   넣을 수 있는 납입액   (fact.k04.f1)
-#   ISA_ROLLOVER_CREDIT_*     300만원   ISA 전환으로 «더해지는» 공제 대상 (fact.k04.f4)
-#
-# 연금계좌 연간 납입한도(원). 연금저축·DC 개인부담금과 합산한다. 출처: fact.k04.f1.
-# 900만원을 넘겨 넣은 몫은 공제 대상이 아니지만 과세이연·이연공제 대상이다(fact.k04.f5) —
-# 그래서 «더 넣을 수 있는 금액»과 «공제받을 수 있는 금액»은 같은 수가 아니다.
+# 한도 3축 — 축 미표기 시 최소값이 상한으로 오독
+#   TAX_CREDIT_CAP_WON 900만원(공제 대상, f2) · DEPOSIT_CAP_WON 1,800만원(납입 가능, f1) · ISA_ROLLOVER_CREDIT_* 300만원(전환 추가 공제, f4)
+# 연간 납입한도(원, 연금저축·DC 개인부담금 합산). fact.k04.f1
 DEPOSIT_CAP_WON = 18_000_000
 
-# ISA 만기자금 전환 특례. 출처: fact.k04.f4 · proc.048.
-# 전환액의 10%(300만원 한도)가 세액공제 «대상 한도»에 더해져 최대 1,200만원이 되고,
-# 전환금 자체는 DEPOSIT_CAP_WON 에 걸리지 않는다(만기금액의 전부 또는 일부).
-# 카드가 못박은 오답 둘: "전환금 전액이 공제 대상" · "납입한도 1,800만원에 포함된다".
+# ISA 만기자금 전환 특례(fact.k04.f4 · proc.048) — 전환액 10%(최대 300만원)가 공제 한도에 추가, 납입한도 미적용
 ISA_ROLLOVER_CREDIT_RATE = 0.10
 ISA_ROLLOVER_CREDIT_CAP_WON = 3_000_000
-#: 전환 기한 — ISA 만기일로부터 며칠. 출처: fact.k04.f4 · proc.048("60일 이내").
+#: 전환 기한(ISA 만기일로부터 일수). fact.k04.f4
 ISA_ROLLOVER_DEADLINE_DAYS = 60
 
 
 def tax_credit(paid_won: int, rate: float) -> int:
-    """납입액에 대한 세액공제 환급액(원). 공제 대상은 한도(TAX_CREDIT_CAP_WON)까지만이다.
-
-    브리핑 화면(⑤ 예상_세액공제액)과 대화형 계산기가 **같은 함수**를 쓴다. 두 곳이 각자
-    곱하면 세법이 바뀔 때 한쪽만 고쳐지고, 그때 화면과 답변이 서로 다른 금액을 말한다
-    (§3 "같은 판정을 두 번 구현하지 않는다").
-
-    여기서 나오는 것은 **공제 한도까지의 상한**이지 실제 환급액이 아니다 — 세액공제 전
-    결정세액이 공제액보다 적으면 그만큼 못 받는다(fact.k04.f2). 그 단서는 값을 내놓는
-    쪽이 함께 말해야 한다.
-    """
+    """세액공제 환급 상한(원, 한도까지). 화면·계산기 공용. 결정세액 단서는 호출부가 병기."""
     return int(min(paid_won, TAX_CREDIT_CAP_WON) * rate)
 
 
 def isa_rollover_credit(converted_won: int) -> int:
-    """ISA 만기자금 전환으로 **늘어나는** 세액공제 대상 납입액(원).
-
-    900만원 한도 «안에서» 계산하는 값이 아니라 그 한도에 **더해지는** 몫이다
-    (fact.k04.f4 "세액공제 한도에 전환금액의 10%(최대 300만원)가 추가돼 최대 1,200만원까지").
-
-    전환금 전액이 공제 대상이 되는 것이 아니다 — 카드가 그것을 오답으로 못박는다. 그래서
-    `tax_credit()` 에 전환금을 그대로 넣어 계산하면 안 되고(그러면 8,000만원 전환이
-    한도를 채운 것으로 계산된다), 여기서 나온 «추가 공제 대상»에만 공제율을 곱한다.
-    """
+    """ISA 전환으로 추가되는 공제 대상액(원). 전환금을 tax_credit() 에 직접 넣는 것 금지."""
     return min(int(converted_won * ISA_ROLLOVER_CREDIT_RATE), ISA_ROLLOVER_CREDIT_CAP_WON)
 
 
-#: 운용변경 없음 판정 — 최종 운용지시 이후 경과 개월수 임계값.
-#: 타겟 룰베이스 TG-201 「리밸런싱 장기 미실시 고객」 = 12개월(근거등급 D, 기획자 설계
-#: 제안값 — 원문은 "리밸런싱이 필요한 고객"이라고만 하고 기간을 말하지 않는다).
-#: 예전 값 6 은 어느 문서에도 없었다. 룰베이스가 그 자리를 메우므로 12 로 맞춘다.
-#: churn() 의 가산 구간은 이탈 점수용이라 별개다 — 거기는 6개월을 그대로 둔다.
+#: 운용변경 없음 임계(개월) — TARGET_ID TG-201(근거등급 D). churn() 의 6개월 구간과 별개
 NO_CHANGE_MONTHS = 12
 
-# 만기예금 요건의 인정 범위(잔여일수) — "만기 1개월 전 만기 안내"(세그먼트 9·방법론 18). churn() 의
-# 만기 가산 구간(≤30/≤90)은 이탈 점수용이라 별개다.
+# 만기예금 요건 범위(잔여일수) — «만기 1개월 전 안내»(세그먼트 9·방법론 18). churn() 구간과 별개
 MAT_WINDOW_DAYS = 30
 
 
 @dataclass
 class Profile:
-    """타겟리스트·MyStar·CRM 을 조인한 고객 단위 레코드. 본 시스템의 단일 입력이다."""
+    """타겟리스트·MyStar·CRM 조인 고객 레코드(시스템 단일 입력)."""
 
     id: str
     nm: str
     ag: int
-    bal: int  # 평가금액(원). REQUIREMENTS.md §3.2 — 화면·프롬프트 표기는 '평가금액'으로 통일한다.
+    bal: int  # 평가금액(원)
     rk: str  # 투자성향
-    grade: str  # 고객 위험등급. 가입 가능한 상품 위험등급의 하드 상한이다.
+    grade: str  # 고객 위험등급(가입 상품 하드 상한)
     port: list[int]  # 자산 구성비(%) [예금, 채권형, TDF/MP, 섹터ETF]
     ret: float  # 1년 수익률(%)
-    retPct: int | None  # 동일 고객군 내 수익률 백분위. 값이 낮을수록 하위 구간이다.
-    # None 은 "아직 산출되지 않음". 피어그룹 수익률 조인이 늦게 붙는 값이라 실데이터 전환
-    # 초기에 비어 올 수 있고, 그때 요건이 성립하지 않을 뿐 브리핑 전체가 죽으면 안 된다.
+    retPct: int | None  # 수익률 백분위(낮을수록 하위). None = 미산출
     dopt: str  # 디폴트옵션 설정 여부 ("설정" / "미설정")
-    room: int  # 당해 세액공제 잔여한도(만원) — 원장 산출값(900만원 축).
-    # **«추가납입 여력»이 아니다.** 더 넣을 수 있는 금액은 `deposit_room`(1,800만원 축)이고,
-    # 이 값은 «더 넣으면 공제받을 수 있는 금액»이다. 예전 이름이 그 둘을 하나로 부르는 바람에
-    # 브리핑이 같은 수를 「세액공제_잔여한도」와 「납입여력」 두 이름으로 실었고, 화면은
-    # 그 수를 납입 상한으로 읽었다. 요건 판정(`add`·`tax`)이 보는 것은 계속 이 값이다.
-    dorm: int | None  # 최종 접촉 이후 경과 일수. None 은 "접촉 이력 소스 없음"(CRM 조인 전).
+    room: int  # 당해 세액공제 잔여한도(만원, 900만원 축). 납입 여력 아님(→ deposit_room)
+    dorm: int | None  # 최종 접촉 후 경과 일수. None = 소스 없음
     nchM: float  # 최종 운용변경 이후 경과 개월수
-    # ── 만기 ─────────────────────────────────────────────────
-    # 아래 셋은 **가장 가까운 만기 한 건**이다(요건 판정·재예치 전략의 입력). `mat` 요건은
-    # "만기 1개월 전 안내"라 가장 가까운 것만 보면 되고, st.mat_reprice 의 배분액도 그 건이다.
-    #
-    # 하지만 **고객이 들고 있는 만기가 그 하나라는 뜻은 아니다.** 예금과 GIC 를 함께 들고
-    # 만기가 서로 다른 고객이 있다(목업 9케이스 중 3명). "만기 언제야?" 에 가장 가까운 것
-    # 하나만 답하면 나머지는 없는 것이 되므로, 전체 목록은 `maturities` 가 따로 들고 있다.
+    # 아래 셋은 최근접 만기 1건(요건 판정·재예치용). 만기 전체는 `maturities`
     matDD: int | None = None  # 가장 가까운 만기까지의 잔여일수
-    matDate: str | None = None  # 가장 가까운 만기일(ISO). 잔여일수만으로는 "언제야?"에 날짜로
-    # 답할 수 없다 — 재료에 없으면 LLM 이 오늘 날짜에서 계산해 말하게 되고, 그 계산은 근거가 아니다.
+    matDate: str | None = None  # 최근접 만기일(ISO) — 없으면 LLM 이 날짜 역산
     matAmt: int = 0  # 그 만기일에 도래하는 금액(원)
-    holdings: list[dict] = field(default_factory=list)  # 보유상품 개별 종목 — 원장 그대로.
-    # [{"name","type","amount","principal","ret_1y","ret_own","pct","grade","rate",
-    #   "discontinued","opened","matures"}] 을 평가금액 내림차순으로. `assets`(자산군별 합계)
-    # 로는 "무슨 상품 들고 있어" · "판매중단된 거 있어" 에 답할 수 없다.
-    # 과거 상담 기록은 여기 두지 않는다 — 읽는 곳을 세션 저장소 하나로 모았다.
-    # 원장의 상담 기록은 scripts/seed_sessions.py 가 session_data 로 심는다(실서비스에서는
-    # CRM 이 같은 자리를 채운다). 여기에도 두면 같은 상담이 화면에 두 번 실린다.
-    peer: dict | None = None  # 동연령대 비교(원장) — 평균·상위1% 수익률, 상위1% 원리금보장
-    # 비중, 상위1%가 많이 담은 펀드·ETF. 모수가 저장소 밖이라 엔진이 계산할 수 없는 값이다.
-    activity: dict = field(default_factory=dict)  # 거래 활동(원장) — 최근 매매·입금일,
-    # 1년 매매 횟수, 상품군별 보유·매매 이력, 최근 1개월 고유계정대 증감.
-    pension_eligible: bool = False  # 연금개시 요건 충족 여부(원장 산출값 — 만 55세 & 가입
-    # 5년 & 개인부담금>0). 세 조건의 조합 판정을 코드가 다시 하지 않는다.
-    isa: dict | None = None  # ISA 만기자금 — {"amount", "date", "dd", "org", "within_1m"}.
-    # **IRP 계좌 밖의 돈**이다(추가납입 재원 후보). 보유 현황과 섞어 읽으면 IRP 잔액이
-    # 부풀어 보이므로 표기에서 갈라 둔다. 만기금액이 0 이면 None.
-    paid_by_year: dict[str, int] = field(default_factory=dict)  # 연도별 IRP 납입액(원).
-    # pension_paid_ytd(당해 세액공제 인정액)만으로는 "작년엔 얼마 넣었어" 에 답할 수 없다.
-    assets: list[dict] = field(default_factory=list)  # 자산군별 보유 — 원장 그대로.
-    # [{"type": 자산군, "amount": 평가금액(원), "pct": 비중(%)}]. `port` 4분류는 전략 로직이
-    # 쓰는 **요약**이라 정수 비중이고 여러 자산군을 한 칸에 접는다(port[0] 은 예금·GIC·
-    # 고유계정대·기타의 합). 그 요약만으로는 "고유계정대 얼마야?" 에 답할 수 없고 — 금액이
-    # 아예 없고, 비중도 반올림된 값이라 원장의 7.7% 가 8% 로 나간다. 원장 값은 여기 둔다.
-    maturities: list[dict] = field(default_factory=list)  # 만기 보유 전체.
-    # [{"date": ISO, "dd": 잔여일수, "type": 상품유형, "name": 상품명, "amount": 평가금액}] 을
-    # 만기일 오름차순으로. 대화형이 "만기 뭐뭐 있어?"에 빠짐없이 답하기 위한 재료다.
+    holdings: list[dict] = field(default_factory=list)  # 보유상품 개별 종목(평가금액 내림차순)
+    # 상담 기록은 미수록 — 세션 저장소 단일 경로(중복 노출 방지)
+    peer: dict | None = None  # 동연령대 비교(외부 조인값)
+    activity: dict = field(default_factory=dict)  # 거래 활동(원장)
+    pension_eligible: bool = False  # 연금개시 요건 충족(원장 산출값, 재판정 금지)
+    isa: dict | None = None  # ISA 만기자금(IRP 외부). 0 이면 None
+    paid_by_year: dict[str, int] = field(default_factory=dict)  # 연도별 IRP 납입액(원)
+    assets: list[dict] = field(default_factory=list)  # 자산군별 금액·비중(원장 소수값). port 는 정수 요약
+    maturities: list[dict] = field(default_factory=list)  # 만기 보유 전체(만기일 오름차순)
     nonface: bool = False  # 비대면 거래 채널 고객 여부
-    income_bracket: str | None = None  # 총급여 구간 ("5500이하" / "5500초과"). 세액공제율 판정에 사용한다.
-    customer_type: str | None = None  # "직장인" / "사업자" / "공통". strategy.pitch_refs 에서 화법을
-    # 고를 때만 쓴다 — 없으면 "공통" 화법으로 폴백(pitch_talk() 참고). 출처 미정: 타겟리스트·
-    # MyStar·CRM 중 실제 직업 구분 값이 있는지 확인이 이 필드 사용의 전제 조건이다.
-    # ── 부담금 재원별 구성 ────────────────────────────────────
-    # 적립금이 «누구 몫에서 왔는가». 수수료율표(fact.k04.f50)가 「사용자부담금(퇴직금)」과
-    # 「가입자부담금」으로 행이 갈리므로, 이 둘을 모르면 "수수료 얼마야?" 에 답할 수 없다.
-    # 값은 원장(06_PENSION `퇴직급여금액`·`개인부담금금액`)에 있었는데 여기서 접히지 않아
-    # 대화형이 직원에게 **부담금 종류를 되물었다**(pension_agent/CLAUDE.md §12 지워진 gap 30).
-    #
-    # **목업과 실데이터의 의미가 다르다.** 목업 12케이스는 이 둘의 합이 전체평가금액과
-    # 정확히 같다(= 평가금액을 재원별로 가른 값). 반면 실데이터 딕셔너리의 대응 컬럼
-    # `사용자부담금`(userBram)·`가입자부담금`(apctBram)은 «부담금 **납입** 누계금액」이고,
-    # 그 합은 `부담금납입누계금액` 이지 평가금액이 아니다(평가금액 = 납입누계 + 운용수익).
-    # 실데이터 전환 때 이 필드를 그대로 이어 붙이면 «평가금액 구성»이라고 적힌 자리에
-    # 납입누계가 들어간다 — 조인 시 어느 축인지 먼저 정해야 한다.
+    income_bracket: str | None = None  # 총급여 구간 ("5500이하" / "5500초과")
+    customer_type: str | None = None  # "직장인"/"사업자"/"공통" — 화법 선택용, 소스 미정
+    # 부담금 재원별 구성(수수료율표 f50 분기 기준)
+    # 주의: 목업은 합 = 평가금액, 실데이터 대응 컬럼(userBram·apctBram)은 납입 누계 — 전환 시 축 확인
     severance_amt: int = 0  # 퇴직급여(사용자부담금) 몫(원)
     own_contrib_amt: int = 0  # 개인부담금(가입자부담금) 몫(원)
-    pension_paid_ytd: int = 0  # 당해 연금계좌 기납입액(원). 세액공제 잔여 한도 산출에 사용한다.
+    pension_paid_ytd: int = 0  # 당해 세액공제 인정 납입액(원)
     paid_ytd_total: int = 0  # 당해 연금계좌 실납입액 합계(원) — IRP + 연금저축.
-    # 연금저축(연금저축펀드 포함) 계좌 보유 여부. None 은 «미확인»이다 — 원본 9Cases 에 없던
-    # 컬럼이라(tax_isa.연금저축보유여부, 데이터사전 21행) 값을 부여한 고객만 True/False 가 된다.
-    # 당해 연금저축 납입액 0원은 «올해 안 넣었다»일 뿐이라 이 값으로 대신 읽지 않는다.
+    # 연금저축 계좌 보유. None = 미확인(당해 납입 0원으로 대체 판정 금지)
     pension_savings: bool | None = None
-    # `pension_paid_ytd`(세액공제 **인정** 납입액)와 다른 값이다: 900만원을 넘겨 넣은 몫은
-    # 인정액에 안 잡히지만 1,800만원 납입한도는 그만큼 쓴다. `deposit_room` 의 입력이다.
-    balPct: int | None = None  # 평가금액(적립금) 백분위 — 값이 낮을수록 상위 구간이다(예:
-    # 9 → "상위 9%"). retPct(낮을수록 하위)와 표기 방향이 반대이니 주의 — "평가금액 상위
-    # N%"라는 화면 표현과 필드값이 그대로 일치하도록 관례를 맞췄다. retPct 와 같은 성격의
-    # 상류 배치 조인 필드다 — 모수(유사고객 모집단)가 이 저장소 안에 없어 엔진이 직접 계산할
-    # 수 없다. 없으면 "왜 이 고객님인가요?" 근거에서 해당 줄만 생략한다(engine._why_this_customer 참고).
-    cash_idle_pct: int | None = None  # 고유계정대(미투자 현금) 비중(%). port[0](예금) 중 운용
-    # 지시가 없어 대기 중인 부분만 가리키며, port[0] 의 부분집합이다(port[0] 을 대체하지 않음
-    # — 위험자산 한도 등 기존 게이팅 로직은 계속 port 4분류만 본다). 없으면 3분류 운용현황
-    # 표시를 생략한다(engine._three_way_breakdown 참고).
-    invest_period_years: float | None = None  # 투자기간(가입 후 경과연수). 상품추천 LLM 입력.
-    joined: str | None = None  # IRP 가입일(ISO). 경과연수만으로는 "언제 가입했어?" 에 날짜로
-    # 답할 수 없다 — matDate 와 같은 이유다(재료에 없으면 LLM 이 오늘에서 빼서 말한다).
-    pension_started: bool = False  # 연금수령 개시 여부. 참이면 추가납 요건(add·tax)이 성립하지 않는다
-    # (conditions() — 07_에이전트_기능정의/01 ① "연금개시 계좌 → 추가납 권유 금지", 방법론 59 "연금개시 →
-    # 추가입금 불가"; REQUIREMENTS.md §7). 상품추천 LLM 입력(§9)에도 쓴다.
-    club_grade: str | None = None  # 스타클럽 등급(예: "VIP"). CRM 조인 값 — 화면 상단에 값이 있을 때만
-    # 붙인다(REQUIREMENTS.md §3.1, 07_에이전트_기능정의/01 ① 양식 "만 57세 · VIP"). 없으면 생략한다.
+    balPct: int | None = None  # 평가금액 백분위(낮을수록 상위 — retPct 와 방향 반대)
+    cash_idle_pct: int | None = None  # 고유계정대 비중(%) — port[0] 의 부분집합
+    invest_period_years: float | None = None  # 가입 후 경과연수(반올림 — 문장 표기는 tenure_text)
+    joined: str | None = None  # IRP 가입일(ISO)
+    pension_started: bool = False  # 연금수령 개시 — 참이면 add·tax 미성립(추가납 권유 금지)
+    club_grade: str | None = None  # 스타클럽 등급 — 값 있을 때만 표시
 
     @property
     def risk_asset(self) -> int:
-        """위험자산 비중(%). TDF/MP 와 섹터 ETF 의 합계로 산출한다."""
+        """위험자산 비중(%) = TDF/MP + 섹터 ETF."""
         return self.port[2] + self.port[3]
 
     @property
@@ -279,39 +137,19 @@ class Profile:
 
     @property
     def risk_headroom_amt(self) -> int:
-        """위험자산 한도까지 남은 여력(원). 한도를 이미 초과한 경우 0 이다.
-
-        위험자산을 증가시키는 제안의 배분 상한으로 사용한다. 이 값을 넘겨 제안하면
-        제안 자체가 규정 위반이 된다.
-        """
+        """위험자산 한도까지 여력(원, 초과 시 0) — 위험자산 증가 제안의 배분 상한."""
         return max(0, round(self.bal * (RISK_ASSET_CAP_PCT - self.risk_asset) / 100))
 
     @property
     def tax_credit_rate(self) -> float:
-        """세액공제율. 소득 구간이 확인되지 않은 경우 낮은 쪽을 적용한다.
-
-        구간 미확인 상태에서 16.5% 를 적용하면 기대효과가 최대 25% 과대 산출된다.
-        과대 산출을 피하는 방향으로 기울인다.
-        """
+        """세액공제율. 구간 미확인 시 낮은 쪽(과대 산출 방지)."""
         return TAX_CREDIT_RATE.get(self.income_bracket or "", TAX_CREDIT_RATE["5500초과"])
 
     @property
     def deposit_room(self) -> int:
-        """연 납입한도(1,800만원)까지 남은 금액(원). **`room` 과 다른 축이다.**
-
-        여기 남은 만큼 «더 넣을 수 있다»는 뜻이지 «그만큼 공제받는다»는 뜻이 아니다 —
-        공제 대상은 `room`(900만원 축)까지고, 그 위 구간은 과세이연·이연공제다(fact.k04.f5).
-        두 값을 한 이름으로 부르면 작은 쪽이 납입 상한으로 읽힌다.
-
-        ISA 만기자금 전환은 이 한도에 걸리지 않는다(fact.k04.f4 ②) — 전환액은 여기서
-        빼지 않는다.
-        """
+        """연 납입한도(1,800만원)까지 남은 금액(원). `room`(공제 축)과 별개, ISA 전환액 미차감."""
         return max(0, DEPOSIT_CAP_WON - self.paid_ytd_total)
 
-
-# ─────────────────────────────────────────────────────────────
-# 타겟 선정 요건
-# ─────────────────────────────────────────────────────────────
 
 CONDS = {
     "dep": "원리금보장상품 편중(80% 이상)",
@@ -326,11 +164,7 @@ CONDS = {
     "sec": "특정 섹터 집중",
     "mis": "투자성향 불일치",
     "lim": "위험자산 한도 초과",
-    # ── 첫 화면 배지에서 온 요건 5종 ─────────────────────────────
-    # 판정 기준은 전부 지식베이스 세그먼트의 `condition_text` 원문이고, 임계값도 원문 값을
-    # 그대로 쓴다. 기획자가 세그먼트를 읽고 목업 9케이스에 부여한 배지(원본 08_BADGES)를
-    # 골든셋으로 두고, 아래 규칙이 그 Y/N 을 **정확히 재현하는지** 대조해 세웠다
-    # (tests/test_engine.py 「배지 골든셋」).
+    # 배지 요건 5종 — 세그먼트 condition_text 원문 기준, 배지 골든셋 재현(test_engine)
     "idl": "미운용 현금성자산",
     "hlt": "판매중단·환매추천 펀드 보유",
     "pen": "연금개시 요건충족 후 미개시",
@@ -338,34 +172,19 @@ CONDS = {
     "out": "이탈위험 관찰(현금화 신호)",
 }
 
-#: 원리금보장 편중 판정 — 고유계정대+예금+GIC 합산 비중 임계값(%).
-#: 타겟 룰베이스 TG-202 「원리금보장상품 고편중 조기경보」 = 80% 이상 100% 미만(근거등급 D,
-#: 기획자 설계 제안값 — 원문에 없다) + TG-003 「고유계정대·시중은행 정기예금 100% 보유」
-#: (근거등급 A, 문서 직접명시)의 합집합이라 상한을 두지 않는다. 상한(<100)을 그대로 옮기면
-#: 100% 고객이 어느 쪽에도 안 걸리는 구멍이 생기고, port[0] 이 4분류 반올림·합100 보정을
-#: 거친 값이라 99/100 경계가 원장 소수점이 아니라 반올림에 따라 갈린다.
-#:
-#: 예전 값은 60 이었다. 그 60 은 원문에도 룰베이스에도 없는 수였고 — 지식베이스 세그먼트
-#: 1·40·53 의 검토주석이 "코드 판정과 모집단이 다름, 팀 결정 필요"로 남겨둔 자리다 —
-#: 목업 9케이스에서 오세훈(합산 69%)에게 「원리금보장 편중」을 세웠다. 기획자가 확인해준
-#: 배지는 그를 N 으로 둔다. 80 으로 올리면 배지와 일치한다.
+#: 원리금보장 편중 임계(%) — TARGET_ID TG-202(D, 80~100%) ∪ TG-003(A, 100%) 합집합이라 상한 없음
 PRINCIPAL_HEAVY_PCT = 80
 
-#: 미운용 현금성자산 판정 — 고유계정대 비중 임계값(%).
-#: 세그먼트 1 "고유계정대(현금성자산) 보유 비율 50% 이상"(Series 1, 2026.05) · 세그먼트 3 이
-#: 같은 값을 '이탈위험 선별' 용도로 병기한다. 세그먼트 3 은 100만원·7,500만원 기준도 함께
-#: 적는데 용도가 다르다(대량 LMS·TM 콜 배분) — 여기서 쓰는 것은 선별용 50% 다.
+#: 미운용 현금성자산 임계 — 고유계정대 비중(%), TARGET_ID TG-001 · 세그먼트 1·3 선별 기준
 CASH_IDLE_PCT = 50
 
-# 요건 '표기' 순서 전용이다 — 전략 선정 순서는 engine._score() 의 산출 결과를 따르므로,
-# 이 배열을 바꿔도 어떤 전략이 뽑히는지는 달라지지 않는다.
+# 요건 표기·타겟 목록 우선순위(전략 선정은 engine._score)
 PRIO = ["chn", "out", "dor", "lim", "mis", "sec", "hlt", "dep", "idl", "nod", "low",
         "mat", "isa", "pen", "tax", "add", "nch"]
 
 
 def churn(p: Profile) -> float:
-    """이탈 위험 점수. 미접촉·만기임박·성과저조·방치·미설정을 가산한다."""
-    # 값이 없는 항목은 가산하지 않는다 — 모르는 것을 위험으로도 안전으로도 치지 않는다.
+    """이탈 위험 점수 — 미접촉·만기임박·성과저조·방치·미설정 가산(None 항목 미가산)."""
     v = min(8.0, p.dorm / 60) if p.dorm is not None else 0.0
     if p.matDD is not None and p.matDD <= 30:
         v += 3
@@ -381,24 +200,21 @@ def churn(p: Profile) -> float:
 
 
 def conditions(p: Profile) -> list[str]:
-    """성립하는 타겟 선정 요건을 PRIO 순으로 반환한다."""
+    """성립 타겟 요건(PRIO 순)."""
     a: set[str] = set()
-    # port[0] = 고유계정대+예금+GIC = 룰베이스의 «원리금보장_합산비율».
+    # port[0] = 룰베이스 «원리금보장_합산비율»
     if p.port[0] >= PRINCIPAL_HEAVY_PCT:
         a.add("dep")
     if p.dopt == "미설정":
         a.add("nod")
-    # retPct·dorm 은 None 으로 올 수 있다(§4 소스 미확정 필드). 값이 없으면 요건을 세우지
-    # 않는다 — matDD 가 이미 같은 방식이다. 여기서 None 을 비교하면 TypeError 로 브리핑 전체가
-    # 죽는다(실제로 그랬다).
+    # None 가드 필수 — None 비교 시 TypeError 로 브리핑 전체 중단
     if p.retPct is not None and p.retPct <= 30:
         a.add("low")
     if p.dorm is not None and p.dorm >= 180:
         a.add("dor")
     if p.nchM >= NO_CHANGE_MONTHS:
         a.add("nch")
-    # 아래끝 0 이 있어야 «만기 1개월 전 안내»가 성립한다 — 오늘이 만기를 지나가면 matDD 는
-    # 음수가 되는데, 상한만 보면 지난 만기가 영원히 요건에 남아 «곧 만기»라고 안내하게 된다.
+    # 하한 0 필수 — 지난 만기(음수) 제외
     if p.matDD is not None and 0 <= p.matDD <= MAT_WINDOW_DAYS:
         a.add("mat")
     if p.port[3] >= 50:
@@ -414,42 +230,25 @@ def conditions(p: Profile) -> list[str]:
     if churn(p) >= 10:
         a.add("chn")
 
-    # ── 배지 요건 5종 ────────────────────────────────────────────
-    # 고유계정대가 많다는 사실 하나로는 «방치»인지 «빼려고 현금화한 것»인지 갈리지 않는다.
-    # 세그먼트 26(현금성자산 '미운용/사용계획 없음' 판정 — 오탐 제거 방법론)이 그 갈림을
-    # 정한다: "① 1개월 이상 금액 변동 없음". 변동이 없으면 방치(idl), 최근 유입이 있으면
-    # 자금을 옮기려 현금화한 신호로 보고 관찰 대상(out)이다 — 세그먼트 34 가 ETF 성향
-    # 고객을 증권사 이탈 최고위험군으로 지목하는 자리와 맞물린다.
-    # (세그먼트 26 은 scope=참고 라 문제상황으로 뜨지 않는다. 판정 근거로만 쓴다.
-    #  그 검토주석은 "1·3 의 제외 조건으로 결합하자는 제안은 정리자의 해석"이라고 남기는데,
-    #  기획자의 배지 부여가 실제로 그 결합을 따랐고 9케이스에서 정확히 재현된다.)
+    # 고유계정대 과다 — 1개월 변동 없음이면 방치(idl), 유입이면 현금화 신호(out). 세그먼트 26·34
     if p.cash_idle_pct is not None and p.cash_idle_pct >= CASH_IDLE_PCT:
         delta = (p.activity or {}).get("cash_delta_1m")
         if delta:
-            # 임계값 «미정»: 세그먼트 34 는 ETF 성향을 조건으로 적을 뿐 "유입이 얼마 이상"을
-            # 말하지 않고, 검토주석도 본부·현장 관점이 정반대 모집단이라 팀 결정이 필요하다고
-            # 남겨뒀다. 골든셋 양성이 1명(윤가영 +1.7억)뿐이라 어떤 임계값을 놔도 재현되므로,
-            # 지어내지 않고 «유입이 있으면 관찰»(>0)로 가장 넓게 둔다. 실데이터에서 과다
-            # 검출되면 그때 팀이 정한 값을 여기 넣는다.
+            # 유입 임계값 미정(원문 없음) — 지어내지 않고 >0
             if delta > 0:
                 a.add("out")
         else:
             a.add("idl")
-    # 세그먼트 8 — 판정 근거는 본부가 배포하는 '환매추천 펀드'(구 '판매중단 펀드') 목록이다.
-    # 원장이 상품마다 판매중단 여부를 실어 주므로 목록 조인이 이미 끝난 형태로 들어온다.
-    # 원문의 제외 조건("PB센터 관리고객 제외")은 원장에 해당 컬럼이 없어 적용하지 못한다.
+    # 세그먼트 8 — PB센터 제외 조건은 원장 컬럼 없어 미적용
     if any(h.get("discontinued") for h in p.holdings):
         a.add("hlt")
-    # 세그먼트 19-1 — "만 55세 이상 & 가입 5년 경과(또는 퇴직급여 보유) & 아직 연금 미개시".
-    # 셋의 조합 판정은 원장이 `연금개시요건충족여부` 로 이미 산출해 준다(엑셀 수식).
+    # 세그먼트 19-1 — 요건 충족은 원장 산출값
     if p.pension_eligible and not p.pension_started:
         a.add("pen")
-    # 세그먼트 17 — "ISA 만기 도래(예정) 또는 만기해지 후 60일 미경과". 만기 예정분만 원장에
-    # 들어온다(해지 후 경과일 컬럼은 없다).
+    # 세그먼트 17 — 만기 예정분만(해지 후 경과일 컬럼 없음)
     if p.isa:
         a.add("isa")
-    # 연금수령 개시 계좌에는 추가납 요건을 세우지 않는다 — 연금지급설계가 등록되면 추가입금 자체가
-    # 불가하고(방법론 59), 권유는 "하지 말 것"이다(07_에이전트_기능정의/01 ①). REQUIREMENTS.md §7.
+    # 연금개시 계좌는 추가납 요건 미성립(추가입금 불가 — 방법론 59)
     if not p.pension_started:
         if p.room > 0:
             a.add("add")
@@ -459,94 +258,41 @@ def conditions(p: Profile) -> list[str]:
 
 
 def days_to_year_end(base: date | None = None) -> int:
-    """연말(12/31)까지의 잔여일수. 세액공제 전략의 시급성 산출에 사용한다.
-
-    **오늘은 세지 않는다** — 12/31 당일이면 0 이다. "오늘 포함 며칠"은 이 값 +1 이라
-    같은 날에 대해 두 숫자가 다 성립한다. 어느 쪽인지 말하지 않고 하나만 던지면 하루짜리
-    오안내가 되므로, 상담에 싣는 쪽(consult_agent 의 `date` 도구)은 둘을 함께 밝힌다.
-    """
+    """연말까지 잔여일수(오늘 미포함, 12/31 당일 0). 오늘 포함은 +1."""
     base = base or today()
     return (date(base.year, 12, 31) - base).days
 
 
-# ─────────────────────────────────────────────────────────────
-# 고객 로스터 — 시연용 더미 12케이스
-# (customers.json ← IRP_Agent_더미고객_9Cases_v3.xlsx 9 + scripts/demo_cases.json 3)
+# 고객 로스터 — customers.json(생성물) → Profile 매핑만
+#   · port 4분류 [원리금보장+현금, 채권형(저위험 수익증권), 실적배당 수익증권, ETF], cash_idle_pct ⊂ port[0]
+#   · grade 는 원본에 없음 → PREF[투자성향] 으로 보수적 파생(실데이터 전환 시 교체)
+#   · retPct·balPct·customer_type 은 None
+#   · income_bracket 은 총급여에서 구간으로(기획자 확인 전 부여 컬럼)
+#   · matDD/matAmt 는 만기 보유상품 중 최근접 만기
 #
-# 원장은 `config.CUSTOMERS_JSON` 이다(scripts/import_customers.py 가 원본 xlsx 에서 생성 —
-# 손으로 고치지 않는다). 여기서는 그 레코드를 Profile 로 **매핑만** 한다. 매핑 규약:
-#
-#   · port 4분류 [원리금보장(예금+GIC)+현금, 채권형, 실적배당 수익증권, ETF] — 원본의
-#     5분류(고유계정대/예금/GIC/수익증권/ETF)에서 접는다. 채권형은 수익증권 중 위험등급
-#     매우낮은위험·낮은위험인 상품의 평가금액 합. cash_idle_pct(고유계정대)는 port[0] 의
-#     부분집합이라는 기존 규약 그대로다.
-#   · grade(고객 위험등급)는 원본에 없다 → PREF[투자성향] 으로 **보수적으로 파생**한다.
-#     실데이터 전환 시 실제 고객 위험등급 컬럼으로 교체한다(docs/DEMO_STATUS.md §4).
-#   · retPct·balPct·customer_type 은 원본에 모수·컬럼이 없다 → None 으로 둔다(그레이스풀
-#     생략 경로가 이미 있다).
-#   · income_bracket 은 `05_TAX_ISA.총급여` 에서 구간으로 접는다(_income_bracket).
-#     **원본 9Cases 에는 없던 컬럼이고 2026-09-18 에 우리가 넣었다** — 기획자 확인 전이다
-#     (09_데이터사전에 그렇게 적어 두었다). 그 전에는 전원 None 이라 공제율이 언제나
-#     13.2% 로 떨어졌고, 대화형은 세액공제 질문마다 총급여를 되물었다. 16.5% 경로가
-#     통째로 안 돌던 자리다.
-#   · matDD/matAmt 는 만기일 있는 보유상품(예금·GIC) 중 최근접 만기의 잔여일수·평가금액 합.
-#
-# ── 접지 않은 원장 컬럼 (2026-09-07 전수 대조) ────────────────────────────────
-# **원장에 컬럼이 있는 것과 답할 수 있는 것은 다르다.** 여기서 접히지 않으면 대화형은 그
-# 값을 본 적이 없고, 그런데도 «없는 값»이 아니라 «답을 못 하는 값»으로 보여서 눈에 띄지
-# 않는다 — 부담금 재원 구성(퇴직급여/개인부담금)이 그래서 반년 가까이 되묻기로 남아 있었다
-# (pension_agent/CLAUDE.md §12 지워진 gap 30). 그래서 남은 것을 **이유와 함께** 적어둔다.
-#
-#   badges 블록 전체     기획자가 세그먼트를 읽고 부여한 **골든셋**이다. 요건은 계좌 값에서
-#                        코드가 판정하고(conditions()), 배지는 그 판정을 대조하는 정답표로만
-#                        쓴다(tests/test_engine.py). 접으면 정답을 보고 답을 쓰는 꼴이 된다.
-#   summary 의 비중 컬럼  `_assets()` 가 원장 소수값을 그대로 옮긴다(접는 대상이 아니다).
-#   tax_isa.세액공제기준한도  같은 값이 TAX_CREDIT_CAP_WON(fact.k04.f2)에 있다. 원장에서도
-#                        읽으면 세법 개정 때 한쪽만 고쳐져 화면과 답변이 갈린다.
-#   tax_isa.총급여        **금액은 접지 않고 구간만 접는다**(income_bracket). 공제율 판정에
-#                        쓰는 것은 구간이고, 금액을 화면·답변에 세울 요건이 지식베이스에
-#                        없다 — 실으면 «총급여 얼마야»에 LLM 이 답하기 시작한다(루트
-#                        CLAUDE.md "없는 기준은 만들지 않는다"). 요건이 생기면 그때 접는다.
-#   basic.관리점          읽는 곳이 없다. 화면 상단 요건(REQUIREMENTS.md §3.1)에도 없다.
-#   basic.투자성향분석일   유효기간 규칙이 지식베이스에 없다. 날짜만 실으면 «언제까지 유효한가»를
-#                        LLM 이 지어낸다(루트 CLAUDE.md "없는 기준은 만들지 않는다").
-#   summary.디폴트옵션위험등급  설정 여부(dopt)만 접는다. 등급별 판정 기준이 아직 없다.
-#   pension.연금개시일·연금지급설계등록여부  12케이스 전원이 미개시라 값이 없다(전부 null/N).
-#                        연금개시 고객이 생기면 그때 `pension_started` 옆에 함께 접는다.
-#   pension.퇴직급여포함여부  `severance_amt > 0` 과 같은 뜻이라 금액만 접는다.
-#   products.판매상태     `판매중단여부` 로 이미 판정한다. 데이터사전이 "목업 시나리오용 가상
-#                        상태"라고 못박은 컬럼이기도 하다.
-#   history 블록          scripts/seed_sessions.py 가 세션 저장소로 심는다 — Profile 에도
-#                        두면 같은 상담이 화면에 두 번 실린다(위 holdings 주석 참고).
-#
-# customers.json 이 없으면 로스터는 빈 리스트다 — 브리핑 CLI·Streamlit 화면·문제상황
-# 덤프는 "등록된 고객 없음" 으로 빠지고 `get_profile()` 은 None 을 반환한다.
-# ─────────────────────────────────────────────────────────────
+# 접지 않은 원장 컬럼(이유)
+#   badges 블록               골든셋 — 판정 입력으로 쓰면 정답을 보고 답을 씀
+#   tax_isa.세액공제기준한도   TAX_CREDIT_CAP_WON 과 중복(이중 관리 금지)
+#   tax_isa.총급여            구간만 사용 — 금액 노출 요건 없음
+#   basic.관리점              사용처 없음
+#   basic.투자성향분석일       유효기간 규칙 없음(LLM 이 지어냄)
+#   summary.디폴트옵션위험등급  등급별 판정 기준 없음
+#   pension.연금개시일·연금지급설계등록여부  전원 미개시라 값 없음
+#   pension.퇴직급여포함여부   severance_amt > 0 과 동일
+#   products.판매상태          판매중단여부로 판정(가상 상태 컬럼)
+#   history 블록              seed_sessions 가 세션 저장소로 수록(중복 노출 방지)
+# customers.json 없으면 빈 로스터, get_profile() 은 None
 
 _BOND_GRADES = ("매우낮은위험", "낮은위험")  # 수익증권 중 채권형으로 접는 위험등급
 
 
 def _days_since(iso: str | None) -> int | None:
-    """그 날짜 이후 **오늘까지** 경과한 일수. 기준은 AS_OF 가 아니다 — 마지막 접촉이
-    언제였는지는 원장이 찍힌 날이 아니라 지금 묻는 것이기 때문이다."""
+    """그 날짜부터 오늘까지 경과 일수(AS_OF 기준 아님)."""
     return (today() - date.fromisoformat(iso)).days if iso else None
 
 
 def tenure_text(iso: str | None) -> str | None:
-    """그 날짜 이후 오늘까지를 **사람이 말하는 꼴**로 — 「3년」·「2년 10개월」·「7개월」.
-
-    `invest_period_years` 는 소수 한 자리로 반올림한 수라(적합성·상품추천의 입력) 그대로
-    문장에 실으면 「가입 후 3.0년이 지났어요」가 된다 — 직원도 고객도 그렇게 말하지 않고,
-    반올림 때문에 3년 1개월과 2년 11개월이 같은 「3.0년」으로 보인다(2026-09-21 실측,
-    질문 리스트 25번).
-
-    **수를 고치지 않고 표기를 만든다.** 그 필드는 계산의 입력이라 꼴을 바꾸면 쓰는 쪽이
-    깨지고, 반대로 반올림한 수에서 개월을 되짚으면 없는 정밀도를 지어내는 것이다 —
-    그래서 날짜에서 바로 센다. 기준은 `_days_since` 와 같은 «오늘»이다.
-
-    0개월이면 년만, 1년 미만이면 개월만 적는다. 「0년 7개월」·「3년 0개월」은 둘 다
-    사람이 쓰지 않는 말이다.
-    """
+    """오늘까지 경과 기간 표기(「3년」·「2년 10개월」·「7개월」) — 날짜에서 직접 계산(invest_period_years 사용 금지)."""
     if not iso:
         return None
     start, now = date.fromisoformat(iso), today()
@@ -563,7 +309,7 @@ def tenure_text(iso: str | None) -> str | None:
 
 
 def _port(rec: dict) -> tuple[list[int], int]:
-    """원본 5분류 → port 4분류(%)와 cash_idle_pct. 정수 반올림 후 합 100 을 보정한다."""
+    """원본 5분류 → port 4분류(%, 합 100 보정)와 cash_idle_pct."""
     sm, bal = rec["summary"], rec["summary"]["전체평가금액"]
     bond = sum(p["평가금액"] for p in rec["products"]
                if p["상품유형"] == "수익증권"
@@ -575,17 +321,16 @@ def _port(rec: dict) -> tuple[list[int], int]:
         sm["ETF평가금액"],
     ]
     port = [round(a * 100 / bal) for a in amounts]
-    port[port.index(max(port))] += 100 - sum(port)  # 반올림 오차는 최대 슬롯에서 흡수
+    port[port.index(max(port))] += 100 - sum(port)  # 반올림 오차는 최대 슬롯이 흡수
     return port, round(sm["고유계정대평가금액"] * 100 / bal)
 
 
-#: 원장 요약(02_IRP_SUMMARY)의 자산군. 값이 0 인 자산군은 싣지 않는다.
+#: 원장 요약 자산군(0 인 것 제외)
 _ASSET_TYPES = ("고유계정대", "예금", "GIC", "수익증권", "ETF", "기타")
 
 
 def _assets(rec: dict) -> list[dict]:
-    """자산군별 평가금액·비중을 원장 그대로. 비중은 원장의 소수값을 소수점 한 자리로만
-    옮긴다 — 반올림해 정수로 만들면 7.7% 가 8% 로 나가 원장과 어긋난 값이 답변에 실린다."""
+    """자산군별 평가금액·비중(소수 한 자리, 정수 반올림 금지)."""
     sm = rec["summary"]
     out = []
     for t in _ASSET_TYPES:
@@ -596,7 +341,7 @@ def _assets(rec: dict) -> list[dict]:
 
 
 def _holdings(rec: dict) -> list[dict]:
-    """보유상품 개별 종목. 평가금액 내림차순 — 직원이 큰 것부터 본다."""
+    """보유상품 개별 종목(평가금액 내림차순)."""
     rows = [{"name": h["상품명"], "type": h["상품유형"], "amount": h["평가금액"],
              "principal": h["매입원금잔액"], "ret_1y": h.get("최근1년수익률"),
              "ret_own": h.get("고객보유수익률"), "pct": round((h.get("PF비중") or 0) * 100, 1),
@@ -608,7 +353,7 @@ def _holdings(rec: dict) -> list[dict]:
 
 
 def _peer(rec: dict) -> dict | None:
-    """동연령대 비교. 모수(유사고객 집단)가 저장소 밖이라 엔진이 산출할 수 없는 조인값이다."""
+    """동연령대 비교(외부 조인값)."""
     q = rec.get("peer") or {}
     if not q:
         return None
@@ -624,7 +369,7 @@ def _peer(rec: dict) -> dict | None:
 
 
 def _activity(rec: dict) -> dict:
-    """거래 활동. 원장 컬럼을 그대로 옮긴다 — 판정하지 않는다."""
+    """거래 활동(원장 그대로)."""
     a = rec.get("activity") or {}
     return {"last_trade": a.get("최근상품매매일"), "last_order": a.get("최근운용지시일"),
             "last_deposit": a.get("최근입금일"), "trades_1y": a.get("최근1년상품매매횟수"),
@@ -637,7 +382,7 @@ def _activity(rec: dict) -> dict:
 
 
 def _isa(rec: dict) -> dict | None:
-    """ISA 만기자금. 만기금액이 없으면 None — 없는 것을 0원으로 실으면 화면에 줄이 생긴다."""
+    """ISA 만기자금. 만기금액 없으면 None."""
     t = rec["tax_isa"]
     amt = t.get("ISA만기금액") or 0
     if not amt:
@@ -649,23 +394,14 @@ def _isa(rec: dict) -> dict | None:
 
 
 def _paid_by_year(rec: dict) -> dict[str, int]:
-    """연도별 IRP 납입액. 원장 컬럼명(`2023년IRP납입액`)에서 연도만 뽑는다."""
+    """연도별 IRP 납입액(컬럼명에서 연도 추출)."""
     return {k.replace("IRP납입액", ""): v
             for k, v in rec["tax_isa"].items()
             if k.endswith("IRP납입액") and not k.startswith("당해") and v}
 
 
 def next_maturity(mats: list[dict]) -> dict | None:
-    """만기 목록에서 «지금 이야기할 만기» 한 건. 만기일 오름차순 목록을 받는다.
-
-    아직 오지 않은 것 중 가장 가까운 것이다. 오늘이 움직이므로 목록 맨 앞이 이미 지난
-    만기일 수 있는데, 그걸 그대로 집으면 그 뒤에 있는 **진짜 다음 만기가 통째로 가려져**
-    30일 안에 만기가 오는 고객이 요건에서 빠진다.
-
-    전부 지났으면 **가장 최근에 지난 것**을 집는다(맨 앞은 제일 오래 전 것이라 쓸모가 없다).
-    그때 화면은 "만기 경과 N일"로 읽고(engine/text.py::dday) 요건은 서지 않는다 —
-    지난 돈이 어떻게 됐는지는 원장 스냅샷이 모르므로 사실만 적고 판단은 직원에게 남긴다.
-    """
+    """다가올 만기 중 최근접 1건, 전부 지났으면 가장 최근 지난 것(맨 앞 선택 금지 — 다음 만기 가려짐)."""
     if not mats:
         return None
     upcoming = [m for m in mats if m["dd"] >= 0]
@@ -673,8 +409,7 @@ def next_maturity(mats: list[dict]) -> dict | None:
 
 
 def _maturities(rec: dict) -> list[dict]:
-    """만기일이 있는 보유상품 전체를 만기일 오름차순으로. 예금만이 아니다 — GIC 처럼
-    만기가 있는 다른 상품도 함께 담는다(상품 유형을 같이 실어야 어느 만기인지 분간된다)."""
+    """만기 있는 보유상품 전체(예금·GIC 등, 만기일 오름차순)."""
     rows = [{"date": p["약정만기년월일"],
              "dd": (date.fromisoformat(p["약정만기년월일"]) - today()).days,
              "type": p["상품유형"], "name": p["상품명"], "amount": p["평가금액"]}
@@ -683,27 +418,19 @@ def _maturities(rec: dict) -> list[dict]:
 
 
 def _paid_ytd_total(tax_isa: dict) -> int:
-    """당해 연금계좌 실납입액 합계(원) — IRP + 연금저축.
-
-    두 컬럼이 다 있어야 성립한다. 하나라도 없으면 세액공제 **인정액**으로 떨어진다 —
-    인정액은 900만원에서 잘린 값이라 합계보다 작거나 같고, 그래서 납입 여력을 과대
-    산출하지 않는다(공제율을 구간 미확인일 때 낮은 쪽으로 두는 것과 같은 방향이다).
-    """
+    """당해 실납입액 합계(IRP + 연금저축). 컬럼 누락 시 인정액으로 폴백(여력 과대 방지)."""
     irp, sav = tax_isa.get("당해년도IRP납입액"), tax_isa.get("당해년도연금저축납입액")
     if irp is None or sav is None:
         return tax_isa["당해년도세액공제인정납입액"]
     return irp + sav
 
 
-#: 총급여 구간 경계(원). 세법은 「총급여액 5,500만원 **이하**」라 경계값은 낮은 구간에
-#: 든다 — 박지민이 정확히 이 값이라, 부등호를 `<` 로 쓰면 그 한 명이 조용히 13.2% 로
-#: 넘어간다(원장은 그대로인데 환급액만 25% 작아진다).
+#: 총급여 구간 경계(원) — 경계값은 «이하» 구간(`<` 금지)
 INCOME_BRACKET_EDGE_WON = 55_000_000
 
 
 def _income_bracket(tax_isa: dict) -> str | None:
-    """총급여(원) → 세액공제율 구간. 컬럼이 없으면 None 이고, 그때는 `tax_credit_rate`
-    가 낮은 쪽으로 떨어진다(과대 산출을 피하는 방향 — 그 프로퍼티 주석)."""
+    """총급여(원) → 공제율 구간. 컬럼 없으면 None."""
     salary = tax_isa.get("총급여")
     if salary is None:
         return None
@@ -716,7 +443,7 @@ def _to_profile(rec: dict) -> Profile:
     mats = _maturities(rec)
     assets = _assets(rec)
     isa = _isa(rec)
-    # 요건 판정·재예치 전략의 입력이 되는 만기 한 건. 같은 날짜에 여러 건이면 합산한다.
+    # 최근접 만기 1건(같은 날짜 여러 건은 합산)
     focus = next_maturity(mats)
     nearest = focus["date"] if focus else None
     mat_dd = focus["dd"] if focus else None
@@ -725,7 +452,7 @@ def _to_profile(rec: dict) -> Profile:
     return Profile(
         id=rec["id"], nm=basic["고객명"], ag=basic["만나이"],
         bal=sm["전체평가금액"], rk=rk,
-        grade=PREF[rk],  # 파생값 — 위 매핑 규약 참고
+        grade=PREF[rk],  # 파생값
         port=port,
         ret=round(sm["최근1년IRP수익률"] * 100, 1),
         retPct=None, balPct=None,
@@ -739,8 +466,7 @@ def _to_profile(rec: dict) -> Profile:
         peer=_peer(rec), activity=_activity(rec),
         cash_idle_pct=cash_pct,
         pension_paid_ytd=rec["tax_isa"]["당해년도세액공제인정납입액"],
-        # 납입한도 여력의 입력. 인정액이 아니라 **실납입액**을 더한다 — 한도를 넘겨 넣은
-        # 몫은 공제 인정액에서 빠지지만 1,800만원 한도는 그만큼 쓴다.
+        # 인정액 아닌 실납입액(납입한도 여력 입력)
         paid_ytd_total=_paid_ytd_total(rec["tax_isa"]),
         pension_savings={"Y": True, "N": False}.get(rec["tax_isa"].get("연금저축보유여부")),
         invest_period_years=round((_days_since(rec["pension"]["IRP가입일"]) or 0) / 365.25, 1),
@@ -754,15 +480,14 @@ def _to_profile(rec: dict) -> Profile:
 
 
 def _load_personas() -> list[Profile]:
-    from pension_agent.common import config  # noqa: PLC0415 — 경로는 config 소유(구조 규칙)
+    from pension_agent.common import config  # noqa: PLC0415 — 경로는 config 소유
 
     if not config.CUSTOMERS_JSON.is_file():
         return []
     doc = json.loads(config.CUSTOMERS_JSON.read_text(encoding="utf-8"))
     as_of = doc.get("meta", {}).get("as_of")
     if as_of != AS_OF.isoformat():
-        # 스냅샷 값(잔액·수익률)이 어느 시점 것인지가 어긋나면 화면 전체가 거짓이 된다.
-        # 조용히 계속하지 않는다. 오늘(today())과 어긋나는 것은 정상이다 — 원장은 묵는다.
+        # 기준일 불일치는 중단(오늘과의 차이는 정상)
         raise ValueError(
             f"customers.json 기준일({as_of})이 customer.AS_OF({AS_OF})와 다릅니다 — "
             "원본 xlsx 교체 시 AS_OF 를 함께 맞추세요.")
@@ -773,25 +498,14 @@ PERSONAS: list[Profile] = _load_personas()
 
 _BY_ID = {p.id: p for p in PERSONAS}
 
-#: 고객 id(KB-PIN)의 원장 표기 — 6자리-7자리. 앞자리가 생년월일이라 **주민등록번호와 같은
-#: 꼴**이고, 행내 개인정보 필터(APIM 의 LLM 앞단 · 플랫폼 게이트웨이의 요청/응답)가 그 꼴을
-#: 잡는다. 그래서 프론트는 다른 꼴로 보내고 여기서 원장 표기로 되돌린다.
-#: 하이픈을 뺀 13자리 — 받기는 한다.
+#: KB-PIN 하이픈 없는 13자리. 원장 표기(6-7자리)는 주민번호 꼴이라 개인정보 필터에 차단됨
 _ID_COMPACT = re.compile(r"^\d{13}$")
-#: 프론트가 보내는 꼴 — `b64:` + 원장 표기의 base64(`b64:MTcxMjAzLTQ4MTUwNjI=`). 연속된
-#: 숫자열이 없어 숫자열을 보는 룰에 걸리지 않는다(«기본필터»의 룰 표는 확인된 바 없다).
-#: 접두를 두는 이유는 base64 문자열이 다른 꼴과 겉으로 갈리지 않기 때문이다 — 접두 없는
-#: 값은 풀지 않는다.
+#: 프론트 전송 꼴 접두 — `b64:` + 원장 표기 base64(접두 없는 값은 디코딩 안 함)
 ID_B64_PREFIX = "b64:"
 
 
 def normalize_id(value: str | None) -> str | None:
-    """요청이 실어 온 고객 id 를 원장 표기(`171203-4815062`)로. 비어 있으면 None.
-
-    받는 꼴은 셋이다 — 원장 표기 그대로 · 하이픈을 뺀 13자리(`1712034815062`) · `b64:` 접두의
-    base64. 뒤의 둘을 받는 이유는 위 주석이다. 그 밖의 꼴은 손대지 않는다 — 여기서 고쳐 쓰기 시작하면
-    없는 고객이 있는 고객으로 읽힐 수 있다. id 의 형식을 아는 곳은 이 모듈 하나다.
-    """
+    """요청 고객 id(원장 표기 · 13자리 · `b64:`) → 원장 표기. 그 밖의 꼴은 그대로, 빈 값은 None."""
     text = (value or "").strip()
     if not text:
         return None
@@ -799,7 +513,7 @@ def normalize_id(value: str | None) -> str | None:
         try:
             decoded = base64.b64decode(text[len(ID_B64_PREFIX):], validate=True).decode("utf-8")
         except (ValueError, UnicodeDecodeError):
-            return text          # 풀리지 않는 값은 그대로 — 없는 고객으로 떨어진다
+            return text          # 디코딩 실패 → 그대로(없는 고객)
         return normalize_id(decoded)
     if _ID_COMPACT.match(text):
         return f"{text[:6]}-{text[6:]}"
@@ -807,15 +521,10 @@ def normalize_id(value: str | None) -> str | None:
 
 
 def encode_id(customer_id: str) -> str:
-    """원장 표기를 요청에 실을 꼴(`b64:…`)로 — 연속된 숫자열이 남지 않는다. `normalize_id` 의
-    역이고, 프론트가 보내야 하는 꼴의 기준이다(client/README.md)."""
+    """원장 표기 → `b64:…`(normalize_id 의 역, 프론트 전송 기준)."""
     return ID_B64_PREFIX + base64.b64encode(customer_id.encode("utf-8")).decode("ascii")
 
 
 def get_profile(customer_id: str) -> Profile | None:
-    """고객 id 로 Profile 을 조회한다. 지금은 PERSONAS 조회의 얇은 래퍼일 뿐이지만, 대화형
-    에이전트(consult_agent 의 customer 도구)가 이 함수 하나만 의존하도록 해 나중에 실제 고객
-    프로파일 저장소로 교체할 때 이 함수 본문만 바꾸면 되게 한다.
-
-    로스터가 비어 있는 지금은 어떤 id 로도 None 이 나온다 — 호출부는 이미 None 을 다룬다."""
+    """고객 id → Profile(없으면 None). 실 저장소 교체 시 이 함수만 수정."""
     return _BY_ID.get(customer_id)
