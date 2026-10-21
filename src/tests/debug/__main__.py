@@ -1,4 +1,4 @@
-"""디버그 CLI — 운영 CLI 와 같은 출력에 트레이스를 얹는다.
+"""디버그 CLI — 운영 CLI 출력 + 실행 트레이스. 인자 규약은 운영 CLI(`pension_agent.__main__`)와 동일.
 
     cd src
     python -m tests.debug --script tax_credit_asserts_wrong --debug --show-llm
@@ -7,28 +7,13 @@
     python -m tests.debug -c 198734-1205842 --debug                  # REPL
     python -m tests.debug --list                                     # 시나리오 목록
 
-**인자 규약은 운영 CLI(`pension_agent.__main__`)와 같다** — 그래야 평소 쓰던
-줄에 `--debug` 만 붙여 쓸 수 있다. `-c/--customer` 는 앞뒤 어디에 와도 되고, 질문이 여러
-개면 순서대로 한 턴씩(맥락 이어서), 질문이 없으면 REPL 이다. 여기에 셋이 더 있다:
+`-c/--customer` 위치 무관 · 질문 여러 개면 한 턴씩 이어서 · 질문 없으면 REPL. 추가 옵션:
 
-    --debug          답변 아래에 실행 트레이스를 붙인다
-    --show-llm       compose 가 LLM 에게 받은 문장(폐기됐어도)을 그대로 보여준다
-    --script N       캔드 LLM 시나리오로 실행한다(키 없이 돈다)
-    --any-customer   이 체크아웃에 없는 고객 id 로도 그냥 진행한다(경고만)
-    -e/--employee    이 상담을 하는 직원의 사번(운영 CLI 와 같다) — 쪽지의 받는 사람 기본값이자
-                     보내는 주체. 없으면 WORKB_EMP_NO 로 떨어진다
-
-`-c` 로 넘긴 값은 **손대지 않고 그대로** `graph.ask(customer_id=...)` 로 간다 — 운영 CLI 와
-같다. 다만 없는 id 를 넘기면 아무 일도 일어나지 않은 것처럼 보인다(`get_profile` 이 None →
-고객 도구가 재료를 못 내놓음 → 재료 0건). **id 를 잘못 넣은 것과 그 고객에게 재료가 없는
-것이 화면에서 구분되지 않는다**는 뜻이라, 시작할 때 한 번 확인하고 이 체크아웃에 실제로
-있는 id 를 알려준다. 실제 고객 저장소로 바뀌면 이 조회가 의미를 잃으므로 `--any-customer`
-로 지나갈 수 있다.
-
-**운영 `__main__.py` 를 import 하지 않는다.** 그 파일은 import 즉시 `sys.argv` 를 파싱하고
-REPL 로 들어가는 스크립트라, 불러오는 순간 이 CLI 가 아니라 그쪽이 돈다. 그래서 답변·근거
-출력은 형식을 그대로 옮겨 적었다 — 중복이고, 운영 코드를 고치지 않는다는 제약의 대가다.
-두 출력이 글자까지 같은지는 이 스위트가 재지 못한다(알고 남긴다).
+    --debug          답변 아래 실행 트레이스
+    --show-llm       compose 가 받은 LLM 문장(폐기 포함) 표시
+    --script N       캔드 LLM 시나리오로 실행(키 불필요)
+    --any-customer   이 체크아웃에 없는 고객 id 도 진행(경고만)
+    -e/--employee    상담 직원 사번 — 쪽지 받는 사람 기본값이자 보내는 주체. 없으면 WORKB_EMP_NO
 """
 
 from __future__ import annotations
@@ -43,8 +28,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def _print_source(s: dict) -> None:
-    # 표기는 운영 CLI 와 같은 공용 함수가 정한다(tools.source_lines) — 각자 복사해 갖고
-    # 있던 동안 출처 URL 변경이 운영 CLI 에만 적용되고 이 화면에는 빠졌다.
+    # 운영 CLI 와 같은 공용 함수 사용 — 복사본은 출처 표기 변경을 놓침
     from pension_agent.tools import source_lines  # noqa: PLC0415 — graph 적재 뒤
 
     for line in source_lines(s):
@@ -53,8 +37,7 @@ def _print_source(s: dict) -> None:
 
 def _print_answer(r: dict) -> None:
     print(r["answer"])
-    # 답변이 가리킨 단말 화면의 딥링크(§10) — 화면이 본문의 번호를 감쌀 재료다.
-    # 터미널에는 감쌀 자리가 없으므로 목록으로 세운다(`__main__` 과 같다).
+    # 단말 화면 딥링크 — 터미널은 목록으로 표시
     for item in r.get("links") or []:
         print(f"  [화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
     sources = r["sources"]
@@ -70,11 +53,7 @@ def _print_answer(r: dict) -> None:
 
 
 def _check_customer(customer_id: str | None, allow_any: bool) -> tuple[bool, str]:
-    """`-c` 로 받은 id 가 이 체크아웃에 있는가. 반환: (진행해도 되는가, 트레이스에 남길 경고).
-
-    조회는 운영 코드 것을 그대로 쓴다(`customer.get_profile`) — 같은 판정을 두 번 구현하지
-    않는다. 임포트를 함수 안에 두는 이유는 strategy_agent 가 무겁기 때문이다.
-    """
+    """`-c` id 실재 확인 — 오타와 재료 0건이 화면에서 구분 안 됨. 반환: (진행 여부, 경고)."""
     if not customer_id:
         return True, ""
     from pension_agent.tools.customer_solution import customer as SC  # noqa: PLC0415
@@ -100,8 +79,7 @@ def _usage() -> None:
 
 
 def _repl(ask, tr, customer_id: str | None, debug: bool, show_llm: bool) -> int:
-    """대화형. 답변 보고 다음 질문을 그때그때 입력하는 실제 사용 형태 그대로 —
-    계측은 세션 내내 걸려 있고 트레이스는 **방금 턴만** 찍는다."""
+    """대화형 REPL. 계측은 세션 내내, 트레이스는 방금 턴만 출력."""
     print("질문을 입력하세요 (빈 줄 입력 시 종료). 후속 질문은 이전 맥락을 이어서 물어보면 됩니다.")
     if customer_id:
         print(f"(고객 화면 열림: {customer_id})")
@@ -111,8 +89,7 @@ def _repl(ask, tr, customer_id: str | None, debug: bool, show_llm: bool) -> int:
 
     while True:
         try:
-            # 로케일이 UTF-8 이 아닌 터미널에서 백스페이스가 남긴 반쪽 바이트를 지운다 —
-            # 그대로 두면 프롬프트에 실렸다가 상담이력 저장에서 턴이 통째로 죽는다.
+            # 비 UTF-8 터미널의 반쪽 바이트 제거 — 남으면 상담이력 저장에서 턴 실패
             question = scrub_text(input("\n> ")).strip()
         except EOFError:
             break
@@ -154,7 +131,7 @@ def main(argv: list[str]) -> int:
                 _usage()
                 return 1
         elif flag in ("-e", "--employee"):
-            employee_id = value      # 운영 CLI 와 같은 뜻 — 이 상담을 하는 직원의 사번
+            employee_id = value      # 상담 직원 사번
         else:
             customer_id = value
 
@@ -162,9 +139,7 @@ def main(argv: list[str]) -> int:
     if not ok:
         return 2
 
-    # 남은 인자가 곧 질문이다. 그래서 **오타 난 플래그가 조용히 질문이 된다** — `--demo` 를
-    # 넘기면 그 문자열을 질문으로 물어 능력 안내 한 턴으로 끝나고, 화면만 봐서는 플래그가
-    # 없다는 사실을 알 수 없다. 알 수 없는 `--`인자는 크게 실패시킨다.
+    # 남은 인자 = 질문 — 오타 플래그가 조용히 질문이 되지 않도록 모르는 `--` 인자는 실패
     unknown = [a for a in argv if a.startswith("--")]
     if unknown:
         print(f"모르는 옵션입니다: {' '.join(unknown)}")
@@ -174,15 +149,14 @@ def main(argv: list[str]) -> int:
 
     questions = argv or ([scenario.question] if scenario else [])
 
-    # 운영 CLI 와 같이 행내 MCP(쪽지 발송)를 붙인다 — 캔드 시나리오(--script)는 LLM 도 발송도
-    # 스텁이라 붙이지 않는다. 안 붙이면 쪽지 승낙 턴이 설정과 무관하게 «미연결»로 끝난다.
+    # 행내 MCP(쪽지 발송) 연결 — 캔드 시나리오는 스텁이라 제외. 미연결 시 승낙 턴이 «미연결»
     if scenario is None:
         from pension_agent.common import mcp, note  # noqa: PLC0415 — graph 적재 뒤
         if not mcp.install():
             print("(쪽지 발송: 미연결 — .env 의 MCP_* 가 없거나 행내 패키지가 없습니다. "
                   "확인: python -m pension_agent.common.mcp)", file=sys.stderr)
         elif note.employee_id(employee_id) is None:
-            # 붙었는데 보내는 사번이 없으면 승낙 턴이 «보낼 직원 사번이 없다»로 끝난다.
+            # 보내는 사번 없으면 승낙 턴 실패
             print(f"(쪽지 보내는 사번: 없음 — -e 사번 을 넘기거나 {note.EMP_NO_ENV} 를 채우세요)",
                   file=sys.stderr)
 

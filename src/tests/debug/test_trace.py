@@ -1,20 +1,6 @@
-"""트레이스 회귀 검사 — 계측이 실제 동작을 보고 있는지, 그리고 계측이 새지 않는지.
+"""트레이스 회귀 검사 — 게이트별 차단·통과 판정, 계측 복원. 캔드 시나리오만 사용(키 불필요).
 
-키 없이 돈다(캔드 시나리오만 쓴다).
-
-    cd src
-    python -m tests.debug.test_trace
-
-이 스위트가 고정하는 것은 **어느 게이트가 무엇을 걸고 무엇을 통과시키는가**다. "세액공제
-한도가 얼마야?" 가 카드 원문(문어체)으로 답해지던 사고 둘이 여기서 시작했고, 고친 뒤에는
-같은 시나리오가 반대 방향을 고정한다:
-
-  · 표기 — "148만 5천원" 이 원장 밖 수치로 걸리던 것 → `verify._measures` (korean_units)
-  · 극성 — 오기를 «틀렸다»고 짚는 문장까지 걸리던 것 → `relations._corrects`
-           (tax_credit_correction ↔ tax_credit_asserts_wrong)
-
-둘 다 **넓히기만 하고 좁히지 않았다**는 것을 짝 시나리오가 함께 잰다 — 값이 틀리면
-(korean_units_wrong), 문구를 주장하면(asserts_wrong) 여전히 폐기된다.
+실행: cd src && python -m tests.debug.test_trace
 """
 
 from __future__ import annotations
@@ -37,10 +23,10 @@ from tests.debug import script, trace as TR
 from tests.debug.__main__ import main
 from tests.debug.runner import run
 
-#: 폴백 머리말의 고정 문구 앞부분 — 문구를 테스트에 베껴 적으면 한쪽만 고쳐진다.
+#: 폴백 머리말 고정 문구 앞부분 — 베껴 적기 금지
 _RAW_HEAD = P.RAW_EVIDENCE.split("{", 1)[0]
 
-#: 계측 전 원본. 검사 8(복원)이 이것과 대조한다 — import 시점에 잡아둬야 의미가 있다.
+#: 계측 전 원본(복원 검사용) — import 시점에 확보
 _ORIGINALS = {"answer": G.answer, "verify_texts": P.verify_texts,
               "relations": P.relations, "span": P._span_verdict,
               "fits_question": T.fits_question}
@@ -59,18 +45,14 @@ def _run(name: str):
 
 
 def _evidence_texts(name: str) -> list[str]:
-    """그 시나리오가 모으는 근거 원문. 원장에 무엇이 들어 있는지 대조할 때 쓴다."""
+    """시나리오가 모으는 근거 원문(원장 대조용)."""
     scn = script.SCENARIOS[name]
     with script.installed(scn):
         found = T.run("fact", {"question": scn.question}, "세액공제 한도")
     return [found["text"]] if found else []
 
 
-# ─────────────────────────────────────────────────────────────
-# 1. 노드 순서 — 어느 노드를 거쳐 답이 나왔나
-# ─────────────────────────────────────────────────────────────
-# 계획 루프가 끝나면 answer 하나로 간다(routing.route_plan → answer). 되묻기 판정과
-# 답변 작성이 그 안에서 함께 끝나고(nodes/answer.py), 되묻지 않았으면 offer 로 간다.
+# 1. 노드 순서 — plan → answer(되묻기·작성) → offer
 
 r, tr = _run("tax_credit_asserts_wrong")
 check(tr.node_names() == ["understand", "plan_step", "answer", "offer"],
@@ -81,12 +63,7 @@ check((tr.node("plan_step") or types.SimpleNamespace(note="")).note.startswith(
       (tr.node("plan_step") or types.SimpleNamespace(note="?")).note)
 
 
-# ─────────────────────────────────────────────────────────────
-# 2·3. 알려진 오답 — 주장은 잡고 정정은 통과시킨다
-# ─────────────────────────────────────────────────────────────
-# 같은 문구가 정반대 뜻으로 쓰인다. 문자열 포함만 보던 동안 «"…이상 13.2%"는 오기예요»
-# 까지 잡혀 답변이 통째로 버려졌다 — 카드의 verify_points 가 직원에게 그렇게 짚어주라고
-# 적어둔 문구인데도. 이제 인용부호 + 정정 표지를 보고 가른다.
+# 2·3. 알려진 오답 — 주장은 차단, 정정(인용부호 + 정정 표지)은 통과
 
 gates = tr.gates()
 check(gates.get("verify_texts") is not None and gates["verify_texts"].passed,
@@ -98,8 +75,7 @@ check("span" not in gates,
       "asserts_wrong: 앞에서 끊겨 원문 스팬 검사는 실행조차 되지 않는다", str(sorted(gates)))
 
 draft = tr.draft()
-# 폴백은 «답변이 아님»을 한 줄로 밝히고 그 뒤에 근거 원문을 세운다(plan.RAW_EVIDENCE) —
-# 그 머리말이 없으면 직원은 카드 덤프를 답변으로 읽는다.
+# 폴백 머리말 필수 — 없으면 카드 덤프를 답변으로 오독
 check(r["answer"].startswith(_RAW_HEAD) and "■" in r["answer"]
       and draft and draft not in r["answer"],
       "asserts_wrong: 화면에 나간 것은 생성문이 아니라 근거 원문이다(말투가 달라지는 자리)",
@@ -119,9 +95,7 @@ check("오기니까" in rc["answer"] and '"초과"' in rc["answer"],
       "correction: 그 코칭이 화면까지 간다", rc["answer"][-40:])
 
 
-# ─────────────────────────────────────────────────────────────
-# 4. 통과 경로 — 한 문장 차이로 갈린다
-# ─────────────────────────────────────────────────────────────
+# 4. 통과 경로
 
 r2, tr2 = _run("tax_credit_clean")
 gates2 = tr2.gates()
@@ -131,9 +105,7 @@ check(r2["answer"].startswith(tr2.draft()) and not r2["answer"].startswith("■"
       "clean: 생성문이 그대로 답변이 된다(해요체 유지)", r2["answer"][:40])
 
 
-# ─────────────────────────────────────────────────────────────
-# 5. 다른 게이트가 걸리면 트레이스도 다르게 말한다
-# ─────────────────────────────────────────────────────────────
+# 5. 다른 게이트 차단 시 트레이스 구분
 
 r3, tr3 = _run("out_of_ledger")
 gates3 = tr3.gates()
@@ -144,13 +116,7 @@ check(r3["answer"].startswith(_RAW_HEAD) and "■" in r3["answer"],
       "out_of_ledger: 역시 근거 원문 폴백", r3["answer"][:30])
 
 
-# ─────────────────────────────────────────────────────────────
-# 5-2. 실제 실행에서 걸린 자리 — 값은 맞는데 표기가 달라서 버려진다
-# ─────────────────────────────────────────────────────────────
-# 실제 LLM 이 쓴 문장은 "148만 5천원"·"2026년 6월" 이었고, 원장은 "1,485,000원"·
-# "148.5만원"·"2026.06" 이다. 같은 값인데 숫자 토큰 집합이 달라 폐기됐다 — 지어낸 수치를
-# 막은 것이 아니라 맞는 답변을 표기 때문에 버린 것이다. verify._measures() 가 덩이로
-# 읽게 되면서 통과한다. **표기는 통과시키되 값은 여전히 따진다**는 것까지 함께 고정한다.
+# 5-2. 표기만 다른 같은 값은 통과, 값이 다르면 폐기
 
 r5, tr5 = _run("korean_units")
 check(tr5.blocked_by() is None and not r5["answer"].startswith(_RAW_HEAD),
@@ -164,20 +130,14 @@ check(tr6.blocked_by() == "verify_texts" and r6["answer"].startswith(_RAW_HEAD),
       "korean_units_wrong: 같은 표기라도 값이 틀리면 여전히 폐기된다",
       str(tr6.gates().get("verify_texts")))
 
-# 버려진 값이 실제로는 원장 안에 있다 — 표기만 달랐다는 것을 못박는다.
-#
-# 연월은 **날짜 정규형**으로 찾는다. 원장은 "2026.06" 이라 적지만, 날짜를 통짜로 대조하게
-# 되면서(verify._CHUNK) 그 표기는 맨 토큰 "2026.06" 이 아니라 `날짜:2026-06` 으로 나온다 —
-# 여기서 옛 표기를 찾으면 «표기가 판정을 뒤집으면 안 된다»는 이 검사 자체가 표기에 걸린다.
+# 같은 값이 원장에 다른 표기로 존재. 연월은 날짜 정규형(`날짜:2026-06`)으로 조회
 _ledger = " ".join(_evidence_texts("korean_units"))
 check({"1485000", "148.5", "1188000", V._dform("2026", "06")} <= V.numbers(_ledger),
       "korean_units: 같은 값이 원장에 다른 표기로 들어 있다(오답이 아니었다)",
       str(sorted(V.numbers(_ledger))))
 
 
-# ─────────────────────────────────────────────────────────────
-# 6. LLM 이 죽은 턴은 폴백이 아니다 (§11)
-# ─────────────────────────────────────────────────────────────
+# 6. LLM 실패 턴은 폴백 아님
 
 r4, tr4 = _run("llm_dead")
 check(r4["answer"].startswith(P.LLM_FAILED.split("{", 1)[0])
@@ -186,9 +146,7 @@ check(r4["answer"].startswith(P.LLM_FAILED.split("{", 1)[0])
 check(tr4.gates() == {}, "llm_dead: 게이트는 하나도 실행되지 않는다", str(tr4.gates()))
 
 
-# ─────────────────────────────────────────────────────────────
-# 7. 계측이 새지 않는다 — 이 스위트가 다른 스위트를 오염시키면 안 된다
-# ─────────────────────────────────────────────────────────────
+# 7. 계측 복원 — 다른 스위트 오염 방지
 
 check(G.answer is _ORIGINALS["answer"], "복원: graph.answer 가 원본으로 돌아왔다")
 check(P.verify_texts is _ORIGINALS["verify_texts"] is V.verify_texts,
@@ -202,12 +160,7 @@ check(G._AGENT is None,
       "복원: 계측된 노드가 박힌 컴파일 그래프를 남기지 않는다", str(G._AGENT))
 
 
-# ─────────────────────────────────────────────────────────────
-# 8. 없는 고객 id 를 조용히 넘기지 않는다
-# ─────────────────────────────────────────────────────────────
-# `-c` 값은 손대지 않고 graph.ask 로 그대로 간다. 그래서 없는 id 를 넣으면 에러 없이
-# 재료만 0건이 되고, **id 를 잘못 넣은 것과 그 고객에게 재료가 없는 것이 구분되지 않는다.**
-# 진단 도구에서 그 둘이 같아 보이면 안 된다.
+# 8. 없는 고객 id 차단 — 오타와 재료 0건이 구분 안 됨
 
 _UNKNOWN = "999999-9999999"
 
@@ -221,8 +174,7 @@ def _capture(argv: list[str]) -> tuple[int, str]:
 
 code, out = _capture(["-c", _UNKNOWN, "세액공제 한도가 얼마야?"])
 check(code == 2 and "없습니다" in out, "없는 고객 id 면 실행 전에 끊는다", f"code={code}")
-# 특정 페르소나를 이름으로 박지 않는다 — 고객 데이터는 이미 한 번 통째로 갈렸다
-# (C1~C6 → PIN 9케이스). 안내가 **지금 적재된 것**을 말하는지만 본다.
+# 페르소나 이름 하드코딩 금지 — 현재 적재분 기준
 from pension_agent.tools.customer_solution import customer as SC  # noqa: E402, PLC0415
 
 _first = SC.PERSONAS[0]
@@ -233,18 +185,14 @@ code, out = _capture(["--script", "tax_credit_clean", "-c", _UNKNOWN, "--any-cus
 check(code == 0 and f"⚠ {_UNKNOWN}" in out,
       "--any-customer 면 진행하되 트레이스 맨 위에 경고가 남는다", f"code={code}")
 
-# 고객 id 를 준 실행은 상담이력을 남긴다(.gitignore 대상). 이번 실행이 만든 것만 지운다.
+# 이번 실행이 만든 상담이력만 삭제
 _leftover = session_store.SESSION_DATA_DIR / f"{_UNKNOWN}.json"
 if _leftover.exists():
     _leftover.unlink()
 check(not _leftover.exists(), "검사가 남긴 상담이력 파일을 치운다")
 
 
-# ─────────────────────────────────────────────────────────────
-# 9. 계측 대상이 사라지면 조용히 덜 보지 않고 크게 실패한다
-# ─────────────────────────────────────────────────────────────
-# 이 검사가 없으면, 운영 쪽에서 `_span_verdict` 를 인라인한 날 트레이스는 "게이트 통과"를
-# 찍는다 — 실은 게이트를 못 본 것인데. 진단 도구가 조용히 틀리는 것이 가장 나쁘다.
+# 9. 계측 대상 소멸 시 예외 — 없으면 못 본 게이트를 «통과»로 기록
 
 _saved_span = P._span_verdict
 del P._span_verdict
@@ -257,7 +205,6 @@ finally:
     P._span_verdict = _saved_span
 
 
-# ─────────────────────────────────────────────────────────────
 
 failed = [(label, detail) for ok, label, detail in _results if not ok]
 for ok, label, detail in _results:

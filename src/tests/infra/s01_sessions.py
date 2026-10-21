@@ -1,6 +1,6 @@
-"""session_store — 주인 없는 기록은 남기지 않는다
+"""session_store — 주인 없는 기록 미저장 · 왕복 · 깨진 바이트 저장.
 
-`tests/test_infra.py` 가 번호 순서로 임포트해 돌린다 — 이 파일을 따로 돌리지 않는다.
+실행: python -m tests.test_infra (번호 순서 임포트, 단독 실행 금지)
 """
 
 from __future__ import annotations
@@ -8,8 +8,6 @@ from __future__ import annotations
 from tests.infra._common import _clean_session_data, check, session_store
 
 
-# ─────────────────────────────────────────────────────────────
-# session_store — 주인 없는 기록은 남기지 않는다
 import logging as _lg0  # noqa: E402
 _skip_records: list = []
 
@@ -37,7 +35,6 @@ finally:
     _ss_log.handlers.clear()
 
 # session_store — 왕복 테스트
-# ─────────────────────────────────────────────────────────────
 
 _clean_session_data()
 session_store.append_turn("TEST01", "sess-a", {"role": "user", "text": "질문1"}, employee_id="E01")
@@ -57,9 +54,7 @@ check(len(summary) == 2, "session_store: summarize_for_briefing 최신순 2건",
 empty_summary = session_store.summarize_for_briefing("NO_SUCH_CUSTOMER")
 check(empty_summary == [], "session_store: 없는 고객은 빈 목록(에러 아님)")
 
-# UTF-8 로 쓸 수 없는 문자가 섞여도 기록은 남는다 — 행내 터미널(로케일 비 UTF-8)에서
-# 백스페이스가 한글 한 글자 중 1바이트만 지우면 남은 2바이트가 surrogateescape 로 들어와
-# `input()` 은 성공하고 파일 쓰기에서 죽었다(2026-09-08 실측 — 답변까지 만든 턴이 통째로).
+# 비 UTF-8 터미널의 반쪽 바이트(surrogateescape)가 섞여도 저장 성공 — 파일 쓰기에서 턴 실패하던 회귀
 _broken = "이 고객 왜 타겟".encode("utf-8")[:-1].decode("utf-8", "surrogateescape") + " 이야?"
 check(session_store.scrub_text(_broken) == "이 고객 왜 타 이야?",
       "session_store.scrub_text: 반쪽 바이트(서로게이트)를 지운다", repr(session_store.scrub_text(_broken)))

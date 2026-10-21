@@ -1,6 +1,6 @@
-"""env — 값의 우선순위 · 실행 단계 (env.py 머리말)
+"""env — 값 우선순위 · 실행 단계(ENV_PATH) · 출처 이름.
 
-`tests/test_infra.py` 가 번호 순서로 임포트해 돌린다 — 이 파일을 따로 돌리지 않는다.
+실행: python -m tests.test_infra (번호 순서 임포트, 단독 실행 금지)
 """
 
 from __future__ import annotations
@@ -10,14 +10,10 @@ from pathlib import Path
 from tests.infra._common import check
 
 
-# ─────────────────────────────────────────────────────────────
-# env — 값의 우선순위 · 실행 단계 (env.py 머리말)
-#
-# 파일은 src/.env 하나다. 고정하는 것:
-#   · 실제 환경변수 > LLM_DOTENV 로 지정한 파일 > .env — 운영이 주입한 값을 파일이 뒤엎지 않는다
-#   · ENV_PATH 가 serving 이면 …_SERV, 그 외 전부 …_TRNN — 플랫폼 가이드의 분기 그대로
-#   · 단계별 값이 없으면 접미사 없는 이름이 폴백(Gateway·사외)
-# ─────────────────────────────────────────────────────────────
+# 고정 대상:
+#   · 실제 환경변수 > LLM_DOTENV 파일 > .env
+#   · ENV_PATH 가 serving 이면 …_SERV, 그 외 …_TRNN
+#   · 단계별 값 없으면 접미사 없는 이름으로 폴백(Gateway·사외)
 
 import os  # noqa: E402
 import tempfile  # noqa: E402
@@ -45,7 +41,7 @@ try:
         check(os.environ.get("LLM_PROVIDER") == "genai" and os.environ.get("PENSION_TEST_MARK") == "shared",
               "env: src/.env 를 읽는다")
 
-        # LLM_DOTENV 로 지정한 파일이 .env 보다 앞선다 (다른 설정을 잠깐 쓸 때)
+        # LLM_DOTENV 파일이 .env 보다 우선
         (_root / "other.env").write_text("LLM_MODEL=other-model\n", encoding="utf-8")
         _clear_env()
         os.environ["LLM_DOTENV"] = str(_root / "other.env")
@@ -53,15 +49,13 @@ try:
         check(os.environ.get("LLM_MODEL") == "other-model" and os.environ.get("LLM_PROVIDER") == "genai",
               "env: LLM_DOTENV 파일이 .env 를 덮되, 없는 키는 .env 에서 온다")
 
-        # 실제 환경변수는 어느 파일도 덮지 못한다
+        # 실제 환경변수가 최우선
         _clear_env()
         os.environ["LLM_MODEL"] = "from-shell"
         _env.load(root=_root)
         check(os.environ.get("LLM_MODEL") == "from-shell", "env: 실제 환경변수는 파일이 덮지 못한다")
 
-        # 실행 단계(ENV_PATH) — 행내 .env 하나에 URL 이 두 벌(…/trnn/… · …/serv/…) 있고
-        # 어느 것을 읽을지는 이 변수가 정한다. 워크스페이스에는 없으니 분석계, 배포 때는
-        # Jenkins 가 실제 환경변수로 serving 을 넣는다. 파일 경로로 잘못 읽던 때가 있었다.
+        # 실행 단계(ENV_PATH) — 미지정 = 분석계(TRNN), 배포 시 Jenkins 가 serving 주입
         _clear_env()
         os.environ.update({"LLM_BASE_URL_TRNN": "https://h/trnn/m", "LLM_BASE_URL_SERV": "https://h/serv/m",
                            "LLM_API_KEY": "k-common", "LLM_API_KEY_SERV": "k-serv"})
@@ -77,9 +71,7 @@ try:
         os.environ["LLM_BASE_URL"] = "https://one"
         check(_env.staged("LLM_BASE_URL") == "https://one", "env: 단계별 URL 이 없으면 하나짜리 LLM_BASE_URL(Gateway·사외)")
 
-        # 어느 «이름»에서 읽었나 — 값이 아니라 출처다. /health 와 401 안내가 이것으로 말한다.
-        # 서빙계 URL 에 접미사 없는 키가 실리는 짝(APIM 401 invalid subscription key)이
-        # 설정 화면에서는 «키 있음»으로만 보이던 것을 드러내려고 둔다.
+        # 값을 읽은 «이름»(출처) — 서빙계 URL + 접미사 없는 키(APIM 401) 짝 진단용
         _clear_env()
         os.environ.update({"LLM_BASE_URL_SERV": "https://h/serv/m", "LLM_API_KEY": "k-common",
                            "ENV_PATH": "serving"})
@@ -94,8 +86,7 @@ try:
               "llm: 단계 구분이 없는 설정(Gateway·사외)은 어긋남이 아니다")
         check(not _llm._mismatch("LLM_BASE_URL_SERV", ""),
               "llm: 키가 아예 없으면 어긋남이 아니라 미설정이다(available() 가 잡는다)")
-        # 채우라고 안내할 이름은 **실제로 읽은 URL 변수**가 정한다. env.suffix() 를 다시 부르면
-        # 호출 시각의 ENV_PATH 를 읽어, _SERV URL 을 쓰면서 _TRNN 키를 넣으라는 안내가 나간다.
+        # 안내할 키 이름은 실제로 읽은 URL 변수 기준 — ENV_PATH 재조회 시 _SERV URL 에 _TRNN 키 안내
         _saved_src = _llm.BASE_URL_SRC
         try:
             _llm.BASE_URL_SRC = "LLM_BASE_URL_SERV"
