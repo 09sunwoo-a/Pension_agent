@@ -1,9 +1,9 @@
 """kinds.json 선언 구동 검증 + 저작 프롬프트 생성기. 새 종류는 kinds.json 항목 추가만으로 대응.
 
 CLI:
-    python -m common.schema validate <루트...>     # 통합 검증 (ERROR/WARN)
-    python -m common.schema prompt <kind>          # 그 종류의 저작 프롬프트 출력
-    python -m common.schema kinds                  # 등록된 종류 목록
+    python -m pension_agent.knowledge.schema validate <루트...>     # 통합 검증 (ERROR/WARN)
+    python -m pension_agent.knowledge.schema prompt <kind>          # 그 종류의 저작 프롬프트 출력
+    python -m pension_agent.knowledge.schema kinds                  # 등록된 종류 목록
 """
 
 from __future__ import annotations
@@ -236,7 +236,7 @@ if __name__ == "__main__":
 
     if cmd == "prompt":
         if len(args) < 2:
-            print("사용법: python -m common.schema prompt <kind>")
+            print("사용법: python -m pension_agent.knowledge.schema prompt <kind>")
             raise SystemExit(2)
         print(authoring_prompt(args[1]))
         raise SystemExit(0)
