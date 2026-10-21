@@ -54,3 +54,6 @@ DATA_ROOTS: list[Path] = [STRATEGY_DATA_DIR, KB_DATA_DIR]
 
 # 상담 세션 기록 위치 (session_store.py). 데모는 파일, 실서비스는 DB 로 바뀔 자리다.
 SESSION_DATA_DIR = SRC_ROOT / "runtime" / "session_data"
+
+# 메인 브리핑의 고정 뷰 SQL (tools/branch_briefing). 백엔드별 하위 폴더(sqlite · sybase).
+BRANCH_SQL_DIR = PACKAGE_ROOT / "tools" / "branch_briefing" / "sql"

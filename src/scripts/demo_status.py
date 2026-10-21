@@ -91,6 +91,17 @@ def _scheduler_state() -> str:
     return name or "없음 (미연결 — 예약 요청은 보내지 않는다)"
 
 
+def _branch_db_state() -> str:
+    """부점 DB 백엔드 표시 — 리포트를 만든 환경의 값이다(`.env` 포함)."""
+    from pension_agent.common import env  # noqa: PLC0415
+    from pension_agent.tools.branch_briefing import run  # noqa: PLC0415
+
+    env.load()
+    return {"demo": "demo (행외 목업 DB — 전부 시연값)",
+            "sybase": "sybase (행내 Sybase IQ)",
+            "off": "off (조회하지 않는다)"}[run.backend()]
+
+
 def _rows(lines: list[str], header: list[str], rows: list[list[str]]) -> None:
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "|".join("---" for _ in header) + "|")
@@ -252,6 +263,12 @@ def build() -> tuple[str, dict[str, int]]:
          "한 통을 즉시 보낸다. 화면은 «예약했어요»라고 말하지만 실제로는 이미 나간 것이다(시연에서 "
          "쪽지가 도착하는 것을 보이려는 것). 실서비스로 옮길 때는 PENSION_MEMO_SCHEDULER=off(보내지 "
          "않고 «미연결»)이나 actions.SCHEDULERS 에 더한 실제 실행기 이름을 넣는다"),
+        ("tools/branch_briefing 부점 DB", _branch_db_state(),
+         "메인 브리핑(부점 데이터 질의)이 조회하는 DB. **기본값이 demo 다** — 행외 목업 DB(sqlite 메모리, "
+         "부점 4곳 · 직원 5명 · 고객 300명 중 288명은 고정 시드로 만든 가짜, 12명은 목업 고객을 옮긴 것). "
+         "행내로 옮길 때는 BRANCH_DB=sybase 로 바꾸고 sql/sybase/ 의 고정 뷰 SQL 세 개(사번→부점 · "
+         "고객 뷰 · 부점 집계 뷰)를 실제 테이블로 채운다 — 채우기 전에는 «DB 미연결»로 답한다. "
+         "MCP 서버 sybase(MCP_SERVERS · MCP_CONN_ID)와 sybaseiq_query 의 인자 이름·응답 꼴도 행내 실측이 필요하다"),
         ("actions.screens.link() 파라미터", "scnNo · mode",
          "규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 "
          "링크로 넘기지 않고 직원이 화면에서 입력한다 — 규격이 정해지면 "

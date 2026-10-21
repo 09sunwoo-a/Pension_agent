@@ -27,6 +27,7 @@ evidence/record.py. 못 찾으면 None, 죽으면 ToolFailure — tools/base.py.
     history.py      history transcript       지난 상담 · 이번 상담의 대화
 
     고객 화면 없이 쓰는 도구
+    branch_briefing/tool.py  branch          우리 부점 고객 데이터 질의 — SQL 생성·검사·실행 [LLM]
     targets.py      targets                  오늘의 타겟 고객 목록
     dates.py        date                     오늘 날짜 · 연말까지 남은 일수
     tax_credit.py   tax_credit               «얼마 더 넣으면 얼마 받나» — 코드 계산
@@ -150,6 +151,9 @@ from pension_agent.tools.customer_solution.outreach import (  # noqa: F401
 )
 from pension_agent.tools.customer_solution.targets import (  # noqa: F401
     _targets,
+)
+from pension_agent.tools.branch_briefing.tool import (  # noqa: F401
+    _branch,
 )
 from pension_agent.tools.general.answered import (  # noqa: F401
     CARDS_HEADER,
@@ -284,6 +288,15 @@ TOOLS: dict[str, Tool] = {
              "그 요건을 성립시킨 값)를 순서대로 돌려준다. 「오늘 누구부터 봐야 해」·"
              "「타겟 몇 명이야」·「타겟 목록 쪽지로 보내줘」가 여기다", _targets,
              progress="오늘의 타겟 고객 목록"),
+        # 메인 브리핑. `targets` 와 갈라 두는 축은 **질문이 정하는 조회**다 — 그쪽은 룰베이스가
+        # 고른 오늘의 목록 한 가지이고, 이쪽은 직원이 묻는 조건(만기 30일 이내·디폴트옵션
+        # 미설정·부점 비교)으로 부점 데이터를 센다. 고객 화면 없이 쓰므로 _NEEDS_CUSTOMER 에
+        # 넣지 않는다.
+        Tool("branch", "**우리 부점**의 IRP 고객 데이터를 조건으로 조회·집계한다 — 「만기 30일 "
+             "이내 고객 누구야」·「디폴트옵션 미설정 몇 명이야」·「평가금액 상위 5명」·「다른 "
+             "부점이랑 타겟 수 비교」처럼 **여러 고객을 조건으로 세거나 고르는** 질문이 여기다. "
+             "다른 부점은 집계로만 볼 수 있다. 지금 열려 있는 고객 한 명의 값을 묻는 질문은 여기가 아니다",
+             _branch, progress="부점 고객 데이터"),
         # `pitch` 와 갈라 두는 이유는 재료가 오는 곳이 다르기 때문이다. pitch 는 질문으로
         # 지식베이스 전체를 찾고, 이쪽은 **이 고객의 문제상황**에 걸린 것만 본다 — 화면
         # ⑥⑦⑧ 과 같은 후보군이다. 설명이 갈리지 않으면 계획이 둘을 구분하지 못한다.

@@ -28,6 +28,10 @@
     clarify.py      CLARIFY_PROMPT             답의 형태 판정
                     JUDGE_BRANCHES_BLOCK       적합성 게이트가 표시한 갈래
 
+    메인 브리핑
+    branch.py       BRANCH_SQL_SYSTEM · BRANCH_SQL_PROMPT   부점 데이터 질문 → 고정 뷰 SELECT 한 문장
+                    BRANCH_SQL_RETRY_BLOCK     검사·실행에 걸린 SQL 을 다시 쓸 때
+
     특수 턴 · 쪽지
     meta.py         HELP_SYSTEM · HELP_PROMPT  에이전트 자신에 대한 질문 — 코드가 준 사실 안에서
     correction.py   CORRECTION_SYSTEM · CORRECTION_PROMPT   브리핑 산문 수정
@@ -97,4 +101,9 @@ from pension_agent.prompts.memo import (  # noqa: F401
     MEMO_EDIT_PROMPT,
     MEMO_EDIT_RECIPIENT_BLOCK,
     MEMO_EDIT_ECHO_BLOCK,
+)
+from pension_agent.prompts.branch import (  # noqa: F401
+    BRANCH_SQL_SYSTEM,
+    BRANCH_SQL_PROMPT,
+    BRANCH_SQL_RETRY_BLOCK,
 )
