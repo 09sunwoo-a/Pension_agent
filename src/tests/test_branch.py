@@ -20,7 +20,8 @@ from pension_agent.tools.branch_briefing import run, tool, views
 
 _results: list[tuple[bool, str, str]] = []
 
-EMP = "3902172"          # 시연 사번 — 여의도(0001)
+EMP = "3902172"          # 시연 사번 — 여의도종합금융센터(0001)
+YEOUIDO = "여의도종합금융센터"
 OTHER_EMP = "3902201"    # 강남(0002)
 
 
@@ -95,12 +96,12 @@ def check_checker() -> None:
 
 def check_scope() -> None:
     mine = run.my_branch(EMP)
-    check(mine == ("0001", "여의도"), "사번 → 부점: 3902172 는 여의도", str(mine))
+    check(mine == ("0001", YEOUIDO), "사번 → 부점: 3902172 는 여의도종합금융센터", str(mine))
     check(run.my_branch("9999999") is None, "모르는 사번은 부점 없음")
     check(run.my_branch("12' OR '1'='1") is None, "사번 꼴이 아니면 조회하지 않음")
 
     _, rows, _ = run.execute("SELECT DISTINCT branch_name FROM v_irp_customer", "0001", EMP)
-    check([r["branch_name"] for r in rows] == ["여의도"], "고객 뷰에는 직원 부점 고객만 있다",
+    check([r["branch_name"] for r in rows] == [YEOUIDO], "고객 뷰에는 직원 부점 고객만 있다",
           str(rows))
     # LLM 이 다른 부점을 적어도 범위 불변
     _, rows, _ = run.execute("SELECT customer_name FROM v_irp_customer WHERE branch_name = '강남'",
@@ -109,7 +110,7 @@ def check_scope() -> None:
     _, rows, _ = run.execute("SELECT branch_name, is_my_branch FROM v_branch_summary", "0002",
                              OTHER_EMP)
     flags = {r["branch_name"]: r["is_my_branch"] for r in rows}
-    check(len(rows) == 4 and flags.get("강남") == 1 and flags.get("여의도") == 0,
+    check(len(rows) == 4 and flags.get("강남") == 1 and flags.get(YEOUIDO) == 0,
           "부점 비교는 집계 뷰로 — 내 부점 표시가 사번을 따른다", str(flags))
 
 
@@ -279,16 +280,17 @@ def check_status() -> None:
         other = status.compute(OTHER_EMP)
         ev = tools.run("branch_status", _state(), "부점 현황")
     ind = {i["id"]: i for i in st["indicators"]}
-    check(st["branch"] == "여의도" and st["prev_date"] == "2026-09-30", "비교 기준은 전월말이다", st["prev_date"])
-    check(ind["customer_count"]["direction"] == "감소" and ind["total_eval_amt"]["direction"] == "증가"
-          and ind["avg_return_rate"]["label"] == "하락", "지표 방향(계좌 감소·잔액 증가·수익률 하락)",
+    check(st["branch"] == YEOUIDO and st["prev_date"] == "2026-09-30", "비교 기준은 전월말이다", st["prev_date"])
+    check(ind["customer_count"]["direction"] == "증가" and ind["total_eval_amt"]["direction"] == "증가"
+          and ind["branch_return_rate"]["label"] == "상승" and ind["idle_cash_total"]["direction"] == "감소",
+          "지표 방향(화면 기획안 — 잔액 ▲ · 수익률 ▲ · 고유계정대 ▼)",
           str({k: v["direction"] for k, v in ind.items()}))
-    check([c["id"] for c in st["cases"]] == ["BC-01", "BC-02"], "여의도는 CASE 1·2 가 성립한다",
+    check([c["id"] for c in st["cases"]] == ["BC-03"], "여의도종합금융센터는 CASE 3 이 성립한다",
           str(st["cases_all"]))
     check(other["cases"] == [], "강남은 성립하는 CASE 가 없다(0건도 결과)", str(other["cases_all"]))
-    bc02 = st["cases"][1]
-    check(bc02["segment_changes"][0]["id"] == "BS-01" and bc02["segment_changes"][0]["delta"] > 0,
-          "CASE 는 판정에 쓴 세그먼트의 인원 변화를 싣는다", str(bc02["segment_changes"]))
+    bc03 = st["cases"][0]
+    check(bc03["segment_changes"][0]["id"] == "BS-06" and bc03["segment_changes"][0]["delta"] > 0,
+          "CASE 는 판정에 쓴 세그먼트의 인원 변화를 싣는다", str(bc03["segment_changes"]))
     text = (ev or {}).get("text", "")
     check(ev is not None and "부점 현황" in text and "오늘의 관리 방향" in text, "branch_status 가 원장 근거가 된다")
     check("idle_cash_pct" not in text and "WHERE" not in text, "재료에 컬럼 이름·SQL 이 없다(개발 용어)")
@@ -308,6 +310,26 @@ def check_status() -> None:
     check(st2["cases"] == [], "증가 판정 최소 인원(BP-01)을 올리면 CASE 가 성립하지 않는다")
 
 
+def check_yeouido_screen() -> None:
+    """부점 브리핑 화면 기획안의 수치가 목업 DB 에서 그대로 나온다(demo_yeouido)."""
+    from pension_agent.tools.branch_briefing import status  # noqa: PLC0415
+    with _Today():
+        st = status.compute(EMP)
+        _, rows, _ = run.execute("SELECT COUNT(*) AS n FROM v_irp_customer WHERE eval_amt = 100000000",
+                                 "0001", EMP)
+    ind = {i["id"]: i for i in st["indicators"]}
+    want = {"customer_count": 1392, "total_eval_amt": 52_680_000_000, "branch_return_rate": 18.96,
+            "idle_cash_total": 670_000_000, "safe_asset_ratio": 69.3, "transfer_out_count": 89,
+            "transfer_out_amt": 6_280_000_000, "low_return_count": 210, "high_balance_count": 120,
+            "high_balance_share": 45.3}
+    got = {k: ind[k]["now"] for k in want}
+    check(got == want, "화면 수치(1,392명 · 526.8억 · 18.96% · 6.7억 · 69.3% · 89좌·62.8억 · 210명 · 120명·45.3%)",
+          str({k: v for k, v in got.items() if v != want[k]}))
+    delta = (ind["total_eval_amt"]["delta"], ind["branch_return_rate"]["delta"], ind["idle_cash_total"]["delta"])
+    check(delta == (130_000_000, 0.12, -40_000_000), "전월말 대비 ▲1.3억 · ▲0.12%p · ▼0.4억", str(delta))
+    check(rows[0]["n"] == 0, "1억 경계에 몰린 계좌가 없다(비례 조정이 경계에 붙이지 않는다)")
+
+
 def check_strategy() -> None:
     from pension_agent.tools.branch_briefing import status, strategy  # noqa: PLC0415
     with _Today():
@@ -316,8 +338,8 @@ def check_strategy() -> None:
     nums = strategy.allowed_numbers(st)
     check(nums and all(n.endswith("명") for n in nums), "문장에 쓸 수 있는 숫자는 세그먼트 인원 변화뿐이다",
           str(nums))
-    good = (f"부점 잔액은 증가했지만 계좌 수는 줄었고 계약이전 사전조회 신청도 {nums[0]} 늘었습니다. "
-            "만기금액이 크고 최근 접촉이 없었던 고객부터 확인하는 것이 좋겠습니다.")
+    good = (f"부점 잔액이 늘었고 세액공제 한도 여유 고객도 {nums[0]} 늘었습니다. "
+            "잔여한도가 크지만 최근 추가입금이 없는 고객부터 관리하는 것이 좋겠습니다.")
     check(strategy.check_text(good, st) == [], "방향만 쓴 지표 + 세그먼트 인원 변화는 통과한다")
     check(strategy.check_text("계좌 수가 6계좌 줄었습니다.", st) != [], "지표 수치를 쓰면 걸린다")
 
@@ -335,7 +357,7 @@ def check_strategy() -> None:
         strategy.generate = _gen(good)
         out = strategy.write(st)
         check(out["status"] == "ok" and out["text"] == good, "검사를 통과한 LLM 문장이 나간다")
-        check("우선 관리할 고객" in calls[-1] and "만기금액" in calls[-1], "프롬프트에 판정된 CASE 가 실린다")
+        check("우선 관리할 고객" in calls[-1] and "잔여한도" in calls[-1], "프롬프트에 판정된 CASE 가 실린다")
         calls.clear()
         strategy.generate = _gen("잔액이 66억원으로 늘었습니다.", good)
         out = strategy.write(st)
@@ -365,7 +387,7 @@ def check_targets() -> None:
     with _Today():
         ev = tools.run("branch_targets", _state(q="오늘 중점적으로 관리할 고객은 누구야?"), "관리 대상")
     meta = (ev or {}).get("meta") or {}
-    check(ev is not None and meta.get("codes")[:3] == ["mat", "chn", "dor"],
+    check(ev is not None and meta.get("codes") == ["tax", "add"],
           "관리 대상 추천 순서는 오늘의 CASE 가 가리키는 요건을 따른다", str(meta.get("codes")))
     ordered = target_list.prioritize(plain, meta["codes"])
     check(meta["names"] == [t.profile.nm for t in ordered], "재료의 순서 = prioritize 결과")
@@ -406,6 +428,7 @@ def main() -> int:
     check_registry()
     check_rules()
     check_status()
+    check_yeouido_screen()
     check_strategy()
     check_targets()
 

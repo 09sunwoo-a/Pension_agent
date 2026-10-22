@@ -1,8 +1,11 @@
 """행외 목업 DB(sqlite 메모리) — 전부 시연값.
 
-고객 300명 = 고정 시드 합성 288명 + 목업 고객 12명(customers.json 과 같은 값 — 화면 간 수치 일치).
+여의도종합금융센터(0001) 1,392명 = 목업 고객 12명(customers.json 과 같은 값) + 부점 브리핑 화면 기획안의
+수치에 맞춘 합성 1,380명(demo_yeouido.py). 다른 세 부점은 고정 시드 합성 72명씩.
 전월말 스냅샷(`irp_customer_prev`)도 시연값이다 — 오늘 표에서 고정 시드로 «한 달 전» 을 되짚어 만든다.
-부점마다 CASE 1(계좌 감소·사전조회·만기 증가)·CASE 2(수익률 하락·미운용 증가)가 서도록 흔든다.
+다른 부점은 CASE 1(계좌 감소·사전조회·만기 증가)·CASE 2(수익률 하락·미운용 증가)가 서도록 흔들고,
+여의도종합금융센터는 화면 기획안의 증감 화살표대로 되짚는다(CASE 3 — demo_yeouido.py).
+올해 계약이전(타사 유출)은 `irp_transfer_out` — 고객 표에는 없는 떠난 계좌다.
 질의는 sql/sqlite 고정 뷰 경유만.
 """
 
@@ -14,10 +17,11 @@ import threading
 from datetime import date, timedelta
 
 from pension_agent.common import clock
+from pension_agent.tools.branch_briefing import demo_yeouido
 from pension_agent.tools.customer_solution import customer as C
 
 #: 시연 부점(첫 부점에 목업 고객 12명).
-BRANCHES = (("0001", "여의도"), ("0002", "강남"), ("0003", "판교"), ("0004", "부산"))
+BRANCHES = (("0001", demo_yeouido.NAME), ("0002", "강남"), ("0003", "판교"), ("0004", "부산"))
 #: 시연 직원(사번 · 이름 · 부점). 3902172 는 문서·테스트용 개발 사번.
 EMPLOYEES = (("3902172", "김국민", "0001"), ("3902173", "이하나", "0001"),
              ("3902201", "박서준", "0002"), ("3902301", "최유리", "0003"),
@@ -58,6 +62,9 @@ CREATE TABLE branch (branch_code TEXT PRIMARY KEY, branch_name TEXT);
 CREATE TABLE employee (emp_no TEXT PRIMARY KEY, emp_name TEXT, branch_code TEXT);
 {_table_sql("irp_customer_base")}
 {_table_sql("irp_customer_prev")}
+CREATE TABLE irp_transfer_out (
+  customer_name TEXT, branch_code TEXT, transfer_date TEXT, transfer_amt INTEGER, to_institution TEXT
+);
 """
 
 _LOCK = threading.Lock()
@@ -184,7 +191,7 @@ def _prev_rows(current: list[tuple]) -> list[tuple]:
             r[_COL["next_maturity_date"]] = (prev + timedelta(days=prev_offset)).isoformat()
         out.append(tuple(r))
     # 전월말 이후 해지된 계좌 — 어느 세그먼트에도 걸리지 않게 평이하게
-    for code, _ in BRANCHES:
+    for code in sorted({r[_COL["branch_code"]] for r in current}):
         for k in range(_CLOSED_PER_BRANCH):
             r = list(next(x for x in current if x[_COL["branch_code"]] == code))
             r[_COL["customer_name"]] = f"해지고객{code}-{k + 1}"
@@ -203,6 +210,20 @@ def _prev_rows(current: list[tuple]) -> list[tuple]:
     return out
 
 
+def _other_transfers() -> list[tuple]:
+    """다른 부점의 올해 계약이전(시연값) — 부점마다 12건, 올해 1월 1일부터 오늘 사이."""
+    rnd = random.Random(_SEED + 3)
+    today = clock.today()
+    start = date(today.year, 1, 1)
+    out = []
+    for code, _ in BRANCHES[1:]:
+        for _k in range(12):
+            out.append((rnd.choice(_SURNAMES) + rnd.choice(_GIVEN), code,
+                        (start + timedelta(days=rnd.randint(0, (today - start).days))).isoformat(),
+                        rnd.randint(5, 150) * 1_000_000, rnd.choice(("증권", "은행", "보험"))))
+    return out
+
+
 def connection() -> sqlite3.Connection:
     """목업 DB 연결(프로세스당 하나, 읽기 전용)."""
     global _CONN
@@ -213,10 +234,20 @@ def connection() -> sqlite3.Connection:
             conn.executescript(_SCHEMA)
             conn.executemany("INSERT INTO branch VALUES (?, ?)", BRANCHES)
             conn.executemany("INSERT INTO employee VALUES (?, ?, ?)", EMPLOYEES)
-            current = _persona_rows() + _synthetic_rows()
+            personas = [dict(zip(COLUMNS, r)) for r in _persona_rows()]
+            yeouido, yeouido_prev, transfers = demo_yeouido.build(personas)
+            # 다른 부점 — 기존 합성 고객(0001 몫은 버린다. 난수 순서를 그대로 두려고 생성 뒤에 거른다)
+            # 전월말도 예전과 같은 입력(목업 + 합성 288명)으로 흔든 뒤 거른다 — 다른 부점 결과를 그대로 둔다
+            legacy = _persona_rows() + _synthetic_rows()
+            others = [r for r in legacy if r[_COL["branch_code"]] != demo_yeouido.CODE]
+            others_prev = [r for r in _prev_rows(legacy) if r[_COL["branch_code"]] != demo_yeouido.CODE]
             marks = ", ".join("?" * len(COLUMNS))
-            conn.executemany(f"INSERT INTO irp_customer_base VALUES ({marks})", current)
-            conn.executemany(f"INSERT INTO irp_customer_prev VALUES ({marks})", _prev_rows(current))
+            rows = [tuple(d[c] for c in COLUMNS) for d in yeouido] + others
+            prev_rows = [tuple(d[c] for c in COLUMNS) for d in yeouido_prev] + others_prev
+            conn.executemany(f"INSERT INTO irp_customer_base VALUES ({marks})", rows)
+            conn.executemany(f"INSERT INTO irp_customer_prev VALUES ({marks})", prev_rows)
+            conn.executemany("INSERT INTO irp_transfer_out VALUES (?, ?, ?, ?, ?)",
+                             transfers + _other_transfers())
             conn.commit()
             # 검사를 빠져나간 쓰기 문장 대비
             conn.execute("PRAGMA query_only = ON")

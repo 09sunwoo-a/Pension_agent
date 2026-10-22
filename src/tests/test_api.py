@@ -470,7 +470,7 @@ try:
         check(r.status_code == 200 and _types(evs) == ["branch_panel", "branch_briefing", "done"],
               "mode=branch_briefing 은 message 없이 branch_panel → branch_briefing → done", str(_types(evs)))
         panel = evs[0] if evs else {}
-        check(panel.get("branch") == "여의도" and len(panel.get("indicators") or []) == 3
+        check(panel.get("branch") == "여의도종합금융센터" and len(panel.get("indicators") or []) >= 3
               and panel.get("prev_date"), "패널에 부점 지표 셋과 전월말 기준일이 실린다")
         brief = evs[1] if len(evs) > 1 else {}
         check(brief.get("status") in ("ok", "no_case") and brief.get("text"), "브리핑 문장이 실린다", str(brief))

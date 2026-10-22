@@ -7,10 +7,11 @@
 
     status.py    rules() · compute()      룰베이스 부점 시트(세그먼트·CASE·임계값) → 지표·변화·CASE 판정
     strategy.py  build() · write()        전략 브리핑 문장 — 숫자는 세그먼트 인원 변화만(코드 검사)
-    views.py     VIEWS · catalog()        LLM 용 스키마(고정 뷰 3개 — 오늘 · 전월말 · 부점 집계)
+    views.py     VIEWS · catalog()        LLM 용 스키마(고정 뷰 4개 — 오늘 · 전월말 · 계약이전 · 부점 집계)
     check.py     check() · SQLRejected    실행 전 SQL 검사(LLM SQL · 코드 SQL 공통)
     run.py       my_branch() · execute()  사번 → 부점 · 고정 뷰 결합 · 행 수 상한 · 백엔드
-    demo_db.py   connection()             행외 목업 DB(sqlite 메모리 · 오늘 + 전월말 스냅샷)
+    demo_db.py   connection()             행외 목업 DB(sqlite 메모리 · 오늘 + 전월말 스냅샷 · 계약이전)
+    demo_yeouido.py build()               여의도종합금융센터 1,392명 — 화면 기획안 수치에 맞춘 시연 고객
     sql/         sqlite/ · sybase/        고정 뷰 SQL(사람 작성, sybase 는 행내 작성)
 
 백엔드: 환경변수 BRANCH_DB(demo · sybase · off).

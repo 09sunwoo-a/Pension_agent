@@ -90,7 +90,7 @@ Content-Type: application/json
 
 | type | 필드 | 화면 |
 |---|---|---|
-| `branch_panel` | `branch`, `base_date`, `prev_date`, `indicators[]`, `segments[]`, `cases[]`, `rule_status` | **수치 패널.** 정형 수치는 여기서만 그린다. `indicators[]` 는 부점 지표 셋(`id`·`name`·`now`·`prev`·`delta`·`direction`·`label` — 잔액은 원, 수익률은 %), `segments[]` 는 세그먼트 인원(`id`·`name`·`grade`·`now`·`prev`·`delta`·`direction`), `cases[]` 는 오늘 해당하는 관리 방향(`id`·`name`·`grade`·`why[]`·`feature`·`strategy`). `prev` 는 전월말(`prev_date`) 값이다. `grade` 가 `D` 인 기준은 기획자 설계 제안이다 — 행내 확정 기준과 같은 모양으로 그리지 않는다 |
+| `branch_panel` | `branch`, `base_date`, `prev_date`, `indicators[]`, `segments[]`, `cases[]`, `rule_status` | **수치 패널.** 정형 수치는 여기서만 그린다. `indicators[]` 는 부점 지표(`id`·`name`·`unit`·`core`·`now`·`prev`·`delta`·`direction`·`label` — `unit` 은 `원`·`%`·개수 단위). 부점 잔액·계좌 수·부점 수익률(적립금 가중)·고유계정대 잔액·원리금보장 비중·올해 계약이전(좌·금액)·수익률 저조 고객·적립금 1억 이상 고객(수·비중)이고, `core` 가 참인 셋이 관리 방향 판정에 쓰인다. `segments[]` 는 세그먼트 인원(`id`·`name`·`grade`·`now`·`prev`·`delta`·`direction`), `cases[]` 는 오늘 해당하는 관리 방향(`id`·`name`·`grade`·`why[]`·`feature`·`strategy`). `prev` 는 전월말(`prev_date`) 값이다. `grade` 가 `D` 인 기준은 기획자 설계 제안이다 — 행내 확정 기준과 같은 모양으로 그리지 않는다 |
 | `branch_briefing` | `text`, `status`, `reason` | **브리핑 문장 영역.** `status` 가 `ok`(LLM 문장) · `fallback`(문장 검사에 걸려 기준표의 전략 문장을 그대로 실음) · `no_case`(오늘 해당 관리 방향 없음 — 코드 문장)면 `text` 를 그린다. `llm_down` 이면 `text` 가 `null` 이다 — 문장 영역을 비우고 `reason` 을 개발자 콘솔에만 찍는다. 문장에는 세그먼트 인원 변화 말고 숫자가 없다(패널과 숫자를 겹치지 않는다) |
 | `done` | 없음 | 끝. 사번으로 부점을 못 찾거나 DB 를 못 읽으면 `error` 뒤에 온다 |
 

@@ -13,26 +13,35 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from functools import lru_cache
 
 from pension_agent.common import clock, config
 from pension_agent.tools.branch_briefing import check, run, views
 
-#: 부점 지표 — 대상ID → 이름. 계좌 수는 고객 수로 센다(개인형IRP 1인 1계좌 가정 — DEMO_STATUS 기재).
-INDICATORS: dict[str, str] = {
-    "total_eval_amt": "부점 잔액",
-    "customer_count": "계좌 수",
-    "avg_return_rate": "평균 수익률",
+#: 부점 지표 — 대상ID → (이름, 단위, 증가·감소 최소 변화폭 PARAM_ID, CASE 판정에 쓰는 핵심 지표인가).
+#: 단위: 원 · % · 그 밖은 개수 단위. 계좌 수는 고객 수로 센다(개인형IRP 1인 1계좌 가정 — DEMO_STATUS 기재).
+#: 부점 수익률·원리금보장 비중은 적립금(평가금액) 가중이다.
+INDICATORS: dict[str, tuple[str, str, str, bool]] = {
+    "total_eval_amt": ("부점 잔액", "원", "BP-03", True),
+    "customer_count": ("계좌 수", "계좌", "BP-02", True),
+    "branch_return_rate": ("부점 수익률", "%", "BP-04", True),
+    "idle_cash_total": ("고유계정대 잔액", "원", "BP-03", False),
+    "safe_asset_ratio": ("원리금보장 비중", "%", "BP-07", False),
+    "transfer_out_count": ("올해 계약이전", "좌", "BP-02", False),
+    "transfer_out_amt": ("올해 계약이전 금액", "원", "BP-03", False),
+    "low_return_count": ("수익률 저조 고객", "명", "BP-02", False),
+    "high_balance_count": ("적립금 1억 이상 고객", "명", "BP-02", False),
+    "high_balance_share": ("적립금 1억 이상 고객의 적립금 비중", "%", "BP-07", False),
 }
-
-#: 지표 대상ID → 최소 변화폭 임계값 PARAM_ID.
-_INDICATOR_PARAM = {"customer_count": "BP-02", "total_eval_amt": "BP-03", "avg_return_rate": "BP-04"}
+#: 수익률 저조 · 고액 적립금 기준 PARAM_ID(부점 브리핑 화면 기획안 — 근거등급 D)
+_LOW_RETURN_PARAM, _HIGH_BALANCE_PARAM = "BP-08", "BP-09"
 _SEGMENT_PARAM = "BP-01"
 _MAX_CASES_PARAM = "BP-05"
 
 _OPS = (">=", "<=", "=")
 #: 방향 표기 — 판정 값은 증가·감소 그대로, 사람이 읽는 말만 바꾼다
-_WORDS = {("avg_return_rate", "감소"): "하락", ("avg_return_rate", "증가"): "상승"}
+_WORDS = {("branch_return_rate", "감소"): "하락", ("branch_return_rate", "증가"): "상승"}
 #: 표의 문자 조건값 형식 — 따옴표·세미콜론이 끼면 SQL 로 옮기지 않는다
 _TEXT_VALUE = re.compile(r"[가-힣A-Za-z0-9 ]{1,20}")
 
@@ -128,19 +137,37 @@ def segment_sql(seg: Segment) -> str:
     return " AND ".join(_sql_value(f, o, v) for f, o, v in seg.conds)
 
 
-def _snapshot_sql(view: str, segments: tuple[Segment, ...]) -> str:
+def _snapshot_sql(view: str, segments: tuple[Segment, ...], low: float, high: float) -> str:
+    big = f"eval_amt >= {high:g}"
     cols = ["COUNT(*) AS customer_count", "SUM(eval_amt) AS total_eval_amt",
-            "ROUND(AVG(return_rate), 2) AS avg_return_rate"]
+            "ROUND(SUM(eval_amt * return_rate) / SUM(eval_amt), 2) AS branch_return_rate",
+            "SUM(idle_cash_amt) AS idle_cash_total",
+            "ROUND(SUM(eval_amt * safe_asset_pct) / SUM(eval_amt), 1) AS safe_asset_ratio",
+            f"SUM(CASE WHEN return_rate < {low:g} THEN 1 ELSE 0 END) AS low_return_count",
+            f"SUM(CASE WHEN {big} THEN 1 ELSE 0 END) AS high_balance_count",
+            f"ROUND(100.0 * SUM(CASE WHEN {big} THEN eval_amt ELSE 0 END) / SUM(eval_amt), 1)"
+            " AS high_balance_share"]
     cols += [f"SUM(CASE WHEN {segment_sql(s)} THEN 1 ELSE 0 END) AS seg_{s.id.replace('-', '_')}"
              for s in segments]
     return f"SELECT {', '.join(cols)} FROM {view}"
 
 
-def _snapshot(view: str, segments: tuple[Segment, ...], code: str, emp_no: str | None) -> dict:
-    # 코드가 만든 SQL 도 같은 검사를 지난다 — 표에서 온 값이 SQL 을 바꾸는 길을 막는 두 번째 문
-    sql = check.check(_snapshot_sql(view, segments))
-    _final, rows, _cut = run.execute(sql, code, emp_no)
-    return dict(rows[0]) if rows else {}
+def _transfer_sql(day: date) -> str:
+    """그 날 기준 올해 계약이전(타사 유출) 건수·금액 — 1월 1일부터 그 날까지."""
+    return ("SELECT COUNT(*) AS transfer_out_count, SUM(transfer_amt) AS transfer_out_amt "
+            f"FROM v_transfer_out WHERE transfer_date >= '{day.year}-01-01' "
+            f"AND transfer_date <= '{day.isoformat()}'")
+
+
+def _snapshot(view: str, day: date, r: Rules, code: str, emp_no: str | None) -> dict:
+    """한 시점(오늘 · 전월말)의 지표·세그먼트 인원."""
+    low, high = _param(r, _LOW_RETURN_PARAM, 1), _param(r, _HIGH_BALANCE_PARAM, 100_000_000)
+    out: dict = {}
+    for sql in (_snapshot_sql(view, r.segments, low, high), _transfer_sql(day)):
+        # 코드가 만든 SQL 도 같은 검사를 지난다 — 표에서 온 값이 SQL 을 바꾸는 길을 막는 두 번째 문
+        _final, rows, _cut = run.execute(check.check(sql), code, emp_no)
+        out.update(dict(rows[0]) if rows else {})
+    return out
 
 
 def _direction(delta: float, step: float) -> str:
@@ -179,15 +206,14 @@ def compute(emp_no: str | None) -> dict:
         raise LookupError("직원 사번으로 소속 부점을 확인하지 못했습니다")
     code, name = mine
     r = rules()
-    now = _snapshot("v_irp_customer", r.segments, code, emp_no)
-    prev = _snapshot("v_irp_customer_prev", r.segments, code, emp_no)
+    now = _snapshot("v_irp_customer", clock.today(), r, code, emp_no)
+    prev = _snapshot("v_irp_customer_prev", clock.prev_month_end(), r, code, emp_no)
 
     indicators: dict[str, dict] = {}
-    for key, label in INDICATORS.items():
+    for key, (label, unit, pid, core) in INDICATORS.items():
         a, b = now.get(key) or 0, prev.get(key) or 0
-        step = _param(r, _INDICATOR_PARAM[key], 1)
-        direction = _direction(a - b, step)
-        indicators[key] = {"id": key, "name": label, "now": a, "prev": b,
+        direction = _direction(a - b, _param(r, pid, 1))
+        indicators[key] = {"id": key, "name": label, "unit": unit, "core": core, "now": a, "prev": b,
                            "delta": round(a - b, 2), "direction": direction,
                            "label": _WORDS.get((key, direction), direction)}
     seg_step = _param(r, _SEGMENT_PARAM, 5)

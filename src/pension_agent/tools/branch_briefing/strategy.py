@@ -36,7 +36,8 @@ LLM_DOWN = "LLM 연결이 안 되어 있어 오늘의 관리 방향 문장을 �
 
 
 def _cases_block(st: dict) -> str:
-    ind = "; ".join(f"{i['name']} {i['label']}" for i in st["indicators"])
+    # 부점 상태는 CASE 판정에 쓰는 핵심 지표만 — 나머지 패널 지표는 문장에 끌어들이지 않는다
+    ind = "; ".join(f"{i['name']} {i['label']}" for i in st["indicators"] if i["core"])
     out = [f"부점 지표(전월말 대비): {ind}"]
     for n, c in enumerate(st["cases"], 1):
         changes = ", ".join(f"{s['name']} 고객 {s['delta']:+d}명" for s in c["segment_changes"])

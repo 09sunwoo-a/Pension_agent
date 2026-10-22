@@ -47,6 +47,15 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
     "v_irp_customer_prev": (
         "우리 부점의 IRP 고객 — **전월말 기준** 스냅샷. 컬럼은 v_irp_customer 와 같고 남은 일수는 전월말 "
         "기준이다. «지난달보다 늘었나»처럼 전월말과 견줄 때만 쓴다", None),
+    "v_transfer_out": (
+        "우리 부점에서 다른 금융기관으로 계약이전(유출)된 IRP 계좌 — 한 건당 한 행. «올해 계약이전 몇 좌»·"
+        "«어디로 옮겼나»가 여기다. 떠난 계좌라 v_irp_customer 에는 없다", [
+            ("customer_name", "문자", "고객 이름"),
+            ("branch_name", "문자", "관리 부점 이름"),
+            ("transfer_date", "날짜 문자 YYYY-MM-DD", "계약이전 일자"),
+            ("transfer_amt", "정수(원)", "이전 금액"),
+            ("to_institution", "문자", "이전 받은 기관 업권('증권'·'은행'·'보험')"),
+        ]),
     "v_branch_summary": (
         "부점별 집계 — 부점 하나당 한 행. 개인 정보 없이 다른 부점과 견줄 때 쓴다", [
             ("branch_name", "문자", "부점 이름"),

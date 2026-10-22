@@ -333,7 +333,7 @@ python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의
 | 기능 | 도구 | 무엇으로 답하나 | LLM |
 |---|---|---|---|
 | 관리 대상 추천 | `branch_targets` | 타겟 룰베이스로 고른 오늘의 타겟 목록(`target_list`). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
-| 부점 현황 | `branch_status` | 지표(잔액·계좌 수·평균 수익률) · 세그먼트 인원 · **전월말 대비 변화** · 오늘의 CASE(`status.compute`) | 답변 작성만 |
+| 부점 현황 | `branch_status` | 지표(잔액·계좌 수·부점 수익률·고유계정대 잔액·원리금보장 비중·올해 계약이전·수익률 저조·1억 이상) · 세그먼트 인원 · **전월말 대비 변화** · 오늘의 CASE(`status.compute`). CASE 판정에 쓰는 지표는 앞의 셋 | 답변 작성만 |
 | 고객 검색 | `branch_search` | 직원이 말한 조건 → SELECT 한 문장(아래) | SQL 작성 · 답변 작성 |
 
 **기준은 룰베이스 xlsx 의 부점 시트 5종이다**(`부점세그먼트_Master` · `부점세그먼트_조건` · `부점CASE_Rule` ·
@@ -365,7 +365,7 @@ python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의
 
 | 단계 | 파일 | 하는 일 |
 |---|---|---|
-| 볼 수 있는 것 | `views.py` | LLM 에게 보여주는 유일한 스키마. 고정 뷰 세 개 — `v_irp_customer`(우리 부점 고객, 한 명당 한 행) · `v_irp_customer_prev`(같은 꼴의 전월말 스냅샷) · `v_branch_summary`(부점별 집계). 프롬프트에는 부점 세그먼트 정의(이름 · 직원 표현 · 조건)도 함께 실려, 「납입금 미운용」·「현금성 장기대기」가 표의 조건으로 옮겨진다 |
+| 볼 수 있는 것 | `views.py` | LLM 에게 보여주는 유일한 스키마. 고정 뷰 네 개 — `v_irp_customer`(우리 부점 고객, 한 명당 한 행) · `v_irp_customer_prev`(같은 꼴의 전월말 스냅샷) · `v_transfer_out`(타사로 계약이전된 계좌, 한 건당 한 행) · `v_branch_summary`(부점별 집계). 프롬프트에는 부점 세그먼트 정의(이름 · 직원 표현 · 조건)도 함께 실려, 「납입금 미운용」·「현금성 장기대기」가 표의 조건으로 옮겨진다 |
 | 검사 | `check.py` | SELECT 한 문장만 · 세미콜론·주석·WITH·쓰기 명령 금지 · 고정 뷰만 조회 · 시스템 객체 금지. 현황 집계처럼 코드가 만든 SQL 도 같은 검사를 지난다 |
 | 실행 | `run.py` | 고정 뷰 SQL 을 `WITH` 로 앞에 붙인다(DB 에 뷰를 만들지 않는다). 부점코드는 직원 사번으로 조회한 값을 코드가 넣는다. 최대 100행(Sybase 는 `SELECT TOP`) |
 | 재시도 | `tool.py` | 검사나 실행에서 걸리면 이유를 LLM 에게 돌려주고 최대 2번 다시 쓰게 한다 |
@@ -380,13 +380,13 @@ DB 는 `BRANCH_DB` 로 고른다.
 
 | 값 | DB |
 |---|---|
-| `demo` (기본) | 행외 목업 DB(sqlite 메모리, `demo_db.py`) — 부점 4곳 · 고객 300명 · 전월말 스냅샷. 전부 시연값이다 |
+| `demo` (기본) | 행외 목업 DB(sqlite 메모리, `demo_db.py`) — 부점 4곳 · 전월말 스냅샷 · 계약이전. 전부 시연값이다. 여의도종합금융센터 1,392명은 부점 브리핑 화면 기획안의 수치가 그대로 나오게 맞춘 고객이다(`demo_yeouido.py` — 목업 고객 12명 + 합성 1,380명) |
 | `sybase` | 행내 Sybase IQ 를 MCP 도구 `sybaseiq_query` 로 조회한다(`common/mcp/sybase.py`) |
 | `off` | 조회하지 않는다. 표에 없는 값도 `off` 로 본다 |
 
 **행내로 옮길 때 할 일.**
-1. `sql/sybase/` 의 네 파일(`my_branch.sql` 사번→부점 · `v_irp_customer.sql` · `v_irp_customer_prev.sql`(전월말
-   기준년월일 스냅샷) · `v_branch_summary.sql`)을 실제 테이블로 작성한다. 결과 컬럼 이름과 뜻은 `views.py` 와
+1. `sql/sybase/` 의 다섯 파일(`my_branch.sql` 사번→부점 · `v_irp_customer.sql` · `v_irp_customer_prev.sql`(전월말
+   기준년월일 스냅샷) · `v_transfer_out.sql`(계약이전 원장) · `v_branch_summary.sql`)을 실제 테이블로 작성한다. 결과 컬럼 이름과 뜻은 `views.py` 와
    같아야 한다. 작성 전에는 «DB 미연결»로 답한다. 부점 세그먼트용 컬럼(미운용 금액·기간 · 세액공제 잔여한도 ·
    계약이전 사전조회 · 성향 불일치 · ISA 만기)은 원천 테이블이 아직 정해지지 않았다.
 2. `.env` 에 `BRANCH_DB=sybase`, `MCP_SERVERS=workb,sybase`, `MCP_CONN_ID` 를 넣는다.

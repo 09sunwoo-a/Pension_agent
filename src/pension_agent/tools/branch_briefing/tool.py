@@ -156,11 +156,11 @@ DRAFT_MARK = ("부점 세그먼트·CASE·임계값 중 근거등급 D(기획자
 
 def _value(ind: dict, key: str) -> str:
     v = ind[key]
-    if ind["id"] == "total_eval_amt":
+    if ind["unit"] == "원":
         return won(v)
-    if ind["id"] == "avg_return_rate":
-        return f"{v:.2f}%"
-    return f"{int(v):,}계좌"
+    if ind["unit"] == "%":
+        return f"{v:.2f}%" if ind["id"] == "branch_return_rate" else f"{v:.1f}%"
+    return f"{int(v):,}{ind['unit']}"
 
 
 def _change(seg: dict, st: dict) -> str:
