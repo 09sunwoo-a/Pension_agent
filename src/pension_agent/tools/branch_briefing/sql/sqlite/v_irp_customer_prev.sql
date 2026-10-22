@@ -10,7 +10,7 @@ SELECT c.customer_name, c.age, c.star_grade, c.risk_profile,
        c.last_contact_days, c.target_reasons,
        CASE WHEN c.target_reasons <> '' THEN 1 ELSE 0 END AS is_target,
        c.idle_cash_amt, c.idle_cash_days, c.tax_credit_room, c.transfer_inquiry,
-       c.risk_mismatch, c.isa_maturity_date, c.isa_maturity_amt,
+       c.risk_mismatch, c.isa_maturity_date, c.isa_maturity_amt, c.etf_eval_amt,
        CAST(julianday(c.isa_maturity_date) - julianday('{prev_date}') AS INTEGER) AS isa_days_to_maturity
 FROM irp_customer_prev c
 JOIN branch b ON b.branch_code = c.branch_code

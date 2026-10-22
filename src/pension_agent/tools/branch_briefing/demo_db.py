@@ -43,13 +43,16 @@ COLUMNS = (
     # 부점 브리핑 세그먼트용(2026-10-22) — 원천 테이블 미확정 시연 컬럼
     "idle_cash_amt", "idle_cash_days", "tax_credit_room", "transfer_inquiry",
     "risk_mismatch", "isa_maturity_date", "isa_maturity_amt",
+    # 상품 유형별 보유(2026-10-22) — 원천 테이블 미확정 시연 컬럼
+    "etf_eval_amt",
 )
 _COL = {name: i for i, name in enumerate(COLUMNS)}
 
 _TYPES = {"age": "INTEGER", "eval_amt": "INTEGER", "return_rate": "REAL",
           "safe_asset_pct": "REAL", "idle_cash_pct": "REAL", "next_maturity_amt": "INTEGER",
           "last_contact_days": "INTEGER", "idle_cash_amt": "INTEGER", "idle_cash_days": "INTEGER",
-          "tax_credit_room": "INTEGER", "isa_maturity_amt": "INTEGER"}
+          "tax_credit_room": "INTEGER", "isa_maturity_amt": "INTEGER",
+          "etf_eval_amt": "INTEGER"}
 
 
 def _table_sql(name: str) -> str:
@@ -103,6 +106,8 @@ def _persona_rows() -> list[tuple]:
             "신청" if {"chn", "out"} & set(conds) else "없음",
             "불일치" if "mis" in conds else "일치",
             (p.isa or {}).get("date"), int((p.isa or {}).get("amount") or 0) or None,
+            # ETF 평가금액 — 원장 보유상품(holdings)의 ETF 합계 그대로
+            sum(int(h.get("amount") or 0) for h in (p.holdings or []) if h.get("type") == "ETF"),
         ))
     return rows
 
@@ -160,8 +165,37 @@ def _synthetic_rows() -> list[tuple]:
             # 위험자산 비중은 원리금보장 비중의 나머지로 근사
             "불일치" if C.risk_mismatch(risk, 100 - safe, safe) else "일치",
             None, None,
+            etf_amount(base[0], base[4], bal, safe),
         ))
     return out
+
+
+#: 합성 고객 중 ETF 를 가진 비율 · 실적배당(원리금보장 밖) 몫 중 ETF 비중 범위(시연값).
+_ETF_SHARE = 0.4
+_ETF_PART = (0.15, 0.7)
+
+
+def etf_amount(name: str, branch: str, eval_amt: int, safe_pct: float | None) -> int:
+    """합성 고객의 ETF 평가금액(시연값) — 원리금보장 밖 몫 안에서.
+
+    고객마다 이름·부점으로 시드를 따로 둔다 — 다른 컬럼의 난수 순서를 건드리지 않아 화면 기획안 수치가 그대로다.
+    """
+    rnd = random.Random(f"etf:{branch}:{name}")
+    risky = eval_amt * (100 - (safe_pct or 0)) / 100
+    if risky < 1_000_000 or rnd.random() >= _ETF_SHARE:
+        return 0
+    return int(round(risky * rnd.uniform(*_ETF_PART), -4))
+
+
+def _prev_etf(today_rows: list[dict], prev_rows: list[dict]) -> None:
+    """전월말 ETF 평가금액 — 오늘 값을 전월말 잔액 비율로 되짚는다(해지 계좌·없던 고객은 0)."""
+    now = {(r["branch_code"], r["customer_name"]): r for r in today_rows}
+    for r in prev_rows:
+        cur = now.get((r["branch_code"], r["customer_name"]))
+        if cur is None or not cur["eval_amt"]:
+            r["etf_eval_amt"] = 0
+        else:
+            r["etf_eval_amt"] = int(round(cur["etf_eval_amt"] * r["eval_amt"] / cur["eval_amt"], -4))
 
 
 def _prev_rows(current: list[tuple]) -> list[tuple]:
@@ -177,6 +211,7 @@ def _prev_rows(current: list[tuple]) -> list[tuple]:
         r = list(row)
         r[_COL["return_rate"]] = round(r[_COL["return_rate"]] + 0.6, 1)
         r[_COL["eval_amt"]] = round(r[_COL["eval_amt"]] * 0.98)
+        r[_COL["etf_eval_amt"]] = int(round(r[_COL["etf_eval_amt"]] * 0.98, -4))
         if (r[_COL["idle_cash_pct"]] or 0) >= 50 and rnd.random() < 0.6:
             r[_COL["idle_cash_pct"]] = 20.0
             r[_COL["idle_cash_amt"]] = round(r[_COL["eval_amt"]] * 0.2)
@@ -205,6 +240,7 @@ def _prev_rows(current: list[tuple]) -> list[tuple]:
             r[_COL["tax_credit_room"]], r[_COL["transfer_inquiry"]] = 0, "없음"
             r[_COL["risk_mismatch"]] = "일치"
             r[_COL["isa_maturity_date"]] = r[_COL["isa_maturity_amt"]] = None
+            r[_COL["etf_eval_amt"]] = 0
             r[_COL["target_reasons"]] = ""
             out.append(tuple(r))
     return out
@@ -248,6 +284,10 @@ def connection() -> sqlite3.Connection:
             conn.executemany("INSERT INTO employee VALUES (?, ?, ?)", EMPLOYEES)
             personas = [dict(zip(COLUMNS, r)) for r in _persona_rows()]
             yeouido, yeouido_prev, transfers = demo_yeouido.build(personas)
+            for d in yeouido:
+                d.setdefault("etf_eval_amt", etf_amount(d["customer_name"], d["branch_code"],
+                                                        d["eval_amt"], d["safe_asset_pct"]))
+            _prev_etf(yeouido, yeouido_prev)
             # 다른 부점 — 기존 합성 고객(0001 몫은 버린다. 난수 순서를 그대로 두려고 생성 뒤에 거른다)
             # 전월말도 예전과 같은 입력(목업 + 합성 288명)으로 흔든 뒤 거른다 — 다른 부점 결과를 그대로 둔다
             legacy = _persona_rows() + _synthetic_rows()

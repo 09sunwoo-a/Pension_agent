@@ -10,6 +10,8 @@ branch_search: 검사 거부·실행 오류는 사유를 실어 최대 RETRIES �
 
 from __future__ import annotations
 
+import re
+
 from pension_agent.common import observability
 from pension_agent.common.llm import LLMError, available, generate, json_object  # noqa: F401
 from pension_agent.evidence.record import Evidence, _ev
@@ -48,9 +50,17 @@ def table(rows: list[dict]) -> str:
     if not rows:
         return "(조회 결과 0건)"
     cols = list(rows[0])
+    pct = _percent_columns()
     out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
-    out += ["| " + " | ".join(_cell(r.get(c)) for c in cols) + " |" for r in rows]
+    out += ["| " + " | ".join(_cell(r.get(c)) + ("%" if c in pct and r.get(c) is not None else "")
+                              for c in cols) + " |" for r in rows]
     return "\n".join(out)
+
+
+def _percent_columns() -> set[str]:
+    """뷰 목록이 «(%)» 로 선언한 컬럼 — 셀에 % 를 붙인다. 답변은 「수익률 -9.4%」로 쓰는데 셀이 맨숫자면
+    검증기가 다른 주장으로 보고 답을 폐기한다(기준서 §6 «단위 표기 — 데이터가 선언한 열뿐»)."""
+    return {c for v in views.VIEWS for c, t, _d in (views.VIEWS[v][1] or []) if "(%)" in t}
 
 
 def segment_catalog() -> str:
@@ -64,6 +74,32 @@ def segment_catalog() -> str:
         alias = f" · 다른 이름: {', '.join(seg.aliases)}" if seg.aliases else ""
         lines.append(f"- {seg.name}{alias} → WHERE {where}")
     return "\n".join(lines) or "(정의 없음)"
+
+
+_SELECT_WORD = re.compile(r"\bSELECT\b", re.IGNORECASE)
+
+#: 조회할 수 없는 질문의 재료 문장(코드). 사유는 SQL 작성 LLM 의 설명이라 숫자가 있으면 싣지 않는다 —
+#: 원장에 실리면 그 숫자가 인용 허용이 된다(LLM 이 쓴 문장으로 경계를 넓히지 않는다, 루트 규칙 2).
+CANNOT = "이 질문은 부점 고객 데이터에 있는 항목으로 조회할 수 없습니다."
+CANNOT_NO_SUBSTITUTE = ("조건 일부만으로 조회하거나 다른 고객 목록(관리 대상 추천 등)으로 대신하면 "
+                        "물은 것의 답이 아닙니다.")
+
+
+def _cannot(query: str, branch_name: str, reason: str) -> Evidence:
+    """뷰로 답할 수 없는 질문 → «조회하지 못함» 재료(확인한 결과)."""
+    why = reason.strip() if reason and not re.search(r"\d", reason) else ""
+    observability.step("branch_search", branch_name, cannot=why[:120] or "-")
+    text = "\n".join(x for x in (
+        f"■ 부점 데이터 조회 — {branch_name} 부점 · 조회하지 못함",
+        f"· {CANNOT}",
+        f"· 조회할 수 없는 이유: {why}" if why else "",
+        f"· {CANNOT_NO_SUBSTITUTE}",
+    ) if x)
+    return _ev("branch_search", query, text,
+               [{"id": "branch_db", "title": f"부점 데이터 조회 ({branch_name}) — 조회할 수 없는 질문",
+                 "doc": None, "score": None, "page": None}],
+               meta={"rows": 0, "truncated": False, "branch": branch_name, "sql": None,
+                     "cannot": True})
 
 
 def _sql(question: str, last_sql: str = "", error: str = "") -> tuple[str | None, str]:
@@ -107,9 +143,12 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
         if error:
             observability.step("branch_search", "retry", attempt=attempt - 1, error=error[:120])
         written, reason = _sql(question, sql, error)
+        if written is not None and not _SELECT_WORD.search(written):
+            # sql 칸에 조회문 대신 설명을 적은 응답 — «조회할 수 없다»는 답으로 읽는다
+            written, reason = None, reason or written
         if written is None:
-            # 뷰로 답할 수 없는 질문 — 재료 없음
-            return None
+            # 뷰로 답할 수 없는 질문 — «확인한 결과»로 싣는다(재료 0건으로 두면 계획이 다른 도구의 목록으로 답한다)
+            return _cannot(query, branch_name, reason)
         sql = written
         if not sql:
             error = reason

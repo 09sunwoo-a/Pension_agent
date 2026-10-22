@@ -126,7 +126,7 @@ STEP_KEYS: dict[str, str] = {
     # briefing
     "tier": "등급", "skipped": "건너뜀", "narrative": "서술",
     # branch_search(부점 브리핑 고객 검색)
-    "rows": "행수", "truncated": "잘림",
+    "rows": "행수", "truncated": "잘림", "cannot": "조회불가",
     # branch_status · 전략 브리핑
     "cases": "CASE",
 }

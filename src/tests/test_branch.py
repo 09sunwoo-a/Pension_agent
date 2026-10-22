@@ -205,13 +205,34 @@ def check_retry_and_evidence() -> None:
     check(len(llm.prompts) == tool.RETRIES + 1 and "만들지 못했" in reason,
           f"끝내 검사에 걸리면 {tool.RETRIES + 1}번 시도 후 도구 고장", reason)
 
-    with _LLM(_sql(None, "날씨는 부점 데이터에 없음")):
+    # 조회할 수 없는 질문은 «확인한 결과»다 — 재료 0건으로 두면 계획이 다른 도구(관리 대상 명단)로 대신 답했다
+    with _LLM(_sql(None, "날씨는 부점 데이터에 없음")) as llm:
         ev = tools.run("branch_search", _state(q="오늘 날씨 어때"), "날씨")
-    check(ev is None, "뷰로 답할 수 없다고 하면 근거 없음(빗나간 호출)")
+    text = (ev or {}).get("text", "")
+    check(ev is not None and (ev.get("meta") or {}).get("cannot") and tool.CANNOT in text,
+          "뷰로 답할 수 없다고 하면 «조회하지 못함»을 재료로 싣는다", text[:200])
+    check("날씨는 부점 데이터에 없음" in text and tool.CANNOT_NO_SUBSTITUTE in text,
+          "그 이유와 «다른 목록으로 대신하지 않는다»가 함께 실린다")
+    check(len(llm.prompts) == 1, "답할 수 없다는 응답은 다시 쓰게 하지 않는다")
+    with _LLM(_sql(None, "펀드 1천만원 이상 컬럼 없음")):
+        ev = tools.run("branch_search", _state(q="펀드 1천만원 이상"), "펀드")
+    check("1천만원" not in (ev or {}).get("text", ""),
+          "숫자가 든 LLM 사유는 싣지 않는다(인용 허용을 넓히지 않는다)")
+    with _LLM(_sql("ETF 보유 컬럼이 없어 조회할 수 없습니다")) as llm:
+        ev = tools.run("branch_search", _state(q="x"), "x")
+    check(ev is not None and (ev.get("meta") or {}).get("cannot") and len(llm.prompts) == 1,
+          "sql 칸에 조회문 대신 설명을 적어도 «조회하지 못함»으로 읽는다(도구 고장 아님)")
+    from pension_agent.prompts import ANSWER_SHAPES  # noqa: PLC0415
+    check("조회하지 못함" in ANSWER_SHAPES["branch_search"] and "대신 답하지 않는다" in ANSWER_SHAPES["branch_search"],
+          "답변 형태 요구가 «조회하지 못함»을 다른 목록으로 대신하지 말라고 한다")
 
     with _LLM(_sql("SELECT customer_name FROM v_irp_customer WHERE age > 200")):
         ev = tools.run("branch_search", _state(), "200세 이상")
     check(ev is not None and "0건" in ev["text"], "0건도 확인한 결과로 싣는다")
+
+    t = tool.table([{"customer_name": "가", "return_rate": -9.4, "safe_asset_pct": None, "eval_amt": 5_000_000}])
+    check("| -9.4% |" in t and "| 5,000,000 |" in t and "None" not in t and "|  |" in t,
+          "뷰가 (%) 로 선언한 컬럼만 셀에 % 를 붙인다(답변의 「-9.4%」가 재료와 맞게)", t)
 
 
 def check_registry() -> None:
@@ -308,6 +329,31 @@ def check_status() -> None:
         r.params.clear()
         r.params.update(saved)
     check(st2["cases"] == [], "증가 판정 최소 인원(BP-01)을 올리면 CASE 가 성립하지 않는다")
+
+
+def check_etf() -> None:
+    """ETF 평가금액 컬럼 — 목업 고객은 원장 보유상품의 ETF 합계, 합성 고객은 원리금보장 밖 몫 안."""
+    from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
+    check(any(c == "etf_eval_amt" for c, _t, _d in views.columns("v_irp_customer")),
+          "LLM 이 보는 뷰 목록에 ETF 평가금액이 있다")
+    with _Today():
+        _, rows, _ = run.execute("SELECT customer_name, etf_eval_amt, eval_amt, safe_asset_pct "
+                                 "FROM v_irp_customer", "0001", EMP, limit=2000)
+        by = {r["customer_name"]: r for r in rows}
+        p = next(x for x in C.PERSONAS if x.nm == "최서윤")
+        want = sum(h["amount"] for h in p.holdings if h.get("type") == "ETF")
+        check(by["최서윤"]["etf_eval_amt"] == want, "목업 고객 ETF = 원장 보유상품 ETF 합계",
+              f"{by['최서윤']['etf_eval_amt']} vs {want}")
+        over = [r for r in rows
+                if r["etf_eval_amt"] > r["eval_amt"] * (100 - (r["safe_asset_pct"] or 0)) / 100 + 10_000]
+        check(not over, "ETF 는 원리금보장 밖 몫을 넘지 않는다", str(over[:2]))
+        _, hit, _ = run.execute("SELECT customer_name FROM v_irp_customer "
+                                "WHERE etf_eval_amt >= 10000000 AND return_rate < 5", "0001", EMP)
+        names = {r["customer_name"] for r in hit}
+        check(len(hit) >= 3 and "최서윤" in names,
+              "«ETF 1천만원 이상 · 수익률 5% 미만»에 해당하는 고객이 있다", str(sorted(names)))
+        _, prev, _ = run.execute("SELECT SUM(etf_eval_amt) AS s FROM v_irp_customer_prev", "0001", EMP)
+        check((prev[0]["s"] or 0) > 0, "전월말 스냅샷에도 ETF 평가금액이 있다")
 
 
 def check_yeouido_screen() -> None:
@@ -444,6 +490,7 @@ def main() -> int:
     check_rules()
     check_status()
     check_yeouido_screen()
+    check_etf()
     check_strategy()
     check_targets()
 

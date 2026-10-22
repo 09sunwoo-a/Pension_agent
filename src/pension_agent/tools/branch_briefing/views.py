@@ -15,6 +15,7 @@ _BRIEFING_COLUMNS: list[tuple[str, str, str]] = [
     ("isa_maturity_date", "날짜 문자 YYYY-MM-DD", "ISA 만기일(IRP 밖 계좌, 없으면 NULL)"),
     ("isa_maturity_amt", "정수(원)", "ISA 만기자금 금액(IRP 밖, 없으면 NULL)"),
     ("isa_days_to_maturity", "정수(일)", "오늘부터 ISA 만기일까지 남은 일수. 음수면 이미 지난 것"),
+    ("etf_eval_amt", "정수(원)", "IRP 안에서 보유한 ETF 평가금액 합계(없으면 0) — «ETF 투자 금액»"),
 ]
 
 #: 뷰 이름 → (설명, [(컬럼, 타입, 뜻)]). 컬럼이 None 이면 바로 앞 뷰와 같은 컬럼
