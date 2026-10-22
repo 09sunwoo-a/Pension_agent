@@ -382,11 +382,25 @@ def check_strategy() -> None:
 
 def check_targets() -> None:
     from pension_agent import graph  # noqa: PLC0415
-    from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
-    plain = target_list.today_targets()
+    from pension_agent.tools.branch_briefing import roster  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as C, target_list  # noqa: PLC0415
     with _Today():
+        _name, profiles = roster.branch_profiles(EMP)
+        plain = target_list.today_targets(profiles)
         ev = tools.run("branch_targets", _state(q="오늘 중점적으로 관리할 고객은 누구야?"), "관리 대상")
+        other = tools.run("branch_targets", _state(OTHER_EMP), "관리 대상")
+        loose = tools.run("branch_targets", {"question": "q"}, "관리 대상")
     meta = (ev or {}).get("meta") or {}
+    check(meta.get("count") == 56 and YEOUIDO in ev["text"],
+          "여의도종합금융센터의 오늘의 중점관리 고객은 56명이다(화면 기획안)", str(meta.get("count")))
+    check(all(t.conds for t in plain) and len(plain) == 56,
+          "명부는 부점 DB 관리 대상이고 전원 룰베이스 요건이 성립한다", str(len(plain)))
+    persona_names = {p.nm for p in C.PERSONAS if C.conditions(p)}
+    check(persona_names <= set(meta.get("names") or []), "요건이 성립한 목업 고객은 모두 명부에 있다")
+    check("강남" in (other or {}).get("text", "") and not persona_names & set(other["meta"]["names"]),
+          "다른 부점 직원에게는 그 부점 고객만 나온다(gap 39)")
+    check(loose["meta"]["count"] == len(persona_names) and "·" in loose["text"].splitlines()[0],
+          "사번이 없으면 예전처럼 목업 고객 명부로 답한다")
     check(ev is not None and meta.get("codes") == ["tax", "add"],
           "관리 대상 추천 순서는 오늘의 CASE 가 가리키는 요건을 따른다", str(meta.get("codes")))
     ordered = target_list.prioritize(plain, meta["codes"])
@@ -413,10 +427,11 @@ def check_targets() -> None:
                                              "history": [{"question": "q", "first_targets": old}]}, "x")
     check(not fresh["meta"]["replayed"], "날짜가 바뀐 첫 추천은 다시 계산한다")
     from pension_agent.actions import memo  # noqa: PLC0415
-    table, _ = memo.table_for({}, [again])
-    first_name = fake["names"][0]
-    check(table.find(first_name) != -1 and table.find(first_name) < table.find(fake["names"][-1]),
-          "쪽지 표도 도구가 실은 순서 그대로다")
+    with _Today():
+        table, _ = memo.table_for({"employee_id": EMP}, [again])
+    # 표는 길이 상한에서 잘릴 수 있다(note.MAX_CHARS) — 앞의 두 사람 순서로 잰다
+    a, b = table.find(fake["names"][0]), table.find(fake["names"][1])
+    check(-1 < a < b, "쪽지 표도 도구가 실은 순서 그대로다")
 
 
 def main() -> int:

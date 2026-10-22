@@ -332,7 +332,7 @@ python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의
 
 | 기능 | 도구 | 무엇으로 답하나 | LLM |
 |---|---|---|---|
-| 관리 대상 추천 | `branch_targets` | 타겟 룰베이스로 고른 오늘의 타겟 목록(`target_list`). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
+| 관리 대상 추천 | `branch_targets` | 그 직원 부점의 부점 DB 관리 대상에 타겟 룰베이스 요건 판정을 그대로 적용한 오늘의 중점관리 고객(`roster.branch_profiles` → `target_list`. 여의도종합금융센터는 56명). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
 | 부점 현황 | `branch_status` | 지표(잔액·계좌 수·부점 수익률·고유계정대 잔액·원리금보장 비중·올해 계약이전·수익률 저조·1억 이상) · 세그먼트 인원 · **전월말 대비 변화** · 오늘의 CASE(`status.compute`). CASE 판정에 쓰는 지표는 앞의 셋 | 답변 작성만 |
 | 고객 검색 | `branch_search` | 직원이 말한 조건 → SELECT 한 문장(아래) | SQL 작성 · 답변 작성 |
 

@@ -4,6 +4,9 @@
 아래 «화면 수치»가 부점 현황 계산(status.compute)에서 그대로 나오게 맞춘다. 맞추는 방법은 하나다 —
 무작위로 뽑은 뒤 합계·가중평균이 목표에 닿도록 비례 조정하고, 남는 차이를 한 단위씩 나눠 얹는다.
 
+오늘의 중점관리 고객(요건이 성립한 고객)도 화면처럼 56명이다 — 목업 고객 중 성립한 사람 + 생성한 관리 대상.
+나머지 생성 고객은 어떤 요건(customer.conditions)에도 걸리지 않게 만든다(_SAFE_BOUNDS 등).
+
 전월말 스냅샷도 화면의 증감 화살표(▲1.3억 · ▲0.12%p · ▼0.4억)가 나오게 되짚는다. 그 결과 여의도에서 성립하는
 관리 방향은 CASE 3(잔액 증가 + 세액공제 여유 고객 증가) 하나다 — 화면 브리핑 문구(추가납입·세제혜택)와 같다.
 """
@@ -40,6 +43,16 @@ RETURN_DELTA = 0.12                      # ▲0.12%p
 PREV_IDLE = IDLE_TOTAL + 40_000_000      # ▼0.4억
 NEW_ACCOUNTS = 3                         # 이번 달 신규 — 계좌 수는 늘었다(CASE 1·5 미성립)
 TAX_ROOM_NEW = 8                         # 이번 달 세액공제 여유가 생긴 고객 — CASE 3 성립(BP-01 5명 이상)
+# ── 관리 대상(오늘의 중점관리 고객) ──────────────────────────────────────────
+FOCUS_COUNT = 56                         # 요건이 성립한 고객 = 목업 고객 중 성립한 사람 + 생성 관리 대상
+TAX_TARGETS = 12                         # 관리 대상 중 세액공제 여유 고객(전월말에 그중 8명은 여유 없음)
+
+#: 관리 대상이 아닌 고객의 원리금보장 비중 구간(%) — 정수로 반올림해도 요건(dep 80% 이상 · mis 투자성향
+#: 불일치 · lim 위험자산 70% 초과)에 걸리지 않는 범위. customer.conditions·risk_mismatch 의 임계와 맞물린다
+_SAFE_BOUNDS = {"안정형": (66.0, 79.0), "안정추구형": (66.0, 79.0), "위험중립형": (33.0, 79.0),
+                "적극투자형": (31.0, 64.0), "공격투자형": (31.0, 64.0)}
+#: 관리 대상에게 세우는 요건과 뽑는 비중(세액공제는 TAX_TARGETS 로 따로 채운다)
+_TARGET_KINDS = (("nod", 0.4), ("mat", 0.3), ("dor", 0.3), ("dep", 0.25), ("mis", 0.15), ("pen", 0.1))
 TRANSFER_PREV_SHARE = 0.9                # 올해 계약이전 중 전월말까지의 몫
 
 _SEED = 20261022
@@ -91,25 +104,63 @@ def _weighted(rows: list[dict], key: str) -> float:
 
 
 def _nudge(rows: list[dict], movable: list[int], key: str, target: float, unit: float,
-           lo: float, hi: float) -> None:
-    """가중평균을 target 에 붙인다 — 큰 계좌부터 unit 씩 움직인다(반올림 표기가 target 이 되게)."""
+           *, bounds: dict[int, tuple[float, float]]) -> None:
+    """가중평균을 target 에 붙인다 — 큰 계좌부터 unit 씩 움직인다(반올림 표기가 target 이 되게).
+
+    bounds: 행 번호 → (하한, 상한). 그 구간 밖으로는 움직이지 않는다.
+    """
     w = sum(r["eval_amt"] for r in rows)
     for i in sorted(movable, key=lambda i: -rows[i]["eval_amt"]):
         err = _weighted(rows, key) - target
         if abs(err) < unit / 4:
             return
+        lo, hi = bounds[i]
         step = -round(err * w / rows[i]["eval_amt"] / unit) * unit
         rows[i][key] = round(min(hi, max(lo, rows[i][key] + step)), 2)
     if abs(_weighted(rows, key) - target) >= unit / 2:
         raise ValueError(f"{key} 가중평균을 {target} 에 맞추지 못했습니다")
 
 
+def _targets(rows: list[dict], rnd: random.Random, today: date, count: int) -> set[int]:
+    """count 명을 골라 요건을 하나 이상 세운다. 원리금보장 비중을 정한 행 번호를 돌려준다(보정에서 뺀다)."""
+    picked = rnd.sample(range(len(rows)), count)
+    fixed: set[int] = set()
+    for n_, i in enumerate(picked):
+        r = rows[i]
+        kinds = {"tax"} if n_ < TAX_TARGETS else set()
+        while not kinds or (len(kinds) < 3 and rnd.random() < 0.35):
+            kinds.add(rnd.choices([k for k, _ in _TARGET_KINDS], [w for _, w in _TARGET_KINDS])[0])
+        if "tax" in kinds:
+            r["tax_credit_room"], r["pension_started"] = rnd.choice((3, 5, 9)) * 1_000_000, "미개시"
+        if "nod" in kinds:
+            r["default_option"] = "미설정"
+        if "mat" in kinds:
+            r["next_maturity_date"] = (today + timedelta(days=rnd.randint(0, 30))).isoformat()
+            r["next_maturity_amt"] = min(r["eval_amt"], rnd.randint(5, 120) * 1_000_000)
+        if "dor" in kinds:
+            r["last_contact_days"] = rnd.randint(180, 400)
+        if "dep" in kinds:
+            r["safe_asset_pct"] = rnd.uniform(80.0, 100.0)
+            fixed.add(i)
+        elif "mis" in kinds:
+            r["safe_asset_pct"] = (rnd.uniform(66.0, 79.0) if r["risk_profile"] in ("적극투자형", "공격투자형")
+                                   else rnd.uniform(40.0, 60.0) if r["risk_profile"] in ("안정형", "안정추구형")
+                                   else 31.0)
+            fixed.add(i)
+        if "pen" in kinds:
+            r["age"] = max(r["age"], rnd.randint(55, 70))
+            r["pension_eligible"], r["pension_started"] = "충족", "미개시"
+    return fixed
+
+
 def _names(rnd: random.Random, n: int) -> list[str]:
+    """겹치지 않는 이름 n 개 — 명부를 이름으로 되짚으므로(첫 추천 목록) 부점 안에서 유일해야 한다."""
     taken = {p.nm for p in C.PERSONAS}
-    out = []
+    out: list[str] = []
     while len(out) < n:
         nm = rnd.choice(_SURNAMES) + rnd.choice(_GIVEN)
         if nm not in taken:
+            taken.add(nm)
             out.append(nm)
     return out
 
@@ -137,33 +188,39 @@ def build(personas: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     evals = big + small
     rnd.shuffle(evals)
 
+    # 관리 대상이 아닌 고객은 어떤 요건(customer.conditions)에도 걸리지 않게 만든다 — 디폴트옵션 설정 ·
+    # 세액공제 여유 없음 · 최근 접촉 180일 미만 · 30일 이내 만기 없음 · 연금개시 요건 충족이면 개시 ·
+    # 투자성향에 맞는 원리금보장 비중(_SAFE_BOUNDS). 관리 대상은 아래 «관리 대상» 단계가 요건을 하나 이상 세운다
     rows: list[dict] = []
     for nm, ev in zip(_names(rnd, n), evals):
         age = rnd.randint(27, 74)
-        eligible = age >= 55 and rnd.random() < 0.8
-        started = eligible and rnd.random() < 0.4
-        mat = today + timedelta(days=rnd.randint(-20, 200)) if rnd.random() < 0.5 else None
-        reasons = sorted(rnd.sample(_REASONS, k=rnd.choice((0, 1, 1, 2, 3))))
-        dopt = "미설정" if "디폴트옵션 미설정" in reasons else rnd.choice(("설정", "설정", "미설정"))
-        if dopt == "미설정" and "디폴트옵션 미설정" not in reasons:
-            reasons = sorted([*reasons, "디폴트옵션 미설정"])
+        eligible = age >= 55 and rnd.random() < 0.5
+        risk = rnd.choice(_RISKS)
+        lo, hi = _SAFE_BOUNDS[risk]
+        if rnd.random() < 0.5:
+            offset = rnd.choice((rnd.randint(-20, -1), rnd.randint(31, 200)))
+            mat = today + timedelta(days=offset)
+        else:
+            mat = None
         rows.append({
             "customer_name": nm, "age": age, "star_grade": rnd.choice(_GRADES),
-            "risk_profile": rnd.choice(_RISKS), "branch_code": CODE,
+            "risk_profile": risk, "branch_code": CODE,
             "manager_emp_no": rnd.choice(MANAGERS),
             "joined_date": (date(2012, 1, 1) + timedelta(days=rnd.randint(0, 4800))).isoformat(),
-            "eval_amt": ev, "return_rate": 0.0, "safe_asset_pct": rnd.uniform(30, 100),
+            "eval_amt": ev, "return_rate": 0.0, "safe_asset_pct": rnd.uniform(lo, hi),
             "idle_cash_pct": 0.0,
-            "default_option": dopt, "pension_started": "개시" if started else "미개시",
+            "default_option": "설정", "pension_started": "개시" if eligible else "미개시",
             "pension_eligible": "충족" if eligible else "미충족",
             "next_maturity_date": mat.isoformat() if mat else None,
             "next_maturity_amt": min(ev, rnd.randint(5, 120) * 1_000_000) if mat else None,
-            "last_contact_days": rnd.randint(0, 400), "target_reasons": ", ".join(reasons),
-            "idle_cash_amt": 0, "idle_cash_days": 0,
-            "tax_credit_room": 0 if started else rnd.choice((0, 0, 0, 1, 3, 5, 9)) * 1_000_000,
+            "last_contact_days": rnd.randint(0, 179), "target_reasons": "",
+            "idle_cash_amt": 0, "idle_cash_days": 0, "tax_credit_room": 0,
             "transfer_inquiry": "신청" if rnd.random() < 0.02 else "없음",
             "risk_mismatch": "일치", "isa_maturity_date": None, "isa_maturity_amt": None,
         })
+
+    # 관리 대상 — 목업 고객 중 요건이 성립한 사람과 합쳐 «오늘의 중점관리 고객» 56명이 되게
+    fixed_safe = _targets(rows, rnd, today, FOCUS_COUNT - sum(1 for p in C.PERSONAS if C.conditions(p)))
 
     # 고유계정대 — 목업 고객 몫을 뺀 나머지를 생성 고객 일부에 나눈다(비중 30% 이하)
     holders = rnd.sample([i for i, r in enumerate(rows) if r["eval_amt"] >= 5_000_000], 160)
@@ -187,18 +244,22 @@ def build(personas: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     for i, b in base.items():
         rows[i]["return_rate"] = round(max(LOW_RETURN + 0.1, b + shift), 2)
     _nudge(allrows, [len(personas) + i for i in base], "return_rate", RETURN_W, 0.01,
-           LOW_RETURN + 0.1, 60.0)
+           bounds={len(personas) + i: (LOW_RETURN + 0.1, 60.0) for i in base})
 
     # 원리금보장 비중 — 적립금 가중 69.3%. 고유계정대 비중보다 작아지지 않게
+    # 관리 대상이 아닌 고객은 투자성향별 구간(_SAFE_BOUNDS) 안에서만 움직인다 — 구간을 넘으면 요건이 선다
+    free = [i for i in range(n) if i not in fixed_safe]
+    bounds = {len(personas) + i: _SAFE_BOUNDS[rows[i]["risk_profile"]] for i in free}
     shift = (SAFE_W * TOTAL_EVAL - sum(r["eval_amt"] * r["safe_asset_pct"] for r in allrows)) / \
-        sum(r["eval_amt"] for r in rows)
-    for r in rows:
-        r["safe_asset_pct"] = round(min(100.0, max(r["idle_cash_pct"], r["safe_asset_pct"] + shift)), 1)
-    _nudge(allrows, list(range(len(personas), len(allrows))), "safe_asset_pct", SAFE_W, 0.1, 0.0, 100.0)
+        sum(rows[i]["eval_amt"] for i in free)
+    for i in free:
+        lo, hi = _SAFE_BOUNDS[rows[i]["risk_profile"]]
+        rows[i]["safe_asset_pct"] = round(min(hi, max(lo, rows[i]["safe_asset_pct"] + shift)), 1)
+    _nudge(allrows, list(bounds), "safe_asset_pct", SAFE_W, 0.1, bounds=bounds)
     for r in rows:
         r["safe_asset_pct"] = round(max(r["idle_cash_pct"], r["safe_asset_pct"]), 1)
         r["risk_mismatch"] = "불일치" if C.risk_mismatch(
-            r["risk_profile"], 100 - r["safe_asset_pct"], r["safe_asset_pct"]) else "일치"
+            r["risk_profile"], 100 - round(r["safe_asset_pct"]), round(r["safe_asset_pct"])) else "일치"
 
     # 이번 달 신규 계좌 — 전월말 표에는 없다
     since = max(1, (today - prev).days)
@@ -223,8 +284,9 @@ def _prev(personas: list[dict], rows: list[dict], new: set[int], rnd: random.Ran
             # 남은 일수가 전월말 기준으로도 같게 — 만기 고객 수는 그대로
             r["next_maturity_date"] = (prev + (date.fromisoformat(mat) - today)).isoformat()
     # 수익률 −0.12%p 를 적립금 가중으로 맞춘다(신규 계좌가 빠지고 잔액이 바뀌어 단순 차감은 0.01 어긋난다)
-    _nudge(old, [i for i in range(len(personas), len(old)) if old[i]["return_rate"] >= LOW_RETURN + 0.1],
-           "return_rate", RETURN_W - RETURN_DELTA, 0.01, LOW_RETURN + 0.1, 60.0)
+    movable = [i for i in range(len(personas), len(old)) if old[i]["return_rate"] >= LOW_RETURN + 0.1]
+    _nudge(old, movable, "return_rate", RETURN_W - RETURN_DELTA, 0.01,
+           bounds={i: (LOW_RETURN + 0.1, 60.0) for i in movable})
     synth = [r for r in old[len(personas):] if r["idle_cash_amt"]]
     extra = _fit([r["idle_cash_amt"] for r in synth], PREV_IDLE - sum(p["idle_cash_amt"] for p in personas),
                  [r["idle_cash_amt"] for r in synth], [r["eval_amt"] * 45 // 100 // _STEP * _STEP for r in synth],

@@ -130,8 +130,10 @@ def table_for(state: AgentState, evidence: list[tools.Evidence]) -> tuple[str, s
     if found is None:
         return "", ""
     from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
+    from pension_agent.tools.customer_solution.tool import roster_targets  # noqa: PLC0415
     names = (found.get("meta") or {}).get("names")
-    targets = target_list.by_names(names) if names is not None else note.today_targets()
+    _scope, pool = roster_targets(state)
+    targets = target_list.by_names(names, pool) if names is not None else pool
     if not targets:
         return "", ""
     table, _shown = note.targets_table(targets)

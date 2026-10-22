@@ -343,6 +343,25 @@ def first_targets(history: list[dict] | None) -> dict | None:
     return None
 
 
+def roster_targets(state: AgentState | None) -> tuple[str | None, list]:
+    """(부점명, 관리 대상 Target 목록). 모집단은 직원 부점의 부점 DB 관리 대상(roster).
+
+    사번·부점을 모르거나 DB 를 못 읽으면 (None, 목업 고객 명부) — 부점을 가리지 않는 예전 목록이다.
+    """
+    from pension_agent.common import note  # noqa: PLC0415
+    from pension_agent.tools.branch_briefing import roster, run  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
+
+    emp_no = ((state or {}).get("employee_id") or "").strip() or None
+    if run.backend() != "off" and emp_no:
+        try:
+            scope, profiles = roster.branch_profiles(emp_no)
+            return scope, target_list.today_targets(profiles)
+        except (LookupError, run.DBUnavailable):
+            pass
+    return None, note.today_targets()
+
+
 def _targets(state: AgentState, query: str) -> Evidence | None:
     """관리 대상 추천(branch_targets) — 오늘의 타겟 목록을 오늘의 부점 CASE 순서로.
 
@@ -358,18 +377,20 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     stored = first_targets((state or {}).get("history"))
     replay = bool(stored and stored.get("date") == day)
     try:
+        scope, pool = roster_targets(state)
         if replay:
-            found = target_list.by_names(list(stored.get("names") or []))
+            found = target_list.by_names(list(stored.get("names") or []), pool)
             codes = list(stored.get("codes") or [])
         else:
             emp_no = ((state or {}).get("employee_id") or "").strip() or None
             codes = status.case_codes(emp_no)
-            found = target_list.prioritize(note.today_targets(), codes)
+            found = target_list.prioritize(pool, codes)
     except Exception:
         return None
     cases = {c: n for c, n in note.CONDS.items()}
-    head = (f"■ 관리 대상 추천 — 이 대화의 첫 추천({day})을 그대로 보여드립니다 · {len(found)}명"
-            if replay else f"■ 관리 대상 추천 — {day} 기준 · {len(found)}명")
+    where = f"{scope} · " if scope else ""
+    head = (f"■ 관리 대상 추천 — {where}이 대화의 첫 추천({day})을 그대로 보여드립니다 · {len(found)}명"
+            if replay else f"■ 관리 대상 추천(오늘의 중점관리 고객) — {where}{day} 기준 · {len(found)}명")
     lines = [head]
     if codes:
         # 순서의 이유 — 오늘의 부점 관리 방향(CASE)이 가리키는 요건
@@ -389,7 +410,7 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     names = [t.profile.nm for t in found]
     return _ev("branch_targets", query, text,
                [{"id": "branch_targets.today",
-                 "title": f"관리 대상 추천 {len(found)}명 ({day})",
+                 "title": f"관리 대상 추천 {len(found)}명 ({where}{day})",
                  "doc": "고객 정보 — 계좌 원장 조회값 · 선정 기준은 사후관리 타겟 룰베이스 · "
                         "순서는 부점 CASE(타겟 룰베이스 부점 시트)",
                  "score": None, "page": None}],

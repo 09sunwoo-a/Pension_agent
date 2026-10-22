@@ -17,7 +17,7 @@ import threading
 from datetime import date, timedelta
 
 from pension_agent.common import clock
-from pension_agent.tools.branch_briefing import demo_yeouido
+from pension_agent.tools.branch_briefing import demo_yeouido, roster
 from pension_agent.tools.customer_solution import customer as C
 
 #: 시연 부점(첫 부점에 목업 고객 12명).
@@ -210,6 +210,18 @@ def _prev_rows(current: list[tuple]) -> list[tuple]:
     return out
 
 
+def _judged(rows: list[tuple]) -> list[tuple]:
+    """관리 대상 사유(target_reasons)를 룰베이스 요건 판정으로 채운다 — 무작위 사유를 두지 않는다.
+
+    행 → Profile → customer.conditions() (roster.row_profile). 목업 고객은 원장 Profile 그대로라 화면 브리핑과 같다.
+    """
+    at = _COL["target_reasons"]
+    out = []
+    for r in rows:
+        out.append(r[:at] + (roster.reasons(dict(zip(COLUMNS, r))),) + r[at + 1:])
+    return out
+
+
 def _other_transfers() -> list[tuple]:
     """다른 부점의 올해 계약이전(시연값) — 부점마다 12건, 올해 1월 1일부터 오늘 사이."""
     rnd = random.Random(_SEED + 3)
@@ -242,8 +254,8 @@ def connection() -> sqlite3.Connection:
             others = [r for r in legacy if r[_COL["branch_code"]] != demo_yeouido.CODE]
             others_prev = [r for r in _prev_rows(legacy) if r[_COL["branch_code"]] != demo_yeouido.CODE]
             marks = ", ".join("?" * len(COLUMNS))
-            rows = [tuple(d[c] for c in COLUMNS) for d in yeouido] + others
-            prev_rows = [tuple(d[c] for c in COLUMNS) for d in yeouido_prev] + others_prev
+            rows = _judged([tuple(d[c] for c in COLUMNS) for d in yeouido] + others)
+            prev_rows = _judged([tuple(d[c] for c in COLUMNS) for d in yeouido_prev] + others_prev)
             conn.executemany(f"INSERT INTO irp_customer_base VALUES ({marks})", rows)
             conn.executemany(f"INSERT INTO irp_customer_prev VALUES ({marks})", prev_rows)
             conn.executemany("INSERT INTO irp_transfer_out VALUES (?, ?, ?, ?, ?)",

@@ -42,14 +42,14 @@ def _fill(template: str, **values: str) -> str:
     return template
 
 
-def _rows(sql: str, emp_no: str | None) -> list[dict]:
+def _rows(sql: str, emp_no: str | None, limit: int | None = None) -> list[dict]:
     name = backend()
     if name == "off":
         raise DBUnavailable("부점 DB 조회가 꺼져 있습니다(BRANCH_DB)")
     if name == "demo":
         from pension_agent.tools.branch_briefing import demo_db  # noqa: PLC0415
         cur = demo_db.connection().execute(sql)
-        return [dict(r) for r in cur.fetchmany(MAX_ROWS + 1)]
+        return [dict(r) for r in cur.fetchmany((limit or MAX_ROWS) + 1)]
     from pension_agent.common.mcp import client as mcp_client, sybase  # noqa: PLC0415
     if not emp_no:
         raise DBUnavailable("직원 사번이 없어 행내 DB 에 접속할 수 없습니다")
@@ -75,24 +75,27 @@ def my_branch(emp_no: str | None) -> tuple[str, str] | None:
     return code, name
 
 
-def _limited(sql: str) -> str:
+def _limited(sql: str, limit: int | None = None) -> str:
     """행 수 상한 적용. Sybase 는 TOP n(작은 쪽), sqlite 는 TOP → LIMIT 번역만."""
+    limit = limit or MAX_ROWS
     m = re.match(r"\s*SELECT\s+(DISTINCT\s+)?(TOP\s+(\d+)\s+)?", sql, re.IGNORECASE)
     distinct = m.group(1) or ""
-    n = min(int(m.group(3)), MAX_ROWS) if m.group(3) else None
+    n = min(int(m.group(3)), limit) if m.group(3) else None
     body = sql[m.end():]
     if backend() == "demo":
         out = f"SELECT {distinct}{body}"
         return f"{out} LIMIT {n}" if n is not None and not re.search(r"\bLIMIT\b", out, re.I) else out
-    return f"SELECT {distinct}TOP {n if n is not None else MAX_ROWS + 1} {body}"
+    return f"SELECT {distinct}TOP {n if n is not None else limit + 1} {body}"
 
 
-def execute(sql: str, branch_code: str, emp_no: str | None) -> tuple[str, list[dict], bool]:
-    """고정 뷰를 붙여 실행 → (실행한 SQL, 행, 잘렸는지)."""
+def execute(sql: str, branch_code: str, emp_no: str | None,
+            limit: int | None = None) -> tuple[str, list[dict], bool]:
+    """고정 뷰를 붙여 실행 → (실행한 SQL, 행, 잘렸는지). limit: 코드가 읽는 명부용 상한(기본 MAX_ROWS)."""
+    limit = limit or MAX_ROWS
     values = {"branch_code": branch_code, "today": clock.today().isoformat(),
               # 전월말 뷰(v_irp_customer_prev)의 기준일
               "prev_date": clock.prev_month_end().isoformat()}
     ctes = ",\n".join(f"{name} AS (\n{_fill(_sql_file(name), **values)}\n)" for name in VIEWS)
-    final = f"WITH {ctes}\n{_limited(sql)}"
-    rows = _rows(final, emp_no)
-    return final, rows[:MAX_ROWS], len(rows) > MAX_ROWS
+    final = f"WITH {ctes}\n{_limited(sql, limit)}"
+    rows = _rows(final, emp_no, limit)
+    return final, rows[:limit], len(rows) > limit
