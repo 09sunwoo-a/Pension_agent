@@ -1,11 +1,12 @@
 """부점 현황 — 지표 · 세그먼트 인원 · 전월말 대비 변화 · 오늘의 CASE 판정. 전부 코드(LLM 없음).
 
-기준은 룰베이스 xlsx 의 부점 시트 5종(`targets.json` 의 branch_* — 에이전트 초안, 기획자 검토 전).
+기준은 룰베이스 xlsx 의 부점 시트 6종(`targets.json` 의 branch_* — 에이전트 초안, 기획자 검토 전).
 여기는 그 표를 읽어 SQL 을 만들고 센다 — 임계값·조건을 코드에 두지 않는다.
 
     rules()          표 → Segment · Case · 임계값
     segment_sql()    세그먼트 조건 → WHERE (필드·연산자·값은 표에서, 형식은 여기서 검사)
     compute()        사번 → 부점 현황 dict (화면 패널 · branch_status 도구 · 전략 브리핑이 같은 값을 쓴다)
+    focus_sql()      CASE 의 중점관리 조건 → WHERE (오늘의 중점관리 고객 = 관리 대상 ∩ 이 조건)
 """
 
 from __future__ import annotations
@@ -71,6 +72,8 @@ class Case:
     feature: str                                  # 우선관리 고객 특징
     codes: tuple[str, ...]                        # 연결 요건코드 — 관리 대상 추천 정렬용
     strategy: str                                 # 상담·운용 전략(표 원문)
+    focus: tuple[tuple[str, str, object], ...] = ()   # 중점관리 조건(필드, 연산자, 값) — 전부 AND
+    focus_notes: tuple[str, ...] = ()                 # 그 조건의 설명(표 원문 — 재료에 싣는다)
 
 
 @dataclass(frozen=True)
@@ -109,6 +112,14 @@ def rules() -> Rules:
               _split(c.get("연결 요건코드")), str(c.get("상담·운용 전략") or ""))
          for c in doc.get("branch_cases") or []),
         key=lambda c: c.priority))
+    focus: dict[str, list] = {}
+    for c in sorted(doc.get("branch_case_focus") or [], key=lambda c: int(c.get("순서") or 0)):
+        focus.setdefault(c["CASE_ID"], []).append(c)
+    cases = tuple(
+        Case(c.id, c.name, c.priority, c.grade, c.conds, c.feature, c.codes, c.strategy,
+             tuple((f["조건필드"], f["연산자"], f["조건값"]) for f in focus.get(c.id, ())),
+             tuple(str(f.get("설명") or "") for f in focus.get(c.id, ())))
+        for c in cases)
     params = {p["PARAM_ID"]: p.get("값") for p in doc.get("branch_params") or []}
     states = {str(s.get("적용상태") or "") for s in doc.get("branch_segments") or []}
     return Rules(segments, cases, params, " / ".join(sorted(s for s in states if s)))
@@ -135,6 +146,13 @@ def segment_sql(seg: Segment) -> str:
     if not seg.conds:
         raise RuleError(f"{seg.id} 에 조건 행이 없습니다")
     return " AND ".join(_sql_value(f, o, v) for f, o, v in seg.conds)
+
+
+def focus_sql(case: Case) -> str:
+    """CASE → 중점관리 조건 WHERE 절 본문(AND). 조건이 없으면 RuleError."""
+    if not case.focus:
+        raise RuleError(f"{case.id} 에 중점관리 조건 행이 없습니다")
+    return " AND ".join(_sql_value(f, o, v) for f, o, v in case.focus)
 
 
 def _snapshot_sql(view: str, segments: tuple[Segment, ...], low: float, high: float) -> str:
@@ -231,6 +249,7 @@ def compute(emp_no: str | None) -> dict:
             continue
         cases.append({"id": c.id, "name": c.name, "priority": c.priority, "grade": c.grade,
                       "why": why, "feature": c.feature, "strategy": c.strategy, "codes": list(c.codes),
+                      "focus_notes": list(c.focus_notes),
                       # 판정에 쓴 세그먼트의 인원 변화 — 전략 브리핑 문장이 쓸 수 있는 유일한 수치
                       "segment_changes": [
                           {"id": t, "name": segments[t]["name"], "delta": segments[t]["delta"]}

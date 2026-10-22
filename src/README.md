@@ -332,12 +332,12 @@ python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의
 
 | 기능 | 도구 | 무엇으로 답하나 | LLM |
 |---|---|---|---|
-| 관리 대상 추천 | `branch_targets` | 그 직원 부점의 부점 DB 관리 대상에 타겟 룰베이스 요건 판정을 그대로 적용한 오늘의 중점관리 고객(`roster.branch_profiles` → `target_list`. 여의도종합금융센터는 56명). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
+| 관리 대상 추천 | `branch_targets` | 그 직원 부점의 부점 DB 관리 대상(타겟 룰베이스 요건 판정을 그대로 적용 — `roster.branch_profiles` → `target_list`) 중 **오늘 성립한 CASE 의 중점관리 조건을 전부 만족하는 고객**(`roster.focus_names` — 시트 `부점CASE_중점조건`, AND. 여의도종합금융센터는 관리 대상 1,329명 중 61명). 성립한 CASE 가 없으면 관리 대상 전체를 우선순위 앞쪽부터 30명(`TARGETS_SHOW`). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
 | 부점 현황 | `branch_status` | 지표(잔액·계좌 수·부점 수익률·고유계정대 잔액·원리금보장 비중·올해 계약이전·수익률 저조·1억 이상) · 세그먼트 인원 · **전월말 대비 변화** · 오늘의 CASE(`status.compute`). CASE 판정에 쓰는 지표는 앞의 셋 | 답변 작성만 |
 | 고객 검색 | `branch_search` | 직원이 말한 조건 → SELECT 한 문장(아래) | SQL 작성 · 답변 작성 |
 
-**기준은 룰베이스 xlsx 의 부점 시트 5종이다**(`부점세그먼트_Master` · `부점세그먼트_조건` · `부점CASE_Rule` ·
-`부점CASE_조건` · `부점_임계값` → `scripts.import_targets` → `targets.json` 의 `branch_*`). 세그먼트 조건·CASE
+**기준은 룰베이스 xlsx 의 부점 시트 6종이다**(`부점세그먼트_Master` · `부점세그먼트_조건` · `부점CASE_Rule` ·
+`부점CASE_조건` · `부점CASE_중점조건` · `부점_임계값` → `scripts.import_targets` → `targets.json` 의 `branch_*`). 세그먼트 조건·CASE
 판정조건·«증가로 볼 최소 인원»이 전부 거기 있고 코드는 읽어서 SQL 로 옮긴다(`status.segment_sql` — 뷰에 없는
 필드·모르는 연산자·따옴표가 낀 값은 옮기지 않는다). **이 시트들은 에이전트 초안이다** — 기획자 위임(2026-10-22)으로
 작성했고 검토 전이며, 표의 «적용상태» 칸이 그 사실을 적는다(시연값 현황 리포트 `scripts.demo_status` §8 도 센다). 고칠 값은 xlsx 에 넣고

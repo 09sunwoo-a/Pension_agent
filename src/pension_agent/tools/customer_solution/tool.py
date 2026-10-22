@@ -362,10 +362,30 @@ def roster_targets(state: AgentState | None) -> tuple[str | None, list]:
     return None, note.today_targets()
 
 
-def _targets(state: AgentState, query: str) -> Evidence | None:
-    """관리 대상 추천(branch_targets) — 오늘의 타겟 목록을 오늘의 부점 CASE 순서로.
+#: 오늘 성립한 관리 방향이 없어 관리 대상 전체를 보여줄 때 싣는 최대 인원(우선순위 앞쪽부터).
+TARGETS_SHOW = 30
 
-    선정은 target_list(요건 판정·PRIO) 그대로, 순서만 CASE 가 정한다(target_list.prioritize).
+
+def _today_focus(state: AgentState, scope: str | None) -> tuple[list[dict], set[str] | None]:
+    """(오늘 성립한 CASE, 중점관리 고객 이름). 부점 명부가 아니거나 현황을 못 구하면 ([], None)."""
+    from pension_agent.tools.branch_briefing import roster, run, status  # noqa: PLC0415
+
+    if not scope:
+        return [], None
+    emp_no = ((state or {}).get("employee_id") or "").strip() or None
+    try:
+        cases = status.compute(emp_no)["cases"]
+        return cases, roster.focus_names(emp_no, [c["id"] for c in cases])
+    except (LookupError, run.DBUnavailable, status.RuleError):
+        return [], None
+
+
+def _targets(state: AgentState, query: str) -> Evidence | None:
+    """관리 대상 추천(branch_targets) — 오늘의 중점관리 고객을 오늘의 부점 CASE 순서로.
+
+    선정은 target_list(요건 판정·PRIO) 그대로이고, 그중 오늘 성립한 CASE 의 중점관리 조건(룰베이스 부점 시트
+    «부점CASE_중점조건» — AND)을 전부 만족하는 고객이 오늘의 중점관리 고객이다(2026-10-22 결정). 순서는 CASE 가
+    정한다(target_list.prioritize). 성립한 CASE 가 없으면 관리 대상 전체를 우선순위 앞쪽부터 TARGETS_SHOW 명.
     이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로 싣는다(날짜가 바뀌었으면 새로).
     고객 화면 없이 사용, KB-PIN 미포함 — 첫 목록도 이름으로만 남긴다.
     """
@@ -376,22 +396,45 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     day = clock.today().isoformat()
     stored = first_targets((state or {}).get("history"))
     replay = bool(stored and stored.get("date") == day)
+    today: list[dict] = []
+    focus: set[str] | None = None
     try:
         scope, pool = roster_targets(state)
         if replay:
             found = target_list.by_names(list(stored.get("names") or []), pool)
             codes = list(stored.get("codes") or [])
         else:
-            emp_no = ((state or {}).get("employee_id") or "").strip() or None
-            codes = status.case_codes(emp_no)
-            found = target_list.prioritize(pool, codes)
+            today, focus = _today_focus(state, scope)
+            codes = []
+            for c in today:
+                codes += [x for x in c["codes"] if x not in codes]
+            chosen = [t for t in pool if t.profile.nm in focus] if focus else pool
+            found = target_list.prioritize(chosen, codes)
     except Exception:
         return None
+    total = len(found)
+    if not replay and not focus and total > TARGETS_SHOW:
+        found = found[:TARGETS_SHOW]
     cases = {c: n for c, n in note.CONDS.items()}
     where = f"{scope} · " if scope else ""
-    head = (f"■ 관리 대상 추천 — {where}이 대화의 첫 추천({day})을 그대로 보여드립니다 · {len(found)}명"
-            if replay else f"■ 관리 대상 추천(오늘의 중점관리 고객) — {where}{day} 기준 · {len(found)}명")
+    if replay:
+        head = f"■ 관리 대상 추천 — {where}이 대화의 첫 추천({day})을 그대로 보여드립니다 · {len(found)}명"
+    elif focus:
+        head = f"■ 관리 대상 추천(오늘의 중점관리 고객) — {where}{day} 기준 · {len(found)}명"
+    else:
+        head = f"■ 관리 대상 추천 — {where}{day} 기준 · 관리 대상 {total}명"
     lines = [head]
+    if focus:
+        # 왜 이 사람들인가 — 관리 대상 중 오늘의 관리 방향 «우선관리 고객 특징»을 모두 갖춘 고객
+        lines.append(f"· 관리 대상 {len(pool)}명 중 오늘의 관리 방향에 맞는 고객입니다.")
+        for c in today:
+            notes = "; ".join(n for n in c.get("focus_notes") or [] if n)
+            lines.append(f"· 오늘의 관리 방향 «{c['name']}» — 우선관리 고객: {c['feature']}"
+                         + (f" (조건: {notes})" if notes else ""))
+    elif not replay and scope:
+        lines.append("· 오늘은 전월말 대비 변화로 정해진 관리 방향이 없어, 중점관리 고객을 따로 고르지 않고 "
+                     "관리 대상 전체를 우선순위 순으로 보여드립니다."
+                     + (f" 앞의 {len(found)}명만 실었습니다." if total > len(found) else ""))
     if codes:
         # 순서의 이유 — 오늘의 부점 관리 방향(CASE)이 가리키는 요건
         lines.append("· 순서: 오늘의 부점 관리 방향과 연결된 요건(" +
@@ -415,7 +458,7 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
                         "순서는 부점 CASE(타겟 룰베이스 부점 시트)",
                  "score": None, "page": None}],
                allow=[text],
-               meta={"count": len(found), "names": names, "codes": codes, "replayed": replay,
+               meta={"count": len(found), "total": total, "names": names, "codes": codes, "replayed": replay,
                      # 이 대화의 첫 추천 — graph.ask 가 Turn 에 남긴다(이미 있으면 그것을 잇는다)
                      "first_targets": stored if replay else {"date": day, "names": names,
                                                              "codes": codes}})

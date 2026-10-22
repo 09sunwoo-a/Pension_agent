@@ -1,7 +1,7 @@
 """타겟 고객 룰베이스 원본(xlsx) → targets.json 변환 (멱등).
 
 기획자 확인표(타겟 14종)가 코드보다 상위 기준. 근거등급(A·B·C·D)·조건식은 원문 그대로 적재 — 판정은 `customer.py::conditions()`.
-부점 브리핑 시트 5종(세그먼트·CASE·임계값)도 같은 파일에서 내린다 — 판정은 `tools/branch_briefing/status.py`.
+부점 브리핑 시트 6종(세그먼트·CASE·중점관리 조건·임계값)도 같은 파일에서 내린다 — 판정은 `tools/branch_briefing/status.py`.
 이 5종은 에이전트 초안(기획자 위임 2026-10-22, 검토 전)이다 — 시트의 «적용상태» 칸이 그 사실을 적는다.
 
     python -m scripts.import_targets    # openpyxl 필요(변환 시에만)
@@ -31,6 +31,7 @@ _SHEETS = {
     "부점세그먼트_조건": "branch_segment_conditions",
     "부점CASE_Rule": "branch_cases",
     "부점CASE_조건": "branch_case_conditions",
+    "부점CASE_중점조건": "branch_case_focus",
     "부점_임계값": "branch_params",
 }
 
@@ -47,6 +48,7 @@ _HEADER_KEYS = {
     "branch_segment_conditions": "SCOND_ID",
     "branch_cases": "CASE_ID",
     "branch_case_conditions": "CCOND_ID",
+    "branch_case_focus": "FCOND_ID",
     "branch_params": "PARAM_ID",
 }
 
@@ -112,7 +114,7 @@ def main() -> None:
           f"원천문서 {len(doc['sources'])}건 → {OUTPUT_JSON.relative_to(config.SRC_ROOT)}")
     print(f"            근거등급 " + " · ".join(f"{g} {n}종" for g, n in sorted(by_grade.items())))
     print(f"            부점 세그먼트 {len(doc['branch_segments'])}종 · CASE {len(doc['branch_cases'])}종 · "
-          f"임계값 {len(doc['branch_params'])}행")
+          f"중점관리 조건 {len(doc['branch_case_focus'])}행 · 임계값 {len(doc['branch_params'])}행")
 
 
 if __name__ == "__main__":

@@ -73,3 +73,27 @@ def branch_profiles(emp_no: str | None) -> tuple[str, list[C.Profile]]:
     if cut:
         raise run.DBUnavailable("관리 대상 명부가 행 수 상한을 넘었습니다")
     return name, [row_profile({**r, "branch_code": code}) for r in rows]
+
+
+def focus_names(emp_no: str | None, case_ids: list[str]) -> set[str]:
+    """오늘의 중점관리 고객 이름 — 관리 대상 중 오늘 성립한 CASE 의 중점관리 조건을 전부 만족하는 고객.
+
+    CASE 가 여럿이면 CASE 사이는 OR. 조건은 룰베이스 부점 시트(부점CASE_중점조건)에서만 온다 — 여기에 임계값을
+    두지 않는다. 그래서 같은 코드로도 부점마다 · 날마다 성립한 CASE 가 다르면 중점관리 고객도 다르다.
+    부점을 못 찾으면 LookupError, DB 를 못 읽으면 DBUnavailable, 표의 조건을 SQL 로 못 옮기면 RuleError.
+    """
+    from pension_agent.tools.branch_briefing import run, status  # noqa: PLC0415 — 순환 임포트 회피
+
+    by_id = {c.id: c for c in status.rules().cases}
+    wheres = [status.focus_sql(by_id[c]) for c in case_ids if c in by_id and by_id[c].focus]
+    if not wheres:
+        return set()
+    mine = run.my_branch(emp_no)
+    if not mine:
+        raise LookupError("직원 사번으로 소속 부점을 확인하지 못했습니다")
+    sql = ("SELECT customer_name FROM v_irp_customer WHERE is_target = 1 AND ("
+           + " OR ".join(f"({w})" for w in wheres) + ")")
+    _sql, rows, cut = run.execute(sql, mine[0], emp_no, limit=ROSTER_MAX)
+    if cut:
+        raise run.DBUnavailable("중점관리 명부가 행 수 상한을 넘었습니다")
+    return {r["customer_name"] for r in rows}

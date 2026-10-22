@@ -331,6 +331,17 @@ def check_status() -> None:
     check(st2["cases"] == [], "증가 판정 최소 인원(BP-01)을 올리면 CASE 가 성립하지 않는다")
 
 
+def check_realistic() -> None:
+    """여의도 고객군 인원이 현실적인 범위다 — 관리 대상 수에 맞추려고 나머지를 «깨끗하게» 만들지 않는다."""
+    from pension_agent.tools.branch_briefing import status  # noqa: PLC0415
+    with _Today():
+        seg = {s["id"]: s["now"] for s in status.compute(EMP)["segments"]}
+    for sid, lo, hi, what in (("BS-03", 10, 60, "현금성 장기대기"), ("BS-04", 40, 150, "만기도래 30일"),
+                              ("BS-10", 150, 420, "디폴트옵션 미설정"), ("BS-08", 400, 800, "원리금보장 80% 이상"),
+                              ("BS-09", 150, 450, "연금개시 가능 미개시")):
+        check(lo <= seg[sid] <= hi, f"{what}({sid}) 인원이 {lo}~{hi}명 안이다", str(seg[sid]))
+
+
 def check_etf() -> None:
     """ETF 평가금액 컬럼 — 목업 고객은 원장 보유상품의 ETF 합계, 합성 고객은 원리금보장 밖 몫 안."""
     from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
@@ -430,30 +441,43 @@ def check_targets() -> None:
     from pension_agent import graph  # noqa: PLC0415
     from pension_agent.tools.branch_briefing import roster  # noqa: PLC0415
     from pension_agent.tools.customer_solution import customer as C, target_list  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import tool  # noqa: PLC0415
     with _Today():
         _name, profiles = roster.branch_profiles(EMP)
         plain = target_list.today_targets(profiles)
         ev = tools.run("branch_targets", _state(q="오늘 중점적으로 관리할 고객은 누구야?"), "관리 대상")
         other = tools.run("branch_targets", _state(OTHER_EMP), "관리 대상")
         loose = tools.run("branch_targets", {"question": "q"}, "관리 대상")
+        _, rows, _ = run.execute("SELECT customer_name FROM v_irp_customer WHERE is_target = 1 "
+                                 "AND tax_credit_room >= 9000000 AND pension_started = '미개시' "
+                                 "AND last_contact_days >= 180 AND eval_amt >= 30000000", "0001", EMP, limit=2000)
+        pangyo = tools.run("branch_targets", _state("3902301"), "관리 대상")
+        _, mats, _ = run.execute("SELECT customer_name FROM v_irp_customer WHERE is_target = 1 "
+                                 "AND days_to_maturity BETWEEN 0 AND 30 AND next_maturity_amt >= 10000000 "
+                                 "AND last_contact_days >= 90", "0003", "3902301", limit=2000)
     meta = (ev or {}).get("meta") or {}
-    check(meta.get("count") == 56 and YEOUIDO in ev["text"],
-          "여의도종합금융센터의 오늘의 중점관리 고객은 56명이다(화면 기획안)", str(meta.get("count")))
-    check(all(t.conds for t in plain) and len(plain) == 56,
-          "명부는 부점 DB 관리 대상이고 전원 룰베이스 요건이 성립한다", str(len(plain)))
+    want = {r["customer_name"] for r in rows}
+    check(len(plain) > 1000 and all(t.conds for t in plain),
+          "현실적인 부점 — 관리 대상(요건 1개 이상)은 1,392명 중 1,000명을 넘는다", str(len(plain)))
+    check(set(meta.get("names") or []) == want and 20 <= len(want) < 200 and YEOUIDO in ev["text"],
+          "오늘의 중점관리 고객 = 관리 대상 ∩ CASE 3 중점관리 조건(AND)", f"{meta.get('count')} vs {len(want)}")
+    check(meta.get("total") == meta.get("count") and f"관리 대상 {len(plain)}명" in ev["text"]
+          and "900만원" in ev["text"], "재료가 관리 대상 전체 인원과 중점관리 조건을 밝힌다")
+    check({n for n in pangyo["meta"]["names"]} == {r["customer_name"] for r in mats},
+          "판교(CASE 1)는 CASE 1 의 중점관리 조건으로 고른다 — 부점 상황에 따라 다르다",
+          f"{len(pangyo['meta']['names'])} vs {len(mats)}")
     persona_names = {p.nm for p in C.PERSONAS if C.conditions(p)}
-    check(persona_names <= set(meta.get("names") or []), "요건이 성립한 목업 고객은 모두 명부에 있다")
-    check("강남" in (other or {}).get("text", "") and not persona_names & set(other["meta"]["names"]),
+    om = (other or {}).get("meta") or {}
+    check("강남" in (other or {}).get("text", "") and not persona_names & set(om.get("names") or []),
           "다른 부점 직원에게는 그 부점 고객만 나온다(gap 39)")
+    check(om.get("count") == tool.TARGETS_SHOW < om.get("total", 0) and "관리 방향이 없어" in other["text"],
+          "관리 방향이 없는 부점(강남)은 관리 대상 전체를 우선순위 앞쪽부터 상한까지", str(om))
     check(loose["meta"]["count"] == len(persona_names) and "·" in loose["text"].splitlines()[0],
           "사번이 없으면 예전처럼 목업 고객 명부로 답한다")
     check(ev is not None and meta.get("codes") == ["tax", "add"],
           "관리 대상 추천 순서는 오늘의 CASE 가 가리키는 요건을 따른다", str(meta.get("codes")))
-    ordered = target_list.prioritize(plain, meta["codes"])
+    ordered = target_list.prioritize([t for t in plain if t.profile.nm in want], meta["codes"])
     check(meta["names"] == [t.profile.nm for t in ordered], "재료의 순서 = prioritize 결과")
-    check(sorted(meta["names"]) == sorted(t.profile.nm for t in plain), "선정 대상은 룰베이스 그대로(순서만 바뀜)")
-    hit = [n for n, t in zip(meta["names"], ordered) if set(t.conds) & set(meta["codes"])]
-    check(meta["names"][:len(hit)] == hit, "CASE 요건을 가진 고객이 앞에 선다")
     check(not re.search(r"\d{6}-\d{7}", ev["text"]) and "first_targets" in meta,
           "첫 추천은 이름으로만 남고 식별번호가 없다")
 
@@ -491,6 +515,7 @@ def main() -> int:
     check_status()
     check_yeouido_screen()
     check_etf()
+    check_realistic()
     check_strategy()
     check_targets()
 
