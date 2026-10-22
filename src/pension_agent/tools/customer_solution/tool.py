@@ -426,7 +426,7 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     lines = [head]
     if focus:
         # 왜 이 사람들인가 — 관리 대상 중 오늘의 관리 방향 «우선관리 고객 특징»을 모두 갖춘 고객
-        lines.append(f"· 관리 대상 {len(pool)}명 중 오늘의 관리 방향에 맞는 고객입니다.")
+        lines.append(f"· 관리 대상 {len(pool)}명 중 오늘의 관리 방향의 우선관리 고객 조건을 모두 갖춘 고객입니다.")
         for c in today:
             notes = "; ".join(n for n in c.get("focus_notes") or [] if n)
             lines.append(f"· 오늘의 관리 방향 «{c['name']}» — 우선관리 고객: {c['feature']}"
@@ -435,8 +435,9 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
         lines.append("· 오늘은 전월말 대비 변화로 정해진 관리 방향이 없어, 중점관리 고객을 따로 고르지 않고 "
                      "관리 대상 전체를 우선순위 순으로 보여드립니다."
                      + (f" 앞의 {len(found)}명만 실었습니다." if total > len(found) else ""))
-    if codes:
-        # 순서의 이유 — 오늘의 부점 관리 방향(CASE)이 가리키는 요건
+    if codes and not focus:
+        # 순서의 이유 — 오늘의 부점 관리 방향(CASE)이 가리키는 요건(중점관리면 전원 해당이라 싣지 않는다 —
+        # 실으면 답변이 그 줄을 «선정 이유»로 읽는다)
         lines.append("· 순서: 오늘의 부점 관리 방향과 연결된 요건(" +
                      " · ".join(cases.get(c, c) for c in codes) + ")을 가진 고객을 앞에 두었습니다.")
     if not found:

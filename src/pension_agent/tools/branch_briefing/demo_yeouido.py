@@ -68,6 +68,7 @@ ISA_HOLDER = 0.015                 # ISA 만기(지난 60일 ~ 앞 120일) 자�
 IDLE_HEAVY_MAX = 45
 IDLE_HEAVY_EVAL = (1_000_000, 6_000_000)
 IDLE_HEAVY_SHARE = 0.8             # 나머지 고유계정대 중 50% 이상 고객 몫(나머지는 소액 보유 고객 150명)
+IDLE_HEAVY_FLOOR = 0.7             # 50% 이상 고객의 하한 합이 그 몫의 이 비율까지 — 남는 몫으로 비중이 고르게 퍼진다
 IDLE_LIGHT = 150
 IDLE_LONG = 0.6                    # 50% 이상 고객 중 60일 이상 변동 없음(현금성 장기대기)
 
@@ -213,20 +214,22 @@ def build(personas: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     heavy: list[int] = []
     floor = 0
     for i in pool:
-        lo_i = rows[i]["eval_amt"] * 55 // 100 // _STEP * _STEP
-        if len(heavy) < IDLE_HEAVY_MAX and floor + lo_i <= budget * IDLE_HEAVY_SHARE:
+        lo_i = rows[i]["eval_amt"] * 51 // 100 // _STEP * _STEP
+        if len(heavy) < IDLE_HEAVY_MAX and floor + lo_i <= budget * IDLE_HEAVY_SHARE * IDLE_HEAVY_FLOOR:
             heavy.append(i)
             floor += lo_i
     taken = set(heavy)
     light = rnd.sample([i for i, r in enumerate(rows) if i not in taken and r["eval_amt"] >= 5_000_000],
                        IDLE_LIGHT)
-    idx = heavy + light
-    vals = [round(rows[i]["eval_amt"] * rnd.uniform(0.55, 0.95)) for i in heavy] + \
-        [round(rows[i]["eval_amt"] * rnd.uniform(0.01, 0.05)) for i in light]
-    lo = [rows[i]["eval_amt"] * 55 // 100 // _STEP * _STEP for i in heavy] + [_STEP] * len(light)
-    hi = [rows[i]["eval_amt"] * 95 // 100 // _STEP * _STEP for i in heavy] + \
-        [rows[i]["eval_amt"] * 10 // 100 // _STEP * _STEP for i in light]
-    for i, a in zip(idx, _fit(vals, budget, lo, hi, rnd)):
+    # 두 무리를 따로 맞춘다 — 함께 비례 조정하면 50% 이상 고객이 전부 하한(51%)에 붙는다
+    h_target = round(budget * IDLE_HEAVY_SHARE / _STEP) * _STEP
+    heavy_amt = _fit([round(rows[i]["eval_amt"] * rnd.uniform(0.51, 0.98)) for i in heavy], h_target,
+                     [rows[i]["eval_amt"] * 51 // 100 // _STEP * _STEP for i in heavy],
+                     [rows[i]["eval_amt"] * 98 // 100 // _STEP * _STEP for i in heavy], rnd)
+    light_amt = _fit([round(rows[i]["eval_amt"] * rnd.uniform(0.01, 0.05)) for i in light], budget - h_target,
+                     [_STEP] * len(light),
+                     [rows[i]["eval_amt"] * 10 // 100 // _STEP * _STEP for i in light], rnd)
+    for i, a in zip(heavy + light, heavy_amt + light_amt):
         r = rows[i]
         r["idle_cash_amt"] = a
         r["idle_cash_pct"] = round(a / r["eval_amt"] * 100, 1)
