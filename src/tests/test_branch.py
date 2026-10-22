@@ -439,7 +439,7 @@ def check_strategy() -> None:
 
 def check_targets() -> None:
     from pension_agent import graph  # noqa: PLC0415
-    from pension_agent.tools.branch_briefing import roster  # noqa: PLC0415
+    from pension_agent.tools.branch_briefing import roster, status  # noqa: PLC0415
     from pension_agent.tools.customer_solution import customer as C, target_list  # noqa: PLC0415
     from pension_agent.tools.customer_solution import tool  # noqa: PLC0415
     with _Today():
@@ -470,8 +470,35 @@ def check_targets() -> None:
     om = (other or {}).get("meta") or {}
     check("강남" in (other or {}).get("text", "") and not persona_names & set(om.get("names") or []),
           "다른 부점 직원에게는 그 부점 고객만 나온다(gap 39)")
-    check(om.get("count") == tool.TARGETS_SHOW < om.get("total", 0) and "관리 방향이 없어" in other["text"],
+    focus_max, plain_max = status.target_limits()
+    check((focus_max, plain_max) == (100, 30), "인원 상한은 표(부점_임계값 BP-10 · BP-11)에서 온다 — 중점관리 100명",
+          str((focus_max, plain_max)))
+    check(om.get("count") == plain_max < om.get("total", 0) and "관리 방향이 없어" in other["text"],
           "관리 방향이 없는 부점(강남)은 관리 대상 전체를 우선순위 앞쪽부터 상한까지", str(om))
+    # 상한을 넘으면 우선순위 앞쪽만 싣고 전체 인원을 밝힌다
+    real_limits = status.target_limits
+    status.target_limits = lambda: (10, plain_max)
+    try:
+        with _Today():
+            capped = tools.run("branch_targets", _state(q="오늘 중점관리 고객"), "관리 대상")
+    finally:
+        status.target_limits = real_limits
+    cm = capped["meta"]
+    check(cm["count"] == 10 and cm["total"] == len(want) and cm["names"] == meta["names"][:10]
+          and f"{len(want)}명 중 우선순위 앞쪽 10명만" in capped["text"],
+          "중점관리 고객이 상한을 넘으면 우선순위 앞쪽만 싣고 전체 인원을 밝힌다", str(cm.get("count")))
+    # CASE 는 섰는데 조건을 모두 갖춘 고객이 0명 — 중점관리가 아님을 밝히고 관리 대상 앞쪽을 따로 보인다
+    real_focus = tool._today_focus
+    tool._today_focus = lambda st, sc: (real_focus(st, sc)[0], set())
+    try:
+        with _Today():
+            empty = tools.run("branch_targets", _state(q="오늘 중점관리 고객"), "관리 대상")
+    finally:
+        tool._today_focus = real_focus
+    em, et = empty["meta"], empty["text"]
+    check(em["count"] == plain_max and "중점관리 고객 0명" in et and "중점관리 고객이 아니라" in et
+          and "(오늘의 중점관리 고객)" not in et.splitlines()[0] and "900만원" in et,
+          "중점관리 0명이면 없다고 밝히고, 관리 대상 앞쪽을 중점관리와 구분해 보인다", et[:200])
     check(loose["meta"]["count"] == len(persona_names) and "·" in loose["text"].splitlines()[0],
           "사번이 없으면 예전처럼 목업 고객 명부로 답한다")
     check(ev is not None and meta.get("codes") == ["tax", "add"],

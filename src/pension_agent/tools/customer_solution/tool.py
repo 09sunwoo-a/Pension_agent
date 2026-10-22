@@ -362,10 +362,6 @@ def roster_targets(state: AgentState | None) -> tuple[str | None, list]:
     return None, note.today_targets()
 
 
-#: 오늘 성립한 관리 방향이 없어 관리 대상 전체를 보여줄 때 싣는 최대 인원(우선순위 앞쪽부터).
-TARGETS_SHOW = 30
-
-
 def _today_focus(state: AgentState, scope: str | None) -> tuple[list[dict], set[str] | None]:
     """(오늘 성립한 CASE, 중점관리 고객 이름). 부점 명부가 아니거나 현황을 못 구하면 ([], None)."""
     from pension_agent.tools.branch_briefing import roster, run, status  # noqa: PLC0415
@@ -385,7 +381,9 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
 
     선정은 target_list(요건 판정·PRIO) 그대로이고, 그중 오늘 성립한 CASE 의 중점관리 조건(룰베이스 부점 시트
     «부점CASE_중점조건» — AND)을 전부 만족하는 고객이 오늘의 중점관리 고객이다(2026-10-22 결정). 순서는 CASE 가
-    정한다(target_list.prioritize). 성립한 CASE 가 없으면 관리 대상 전체를 우선순위 앞쪽부터 TARGETS_SHOW 명.
+    정한다(target_list.prioritize). 인원 상한은 부점_임계값 표(status.target_limits — 2026-10-22 사용자 결정
+    중점관리 100명)이고, 넘으면 우선순위 앞쪽만 싣고 전체 인원을 밝힌다. 성립한 CASE 가 없거나 CASE 조건을
+    모두 갖춘 고객이 0명이면, 중점관리 고객이 아님을 밝히고 관리 대상을 우선순위 앞쪽부터 상한만큼 싣는다.
     이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로 싣는다(날짜가 바뀌었으면 새로).
     고객 화면 없이 사용, KB-PIN 미포함 — 첫 목록도 이름으로만 남긴다.
     """
@@ -413,25 +411,35 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     except Exception:
         return None
     total = len(found)
-    if not replay and not focus and total > TARGETS_SHOW:
-        found = found[:TARGETS_SHOW]
+    if not replay:
+        focus_max, plain_max = status.target_limits()
+        found = found[:focus_max if focus else plain_max]
+    # 오늘 CASE 는 섰는데 그 조건을 모두 갖춘 고객이 없다 — 다른 목록을 중점관리처럼 세우지 않는다
+    none_fit = not replay and bool(today) and not focus
     cases = {c: n for c, n in note.CONDS.items()}
     where = f"{scope} · " if scope else ""
     if replay:
         head = f"■ 관리 대상 추천 — {where}이 대화의 첫 추천({day})을 그대로 보여드립니다 · {len(found)}명"
     elif focus:
-        head = f"■ 관리 대상 추천(오늘의 중점관리 고객) — {where}{day} 기준 · {len(found)}명"
+        head = f"■ 관리 대상 추천(오늘의 중점관리 고객) — {where}{day} 기준 · {total}명"
     else:
         head = f"■ 관리 대상 추천 — {where}{day} 기준 · 관리 대상 {total}명"
     lines = [head]
     if focus:
         # 왜 이 사람들인가 — 관리 대상 중 오늘의 관리 방향 «우선관리 고객 특징»을 모두 갖춘 고객
         lines.append(f"· 관리 대상 {len(pool)}명 중 오늘의 관리 방향의 우선관리 고객 조건을 모두 갖춘 고객입니다.")
+    if focus or none_fit:
         for c in today:
             notes = "; ".join(n for n in c.get("focus_notes") or [] if n)
             lines.append(f"· 오늘의 관리 방향 «{c['name']}» — 우선관리 고객: {c['feature']}"
                          + (f" (조건: {notes})" if notes else ""))
-    elif not replay and scope:
+    if focus and total > len(found):
+        lines.append(f"· 조건을 모두 갖춘 고객 {total}명 중 우선순위 앞쪽 {len(found)}명만 실었습니다"
+                     f"(하루 상한 {len(found)}명).")
+    if none_fit:
+        lines.append(f"· 오늘의 관리 방향의 우선관리 고객 조건을 모두 갖춘 고객은 없습니다(중점관리 고객 0명). "
+                     f"아래는 중점관리 고객이 아니라, 관리 대상 {total}명을 우선순위 순으로 본 앞의 {len(found)}명입니다.")
+    elif not replay and scope and not focus:
         lines.append("· 오늘은 전월말 대비 변화로 정해진 관리 방향이 없어, 중점관리 고객을 따로 고르지 않고 "
                      "관리 대상 전체를 우선순위 순으로 보여드립니다."
                      + (f" 앞의 {len(found)}명만 실었습니다." if total > len(found) else ""))

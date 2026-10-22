@@ -7,6 +7,7 @@
     segment_sql()    세그먼트 조건 → WHERE (필드·연산자·값은 표에서, 형식은 여기서 검사)
     compute()        사번 → 부점 현황 dict (화면 패널 · branch_status 도구 · 전략 브리핑이 같은 값을 쓴다)
     focus_sql()      CASE 의 중점관리 조건 → WHERE (오늘의 중점관리 고객 = 관리 대상 ∩ 이 조건)
+    target_limits()  관리 대상 추천에 싣는 최대 인원(중점관리 · 중점관리 없음)
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ INDICATORS: dict[str, tuple[str, str, str, bool]] = {
 _LOW_RETURN_PARAM, _HIGH_BALANCE_PARAM = "BP-08", "BP-09"
 _SEGMENT_PARAM = "BP-01"
 _MAX_CASES_PARAM = "BP-05"
+_FOCUS_MAX_PARAM, _PLAIN_MAX_PARAM = "BP-10", "BP-11"
 
 _OPS = (">=", "<=", "=")
 #: 방향 표기 — 판정 값은 증가·감소 그대로, 사람이 읽는 말만 바꾼다
@@ -194,6 +196,12 @@ def _direction(delta: float, step: float) -> str:
     if delta <= -step:
         return "감소"
     return "변화 없음"
+
+
+def target_limits() -> tuple[int, int]:
+    """(오늘의 중점관리 고객 최대 인원, 중점관리 고객이 없을 때 싣는 인원) — 부점_임계값 BP-10 · BP-11."""
+    r = rules()
+    return int(_param(r, _FOCUS_MAX_PARAM, 100)), int(_param(r, _PLAIN_MAX_PARAM, 30))
 
 
 def _param(rules_: Rules, pid: str, default: float) -> float:

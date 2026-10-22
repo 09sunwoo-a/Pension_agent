@@ -332,7 +332,7 @@ python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의
 
 | 기능 | 도구 | 무엇으로 답하나 | LLM |
 |---|---|---|---|
-| 관리 대상 추천 | `branch_targets` | 그 직원 부점의 부점 DB 관리 대상(타겟 룰베이스 요건 판정을 그대로 적용 — `roster.branch_profiles` → `target_list`) 중 **오늘 성립한 CASE 의 중점관리 조건을 전부 만족하는 고객**(`roster.focus_names` — 시트 `부점CASE_중점조건`, AND. 여의도종합금융센터는 관리 대상 1,328명 중 61명). 성립한 CASE 가 없으면 관리 대상 전체를 우선순위 앞쪽부터 30명(`TARGETS_SHOW`). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
+| 관리 대상 추천 | `branch_targets` | 그 직원 부점의 부점 DB 관리 대상(타겟 룰베이스 요건 판정을 그대로 적용 — `roster.branch_profiles` → `target_list`) 중 **오늘 성립한 CASE 의 중점관리 조건을 전부 만족하는 고객**(`roster.focus_names` — 시트 `부점CASE_중점조건`, AND. 여의도종합금융센터는 관리 대상 1,328명 중 61명). 중점관리 고객은 하루 100명까지(넘으면 우선순위 앞쪽만 싣고 전체 인원을 밝힌다). 성립한 CASE 가 없거나 조건을 모두 갖춘 고객이 0명이면 중점관리 고객이 아님을 밝히고 관리 대상을 우선순위 앞쪽부터 30명(인원 상한은 시트 `부점_임계값` BP-10 · BP-11 — `status.target_limits`). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
 | 부점 현황 | `branch_status` | 지표(잔액·계좌 수·부점 수익률·고유계정대 잔액·원리금보장 비중·올해 계약이전·수익률 저조·1억 이상) · 세그먼트 인원 · **전월말 대비 변화** · 오늘의 CASE(`status.compute`). CASE 판정에 쓰는 지표는 앞의 셋 | 답변 작성만 |
 | 고객 검색 | `branch_search` | 직원이 말한 조건 → SELECT 한 문장(아래) | SQL 작성 · 답변 작성 |
 
