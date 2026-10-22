@@ -39,10 +39,10 @@ def _cases_block(st: dict) -> str:
     ind = "; ".join(f"{i['name']} {i['label']}" for i in st["indicators"])
     out = [f"부점 지표(전월말 대비): {ind}"]
     for n, c in enumerate(st["cases"], 1):
-        changes = ", ".join(f"{s['name']} {s['delta']:+d}명" for s in c["segment_changes"])
+        changes = ", ".join(f"{s['name']} 고객 {s['delta']:+d}명" for s in c["segment_changes"])
         out += [f"{n}. {c['name']}",
                 f"   판정 근거: {' · '.join(c['why'])}",
-                f"   세그먼트 변화: {changes}",
+                f"   고객군 인원 변화(전월말 대비): {changes}",
                 f"   우선 관리할 고객: {c['feature']}",
                 f"   상담·운용 전략: {c['strategy']}"]
     return "\n".join(out)

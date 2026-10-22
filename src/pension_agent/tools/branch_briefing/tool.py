@@ -177,12 +177,16 @@ def status_text(st: dict) -> str:
              "· 부점 지표(전월말 → 오늘):"]
     for ind in st["indicators"]:
         lines.append(f"    - {ind['name']}: {_value(ind, 'prev')} → {_value(ind, 'now')} ({ind['label']})")
-    lines.append("· 세그먼트 인원(전월말 → 오늘, 근거등급):")
-    for seg in st["segments"]:
-        lines.append(f"    - {seg['name']}: {seg['prev']}명 → {seg['now']}명 ({_change(seg, st)}) "
-                     f"· 근거등급 {seg['grade']}")
+    moved = [s for s in st["segments"] if s["direction"] != "변화 없음"]
+    rest = [s for s in st["segments"] if s["direction"] == "변화 없음"]
+    lines.append(f"· 고객군 인원 — 판정 기준({st['segment_step']}명) 이상 변한 고객군(전월말 → 오늘):")
+    lines += [f"    - {s['name']}: {s['prev']}명 → {s['now']}명 ({_change(s, st)}) · 근거등급 {s['grade']}"
+              for s in moved] or ["    - 없음"]
+    lines.append("· 고객군 인원 — 그 밖(변화 없음 또는 판정 기준 미만, 크게 변했다고 말하지 않는다):")
+    lines += [f"    - {s['name']}: {s['prev']}명 → {s['now']}명 ({_change(s, st)}) · 근거등급 {s['grade']}"
+              for s in rest] or ["    - 없음"]
     if st["cases"]:
-        lines.append("· 오늘의 관리 방향(부점 CASE — 코드가 표의 조건으로 판정):")
+        lines.append(f"· 오늘의 관리 방향 {len(st['cases'])}가지(기준표의 조건으로 판정 — 전부 답한다):")
         for c in st["cases"]:
             lines.append(f"    - {c['name']} (근거등급 {c['grade']}) — 판정 근거: {' · '.join(c['why'])}")
             lines.append(f"      우선 관리할 고객: {c['feature']}")
