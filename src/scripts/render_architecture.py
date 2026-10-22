@@ -39,10 +39,8 @@ _TOOL_GROUPS = (
     ("지식베이스", ("pitch", "fact", "procedure", "screen", "channel",
                     "segment", "method", "fieldtip", "market", "lineup")),
     ("현재 고객", ("briefing", "customer", "suitable", "history", "transcript", "playbook", "outreach")),
-    # targets 는 고객 화면 열기 전 재료 — 현재 고객 갈래 아님
-    ("오늘의 목록", ("targets",)),
-    # 메인 브리핑(부점 데이터 조회) — 고객 화면과 무관
-    ("부점 데이터", ("branch",)),
+    # 부점 브리핑 세 기능(관리 대상 추천 · 부점 현황 · 고객 검색) — 고객 화면 열기 전 재료
+    ("부점 브리핑", ("branch_targets", "branch_status", "branch_search")),
     ("계산", ("tax_credit", "date")),
     # 직전 답변 — 고객 화면과 무관
     ("이번 대화", ("last_answer",)),

@@ -199,6 +199,13 @@ def churn(p: Profile) -> float:
     return round(v, 1)
 
 
+def risk_mismatch(rk: str, risk_pct: float, principal_pct: float) -> bool:
+    """투자성향 대비 자산구성 불일치(요건 `mis`). 부점 DB 목업·부점 세그먼트 BS-07 도 이 판정을 쓴다."""
+    return ((rk in ("안정형", "안정추구형") and risk_pct >= 35)
+            or (rk == "위험중립형" and risk_pct >= 68)
+            or (rk in ("적극투자형", "공격투자형") and principal_pct >= 65))
+
+
 def conditions(p: Profile) -> list[str]:
     """성립 타겟 요건(PRIO 순)."""
     a: set[str] = set()
@@ -221,11 +228,7 @@ def conditions(p: Profile) -> list[str]:
         a.add("sec")
     if p.risk_asset > RISK_ASSET_CAP_PCT:
         a.add("lim")
-    if (
-        (p.rk in ("안정형", "안정추구형") and p.risk_asset >= 35)
-        or (p.rk == "위험중립형" and p.risk_asset >= 68)
-        or (p.rk in ("적극투자형", "공격투자형") and p.port[0] >= 65)
-    ):
+    if risk_mismatch(p.rk, p.risk_asset, p.port[0]):
         a.add("mis")
     if churn(p) >= 10:
         a.add("chn")

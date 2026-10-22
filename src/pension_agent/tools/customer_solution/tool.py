@@ -4,7 +4,7 @@
     briefing    전체 브리핑 문서 — compose 미경유, 그대로 답변
     suitable    투자성향 적합성 범위
     outreach    안내 세미나·이벤트와 발송 문구
-    targets     오늘의 타겟 고객 목록(고객 화면 열기 전)
+    branch_targets  관리 대상 추천 — 오늘의 타겟 고객 목록(고객 화면 열기 전 · CASE 순서 · 첫 추천 유지)
 
 KB-PIN(고객 식별번호)은 재료·출처 id·제목 전부 미포함 — 게이트웨이 개인정보 필터가 주민번호로 보고 차단.
 """
@@ -335,30 +335,66 @@ def _outreach(state: AgentState, query: str) -> Evidence | None:
                meta={"lms": lms, "messages": messages})
 
 
-def _targets(state: AgentState, query: str) -> Evidence | None:
-    """오늘의 타겟 고객 목록(target_list 선정·순서 그대로). 고객 화면 없이 사용, KB-PIN 미포함."""
-    from pension_agent.common import note  # noqa: PLC0415 — 순환 임포트 회피
+def first_targets(history: list[dict] | None) -> dict | None:
+    """이 대화의 첫 추천 목록(`Turn.first_targets` — graph.ask 가 턴마다 이어 붙인다)."""
+    for turn in reversed(history or []):
+        if turn.get("first_targets"):
+            return turn["first_targets"]
+    return None
 
+
+def _targets(state: AgentState, query: str) -> Evidence | None:
+    """관리 대상 추천(branch_targets) — 오늘의 타겟 목록을 오늘의 부점 CASE 순서로.
+
+    선정은 target_list(요건 판정·PRIO) 그대로, 순서만 CASE 가 정한다(target_list.prioritize).
+    이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로 싣는다(날짜가 바뀌었으면 새로).
+    고객 화면 없이 사용, KB-PIN 미포함 — 첫 목록도 이름으로만 남긴다.
+    """
+    from pension_agent.common import note  # noqa: PLC0415 — 순환 임포트 회피
+    from pension_agent.tools.branch_briefing import status  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
+
+    day = clock.today().isoformat()
+    stored = first_targets((state or {}).get("history"))
+    replay = bool(stored and stored.get("date") == day)
     try:
-        found = note.today_targets()
+        if replay:
+            found = target_list.by_names(list(stored.get("names") or []))
+            codes = list(stored.get("codes") or [])
+        else:
+            emp_no = ((state or {}).get("employee_id") or "").strip() or None
+            codes = status.case_codes(emp_no)
+            found = target_list.prioritize(note.today_targets(), codes)
     except Exception:
         return None
-    day = clock.today().isoformat()
-    lines = [f"■ 오늘의 타겟 고객 — {day} 기준 · {len(found)}명"]
+    cases = {c: n for c, n in note.CONDS.items()}
+    head = (f"■ 관리 대상 추천 — 이 대화의 첫 추천({day})을 그대로 보여드립니다 · {len(found)}명"
+            if replay else f"■ 관리 대상 추천 — {day} 기준 · {len(found)}명")
+    lines = [head]
+    if codes:
+        # 순서의 이유 — 오늘의 부점 관리 방향(CASE)이 가리키는 요건
+        lines.append("· 순서: 오늘의 부점 관리 방향과 연결된 요건(" +
+                     " · ".join(cases.get(c, c) for c in codes) + ")을 가진 고객을 앞에 두었습니다.")
     if not found:
         # 0건도 명시 — «질의 빗나감»과 구별
         lines.append("· 오늘 사후관리 타겟으로 선정된 고객이 없습니다.")
     for i, t in enumerate(found, 1):
         p = t.profile
         attrs = " · ".join([f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else []))
-        lines.append(f"· {i}. {p.nm} — {attrs} · 평가금액 {note.won(p.bal)}")
+        focus = " · 오늘의 관리 방향 대상" if codes and set(t.conds) & set(codes) else ""
+        lines.append(f"· {i}. {p.nm} — {attrs} · 평가금액 {note.won(p.bal)}{focus}")
         # 요건별 원장 값 병기
         lines += [f"    - {note.cond_text(t, c)}" for c in t.conds]
     text = "\n".join(lines)
-    return _ev("targets", query, text,
-               [{"id": "targets.today",
-                 "title": f"오늘의 타겟 고객 {len(found)}명 ({day})",
-                 "doc": "고객 정보 — 계좌 원장 조회값 · 선정 기준은 사후관리 타겟 룰베이스",
+    names = [t.profile.nm for t in found]
+    return _ev("branch_targets", query, text,
+               [{"id": "branch_targets.today",
+                 "title": f"관리 대상 추천 {len(found)}명 ({day})",
+                 "doc": "고객 정보 — 계좌 원장 조회값 · 선정 기준은 사후관리 타겟 룰베이스 · "
+                        "순서는 부점 CASE(타겟 룰베이스 부점 시트)",
                  "score": None, "page": None}],
                allow=[text],
-               meta={"count": len(found)})
+               meta={"count": len(found), "names": names, "codes": codes, "replayed": replay,
+                     # 이 대화의 첫 추천 — graph.ask 가 Turn 에 남긴다(이미 있으면 그것을 잇는다)
+                     "first_targets": stored if replay else {"date": day, "names": names,
+                                                             "codes": codes}})

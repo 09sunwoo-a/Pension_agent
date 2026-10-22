@@ -49,11 +49,12 @@ Content-Type: application/json
 
 | 키 | 필수 | 뜻 |
 |---|---|---|
-| `message` | 예 | 직원이 입력한 질문. **유효한 UTF-8** 이어야 한다 — 대리 문자(U+DCxx)가 섞이면 게이트웨이가 input_value 를 깨뜨려 500 이 난다. `call_agent.py::_check_utf8` 가 보내기 전에 확인한다 |
+| `message` | 예(`mode` 가 `branch_briefing` 이면 생략) | 직원이 입력한 질문. **유효한 UTF-8** 이어야 한다 — 대리 문자(U+DCxx)가 섞이면 게이트웨이가 input_value 를 깨뜨려 500 이 난다. `call_agent.py::_check_utf8` 가 보내기 전에 확인한다 |
 | `x_client_user` | 예 | 호출한 직원 식별자. 감사 기록이자 LLM 쿼터 버킷이고, 에이전트는 여기서 **사번을 읽어** 쪽지의 받는 사람·보내는 사람을 정한다. **「사번 7자리」로 시작해야 하고**, 뒤에 접미(LLM 호출을 가르는 uuid 등)를 붙일 거면 **구분자로 잇는다**(`3902172-550e8400-…` · `3902172_…`). 사번 뒤에 숫자가 바로 이어지면 사번으로 읽지 않는다 — 사번이 아닌 숫자 id 를 남의 사번으로 오독하지 않기 위해서다 |
 | `customer_id` | 아니오 | **지금 열려 있는 브리핑 화면의 고객 id — `b64:` + base64(원장 표기)로 보낸다**(`171203-4815062` → `b64:MTcxMjAzLTQ4MTUwNjI=`). JavaScript 로는 `"b64:" + btoa(customerId)`. 원장 표기는 주민등록번호와 같은 꼴이라 플랫폼 게이트웨이의 «기본필터»(policy 350)가 그 요청을 `FILTER_INVALID` 로 끊는다(질문이 한 글자여도 막힌다). 에이전트가 원장 표기로 되돌린다. 고객 관련 질문(현황·왜 타겟인가·제안·지난 상담)은 이것이 있어야 답한다. 없으면 에이전트가 «고객 화면을 먼저 열어달라»고 답한다. 지식 질의응답·화법은 없이도 답한다 |
 | `session_id` | 아니오 | 상담 세션 구분자. **상담 한 번마다 새로 만들고**(UUID 등) 같은 상담의 턴들은 같은 값을 보낸다. 에이전트가 이 값으로 이전 턴의 맥락을 이어간다 — 후속 질문·되묻기의 답·「네」가 이것으로 해석된다. 없으면 `"default"` |
 | `log_events` | 아니오 | `true` 면 이 요청의 서버 로그 줄을 `log` 이벤트로, 턴의 절차 기록을 `trace` 이벤트로 함께 받는다(아래 표). 개발자 콘솔과 «답변 근거» 패널을 위한 자리다. 서버에 `CHAT_LOG_EVENTS=1` 이 설정돼 있으면 보내지 않아도 모든 요청에 실린다 |
+| `mode` | 아니오 | `"branch_briefing"` 이면 **부점 브리핑 화면 진입** 요청이다 — `message` 없이 보낸다. 대화 턴이 아니라 화면을 채우는 한 번의 호출이라 맥락(`session_id`)에 남지 않는다. 응답은 아래 「2-1. 부점 브리핑 화면 진입」. 다른 값을 넣으면 422 |
 | `employee_id` | 아니오 | 로그인한 직원의 **WorkB 사번**. `x_client_user` 앞자리가 사번이면 **보낼 필요가 없다** — 사번을 다른 데서 받아오거나 `x_client_user` 의 꼴이 바뀌는 배포를 위한 자리다. 여기 넣은 값은 꼴을 검사하지 않고 그대로 쓴다 |
 
 - 고객을 질문 문장에서 알아내는 기능은 없다. 어느 고객인지는 **호출자가 정한다.**
@@ -81,6 +82,17 @@ Content-Type: application/json
 | `done` | 없음 | 턴 끝. 항상 마지막. 스피너를 끈다 |
 | `log` | `level`, `logger`, `text` | 서버 로그 한 줄. **로그 이벤트를 켰을 때만** 온다(요청 키 `log_events` 또는 서버 `CHAT_LOG_EVENTS=1`). 화면에 그리지 않고 `console.log(ev.text)` 로 개발자 콘솔에 찍는다. `text` 는 Grafana(stdout)에 찍히는 줄과 같은 글자다(`INFO:     [agent] [ab12cd34]  2.0s plan …`). 스트림에서는 찍히는 즉시 다른 이벤트 사이사이에 오고(`done` 앞까지), 비스트림에서는 맨 앞에 모여 온다. 고객 원장 번호 같은 개인정보 꼴은 `[개인정보 가림]` 으로 바뀌어 온다 |
 | `trace` | `started_at`, `finished_at`, `intent`, `timeline[]`, `rounds[]`, `evidence[]`, `sources[]`, `sentences[]` | 이 턴의 절차 기록 — «답변 근거» 패널의 재료다(아래 「`trace` — 답변 근거 패널」). **로그 이벤트를 켰을 때만**, 턴 끝에 한 번, `done` 바로 앞에 온다. 오류로 끝난 턴(`error`)에는 오지 않는다. 개인정보 가림은 `log` 와 같다 |
+
+### 2-1. 부점 브리핑 화면 진입 — `mode: "branch_briefing"`
+
+질문 없이 보내는 요청이다(`{"mode": "branch_briefing", "x_client_user": "3902172-…"}`). 부점은 사번으로
+에이전트가 정한다. 대화 턴과 달리 `progress`·`sources`·`followups` 가 없고 이벤트가 셋이다:
+
+| type | 필드 | 화면 |
+|---|---|---|
+| `branch_panel` | `branch`, `base_date`, `prev_date`, `indicators[]`, `segments[]`, `cases[]`, `rule_status` | **수치 패널.** 정형 수치는 여기서만 그린다. `indicators[]` 는 부점 지표 셋(`id`·`name`·`now`·`prev`·`delta`·`direction`·`label` — 잔액은 원, 수익률은 %), `segments[]` 는 세그먼트 인원(`id`·`name`·`grade`·`now`·`prev`·`delta`·`direction`), `cases[]` 는 오늘 해당하는 관리 방향(`id`·`name`·`grade`·`why[]`·`feature`·`strategy`). `prev` 는 전월말(`prev_date`) 값이다. `grade` 가 `D` 인 기준은 기획자 설계 제안이다 — 행내 확정 기준과 같은 모양으로 그리지 않는다 |
+| `branch_briefing` | `text`, `status`, `reason` | **브리핑 문장 영역.** `status` 가 `ok`(LLM 문장) · `fallback`(문장 검사에 걸려 기준표의 전략 문장을 그대로 실음) · `no_case`(오늘 해당 관리 방향 없음 — 코드 문장)면 `text` 를 그린다. `llm_down` 이면 `text` 가 `null` 이다 — 문장 영역을 비우고 `reason` 을 개발자 콘솔에만 찍는다. 문장에는 세그먼트 인원 변화 말고 숫자가 없다(패널과 숫자를 겹치지 않는다) |
+| `done` | 없음 | 끝. 사번으로 부점을 못 찾거나 DB 를 못 읽으면 `error` 뒤에 온다 |
 
 `answer.text` 에 추천질문 블록은 없다(`followups` 로만 온다). 답변 본문은 검증을 거친 뒤 한 번에
 오고 토큰 단위로 흐르지 않는다 — 진행 문구가 그 시간을 채운다.

@@ -5,7 +5,20 @@
 
 from __future__ import annotations
 
-#: 뷰 이름 → (설명, [(컬럼, 타입, 뜻)])
+#: 부점 브리핑 세그먼트용 컬럼(2026-10-22). 원천 테이블 미확정 — 행외 목업 값
+_BRIEFING_COLUMNS: list[tuple[str, str, str]] = [
+    ("idle_cash_amt", "정수(원)", "운용되지 않는 현금성자산(고유계정대) 금액"),
+    ("idle_cash_days", "정수(일)", "현금성자산(고유계정대) 금액이 변동 없이 지난 일수 — 미운용 기간(없으면 NULL)"),
+    ("tax_credit_room", "정수(원)", "올해 세액공제 잔여한도(연금저축과 함께 쓰는 900만원 한도에서 남은 금액)"),
+    ("transfer_inquiry", "문자", "최근 30일 안 계약이전 사전조회 신청 여부('신청' 또는 '없음')"),
+    ("risk_mismatch", "문자", "투자성향 대비 자산구성 불일치 여부('불일치' 또는 '일치')"),
+    ("isa_maturity_date", "날짜 문자 YYYY-MM-DD", "ISA 만기일(IRP 밖 계좌, 없으면 NULL)"),
+    ("isa_maturity_amt", "정수(원)", "ISA 만기자금 금액(IRP 밖, 없으면 NULL)"),
+    ("isa_days_to_maturity", "정수(일)", "오늘부터 ISA 만기일까지 남은 일수. 음수면 이미 지난 것"),
+]
+
+#: 뷰 이름 → (설명, [(컬럼, 타입, 뜻)]). 컬럼이 None 이면 바로 앞 뷰와 같은 컬럼
+#: (그 경우 전월말 뷰처럼 «같은 꼴의 다른 시점»이다 — catalog 가 컬럼을 다시 적지 않는다)
 VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
     "v_irp_customer": (
         "우리 부점의 IRP 고객 — 고객 한 명당 한 행. 다른 부점 고객은 들어 있지 않다", [
@@ -29,7 +42,11 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
             ("last_contact_days", "정수(일)", "마지막 접촉 후 지난 일수(없으면 NULL)"),
             ("target_reasons", "문자", "관리 대상으로 선정된 사유들(쉼표로 이어 붙임, 없으면 빈 문자열)"),
             ("is_target", "정수 0/1", "관리 대상(타겟) 여부"),
+            *_BRIEFING_COLUMNS,
         ]),
+    "v_irp_customer_prev": (
+        "우리 부점의 IRP 고객 — **전월말 기준** 스냅샷. 컬럼은 v_irp_customer 와 같고 남은 일수는 전월말 "
+        "기준이다. «지난달보다 늘었나»처럼 전월말과 견줄 때만 쓴다", None),
     "v_branch_summary": (
         "부점별 집계 — 부점 하나당 한 행. 개인 정보 없이 다른 부점과 견줄 때 쓴다", [
             ("branch_name", "문자", "부점 이름"),
@@ -47,10 +64,19 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
 MY_BRANCH = "my_branch"
 
 
+def columns(view: str) -> list[tuple[str, str, str]]:
+    """뷰 컬럼 목록. 컬럼이 None 인 뷰는 바로 앞 뷰의 컬럼."""
+    names = list(VIEWS)
+    i = names.index(view)
+    while VIEWS[names[i]][1] is None:
+        i -= 1
+    return VIEWS[names[i]][1]
+
+
 def catalog() -> str:
     """프롬프트에 싣는 뷰 목록."""
     out = []
     for name, (desc, cols) in VIEWS.items():
         out.append(f"### {name} — {desc}")
-        out += [f"- {c} ({t}): {d}" for c, t, d in cols]
+        out += [f"- {c} ({t}): {d}" for c, t, d in cols] if cols else ["- (컬럼은 바로 위 뷰와 같다)"]
     return "\n".join(out)

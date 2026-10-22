@@ -40,3 +40,25 @@ def today_targets(profiles: list[Profile] | None = None) -> list[Target]:
     """오늘의 타겟 고객. 요건 미성립 고객 제외, 로스터가 비면 빈 목록(에러 아님)."""
     found = [Target(p, conditions(p)) for p in (PERSONAS if profiles is None else profiles)]
     return sorted((t for t in found if t.conds), key=lambda t: t.rank)
+
+
+def prioritize(targets: list[Target], codes: list[str]) -> list[Target]:
+    """오늘의 부점 관리 방향(CASE)이 가리키는 요건코드를 가진 고객을 앞으로 — 선정은 그대로, 순서만.
+
+    codes: CASE 우선순위 순 요건코드(`branch_briefing.status.case_codes`). 비면 원래 순서.
+    앞으로 오는 고객끼리는 «가장 앞 CASE 의 요건» 순, 그 안에서는 원래 3단 기준(rank).
+    """
+    if not codes:
+        return list(targets)
+
+    def head(t: Target) -> tuple[int, int]:
+        hits = [codes.index(c) for c in t.conds if c in codes]
+        return (0, min(hits)) if hits else (1, 0)
+
+    return sorted(targets, key=lambda t: (head(t), t.rank))
+
+
+def by_names(names: list[str], targets: list[Target] | None = None) -> list[Target]:
+    """이름 목록 순서대로 Target — 저장해 둔 추천 목록을 다시 세울 때. 없는 이름은 건너뛴다."""
+    pool = {t.profile.nm: t for t in (today_targets() if targets is None else targets)}
+    return [pool[n] for n in names if n in pool]

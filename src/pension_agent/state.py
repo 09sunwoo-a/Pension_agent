@@ -37,6 +37,9 @@ class Turn(TypedDict, total=False):
     answer: str | None               # 화면에 나간 답변(추천질문 전, ANSWER_KEEP 자). 되묻기·LLM 장애 턴엔 없음. last_answer 도구만 읽음
     sources: list[dict]              # 그 답변의 출처(역할 포함)
     marks: list[str]                 # 그 답변의 재료 성격 표시
+    # 이 대화의 첫 관리 대상 추천 {date, names, codes} — 턴마다 이어 붙여 기록 창(12턴)을 넘어도 남는다.
+    # 이름만(KB-PIN 미포함). 「처음 추천한 고객 다시 보여줘」의 재료(branch_targets)
+    first_targets: dict | None
 
 
 class AgentState(TypedDict, total=False):

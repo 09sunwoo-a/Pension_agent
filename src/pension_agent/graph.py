@@ -100,6 +100,17 @@ def _pending_label(history: list[dict] | None) -> str | None:
     return "되묻기" if last.get("pending_clarify") else None
 
 
+def _first_targets(history: list[dict] | None, evidence: list) -> dict | None:
+    """이 대화의 첫 관리 대상 추천. 기록에 있으면 그것, 없으면 이번 턴 branch_targets 산출."""
+    for turn in reversed(history or []):
+        if turn.get("first_targets"):
+            return turn["first_targets"]
+    for ev in evidence:
+        if ev.get("tool") == "branch_targets" and (ev.get("meta") or {}).get("first_targets"):
+            return ev["meta"]["first_targets"]
+    return None
+
+
 def employee_no(explicit: str | None, x_client_user: str | None) -> str | None:
     """직원 WorkB 사번. 명시값 우선, x_client_user 는 사번 꼴일 때만. main.py 로그와 공용."""
     return (explicit or "").strip() or note.as_emp_no(x_client_user)
@@ -206,6 +217,8 @@ def ask(
                    else (out.get("answer") or "")[:ANSWER_KEEP] or None),
         "sources": list(out.get("sources") or []),
         "marks": tools.ledger_marks(evidence),
+        # 이 대화의 첫 관리 대상 추천 — 이미 있으면 그대로 잇고, 없으면 이번 턴 추천을 첫 추천으로
+        "first_targets": _first_targets(history, evidence),
     }
     new_history = [*(history or []), turn][-HISTORY_LIMIT:]
 

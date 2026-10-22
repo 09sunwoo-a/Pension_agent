@@ -6,7 +6,7 @@ strategy_agent(잔여일수·경과일) · consult_agent(`date` 도구) · verif
 from __future__ import annotations
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 #: 오늘 고정용 환경변수. 형식 오류 시 실제 날짜로 넘어가지 않고 즉시 실패.
 TODAY_ENV = "PENSION_TODAY"
@@ -21,6 +21,12 @@ def today() -> date:
         return date.fromisoformat(pinned)
     except ValueError as exc:
         raise ValueError(f"{TODAY_ENV}={pinned!r} 는 YYYY-MM-DD 가 아닙니다") from exc
+
+
+def prev_month_end(base: date | None = None) -> date:
+    """오늘(또는 base) 기준 직전 달 말일 — 부점 브리핑의 비교 기준(전월말)."""
+    base = base or today()
+    return base.replace(day=1) - timedelta(days=1)
 
 
 def now() -> datetime:

@@ -89,7 +89,9 @@ def _limited(sql: str) -> str:
 
 def execute(sql: str, branch_code: str, emp_no: str | None) -> tuple[str, list[dict], bool]:
     """고정 뷰를 붙여 실행 → (실행한 SQL, 행, 잘렸는지)."""
-    values = {"branch_code": branch_code, "today": clock.today().isoformat()}
+    values = {"branch_code": branch_code, "today": clock.today().isoformat(),
+              # 전월말 뷰(v_irp_customer_prev)의 기준일
+              "prev_date": clock.prev_month_end().isoformat()}
     ctes = ",\n".join(f"{name} AS (\n{_fill(_sql_file(name), **values)}\n)" for name in VIEWS)
     final = f"WITH {ctes}\n{_limited(sql)}"
     rows = _rows(final, emp_no)

@@ -238,10 +238,11 @@ def build() -> tuple[str, dict[str, int]]:
          "쪽지가 도착하는 것을 보이려는 것). 실서비스로 옮길 때는 PENSION_MEMO_SCHEDULER=off(보내지 "
          "않고 «미연결»)이나 actions.SCHEDULERS 에 더한 실제 실행기 이름을 넣는다"),
         ("tools/branch_briefing 부점 DB", _branch_db_state(),
-         "메인 브리핑(부점 데이터 질의)이 조회하는 DB. **기본값이 demo 다** — 행외 목업 DB(sqlite 메모리, "
-         "부점 4곳 · 직원 5명 · 고객 300명 중 288명은 고정 시드로 만든 가짜, 12명은 목업 고객을 옮긴 것). "
-         "행내로 옮길 때는 BRANCH_DB=sybase 로 바꾸고 sql/sybase/ 의 고정 뷰 SQL 세 개(사번→부점 · "
-         "고객 뷰 · 부점 집계 뷰)를 실제 테이블로 채운다 — 채우기 전에는 «DB 미연결»로 답한다. "
+         "부점 브리핑(부점 현황 · 고객 검색 · 화면 진입 패널)이 조회하는 DB. **기본값이 demo 다** — 행외 목업 DB"
+         "(sqlite 메모리, 부점 4곳 · 직원 5명 · 고객 300명 중 288명은 고정 시드로 만든 가짜, 12명은 목업 고객을 "
+         "옮긴 것). **전월말 스냅샷도 가짜다** — 오늘 표를 고정 시드로 흔들어 만들었고, 여의도·판교·부산에 CASE 가 "
+         "서도록 맞췄다(§8). 행내로 옮길 때는 BRANCH_DB=sybase 로 바꾸고 sql/sybase/ 의 고정 뷰 SQL 네 개"
+         "(사번→부점 · 고객 뷰 · 전월말 고객 뷰 · 부점 집계 뷰)를 실제 테이블로 채운다 — 채우기 전에는 «DB 미연결»로 답한다. "
          "MCP 서버 sybase(MCP_SERVERS · MCP_CONN_ID)와 sybaseiq_query 의 인자 이름·응답 꼴도 행내 실측이 필요하다"),
         ("actions.screens.link() 파라미터", "scnNo · mode",
          "규격이 정의한 둘만 싣는다. 고객 식별자·발송 문구는 단말이 받는 이름이 미확정이라 "
@@ -280,6 +281,27 @@ def build() -> tuple[str, dict[str, int]]:
           "Pilot 로 운영하고 실데이터에서 보정해야 한다 — 실전환 때 가장 먼저 흔들릴 자리다. "
           "A 는 원문에 임계값이 그대로 적힌 것이다.", ""]
     _rows(L, ["요건", "상수", "현재값", "TARGET_ID", "타겟명", "근거등급", "비고"], trows)
+
+    # 8. 부점 브리핑 기준(룰베이스 부점 시트) — 에이전트 초안
+    segs = tdoc.get("branch_segments") or []
+    cases = tdoc.get("branch_cases") or []
+    params = tdoc.get("branch_params") or []
+    rows8 = ([[s.get("SEG_ID"), "세그먼트", s.get("세그먼트명"), s.get("조건식"), s.get("근거등급"),
+               s.get("적용상태")] for s in segs]
+             + [[c.get("CASE_ID"), "CASE", c.get("CASE명"), c.get("판정조건 요약"), c.get("근거등급"),
+                 c.get("적용상태")] for c in cases]
+             + [[q.get("PARAM_ID"), "임계값", q.get("항목"), f"{q.get('값')} {q.get('단위') or ''}".strip(),
+                 q.get("근거등급"), "—"] for q in params])
+    drafts = sum(1 for r in rows8 if "초안" in str(r[5])) + len(params)
+    n["branch_rules_draft"] = drafts
+    L += [f"## 8. 부점 브리핑 기준 — 에이전트 초안 {drafts} / {len(rows8)}건", "",
+          "룰베이스 xlsx 의 부점 시트 5종(세그먼트·CASE·임계값). **기획자가 «합리적인 기준하에 작성해 달라»고 "
+          "위임해(2026-10-22) 에이전트가 쓴 초안이고 기획자 검토 전이다.** 개발 후 정의·임계값을 고치고, 실제 "
+          "테이블에 맞추는 일은 뒤로 미뤘다. D 는 원문에 없는 설계 제안이다 — 화면 패널은 `grade` 로 그 사실을 "
+          "받는다. 세그먼트 조건 필드 중 `idle_cash_amt`·`idle_cash_days`·`tax_credit_room`·`transfer_inquiry`·"
+          "`risk_mismatch`·`isa_maturity_*` 는 원천 테이블이 정해지지 않은 시연 컬럼이고, «계좌 수»는 고객 수로 "
+          "센다(개인형IRP 1인 1계좌 가정).", ""]
+    _rows(L, ["ID", "종류", "이름", "조건", "근거등급", "적용상태"], [[str(c or "—") for c in r] for r in rows8])
 
     return "\n".join(L).rstrip() + "\n", n
 

@@ -27,9 +27,11 @@
     clarify.py      CLARIFY_PROMPT             답의 형태 판정
                     JUDGE_BRANCHES_BLOCK       적합성 게이트가 표시한 갈래
 
-    메인 브리핑
-    branch.py       BRANCH_SQL_SYSTEM · BRANCH_SQL_PROMPT   부점 데이터 질문 → 고정 뷰 SELECT 한 문장
+    부점 브리핑
+    branch.py       BRANCH_SQL_SYSTEM · BRANCH_SQL_PROMPT   부점 고객 검색 질문 → 고정 뷰 SELECT 한 문장
                     BRANCH_SQL_RETRY_BLOCK     검사·실행에 걸린 SQL 을 다시 쓸 때
+                    BRANCH_BRIEFING_SYSTEM · BRANCH_BRIEFING_PROMPT   부점 전략 브리핑 문장
+                    BRANCH_BRIEFING_RETRY_BLOCK  검사에 걸린 브리핑을 다시 쓸 때
 
     특수 턴 · 쪽지
     meta.py         HELP_SYSTEM · HELP_PROMPT  에이전트 자신에 대한 질문
@@ -105,4 +107,7 @@ from pension_agent.prompts.branch import (  # noqa: F401
     BRANCH_SQL_SYSTEM,
     BRANCH_SQL_PROMPT,
     BRANCH_SQL_RETRY_BLOCK,
+    BRANCH_BRIEFING_SYSTEM,
+    BRANCH_BRIEFING_PROMPT,
+    BRANCH_BRIEFING_RETRY_BLOCK,
 )

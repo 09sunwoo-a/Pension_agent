@@ -16,7 +16,7 @@ KB국민은행 퇴직연금·개인형IRP 지식베이스(`01`~`09` 폴더)와 �
   `customer.today()`(실제 날짜 · `PENSION_TODAY` 로 고정 가능)로 갈라 둔다 — 잔여일수·경과일은
   뒤쪽 기준, ⑨ 안내 콘텐츠(세미나 5 · 이벤트 4)는 연금사업부가 확인해준 「IRP 세미나·이벤트
   DB」에서 왔지만 일정·링크는 시연값이고, 금리는 `knowledge/market/rates_demo.json` 자리표시자다.
-  메인 브리핑의 부점 DB 도 기본값은 행외 목업(`tools/branch_briefing/demo_db.py`)이다.
+  부점 브리핑의 부점 DB(전월말 스냅샷 포함)도 기본값은 행외 목업(`tools/branch_briefing/demo_db.py`)이다.
 - **화면에는 더미 표시를 붙이지 않는다**(발송문 포함). 발표 산출물에 딱지를 남기지 않기로
   했다. 대신 무엇이 더미인지는 `docs/DEMO_STATUS.md` 가 전담한다.
 - 화면(프론트)은 이 저장소에 없다. 실서비스 프론트는 따로 만든다.
@@ -38,6 +38,11 @@ UP-②③④⑤)을 읽고 타겟 14종으로 정규화해 확인해준 표다 �
 `IRP_타겟고객_룰베이스_v1.xlsx`, `scripts/import_targets.py` 가 `targets.json` 으로 내린다.
 요건 임계값이 이 표와 어긋나면 **코드가 틀린 것**이고, `customer.py` 의 각 임계값 상수는
 근거 TARGET_ID 를 주석에 단다.
+
+같은 xlsx 에 **부점 브리핑 시트 5종**(부점 세그먼트 · CASE · 임계값)이 있다 — 부점 단위로 «오늘 무엇을
+볼지»(세그먼트 변화 → CASE)를 정하는 표이고, 고객 단위 타겟 14종과 층이 다르다. **이 5종은 기획자 위임
+(2026-10-22, «합리적인 기준하에 작성 → 개발 후 수정»)으로 에이전트가 쓴 초안이고 기획자 검토 전이다.**
+판정은 `tools/branch_briefing/status.py` 가 표를 읽어서 하고 코드에 임계값을 두지 않는다.
 
 표는 스스로 근거등급을 밝힌다 — **A**(원문에 임계값이 그대로 있음) · **B**(A 의 상위 통합) ·
 **C**(이탈고객 조사 «비중»이며 개인 임계값이 아님) · **D**(원문에 없는 기획자 설계 제안,
@@ -99,14 +104,14 @@ Pilot). D 를 A 와 같은 얼굴로 화면에 세우면 «행내 기준»으로
 | | |
 |---|---|
 | 요건 기준 | `docs/REQUIREMENTS.md` — 전체 서비스 요건 앵커. 상위 기준은 `07_에이전트_기능정의/` |
-| 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/tools/customer_solution/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것 |
+| 타겟 선정 기준 | `IRP_타겟고객_룰베이스_v1.xlsx` → `src/pension_agent/tools/customer_solution/targets.json` (생성물) — 기획자 확인표. 임계값이 어긋나면 코드가 틀린 것. 부점 브리핑 시트 5종(`branch_*`)은 에이전트 초안(검토 전) |
 | ⑨ 안내 콘텐츠 | `IRP_세미나이벤트_DB_v1.md` → `src/pension_agent/tools/customer_solution/data/assets.json` (손 저작 — 9건이라 생성기를 두지 않았다). 평가용 정답은 `data/outreach_golden.json` 에 따로 두고 **LLM 입력에 넣지 않는다** |
 | 데모 상태 | `docs/DEMO_STATUS.md` (생성물) — 무엇이 더미 **데이터**인가 |
 | 실서비스 위험 | `docs/PRODUCTION_RISKS.md` — 무엇이 더미 **구조**인가. 단일 프로세스라서 성립하고 실서비스에서 깨지는 자리 |
 | 지식 저작 | `src/AUTHORING.md` |
 | 실행·테스트·구조 | `src/README.md` — `src/` 만 행내로 옮기므로 그 안에서 완결되는 메인 문서다. 바깥(루트·`docs/`)을 링크하지 않는다 |
 | 행내 배포 | `src/main.py`(FastAPI 진입점) · `src/Dockerfile`(내부망) · `src/.env.example`. 외부망용 `Dockerfile.local` · `requirements-dev.txt` 는 저장소에 넣지 않는다 |
-| 행내 시스템 연동(MCP) | `src/pension_agent/common/mcp/` — 서버 표(`servers.py`) · 연결과 호출(`client.py`) · 도구 어댑터(`workb.py` · `sybase.py`). 붙는 것은 WorkB 쪽지 발송과 Sybase IQ 조회(메인 브리핑)이고, 설정(`MCP_*`)이 없으면 보내지 않고 «미연결»로 답한다. 진단은 `python -m pension_agent.common.mcp` |
+| 행내 시스템 연동(MCP) | `src/pension_agent/common/mcp/` — 서버 표(`servers.py`) · 연결과 호출(`client.py`) · 도구 어댑터(`workb.py` · `sybase.py`). 붙는 것은 WorkB 쪽지 발송과 Sybase IQ 조회(부점 브리핑)이고, 설정(`MCP_*`)이 없으면 보내지 않고 «미연결»로 답한다. 진단은 `python -m pension_agent.common.mcp` |
 | 호출 계약(프론트·게이트웨이) | `client/README.md` — 요청 키 · 응답 이벤트(`type`) · 파싱 규칙 · 멀티턴. 참조 구현은 `client/call_agent.py`. `src/main.py` 머리말은 요청 키·이벤트 type 요약만 둔다. 이벤트를 바꾸면 이 문서를 함께 고친다(`tests/test_api.py` 가 type 목록을 검사) |
 | 에이전트 기준 | `src/pension_agent/CLAUDE.md` — 대화 동작의 **기준서**(있어야 할 동작 + 구현 gap 목록). 구현과 어긋나면 문서가 기준 |
 | 지식 데이터 기준 | `src/pension_agent/knowledge/CLAUDE.md` — 카드가 선언해야 하는 관계 5종 · 실측 · 이행 순서 |
@@ -121,7 +126,7 @@ cd src
 python -m tests.test_engine               # 엔진 선정 로직
 python -m tests.test_support              # ⑥~⑨ · 더미 규약 · 시효성 수치
 python -m tests.test_customer_solution    # 브리핑 문서 — LLM 1회 · 검증 · 실패 처리
-python -m tests.test_branch               # 메인 브리핑 — SQL 검사 · 부점 범위 · 행 수 상한
+python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE · 전략 브리핑
 python -m tests.test_agent                # 라우팅·도구 루프·하지말것 가드
 python -m tests.test_infra                # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api                  # HTTP 진입점 — 행내 플랫폼 I/O 스키마

@@ -14,10 +14,11 @@
                     briefing                 전체 브리핑 문서 [LLM 1회]
                     suitable                 적합성 범위
                     outreach                 세미나·이벤트·발송 문구
-                    targets                  오늘의 타겟 목록
 
-    메인 브리핑 (branch_briefing/tool.py)
-                    branch                   부점 고객 데이터 SQL 질의 [LLM]
+    부점 브리핑 (customer_solution/tool.py · branch_briefing/tool.py)
+                    branch_targets           관리 대상 추천(오늘의 타겟 목록 · CASE 순서 · 첫 추천 유지)
+                    branch_status            부점 현황(지표·세그먼트 전월말 대비 · 오늘의 CASE)
+                    branch_search            고객 검색(부점 고객 데이터 SQL 질의) [LLM]
 
     일반 (general/)
     history.py      history transcript       지난 상담 · 이번 상담 대화
@@ -140,6 +141,7 @@ from pension_agent.tools.kb_search.playbook import (  # noqa: F401
 )
 from pension_agent.tools.branch_briefing.tool import (  # noqa: F401
     _branch,
+    _branch_status,
 )
 from pension_agent.tools.general.answered import (  # noqa: F401
     CARDS_HEADER,
@@ -235,16 +237,27 @@ TOOLS: dict[str, Tool] = {
         Tool("outreach", "이 고객에게 안내할 세미나·이벤트와 그 발송 문구를 돌려준다 — "
              "「보낼 만한 세미나 있어」·「왜 이 이벤트야」·「다른 건 없어」·「문자로 뭐라고 "
              "보내지」가 여기다", _outreach, progress="안내할 이벤트·세미나"),
-        # 고객 화면 없이 쓰는 도구 — _NEEDS_CUSTOMER 미포함
-        Tool("targets", "오늘 관리해야 할 타겟 고객 목록 — 누가 왜 선정됐는지(성립 요건과 "
-             "그 요건을 성립시킨 값)를 순서대로 돌려준다. 「오늘 누구부터 봐야 해」·"
-             "「타겟 몇 명이야」·「타겟 목록 쪽지로 보내줘」가 여기다", _targets,
-             progress="오늘의 타겟 고객 목록"),
-        # targets 와의 구분: 직원이 정한 조건으로 부점 데이터 조회. 고객 화면 불필요 — _NEEDS_CUSTOMER 미포함
-        Tool("branch", "**우리 부점**의 IRP 고객 데이터를 조건으로 조회·집계한다 — 「만기 30일 "
-             "이내 고객 누구야」·「디폴트옵션 미설정 몇 명이야」·「평가금액 상위 5명」·「다른 "
-             "부점이랑 타겟 수 비교」처럼 **여러 고객을 조건으로 세거나 고르는** 질문이 여기다. "
-             "다른 부점은 집계로만 볼 수 있다. 지금 열려 있는 고객 한 명의 값을 묻는 질문은 여기가 아니다",
+        # 부점 브리핑 세 기능 — 고객 화면 없이 쓰는 도구(_NEEDS_CUSTOMER 미포함).
+        # 축: 누구를 볼지(branch_targets, 룰베이스 선정) · 부점이 어떤가(branch_status, 코드 계산) ·
+        # 직원이 정한 조건의 고객(branch_search, SQL). 설명이 겹치면 계획이 엉뚱한 쪽을 고른다
+        Tool("branch_targets", "**관리 대상 추천** — 오늘 중점적으로 관리할 고객 목록. 누가 왜 "
+             "선정됐는지(타겟 룰베이스의 성립 요건과 그 요건을 성립시킨 값)를 오늘의 부점 관리 방향 "
+             "순서대로 돌려준다. 이 대화에서 이미 추천했으면 **그 첫 추천 목록을 그대로** 돌려준다. "
+             "「오늘 중점적으로 관리할 고객은 누구야」·「오늘 누구부터 봐야 해」·「처음 추천한 고객 "
+             "다시 보여줘」·「타겟 몇 명이야」·「타겟 목록 쪽지로 보내줘」가 여기다", _targets,
+             progress="관리 대상 추천"),
+        Tool("branch_status", "**부점 현황** — 우리 부점의 지표(잔액·계좌 수·평균 수익률)와 "
+             "세그먼트 인원(미운용 현금성자산·만기도래·계약이전 사전조회·세액공제 여유·투자성향 "
+             "불일치·연금개시 가능·디폴트옵션 미설정 등)을 **전월말 대비 변화**와 함께, 그리고 그 "
+             "변화로 판정한 **오늘의 관리 방향(CASE)** 을 돌려준다. 「오늘 부점 현황 말해줘」·"
+             "「지난달보다 뭐가 늘었어」·「오늘 부점에서 뭘 신경 써야 해」가 여기다", _branch_status,
+             progress="부점 현황"),
+        Tool("branch_search", "**고객 검색** — 우리 부점의 IRP 고객 데이터를 직원이 말한 조건으로 "
+             "조회·집계한다. 「현금성 장기대기 고객 보여줘」·「IRP 잔액 7천만원 이상 고객 보여줘」·"
+             "「디폴트옵션 미등록 고객 보여줘」·「ISA 만기 고객은 몇 명이야」·「납입금 미운용 고객 몇 "
+             "명이고 현금 합계 얼마야」·「평가금액 상위 5명」·「다른 부점이랑 타겟 수 비교」처럼 "
+             "**여러 고객을 조건으로 세거나 고르는** 질문이 여기다. 다른 부점은 집계로만 볼 수 있다. "
+             "지금 열려 있는 고객 한 명의 값을 묻는 질문은 여기가 아니다",
              _branch, progress="부점 고객 데이터"),
         # pitch 와의 구분: 질문이 아닌 고객 문제상황으로 후보 선정(화면 ⑥⑦⑧ 과 같은 후보군)
         Tool("playbook", "지금 열려 있는 고객의 **계좌 상태**(문제상황)에 걸린 화법·"

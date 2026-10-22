@@ -125,8 +125,10 @@ STEP_KEYS: dict[str, str] = {
     "masked": "가린룰",   # 룰 이름만. 걸린 값 미포함
     # briefing
     "tier": "등급", "skipped": "건너뜀", "narrative": "서술",
-    # branch(메인 브리핑)
+    # branch_search(부점 브리핑 고객 검색)
     "rows": "행수", "truncated": "잘림",
+    # branch_status · 전략 브리핑
+    "cases": "CASE",
 }
 
 #: 값 표 — 판정 토큰 → 로그 한글 값. 표에 없는 문자열(식별자)은 그대로 출력.
