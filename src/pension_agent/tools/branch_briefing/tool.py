@@ -63,25 +63,52 @@ def _percent_columns() -> set[str]:
     return {c for v in views.VIEWS for c, t, _d in (views.VIEWS[v][1] or []) if "(%)" in t}
 
 
-_OPS = {">=": "이상", "<=": "이하", ">": "초과", "<": "미만", "=": ""}
+_OPS = {">=": "이상", "<=": "이하", ">": "초과", "<": "미만", "=": "", "<>": "아님", "!=": "아님"}
 _NUM = r"(-?\d+(?:\.\d+)?)"
+_WHERE = re.compile(r"\bWHERE\b(.*?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|$)", re.IGNORECASE | re.DOTALL)
 
 
-def percent_criteria(sql: str) -> list[str]:
-    """조회문이 백분율 컬럼에 건 조건 → 「원리금보장·현금성 자산 비중 80% 이상」.
+def _unit(kind: str, num: str) -> str:
+    if "(%)" in kind:
+        return f"{num}%"
+    if "(원)" in kind:
+        return won(int(float(num)))
+    if "(일)" in kind:
+        return f"{num}일"
+    return num
 
-    조회문에는 80 이 맨숫자로 있어 답변의 «80% 이상»이 자료 밖 수치로 폐기된다(2026-10-23 실측). 셀에 % 를 붙이는
-    것(table)과 같은 선언 — 뷰 목록이 «(%)» 로 적은 컬럼만 단위를 붙인다.
+
+def criteria(sql: str) -> list[str]:
+    """조회문의 WHERE 조건 → 직원이 읽는 말(「만기 상품: 정기예금」 · 「만기까지 남은 일수 0일~30일」 ·
+    「원리금보장·현금성 자산 비중 80% 이상」). 조회문 순서대로.
+
+    재료에 조건이 SQL 로만 있으면 답변이 그 조건을 말로 옮기지 못하고 빠뜨린다 — 「정기예금 만기 한 달 이내」를
+    조회에는 걸고 답변 첫머리에서는 빼 «정기예금 조건을 못 찾았다»로 읽혔다(2026-10-23 실측). 백분율 조건이 맨숫자로만
+    있으면 답변의 «80% 이상»이 자료 밖 수치로 폐기되기도 했다. 단위는 뷰 목록의 타입 선언에서만 온다(table 과 같은
+    선언 — 기준서 §6 «단위 표기 — 데이터가 선언한 열뿐»).
     """
-    names = {c: d.split(" — ")[0] for v in views.VIEWS for c, t, d in (views.VIEWS[v][1] or []) if "(%)" in t}
-    out = []
-    for col, label in names.items():
-        for lo, hi in re.findall(rf"\b{col}\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}", sql, re.IGNORECASE):
-            out.append(f"{label} {lo}%~{hi}%")
-        for op, num in re.findall(rf"\b{col}\s*(>=|<=|<>|>|<|=)\s*{_NUM}", sql):
-            if op in _OPS:
-                out.append(f"{label} {num}% {_OPS[op]}".rstrip())
-    return out
+    m = _WHERE.search(sql)
+    if not m:
+        return []
+    where = m.group(1)
+    kinds = {c: (t, d) for v in views.VIEWS for c, t, d in (views.VIEWS[v][1] or [])}
+    found: list[tuple[int, str]] = []
+    for col, (kind, desc) in kinds.items():
+        label = views.CONDITION_LABELS.get(col) or re.split(r" — |\. |\(", desc)[0].strip()
+        for x in re.finditer(rf"\b{col}\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}", where, re.IGNORECASE):
+            found.append((x.start(), f"{label} {_unit(kind, x.group(1))}~{_unit(kind, x.group(2))}"))
+        for x in re.finditer(rf"\b{col}\s*(>=|<=|<>|!=|>|<|=)\s*{_NUM}(?![\w.])", where):
+            if "0/1" in kind:  # 여부 컬럼 — 1 이면 그것만, 0 이면 그것이 아닌 고객
+                yes = (x.group(1) in ("=", ">=")) == (x.group(2) == "1")
+                found.append((x.start(), f"{label}{'만' if yes else ' 아님'}"))
+                continue
+            found.append((x.start(), f"{label} {_unit(kind, x.group(2))} {_OPS[x.group(1)]}".rstrip()))
+        for x in re.finditer(rf"\b{col}\s*(=|<>|!=)\s*'([^']*)'", where):
+            value = views.VALUE_LABELS.get((col, x.group(2)), x.group(2))
+            found.append((x.start(), f"{label}: {value}" + (" 아님" if x.group(1) != "=" else "")))
+        for x in re.finditer(rf"\b{col}\s+LIKE\s+'%?([^'%]*)%?'", where, re.IGNORECASE):
+            found.append((x.start(), f"{label}에 «{x.group(1)}» 포함"))
+    return [text for _pos, text in sorted(found)]
 
 
 def segment_catalog() -> str:
@@ -194,7 +221,7 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
     text = "\n".join(x for x in (
         f"■ 부점 데이터 조회 — {branch_name} 부점 · 조회 {len(rows)}행",
         f"· 조회 목적: {reason}" if reason else "",
-        ("· 조회 기준: " + " · ".join(percent_criteria(sql))) if percent_criteria(sql) else "",
+        ("· 조회 조건: " + " · ".join(criteria(sql))) if criteria(sql) else "",
         "· 실행한 조회문:",
         "```sql", sql, "```",
         table(rows),

@@ -236,8 +236,9 @@ def check_retry_and_evidence() -> None:
     with _LLM(_sql("SELECT customer_name, days_to_maturity, eval_amt FROM v_irp_customer "
                    "WHERE safe_asset_pct >= 80 AND days_to_maturity BETWEEN 0 AND 30")):
         crit_ev = tools.run("branch_search", _state(q="원리금보장 편중 · 만기 한 달 이내 고객"), "편중 만기 고객")
-    check("· 조회 기준: 원리금보장·현금성 자산 비중 80% 이상" in (crit_ev or {}).get("text", ""),
-          "조회문의 백분율 조건이 재료에 % 단위로 선다(답변의 «80% 이상»이 폐기되지 않게)",
+    check("· 조회 조건: 원리금보장·현금성 자산 비중 80% 이상 · 만기까지 남은 일수 0일~30일"
+          in (crit_ev or {}).get("text", ""),
+          "조회문의 조건이 재료에 말로 선다 — 백분율은 % 단위(답변의 «80% 이상»이 폐기되지 않게)",
           (crit_ev or {}).get("text", "")[:200])
 
 
@@ -396,10 +397,17 @@ def check_maturity_type() -> None:
         _, prev, _ = run.execute("SELECT COUNT(*) AS n FROM v_irp_customer_prev WHERE next_maturity_type = '예금'",
                                  "0001", EMP)
         check(prev[0]["n"] > 0, "전월말 스냅샷에도 만기 유형이 있다")
-    crit = BT.percent_criteria("SELECT customer_name FROM v_irp_customer WHERE safe_asset_pct >= 80 "
-                               "AND days_to_maturity BETWEEN 0 AND 30 AND idle_cash_pct BETWEEN 10 AND 50")
-    check(crit == ["원리금보장·현금성 자산 비중 80% 이상", "운용되지 않는 현금성자산(고유계정대) 비중 10%~50%"],
-          "백분율 컬럼 조건만 % 단위로 «조회 기준»에 싣는다(남은 일수는 싣지 않는다)", str(crit))
+    crit = BT.criteria("SELECT customer_name, days_to_maturity FROM v_irp_customer WHERE next_maturity_type = '예금' "
+                       "AND days_to_maturity BETWEEN 0 AND 30 AND safe_asset_pct >= 80 AND default_option = '미설정' "
+                       "ORDER BY days_to_maturity")
+    check(crit == ["만기 상품: 정기예금", "만기까지 남은 일수 0일~30일", "원리금보장·현금성 자산 비중 80% 이상",
+                   "디폴트옵션: 미설정"],
+          "조회문의 조건을 전부 조회문 순서대로 말로 옮긴다 — 단위는 뷰 타입 선언에서(%·일)", str(crit))
+    more = BT.criteria("SELECT TOP 5 customer_name FROM v_irp_customer WHERE etf_eval_amt >= 10000000 "
+                       "AND target_reasons LIKE '%장기 미접촉%' AND is_target = 1")
+    check(more == ["ETF 평가금액 1,000만원 이상", "관리 대상 사유에 «장기 미접촉» 포함", "관리 대상만"],
+          "금액은 원 단위 표기 · LIKE 는 «포함» · 여부 컬럼은 «만»", str(more))
+    check(BT.criteria("SELECT COUNT(*) AS n FROM v_irp_customer") == [], "조건이 없으면 조회 조건 줄도 없다")
 
 
 def check_yeouido_screen() -> None:
