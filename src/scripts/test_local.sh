@@ -123,6 +123,12 @@ for line in sys.stdin:
             for it in ev.get('links') or []:
                 print(f'  [화면] {it.get(\"screen\")} {it.get(\"label\") or \"\"} → {it.get(\"url\")}',
                       flush=True)
+            # 첨부 파일(관리 대상 목록 엑셀) — 프론트는 내려받기 버튼, 여기서는 src/ 에 저장
+            for it in ev.get('files') or []:
+                import base64, pathlib
+                path = pathlib.Path(pathlib.Path(it.get('name') or 'attachment').name).resolve()
+                path.write_bytes(base64.b64decode(it.get('base64') or ''))
+                print(f'  [첨부 파일] {path}', flush=True)
         elif t == 'action':
             print(f'  [연계 제안 · {ev.get(\"label\")}] — 다음 턴에 «네» 또는 «아니오»로 답한다', flush=True)
         elif t == 'clarify':
