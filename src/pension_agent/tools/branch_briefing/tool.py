@@ -10,6 +10,7 @@ branch_search: 검사 거부·실행 오류는 사유를 실어 최대 RETRIES �
 
 from __future__ import annotations
 
+import base64
 import re
 
 from pension_agent.common import clock, observability
@@ -23,6 +24,7 @@ from pension_agent.prompts.branch import (
 from pension_agent.state import AgentState
 from pension_agent.tools.base import ToolFailure
 from pension_agent.tools.branch_briefing import check, run, status, views
+from pension_agent.tools.customer_solution import target_table
 from pension_agent.tools.customer_solution.engine.text import won
 
 #: 재작성 횟수(총 생성 RETRIES + 1 번).
@@ -51,10 +53,24 @@ def table(rows: list[dict]) -> str:
         return "(조회 결과 0건)"
     cols = list(rows[0])
     pct = _percent_columns()
-    out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
+    out = ["| " + " | ".join(header(c) for c in cols) + " |", "|" + "---|" * len(cols)]
     out += ["| " + " | ".join(_cell(r.get(c)) + ("%" if c in pct and r.get(c) is not None else "")
                               + _past(c, r.get(c)) for c in cols) + " |" for r in rows]
     return "\n".join(out)
+
+
+def header(col: str) -> str:
+    """결과 컬럼 → 직원이 읽는 머리글(「etf_eval_amt」 → «ETF 평가금액(원)»). 이름은 조회 조건 줄과 같은 짧은 이름
+    (views.CONDITION_LABELS)이고, 금액 열만 단위를 붙인다 — 백분율 칸은 값에 % 가 붙고 일수·나이는 이름이 단위를 말한다.
+    뷰 목록에 없는 열(LLM 이 붙인 별칭·집계)은 그대로 둔다.
+
+    열 이름을 영문 그대로 내보내 화면에 «customer_name | etf_eval_amt»가 떴다(2026-10-23 실측)."""
+    kinds = {c: (t, d) for v in views.VIEWS for c, t, d in (views.VIEWS[v][1] or [])}
+    if col == "순서" or col not in kinds:
+        return col
+    kind, desc = kinds[col]
+    label = views.CONDITION_LABELS.get(col) or re.split(r" — |\. |\(", desc)[0].strip()
+    return f"{label}(원)" if "(원)" in kind else label
 
 
 def _past(col: str, value) -> str:
@@ -304,9 +320,21 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
     ) if x)
     meta = {"rows": len(rows), "truncated": truncated, "branch": branch_name, "sql": sql}
     if listed is not None:
-        meta.update(customer_list=listed, document="\n\n".join(x for x in (
+        # 표는 앞쪽 TEXT_ROWS 명까지, 넘으면 전원을 엑셀로 첨부(관리 대상 목록과 같은 규칙 — 2026-10-23 사용자 요청)
+        files, more = [], ""
+        if len(shown) > target_table.TEXT_ROWS:
+            filename = f"고객조회_{branch_name}_{clock.today().strftime('%Y%m%d')}.xlsx"
+            files = [{"name": filename, "mime": target_table.XLSX_MIME,
+                      "base64": base64.b64encode(sheet(shown, "고객 조회")).decode("ascii")}]
+            more = (f"표에는 앞쪽 {target_table.TEXT_ROWS}명만 실었습니다. {len(shown)}명 전체는 첨부한 엑셀 파일"
+                    f"({filename})에 같은 순서 번호로 있습니다.")
+        conditions = criteria(sql)
+        meta.update(customer_list=listed, files=files, document="\n\n".join(x for x in (
             f"목록 {listed['number']} · {branch_name} 고객 조회 — {len(rows)}명",
-            reason, table(shown), note_line,
+            reason,
+            ("조회 조건: " + " · ".join(conditions)) if conditions else "",
+            more,
+            table(shown[:target_table.TEXT_ROWS]), note_line,
             "번호나 이름으로 이어서 질문해 주세요. 예: ‘2번 고객 자세히’." if rows else "",
         ) if x))
     return _ev("branch_search", query, text,
@@ -316,6 +344,12 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
                  "doc": sql,
                  "score": None, "page": None}],
                meta=meta)
+
+
+def sheet(shown: list[dict], title: str) -> bytes:
+    """조회 결과 → .xlsx(머리글은 표와 같은 한글 이름 · 값은 원값 그대로라 숫자는 숫자 칸)."""
+    cols = list(shown[0])
+    return target_table.sheet([header(c) for c in cols], [[r.get(c) for c in cols] for r in shown], title)
 
 
 #: D 등급(원문에 없는 설계 제안) 기준을 쓴 재료의 성격 표시 — 루트 CLAUDE.md «D 를 A 와 같은 얼굴로 세우지 않는다»

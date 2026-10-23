@@ -74,9 +74,14 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
         ]),
 }
 
-#: 조회 조건을 재료에 말로 옮길 때의 짧은 이름(코드가 «조회 조건» 줄을 만든다 — tool.criteria).
+#: 조회 조건을 재료에 말로 옮길 때 · 결과 표 머리글의 짧은 이름(코드가 «조회 조건» 줄과 표 머리글을 만든다 —
+#: tool.criteria · tool.header).
 #: 컬럼 뜻(위 목록)은 SQL 을 쓰는 LLM 용 설명이라 길다. 여기 없는 컬럼은 그 뜻의 앞부분을 쓴다.
 CONDITION_LABELS: dict[str, str] = {
+    "customer_name": "고객명", "branch_name": "부점", "manager_emp_no": "관리 직원 사번", "is_my_branch": "우리 부점",
+    "customer_count": "IRP 고객 수", "total_eval_amt": "평가금액 합계", "avg_return_rate": "평균 수익률",
+    "target_count": "관리 대상 고객 수", "default_option_unset_count": "디폴트옵션 미설정 고객 수",
+    "maturity_30d_count": "30일 안 만기 고객 수",
     "age": "나이", "star_grade": "스타클럽 등급", "risk_profile": "투자성향", "eval_amt": "평가금액",
     "return_rate": "운용 수익률", "safe_asset_pct": "원리금보장·현금성 자산 비중",
     "idle_cash_pct": "미운용 현금성자산 비중", "default_option": "디폴트옵션", "pension_started": "연금 개시 여부",

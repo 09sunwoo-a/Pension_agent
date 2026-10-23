@@ -23,6 +23,19 @@ _PRONOUN = re.compile(r"(?<![가-힣A-Za-z])(?:이|그|해당)\s*고객")
 _UNKNOWN_NAME = re.compile(r"(?<![가-힣A-Za-z])([김이박최정강조윤장임한오서신권황안송류홍][가-힣]{1,3})\s*고객")
 _GENERIC = {"어떤", "다른", "해당", "전체", "모든", "관리", "대상", "추천", "중점관리", "미접촉", "만기",
             "이탈", "이전", "신규", "신규가입", "정기예금", "이상", "이하", "이내", "이탈징후", "이탈위험", "임박", "한도초과"}
+#: 수치 조건의 꾸밈말(「80% 이상인」·「1억 이하인」·「천만 원 넘는」·「30일 이내인」) — 이름 후보에서 뺀다.
+#: 「이상인 고객」의 «이상인»은 이름 꼴(이 + 2자)이라 부점 이름 조회가 «고객을 찾지 못했다»로 답했다(2026-10-23 실측).
+#: 이름이 «이상인»인 고객도 있을 수 있어 낱말 목록이 아니라 «숫자 바로 뒤»라는 자리로 가른다.
+_AMOUNT_QUALIFIER = re.compile(
+    r"(?:\d[\d,.]*|(?<![가-힣])[일이삼사오육칠팔구십백천만억]+)\s*"
+    r"(?:%p|%|퍼센트|만\s*원|원|억\s*원?|천\s*만\s*원?|만|천|억|세|살|일|개월|달|년|명|건|배)?\s*"
+    r"(?:이상|이하|이내|미만|초과|넘는|넘은|넘게|안팎|정도|가량|이후|이전|전후|부터|까지)[가-힣]*")
+
+
+def _without_amounts(question: str) -> str:
+    return _AMOUNT_QUALIFIER.sub(" ", question)
+
+
 _ORDINALS = {"첫": 1, "두": 2, "세": 3, "네": 4, "다섯": 5, "여섯": 6, "일곱": 7, "여덟": 8, "아홉": 9, "열": 10}
 
 
@@ -249,7 +262,7 @@ def resolve(question: str, saved: dict, employee_id: str | None,
         age = re.search(r"(\d{1,3})\s*세", q)
         grades = _grades(q)
     names = _names(q, entries)
-    unknown = [m[1] for m in _UNKNOWN_NAME.finditer(q) if m[1] not in _GENERIC and m[1] not in names]
+    unknown = [m[1] for m in _UNKNOWN_NAME.finditer(_without_amounts(q)) if m[1] not in _GENERIC and m[1] not in names]
     partial = re.search(r"(?<![가-힣A-Za-z])([김이박최정강조윤장임한오서신권황안송류홍])(?:씨)?\s*고객", q)
     pronoun = bool(_PRONOUN.search(q))
     if pronoun:
@@ -258,7 +271,7 @@ def resolve(question: str, saved: dict, employee_id: str | None,
     # 이름만 지정하면 표시 목록의 부분집합을 신뢰하지 않고 직원 부점 전체에서 정확 일치 조회.
     # 명시한 목록·번호, 동명이인 확인 응답, 지시어는 기존 선택 맥락을 유지.
     if not (numbers or requested_list is not None or pending or pronoun or partial or replay):
-        tokens = _name_tokens(q)
+        tokens = _name_tokens(_without_amounts(q))
         if tokens and (employee_id or names or unknown):
             try:
                 code, profiles = roster.find_names(tokens, employee_id)

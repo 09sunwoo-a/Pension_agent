@@ -68,6 +68,23 @@ class SelectionTest(unittest.TestCase):
                 self.assertIsNone(out.context["selected"])
                 self.assertTrue(out.answer)
 
+    def test_amount_condition_is_not_a_name(self):
+        """「80% 이상인 고객」의 «이상인»은 이름 꼴이지만 수치 조건이다 — 목록 뒤 좁히는 질문이
+        «부점 고객에서 확인되지 않아요»로 끝났다(2026-10-23 실측). 숫자 뒤가 아니면 이름으로 본다."""
+        for q in ("그 중에 원리금보장 비중 80% 이상인 고객은?", "평가금액 1억 이하인 고객만",
+                  "ETF 천만 원 이상인 고객 보여줘", "만기 30일 이내인 고객은?", "60세 이상인 고객 몇 명이야?"):
+            with self.subTest(q=q):
+                out = self.resolve(q)
+                self.assertEqual(out.case, "none")
+                self.assertIsNone(out.answer)
+                self.assertIsNone(out.customer_id)
+        profile = replace(self.p1, nm="이상인")
+        with patch.object(roster, "find_names", side_effect=lambda names, _emp:
+                          ("0001", [profile] if "이상인" in names else [])), \
+                patch.object(roster, "lookup", return_value=profile):
+            named = self.resolve("이상인 고객 자세히 알려줘")
+        self.assertEqual(named.customer_id, profile.id)
+
     def test_duplicate_name_clarification(self):
         saved = deepcopy(self.saved)
         for e in saved["lists"][0]["entries"]:

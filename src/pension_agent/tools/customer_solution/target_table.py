@@ -123,7 +123,13 @@ TEXT_ROWS = 30
 
 
 def workbook(targets: list[Target], title: str) -> bytes:
-    """관리 대상 목록 → .xlsx 바이트(시트 하나). 머리글 굵게·회색 · 머리글 고정 · 자동 필터 · 숫자 서식."""
+    """관리 대상 목록 → .xlsx 바이트."""
+    return sheet(SHEET_HEADER, sheet_rows(targets), title)
+
+
+def sheet(header: list[str], rows: list[list[object]], title: str) -> bytes:
+    """머리글 + 행 → .xlsx 바이트(시트 하나). 머리글 굵게·회색 · 머리글 고정 · 자동 필터 · 숫자 서식.
+    관리 대상 목록과 부점 고객 조회(branch_search)가 같은 꼴을 쓴다."""
     import io  # noqa: PLC0415
 
     from openpyxl import Workbook  # noqa: PLC0415 — 이 기능에서만 쓴다
@@ -133,8 +139,8 @@ def workbook(targets: list[Target], title: str) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = title[:31]
-    ws.append(SHEET_HEADER)
-    for row in sheet_rows(targets):
+    ws.append(header)
+    for row in rows:
         ws.append(row)
     line = Side(style="thin", color="BFBFBF")
     border = Border(left=line, right=line, top=line, bottom=line)
@@ -149,7 +155,7 @@ def workbook(targets: list[Target], title: str) -> bytes:
                 cell.number_format = "0.0"
             elif isinstance(cell.value, int) and cell.row > 1:
                 cell.number_format = "#,##0"
-    for i, head in enumerate(SHEET_HEADER, 1):
+    for i, head in enumerate(header, 1):
         values = [head] + [ws.cell(r, i).value for r in range(2, ws.max_row + 1)]
         width = max(sum(2 if ord(ch) > 0x2E80 else 1 for ch in (f"{v:,}" if isinstance(v, int) else str(v or "")))
                     for v in values)

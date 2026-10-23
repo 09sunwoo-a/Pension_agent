@@ -187,7 +187,7 @@ def check_retry_and_evidence() -> None:
           "검사에 걸리면 이유를 실어 다시 쓰게 한다", str(len(llm.prompts)))
     check(ev is not None and ev["tool"] == "branch_search", "결과가 원장 근거가 된다")
     text = (ev or {}).get("text", "")
-    check("| customer_name | days_to_maturity |" in text, "결과가 표로 실린다", text[:200])
+    check("| 고객명 | 만기까지 남은 일수 |" in text, "결과가 표로 실린다(머리글은 한글 이름)", text[:200])
     src = ((ev or {}).get("sources") or [{}])[0]
     check(src.get("id") == "branch_db" and "v_irp_customer" in (src.get("doc") or ""),
           "실행한 SQL 이 출처에 남는다", str(src))
@@ -706,6 +706,82 @@ def check_briefing_frame() -> None:
     check("화면 표" not in narrow["text"], "틀이 없으면 재료에 «화면 표» 줄도 없다")
 
 
+def check_search_document() -> None:
+    """고객 검색 답변 표 — 머리글이 DB 컬럼명이면 안 되고, 30명을 넘으면 엑셀로 전원을 붙인다.
+
+    2026-10-23 실측: 멀티턴에서 «ETF 투자 금액 천만 원 이상 고객» 답이 «| 순서 | customer_name | age |
+    etf_eval_amt | eval_amt |» 머리글로 73명 전부를 화면 표에 실었다."""
+    import base64  # noqa: PLC0415
+    import io  # noqa: PLC0415
+
+    import openpyxl  # noqa: PLC0415
+
+    from pension_agent.tools import customer_selection as CS  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import target_table  # noqa: PLC0415
+
+    columns = {c for v in views.VIEWS for c, _t, _d in (views.VIEWS[v][1] or [])}
+
+    def heads(doc: str) -> list[str]:
+        return [c.strip() for line in doc.splitlines() if line.startswith("| 순서 |")
+                for c in line.strip("|").split("|")]
+
+    def ask(question: str, sql: str, saved: dict | None) -> tuple[dict, dict]:
+        state = _state(q=question)
+        if saved:
+            state["customer_context"] = saved
+        with _LLM(_sql(sql, "조회")):
+            ev = tools.run("branch_search", state, question)
+        return ev, CS.remember(saved or CS.context(None, EMP), [ev])
+
+    with _Today():
+        q1 = ("SELECT customer_ref, customer_name, age, etf_eval_amt, return_rate, safe_asset_pct, eval_amt "
+              "FROM v_irp_customer WHERE etf_eval_amt >= 10000000 ORDER BY etf_eval_amt DESC")
+        ev, saved = ask("ETF 투자 금액 천만 원 이상 고객 보여줘", q1, None)
+        doc, meta = ev["meta"]["document"], ev["meta"]
+        head = heads(doc)
+        check(head and not set(head) & columns,
+              "고객 검색 답변 표의 머리글은 DB 컬럼명이 아니라 한글 이름이다", f"{head}")
+        check(head == ["순서", "고객명", "나이", "ETF 평가금액(원)", "운용 수익률", "원리금보장·현금성 자산 비중",
+                       "평가금액(원)"], "금액 열은 «(원)»을 붙이고 백분율 열은 셀에 % 가 붙는다", f"{head}")
+        check("조회 조건: ETF 평가금액 1,000만원 이상" in doc, "답변에 조회 조건이 말로 선다", doc[:300])
+        n = meta["rows"]
+        rows = [ln for ln in doc.splitlines() if ln.startswith("| ")][1:]
+        check(len(rows) == min(n, target_table.TEXT_ROWS),
+              f"화면 표는 {target_table.TEXT_ROWS}명까지", f"{len(rows)} / {n}")
+        files = meta.get("files") or []
+        check(n > target_table.TEXT_ROWS and len(files) == 1 and files[0]["name"] in doc
+              and f"{n}명 전체는 첨부한 엑셀" in doc,
+              "30명을 넘으면 전원을 엑셀로 붙이고 본문이 파일 이름을 밝힌다", f"{n} · {files and files[0]['name']}")
+        if files:
+            sheet = list(openpyxl.load_workbook(io.BytesIO(base64.b64decode(files[0]["base64"]))).active
+                         .iter_rows(values_only=True))
+            check(list(sheet[0]) == head and len(sheet) - 1 == n
+                  and [r[0] for r in sheet[1:]] == list(range(1, n + 1))
+                  and all(isinstance(r[3], int) for r in sheet[1:]),
+                  "엑셀은 같은 머리글·같은 순서 번호로 전원이고 금액은 숫자 칸이다", f"{sheet[0]} · {len(sheet) - 1}")
+            check(not any("customer_ref" in str(c) or re.fullmatch(r"\d{4}:\d+", str(c)) for r in sheet for c in r),
+                  "엑셀에도 내부 행 식별자가 없다")
+
+        # 엑셀에만 있는 번호로 이어서 고른다 — 목록은 표에 자른 30명이 아니라 전원을 기억한다
+        pick = CS.resolve("35번 고객 자세히", saved, EMP)
+        entry = saved["lists"][-1]["entries"][34]
+        check(pick.customer_id == entry["ref"], "엑셀의 35번을 고르면 그 고객이 선택된다",
+              f"{pick.case} · {pick.customer_id} vs {entry['ref']}")
+
+        # 이어지는 턴(멀티턴) — 좁힌 조회도 같은 꼴이고 30명 이하면 첨부가 없다
+        q2 = ("SELECT customer_ref, customer_name, etf_eval_amt, safe_asset_pct FROM v_irp_customer "
+              "WHERE etf_eval_amt >= 10000000 AND safe_asset_pct >= 80")
+        ev2, saved = ask("그 중에 원리금보장 비중 80% 이상인 고객은?", q2, saved)
+        doc2 = ev2["meta"]["document"]
+        check(not set(heads(doc2)) & columns and ev2["meta"]["customer_list"]["number"] == 2,
+              "이어지는 턴의 목록도 머리글이 한글이고 목록 번호가 이어진다", f"{heads(doc2)}")
+        check(0 < ev2["meta"]["rows"] <= target_table.TEXT_ROWS and not ev2["meta"].get("files"),
+              "30명 이하 목록에는 엑셀을 붙이지 않는다", str(ev2["meta"]["rows"]))
+        ev3, _ = ask("ETF 천만 원 이상이면서 원리금보장 90% 이상 고객", q2.replace(">= 80", ">= 90"), saved)
+        check("(조회 결과 0건)" in ev3["text"] and not ev3["meta"].get("files"),
+              "0건도 0건이라고 싣고 첨부가 없다")
+
+
 def check_question_set() -> None:
     """시험 질문(tests/branch_questions.py) — LLM 없이 확인할 수 있는 것 전부.
     정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
@@ -856,6 +932,7 @@ def main() -> int:
     check_demo_detail()
     check_briefing_frame()
     check_target_table()
+    check_search_document()
     check_question_set()
 
     passed = sum(1 for ok, _, _ in _results if ok)
