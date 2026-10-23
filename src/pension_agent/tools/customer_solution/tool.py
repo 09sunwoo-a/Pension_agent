@@ -11,6 +11,7 @@ KB-PIN(고객 식별번호)은 재료·출처 id·제목 전부 미포함 — �
 
 from __future__ import annotations
 
+import base64
 import json
 
 from pension_agent.common import clock
@@ -465,12 +466,20 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     listed = customer_selection.from_targets(state, found, query)
     # 표는 코드 값 그대로 응답 — LLM 재작성에 의한 순서·수치·행 누락 방지.
     # PIN 이 든 표시 문서는 meta 에만 두고 모델·관측으로 전달되는 text 에는 싣지 않는다.
+    # 엑셀 첨부 — 표는 앞쪽 TEXT_ROWS 명까지, 파일은 실은 전원(같은 순번 · 2026-10-23 사용자 요청)
+    filename = f"관리대상고객_{scope + '_' if scope else ''}{day.replace('-', '')}.xlsx"
+    files = ([{"name": filename, "mime": target_table.XLSX_MIME,
+               "base64": base64.b64encode(target_table.workbook(found, "관리 대상 고객")).decode("ascii")}]
+             if found else [])
     document = "\n\n".join(x for x in [
         f"목록 {listed['number']} · " + head.removeprefix("■ "),
         *intro,
         (f"모든 고객에게 같은 사유({', '.join(target_table.common(found))})는 표에서 뺐습니다."
          if target_table.common(found) else ""),
-        target_table.render(found) if found else "",
+        (f"표에는 우선순위 앞쪽 {target_table.TEXT_ROWS}명만 실었습니다. {len(found)}명 전체는 첨부한 엑셀 파일"
+         f"({filename})에 같은 순번으로 있습니다." if len(found) > target_table.TEXT_ROWS
+         else f"같은 목록을 엑셀 파일({filename})로도 첨부했습니다." if found else ""),
+        target_table.render(found[:target_table.TEXT_ROWS]) if found else "",
         *(["공제한도 소진율은 연금저축·IRP 합산 연 900만원 기본한도 기준입니다. "
            "고객 PIN은 원장에 없으면 미확인으로 표시합니다."] if found else []),
         *(["번호나 이름으로 이어서 질문해 주세요. 예: ‘2번 고객 자세히’, ‘이 고객 만기 상품은?’"] if found else []),
@@ -483,7 +492,7 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
                         "순서는 부점 CASE(타겟 룰베이스 부점 시트)",
                  "score": None, "page": None}],
                allow=[text],
-               meta={"document": document, "customer_list": listed,
+               meta={"document": document, "customer_list": listed, "files": files,
                      "count": len(found), "total": total, "names": names,
                      "refs": [t.profile.customer_ref for t in found], "codes": codes, "replayed": replay,
                      # 이 대화의 첫 추천 — graph.ask 가 Turn 에 남긴다(이미 있으면 그것을 잇는다)

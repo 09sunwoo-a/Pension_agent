@@ -72,7 +72,7 @@ Content-Type: application/json
 | type | 필드 | 화면 |
 |---|---|---|
 | `progress` | `text` | 답변을 기다리는 동안의 상태 문구. 여러 번 온다. 답변보다 먼저 |
-| `answer` | `text`, `intent`, `links[]`, `messages[]` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다. `links` · `messages` 는 아래 |
+| `answer` | `text`, `intent`, `links[]`, `messages[]`, `files[]` | 답변 본문. 한 번. 연계 제안 턴이면 마지막 문장이 «… 연계해드릴까요? (네 / 아니오)» 다. `links` · `messages` · `files` 는 아래 |
 | `action` | `kind`, `label`, `prompt` (+ 쪽지면 `title`, `text`, `to`) | 연계 제안 턴에만, `answer` 다음. **답변 본문 바로 아래**에 `prompt` 와 **네 / 아니오 버튼**을 그린다(아래 「제안은 근거가 아니다」). 누르면 다음 턴 `message` 로 `"네"` 또는 `"아니오"` 를 보낸다 |
 | (예외) | | 쪽지를 이름으로 보내려는데 같은 이름의 직원이 여러 명이면, 그 턴은 `answer` 에 번호 목록과 「어느 분께 보낼까요? 번호나 부서로 답해 주세요.」만 싣고 **`action` 을 보내지 않는다**(네/아니오로 답할 턴이 아니다). 직원이 입력한 「1번」·「WM」은 다음 턴 `message` 로 그대로 보낸다 |
 | `clarify` | `question`, `options[]` | 되묻기 턴에만, `answer` 다음. 선택지 버튼. 누른 값을 다음 턴 `message` 로 보낸다 |
@@ -97,8 +97,9 @@ Content-Type: application/json
 `answer.text` 에 추천질문 블록은 없다(`followups` 로만 온다). 답변 본문은 검증을 거친 뒤 한 번에
 오고 토큰 단위로 흐르지 않는다 — 진행 문구가 그 시간을 채운다.
 
-관리 대상 추천(`branch_targets`)의 `answer.text` 는 고객별 현황과 모든 관리 사유를 **하나의
-마크다운 표**로 제공한다. 별도 카드 UI 나 HTML 렌더링은 필요 없다. 고객 PIN 은 원장에 있는 값만
+관리 대상 추천(`branch_targets`)의 `answer.text` 는 고객별 현황과 관리 사유를 **하나의
+마크다운 표**로 제공한다. 표에는 우선순위 앞쪽 **30명까지만** 싣고, 실은 전원은 `answer.files` 의
+엑셀 파일에 같은 순번으로 있다(아래 「`answer.files` — 첨부 파일」). 별도 카드 UI 나 HTML 렌더링은 필요 없다. 고객 PIN 은 원장에 있는 값만
 쪽지와 같은 뒷자리 마스킹으로 표시하고, PIN 이 없는 부점 DB 고객은 `미확인`으로 표시한다.
 기존 `answer` 이벤트를 그대로 사용하며 선정 순서·첫 추천 다시 보기는 유지한다.
 
@@ -125,6 +126,25 @@ Content-Type: application/json
 `answer.text` 의 마지막 줄도 같은 문장(`— {prompt}`)이다. 버튼을 따로 그리는 프론트는 본문
 끝의 그 줄을 떼고 그 자리에 세운다 — 같은 문장이 두 번 서지 않게 하되, **본문과 버튼 사이에
 출처·근거 블록이 끼어들지 않게** 한다.
+
+### `answer.files` — 첨부 파일
+
+답변과 함께 내려받을 파일이다. 없으면 `[]`. 지금 붙는 것은 관리 대상 추천의 엑셀 하나다.
+
+```json
+"files": [{"name": "관리대상고객_여의도종합금융센터_20261023.xlsx",
+           "mime": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+           "base64": "UEsDBBQAAAAI..."}]
+```
+
+- 답변 본문 아래(출처 블록 위)에 `name` 으로 **내려받기 버튼**을 그린다. 누르면 `base64` 를 풀어
+  `mime` 의 Blob 으로 저장한다(JavaScript: `Uint8Array.from(atob(f.base64), c => c.charCodeAt(0))`).
+- 본문이 파일 이름을 이미 말한다(«61명 전체는 첨부한 엑셀 파일(…)에 같은 순번으로 있습니다»).
+- 파일 안 고객 PIN 은 본문 표와 같은 마스킹이다. 열: 순번 · 고객명 · 고객 PIN · 나이 · 스타클럽 등급 ·
+  투자성향 · IRP 잔액(원) · 1년 수익률(%) · 세액공제 잔여한도(원) · 공제한도 소진율(%) · 디폴트옵션 ·
+  원리금보장 비중(%) · 관리 사유. 금액·비율은 숫자 셀이다.
+- 파일은 그 턴에만 온다 — 세션에 남지 않는다. 같은 목록을 다시 받으려면 「처음 추천한 고객 다시
+  보여줘」로 묻는다(같은 목록 · 같은 파일).
 
 ### `answer.links` — 단말 화면 딥링크
 

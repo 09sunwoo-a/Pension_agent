@@ -687,8 +687,33 @@ def check_target_table() -> None:
         ev = tools.run("branch_targets", _state(), "관리 대상")
     doc = ev["meta"]["document"]
     rows = [line for line in doc.splitlines() if line.startswith("| ")][1:]
-    check(len(rows) == ev["meta"]["count"] and doc.count("| 순서 |") == 1,
-          "관리 대상 전원이 카드·분할 없이 표 하나에 모두 나온다", f"{len(rows)} vs {ev['meta']['count']}")
+    shown = min(ev["meta"]["count"], target_table.TEXT_ROWS)
+    check(len(rows) == shown and doc.count("| 순서 |") == 1,
+          f"표 하나에 앞쪽 {target_table.TEXT_ROWS}명까지 나온다(카드·분할 없음)", f"{len(rows)} vs {shown}")
+    files = ev["meta"]["files"]
+    check(len(files) == 1 and files[0]["name"].endswith(".xlsx") and files[0]["name"] in doc
+          and files[0]["mime"] == target_table.XLSX_MIME,
+          "관리 대상 목록에는 엑셀 파일이 하나 붙고 본문이 파일 이름을 밝힌다")
+    if ev["meta"]["count"] > target_table.TEXT_ROWS:
+        check(f"앞쪽 {target_table.TEXT_ROWS}명만" in doc and f"{ev['meta']['count']}명 전체는 첨부한 엑셀" in doc,
+              "표에서 자른 인원은 엑셀에 있다고 밝힌다")
+    import base64, io  # noqa: E401, PLC0415
+    import openpyxl  # noqa: PLC0415
+    ws = openpyxl.load_workbook(io.BytesIO(base64.b64decode(files[0]["base64"]))).active
+    sheet = list(ws.iter_rows(values_only=True))
+    check(list(sheet[0]) == target_table.SHEET_HEADER and len(sheet) - 1 == ev["meta"]["count"]
+          and [r[1] for r in sheet[1:]] == ev["meta"]["names"] and [r[0] for r in sheet[1:]] == list(
+              range(1, ev["meta"]["count"] + 1)),
+          "엑셀은 실은 전원을 같은 순번·순서로 싣는다", f"{len(sheet) - 1} vs {ev['meta']['count']}")
+    check(all(isinstance(r[6], int) and isinstance(r[8], int) and isinstance(r[7], (int, float)) for r in sheet[1:])
+          and ws.freeze_panes == "A2" and ws.auto_filter.ref,
+          "엑셀 금액·수익률은 숫자 셀이고 머리글 고정·필터가 있다")
+    check(not any(re.search(r"\d{6}-\d{7}", str(v)) for r in sheet for v in r),
+          "엑셀에도 PIN 은 마스킹만 싣는다")
+    m = re.search(r"모든 고객에게 같은 사유\(([^)]*(?:\([^)]*\)[^)]*)*)\)는 표에서", doc)
+    dropped = [x.strip() for x in m.group(1).split(", ")] if m else []
+    check(bool(dropped) and all(all(x in r[12] for x in dropped) for r in sheet[1:]),
+          "엑셀 관리 사유는 표에서 뺀 공통 사유도 싣는다(행 하나만 봐도 사유가 다 보이게)", f"{dropped}")
     check(all(f"| {i} |" in row and name in row
               for i, (name, row) in enumerate(zip(ev["meta"]["names"], rows), 1)),
           "표의 고객·순번은 추천 순서를 그대로 보존한다")

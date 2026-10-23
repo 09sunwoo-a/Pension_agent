@@ -256,6 +256,11 @@ def ask(
         "links": list(links or []),
         # 본문 속 고객 발송 문구 `{kind, label, text, copy}`. 없으면 []
         "messages": messages,
+        # 첨부 파일 `{name, mime, base64}` — 관리 대상 목록 엑셀. 없으면 []
+        # 그 목록이 답변 자체인 턴만 — 쪽지 초안처럼 목록을 재료로만 쓴 턴에는 붙이지 않는다
+        "files": [f for e in evidence for f in ((e.get("meta") or {}).get("files") or [])
+                  if (e.get("meta") or {}).get("document")
+                  and e["meta"]["document"] in (out.get("answer") or "")],
         # answer 끝 추천질문 블록과 같은 내용
         "followups": followups,
         "intent": out.get("intent"),  # 프론트가 correction 처럼 미완성 기능을 표시할 때 씀

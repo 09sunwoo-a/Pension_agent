@@ -96,3 +96,66 @@ def render(targets: list[Target]) -> str:
                  ", ".join(rest) or "—"]
         lines.append("| " + " | ".join(_cell(value) for value in cells) + " |")
     return "\n".join(lines)
+
+
+#: 엑셀 첨부의 열(2026-10-23 사용자 요청 — 행내 «타겟고객 명단» 엑셀 꼴). 표와 달리 값마다 한 칸이고 숫자는 숫자 셀이다
+#: (정렬·필터·합계를 엑셀에서 하게). 관리 사유는 공통 사유도 빼지 않는다 — 행 하나만 떼어 봐도 사유가 다 보이게.
+#: 성별은 원장에 없어 열을 두지 않는다(지어내지 않는다).
+SHEET_HEADER = ["순번", "고객명", "고객 PIN", "나이", "스타클럽 등급", "투자성향", "IRP 잔액(원)", "1년 수익률(%)",
+                "세액공제 잔여한도(원)", "공제한도 소진율(%)", "디폴트옵션", "원리금보장 비중(%)", "관리 사유"]
+
+
+def sheet_rows(targets: list[Target]) -> list[list[object]]:
+    """엑셀 첨부의 행 — 선정 순서 그대로. 값은 원장 값(PIN 은 표와 같은 마스킹)."""
+    rows = []
+    for i, target in enumerate(targets, 1):
+        p = target.profile
+        used = round((1 - p.room * 10_000 / TAX_CREDIT_CAP_WON) * 100, 1)
+        rows.append([i, p.nm, _pin(p), p.ag, p.club_grade or "", p.rk, int(p.bal), round(float(p.ret), 1),
+                     int(p.room * 10_000), used, p.dopt, int(p.port[0]), ", ".join(reasons(target))])
+    return rows
+
+
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+#: 텍스트 표에 싣는 최대 인원(2026-10-23 사용자 요청 — 나머지는 엑셀 첨부). 답변 형태 규칙이라 코드 상수다.
+TEXT_ROWS = 30
+
+
+def workbook(targets: list[Target], title: str) -> bytes:
+    """관리 대상 목록 → .xlsx 바이트(시트 하나). 머리글 굵게·회색 · 머리글 고정 · 자동 필터 · 숫자 서식."""
+    import io  # noqa: PLC0415
+
+    from openpyxl import Workbook  # noqa: PLC0415 — 이 기능에서만 쓴다
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side  # noqa: PLC0415
+    from openpyxl.utils import get_column_letter  # noqa: PLC0415
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = title[:31]
+    ws.append(SHEET_HEADER)
+    for row in sheet_rows(targets):
+        ws.append(row)
+    line = Side(style="thin", color="BFBFBF")
+    border = Border(left=line, right=line, top=line, bottom=line)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill("solid", fgColor="D9D9D9")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+        for cell in row:
+            cell.border = border
+            if isinstance(cell.value, float):
+                cell.number_format = "0.0"
+            elif isinstance(cell.value, int) and cell.row > 1:
+                cell.number_format = "#,##0"
+    for i, head in enumerate(SHEET_HEADER, 1):
+        values = [head] + [ws.cell(r, i).value for r in range(2, ws.max_row + 1)]
+        width = max(sum(2 if ord(ch) > 0x2E80 else 1 for ch in (f"{v:,}" if isinstance(v, int) else str(v or "")))
+                    for v in values)
+        ws.column_dimensions[get_column_letter(i)].width = min(width + 2, 80)
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

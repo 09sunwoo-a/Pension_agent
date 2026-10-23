@@ -14,7 +14,7 @@
 
 응답 이벤트 type(한 턴 순서):
     progress   0개 이상 · 답변 전
-    answer     1개 · text · intent · links · messages(없으면 [])
+    answer     1개 · text · intent · links · messages · files(없으면 [])
     action     연계 제안 턴에만
     clarify    되묻기 턴에만
     sources    항상(0건이면 [])
@@ -221,6 +221,8 @@ def _turn_events(result: dict[str, Any], *, with_trace: bool = False) -> list[di
         "links": list(result.get("links") or []),
         # 본문이 인용한 고객 발송 문구(LMS) — links 와 같은 이유로 answer 필드
         "messages": list(result.get("messages") or []),
+        # 첨부 파일(관리 대상 목록 엑셀) — 본문 표 아래 내려받기 버튼 재료라 answer 필드
+        "files": list(result.get("files") or []),
     }]
     action = result.get("pending_action")
     # 동명이인 후보 턴(`candidates`)은 네/아니오 턴이 아님 — action 미전송
