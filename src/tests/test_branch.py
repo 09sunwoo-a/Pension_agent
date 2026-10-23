@@ -588,6 +588,25 @@ def check_targets() -> None:
     check(-1 < a < b, "쪽지 표도 도구가 실은 순서 그대로다")
 
 
+def check_pension_savings() -> None:
+    """연금저축 보유 컬럼 — 목업 고객은 원장 연금저축보유여부(비면 미확인 = NULL), 합성 고객은 시연 비율. 오늘·전월말 같은 값."""
+    from pension_agent.tools.branch_briefing import demo_db  # noqa: PLC0415
+    cols = [c for c, _t, _d in views.columns("v_irp_customer")]
+    check("pension_savings" in cols, "연금저축 보유 컬럼이 고객 뷰에 있다")
+    conn = demo_db.connection()
+    vals = {r[0] for r in conn.execute("SELECT DISTINCT pension_savings FROM irp_customer_base")}
+    check(vals <= {"보유", "미보유", None} and {"보유", "미보유"} <= vals, "연금저축 값은 보유·미보유·미확인", f"{vals}")
+    diff = conn.execute("SELECT COUNT(*) FROM irp_customer_base a JOIN irp_customer_prev b "
+                        "ON a.customer_name = b.customer_name AND a.branch_code = b.branch_code "
+                        "WHERE a.pension_savings IS NOT b.pension_savings").fetchone()[0]
+    check(diff == 0, "연금저축 보유는 오늘·전월말 표가 같다", f"{diff}명 다름")
+    from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
+    known = {p.nm: {True: "보유", False: "미보유"}.get(p.pension_savings) for p in C.PERSONAS}
+    got = dict(conn.execute("SELECT customer_name, pension_savings FROM irp_customer_base WHERE branch_code = '0001' "
+                            f"AND customer_name IN ({','.join('?' * len(known))})", list(known)).fetchall())
+    check(all(got.get(n) == v for n, v in known.items()), "목업 고객의 연금저축은 원장 값 그대로(비면 미확인)", f"{got}")
+
+
 def check_question_set() -> None:
     """시험 질문(tests/branch_questions.py) — LLM 없이 확인할 수 있는 것 전부.
     정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
@@ -640,6 +659,7 @@ def main() -> int:
     check_realistic()
     check_strategy()
     check_targets()
+    check_pension_savings()
     check_question_set()
 
     passed = sum(1 for ok, _, _ in _results if ok)

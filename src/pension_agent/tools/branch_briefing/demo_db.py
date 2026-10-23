@@ -47,6 +47,8 @@ COLUMNS = (
     "etf_eval_amt",
     # 만기 상품의 유형(2026-10-23) — 원장 상품유형 표기('예금'·'GIC')
     "next_maturity_type",
+    # 연금저축 계좌 보유(2026-10-23) — '보유'·'미보유', 확인되지 않았으면 NULL
+    "pension_savings",
 )
 _COL = {name: i for i, name in enumerate(COLUMNS)}
 
@@ -112,6 +114,8 @@ def _persona_rows() -> list[tuple]:
             sum(int(h.get("amount") or 0) for h in (p.holdings or []) if h.get("type") == "ETF"),
             # 만기 상품 유형 — 원장 보유상품의 상품유형 그대로
             first.get("type") if first else None,
+            # 연금저축 보유 — 원장 연금저축보유여부(Y/N, 비어 있으면 미확인)
+            {True: "보유", False: "미보유"}.get(p.pension_savings),
         ))
     return rows
 
@@ -171,6 +175,7 @@ def _synthetic_rows() -> list[tuple]:
             None, None,
             etf_amount(base[0], base[4], bal, safe),
             maturity_type(base[0], base[4], base[14]),
+            pension_savings(base[0], base[4]),
         ))
     return out
 
@@ -187,6 +192,15 @@ def maturity_type(name: str, branch: str, maturity_date: str | None) -> str | No
     if not maturity_date:
         return None
     return "예금" if random.Random(f"mat:{branch}:{name}").random() < _DEPOSIT_SHARE else "GIC"
+
+
+#: 합성 고객 중 연금저축 계좌를 가진 비율(시연값 — 행내 통계 아님).
+_PENSION_SAVINGS_SHARE = 0.35
+
+
+def pension_savings(name: str, branch: str) -> str:
+    """합성 고객의 연금저축 보유(시연값) — '보유'·'미보유'. 이름·부점 시드라 오늘·전월말 표가 같다."""
+    return "보유" if random.Random(f"psv:{branch}:{name}").random() < _PENSION_SAVINGS_SHARE else "미보유"
 
 
 #: 합성 고객 중 ETF 를 가진 비율 · 실적배당(원리금보장 밖) 몫 중 ETF 비중 범위(시연값).
@@ -311,6 +325,7 @@ def connection() -> sqlite3.Connection:
             for d in yeouido + yeouido_prev:
                 d.setdefault("next_maturity_type", maturity_type(d["customer_name"], d["branch_code"],
                                                                  d["next_maturity_date"]))
+                d.setdefault("pension_savings", pension_savings(d["customer_name"], d["branch_code"]))
             # 다른 부점 — 기존 합성 고객(0001 몫은 버린다. 난수 순서를 그대로 두려고 생성 뒤에 거른다)
             # 전월말도 예전과 같은 입력(목업 + 합성 288명)으로 흔든 뒤 거른다 — 다른 부점 결과를 그대로 둔다
             legacy = _persona_rows() + _synthetic_rows()

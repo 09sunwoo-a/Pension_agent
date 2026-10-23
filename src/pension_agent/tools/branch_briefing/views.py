@@ -16,6 +16,7 @@ _BRIEFING_COLUMNS: list[tuple[str, str, str]] = [
     ("isa_maturity_amt", "정수(원)", "ISA 만기자금 금액(IRP 밖, 없으면 NULL)"),
     ("isa_days_to_maturity", "정수(일)", "오늘부터 ISA 만기일까지 남은 일수. 음수면 이미 지난 것"),
     ("etf_eval_amt", "정수(원)", "IRP 안에서 보유한 ETF 평가금액 합계(없으면 0) — «ETF 투자 금액»"),
+    ("pension_savings", "문자", "연금저축(연금저축펀드 포함) 계좌 보유 여부('보유' 또는 '미보유', 확인되지 않았으면 NULL)"),
 ]
 
 #: 뷰 이름 → (설명, [(컬럼, 타입, 뜻)]). 컬럼이 None 이면 바로 앞 뷰와 같은 컬럼
@@ -83,7 +84,7 @@ CONDITION_LABELS: dict[str, str] = {
     "idle_cash_amt": "미운용 현금성자산 금액", "idle_cash_days": "미운용 기간",
     "tax_credit_room": "세액공제 잔여한도", "transfer_inquiry": "계약이전 사전조회",
     "risk_mismatch": "투자성향 대비 자산구성", "isa_maturity_amt": "ISA 만기자금",
-    "isa_days_to_maturity": "ISA 만기까지 남은 일수", "etf_eval_amt": "ETF 평가금액",
+    "isa_days_to_maturity": "ISA 만기까지 남은 일수", "etf_eval_amt": "ETF 평가금액", "pension_savings": "연금저축",
     "target_reasons": "관리 대상 사유", "joined_date": "IRP 가입일",
     "next_maturity_date": "만기일", "isa_maturity_date": "ISA 만기일", "transfer_date": "계약이전 일자", "is_target": "관리 대상", "transfer_amt": "이전 금액", "to_institution": "이전 기관",
 }
