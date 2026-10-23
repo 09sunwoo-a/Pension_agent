@@ -628,6 +628,8 @@ def check_briefing_frame() -> None:
         check(out.startswith("> **오늘의 부점 브리핑** · ") and "분석" not in out.split("\n\n|")[0],
               "인용 상자: 제목 · 문장(분석 기준 줄 없음)")
         check(out.rstrip().endswith(table.splitlines()[-1]), "표는 인용 상자 아래")
+    line = next((ln for ln in ev["text"].splitlines() if "올해 계약이전:" in ln), "")
+    check("늘면 이탈이 늘었다는 뜻" in line, "재료가 계약이전 증가의 뜻(이탈)을 함께 싣는다", line)
     narrow = tool._branch_status(_state(EMP, "디폴트옵션 미설정 고객이 지난달보다 늘었어?"), "q")
     check(narrow["meta"]["frame"] is None, "한 고객군만 물은 질문에는 틀을 붙이지 않는다")
     check("화면 표" not in narrow["text"], "틀이 없으면 재료에 «화면 표» 줄도 없다")

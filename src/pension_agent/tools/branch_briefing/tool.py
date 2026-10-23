@@ -311,12 +311,21 @@ def _change(seg: dict, st: dict) -> str:
     return f"{seg['delta']:+d}명, 판정 기준 {st['segment_step']}명 미만"
 
 
+#: 늘면 나쁜 지표의 뜻 — 재료에 함께 싣는다. 없으면 답변이 «계약이전 실적이 늘었다»처럼 좋은 일로 쓴다
+#: (2026-10-23 실측 — 계약이전은 다른 금융기관으로 빠져나간 계좌다).
+MEANINGS = {
+    "transfer_out_count": "다른 금융기관으로 빠져나간 계좌 — 늘면 이탈이 늘었다는 뜻",
+    "transfer_out_amt": "다른 금융기관으로 빠져나간 금액 — 늘면 이탈이 늘었다는 뜻",
+}
+
+
 def status_text(st: dict) -> str:
     """부점 현황 dict → 재료 텍스트(branch_status 도구 · 전략 브리핑이 같은 문장을 본다)."""
     lines = [f"■ 부점 현황 — {st['branch']} 부점 · {st['base_date']} 기준 · 비교 기준 전월말({st['prev_date']})",
              "· 부점 지표(전월말 → 오늘):"]
     for ind in st["indicators"]:
-        lines.append(f"    - {ind['name']}: {_value(ind, 'prev')} → {_value(ind, 'now')} ({ind['label']})")
+        meaning = f" · {MEANINGS[ind['id']]}" if ind["id"] in MEANINGS else ""
+        lines.append(f"    - {ind['name']}: {_value(ind, 'prev')} → {_value(ind, 'now')} ({ind['label']}{meaning})")
     moved = [s for s in st["segments"] if s["direction"] != "변화 없음"]
     rest = [s for s in st["segments"] if s["direction"] == "변화 없음"]
     lines.append(f"· 고객군 인원 — 판정 기준({st['segment_step']}명) 이상 변한 고객군(전월말 → 오늘):")

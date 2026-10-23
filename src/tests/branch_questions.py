@@ -227,7 +227,7 @@ QUESTIONS: list[Q] = [
       "오늘의 부점 브리핑 알려줘",
       "branch_status",
       must=("오늘의 부점 브리핑", "| 부점 현황 | 값 |"),
-      must_not=("관리신호 분석",),
+      must_not=("관리신호 분석", "계약이전 실적", "계약이전 성과"),
       names=False,
       note="2026-10-23 사용자 결정 — 코드가 만든 제목·표 하나(부점 현황 | 값) 안에 LLM 브리핑 문장"),
     Q("targets_today",
