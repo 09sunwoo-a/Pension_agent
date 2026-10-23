@@ -22,6 +22,7 @@ _BRIEFING_COLUMNS: list[tuple[str, str, str]] = [
 VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
     "v_irp_customer": (
         "우리 부점의 IRP 고객 — 고객 한 명당 한 행. 다른 부점 고객은 들어 있지 않다", [
+            ("customer_ref", "문자", "고객 연결용 내부 행 식별자(PIN 아님). 고객 목록 조회에는 반드시 함께 SELECT. 별칭을 붙이지 않는다"),
             ("customer_name", "문자", "고객 이름"),
             ("age", "정수", "나이(만)"),
             ("star_grade", "문자", "스타클럽 등급(패밀리·베스트·그랜드·로얄·MVP)"),

@@ -289,7 +289,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # last 는 재료를 얻었을 때만 존중 — 빗나간 호출로 끝내면 다른 도구 기회 소실
     if last and found is not None:
         update["plan_done"] = True
-    # 완성 문서(전체 브리핑)면 수집 종료 — 그대로 답(document_answer)
+    # 완성 문서(전체 브리핑·관리 대상 표)면 수집 종료 — 그대로 답(document_answer)
     if found is not None and found["meta"].get("document"):
         update["plan_done"] = True
     return update
@@ -515,7 +515,7 @@ def screen(answer: str, evidence: list[tools.Evidence], question: str,
 
 
 def document_answer(state: AgentState) -> dict[str, Any] | None:
-    """원장의 완성 문서(meta["document"], 전체 브리핑)를 그대로 답으로. 없으면 None.
+    """원장의 완성 문서(meta["document"], 브리핑·관리 대상 표)를 그대로 답으로. 없으면 None.
 
     도구 안에서 검사 완료 — compose 재작성 시 양식·표 값 훼손.
     """

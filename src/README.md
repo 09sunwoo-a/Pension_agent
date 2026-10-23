@@ -431,6 +431,7 @@ python -m tests.test_engine               # 추천 엔진 계산
 python -m tests.test_support              # 화법·반론·참고자료·안내 콘텐츠 선정
 python -m tests.test_customer_solution    # 브리핑 문서 — LLM 1회 · 검사 · 실패 처리
 python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE 판정 · 전략 브리핑 · 추천 순서
+python -m tests.test_customer_selection   # 목록 후속 질문 — 동명이인·번호 오류·만료·부점·HTTP 세션 연결
 python -m tests.test_agent                # 분류 · 도구 루프 · 답변 검사 · 쪽지 (본문은 tests/agent/)
 python -m tests.test_infra                # 공용 기반 · 임포트 방향 · 429 호출 제한
 python -m tests.test_api                  # HTTP 입출력 규격

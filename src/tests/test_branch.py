@@ -414,7 +414,7 @@ def check_targets() -> None:
     first = graph._first_targets([], [ev])
     hist = [{"question": "오늘 누구 봐야 해", "first_targets": first}]
     check(graph._first_targets(hist, []) == first, "다음 턴은 이전 턴의 첫 추천을 잇는다")
-    fake = dict(first, names=list(reversed(first["names"])))
+    fake = dict(first, names=list(reversed(first["names"])), refs=list(reversed(first["refs"])))
     with _Today():
         again = tools.run("branch_targets", {"question": "처음 추천한 고객 다시 보여줘", "employee_id": EMP,
                                              "history": [{"question": "q", "first_targets": fake}]}, "다시")
@@ -434,6 +434,62 @@ def check_targets() -> None:
     check(-1 < a < b, "쪽지 표도 도구가 실은 순서 그대로다")
 
 
+def check_target_table() -> None:
+    from dataclasses import replace  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    from pension_agent.common import note  # noqa: PLC0415
+    from pension_agent.nodes import answer as ANS, plan  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as C, target_table  # noqa: PLC0415
+    from pension_agent.tools.customer_solution.target_list import Target  # noqa: PLC0415
+
+    with _Today():
+        ev = tools.run("branch_targets", _state(), "관리 대상")
+    doc = ev["meta"]["document"]
+    rows = [line for line in doc.splitlines() if line.startswith("| ")][1:]
+    check(len(rows) == 56 and doc.count("| 순서 |") == 1,
+          "관리 대상 56명이 카드·분할 없이 표 하나에 모두 나온다")
+    check(all(f"| {i} |" in row and name in row
+              for i, (name, row) in enumerate(zip(ev["meta"]["names"], rows), 1)),
+          "표의 고객·순번은 추천 순서를 그대로 보존한다")
+    check(not re.search(r"\d{6}-\d{7}", doc) and "고객 PIN" in doc and "미확인" in doc,
+          "PIN 은 마스킹하고 PIN 없는 합성 고객의 내부 키는 미확인이다")
+    check("공제한도 소진율" in doc and "공제 잔여한도" in doc and "900만원" in doc,
+          "소진율·잔여한도와 기본한도 기준이 함께 표시된다")
+
+    p = C.PERSONAS[0]
+    samples = [Target(replace(p, room=room, ret=ret, pension_savings=True), ["mat", "hlt", "dep", "nod"])
+               for room, ret in ((0, 6.2), (900, 2.8), (300, 21.6), (550, -9.4))]
+    rendered = target_table.render(samples)
+    sample_rows = rendered.splitlines()[2:]
+    check(all(f"| {pct}% |" in row for row, pct in zip(sample_rows, (100, 0, 67, 39)))
+          and "-9.4%" in sample_rows[-1] and "+6.2%" in sample_rows[0],
+          "소진율 경계·반올림과 수익률의 양수·음수 부호가 정확하다")
+    check(all(all(note.cond_text(target, c) in row for c in target.conds)
+              and "연금저축 보유" in row for target, row in zip(samples, sample_rows)),
+          "관리 사유는 세 건을 넘어도 생략하지 않고 연금저축 보유도 유지한다")
+    dirty = Target(replace(p, nm="고객|이름\n<태그>", id="0001:내부키", club_grade=None), ["tax"])
+    dirty_row = target_table.render([dirty]).splitlines()[2]
+    check(len(re.split(r"(?<!\\)\|", dirty_row)) == 11 and "<태그>" not in dirty_row
+          and "0001:내부키" not in dirty_row and "미확인" in dirty_row,
+          "셀의 구분자·줄바꿈·HTML 과 내부 키가 표를 깨뜨리거나 PIN 이 되지 않는다")
+    check(target_table.render([]) == note.EMPTY_BODY, "0명은 빈 표 대신 대상 없음으로 안내한다")
+
+    with patch.object(plan, "generate", return_value=_sql(None)) as unused:
+        with patch.object(ANS, "compose", side_effect=AssertionError("표를 재작성하면 안 됨")):
+            out = ANS.answer({"question": "오늘 누구부터 봐야 해?", "evidence": [ev]})
+    check(out["answer"] == doc and not unused.called,
+          "완성된 표는 모델 재작성 없이 그대로 답변이 된다")
+    check(not re.search(r"\d{6}-\d{7}", ev["text"] + str(ev["sources"]) + str(ev["allow"]))
+          and "고객 PIN" not in ev["text"],
+          "모델·관측용 근거와 출처는 PIN 표시 문서와 분리된다")
+
+    with _Today(), patch.object(plan, "generate", return_value='{"tool":"branch_targets","query":"관리 대상"}'):
+        result = plan.plan_step({"question": "오늘 누구부터 봐야 해?", "employee_id": EMP})
+    check(result.get("plan_done") and result["evidence"][0]["meta"].get("document"),
+          "관리 대상 표가 완성되면 재료 수집을 종료해 누락·재요약을 막는다")
+
+
 def main() -> int:
     check_checker()
     check_scope()
@@ -446,6 +502,7 @@ def main() -> int:
     check_yeouido_screen()
     check_strategy()
     check_targets()
+    check_target_table()
 
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)

@@ -99,7 +99,7 @@ def cond_text(target: Target, cond: str) -> str:
     return f"{name} {value}" if value else name
 
 
-def _customer_id(customer_id: str) -> str:
+def display_customer_id(customer_id: str) -> str:
     """고객 id 마스킹 — 뒷자리 가림, 자릿수 유지."""
     if not MASK_ID:
         return customer_id
@@ -113,7 +113,7 @@ def _block(no: int, target: Target) -> str:
     attrs = [f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else [])
     shown = target.conds[:MAX_CONDS]
     rest = len(target.conds) - len(shown)
-    lines = [f"{no}. {p.nm} ({_customer_id(p.id)})",
+    lines = [f"{no}. {p.nm} ({display_customer_id(p.id)})",
              f"   {' · '.join(attrs)} · 평가금액 {won(p.bal)}"]
     lines += [f"   - {cond_text(target, c)}" for c in shown]
     if rest > 0:
@@ -192,7 +192,7 @@ def _row(no: int, target: Target) -> str:
         conds += f"<br><span {_MUTED}>외 {rest}건</span>"
     return (f"<tr><td {_TD_NO}>{no}</td>"
             f"<td><b>{esc(p.nm)}</b><br>{esc(attrs)}"
-            f"<br><span {_MUTED}>{esc(_customer_id(p.id))}</span></td>"
+            f"<br><span {_MUTED}>{esc(display_customer_id(p.id))}</span></td>"
             f"<td {_TD_NUM}>{esc(won(p.bal))}</td>"
             f"<td>{conds}</td></tr>")
 

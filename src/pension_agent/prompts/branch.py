@@ -29,6 +29,9 @@ BRANCH_SQL_SYSTEM = """당신은 KB국민은행 영업점 직원의 질문을 SQ
     많으면 직원이 읽을 표가 아니게 되고 인원을 잘못 세게 됩니다. 인원·합계를 물으면 COUNT·SUM 으로 답합니다.
 13. 만기(예금·ISA)를 물으면 남은 일수 컬럼(days_to_maturity · isa_days_to_maturity)을 함께 고릅니다 —
     이미 지난 만기(음수)와 남은 만기가 구별되어야 합니다.
+14. 고객 명단은 현재 v_irp_customer 의 customer_ref, customer_name, age 를 반드시 함께 SELECT 합니다.
+    customer_ref 에 별칭을 붙이지 않습니다. 이 값은 코드가 고객 연결에만 쓰고 화면·LLM 답변에는 숨깁니다.
+    집계·전월말 조회·계약이전 이력에는 이 규칙을 적용하지 않습니다.
 
 출력은 JSON 객체 하나입니다. 다른 글을 붙이지 않습니다."""
 

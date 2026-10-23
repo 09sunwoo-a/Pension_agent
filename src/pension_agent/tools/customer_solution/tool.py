@@ -367,11 +367,12 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
 
     선정은 target_list(요건 판정·PRIO) 그대로, 순서만 CASE 가 정한다(target_list.prioritize).
     이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로 싣는다(날짜가 바뀌었으면 새로).
-    고객 화면 없이 사용, KB-PIN 미포함 — 첫 목록도 이름으로만 남긴다.
+    고객 화면 없이 사용. LLM 재료·첫 목록은 PIN 미포함, 최종 표만 마스킹된 PIN 표시.
     """
     from pension_agent.common import note  # noqa: PLC0415 — 순환 임포트 회피
     from pension_agent.tools.branch_briefing import status  # noqa: PLC0415
-    from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import target_list, target_table  # noqa: PLC0415
+    from pension_agent.tools import customer_selection  # noqa: PLC0415
 
     day = clock.today().isoformat()
     stored = first_targets((state or {}).get("history"))
@@ -379,7 +380,8 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     try:
         scope, pool = roster_targets(state)
         if replay:
-            found = target_list.by_names(list(stored.get("names") or []), pool)
+            found = (target_list.by_refs(stored["refs"], pool) if stored.get("refs") and all(stored["refs"])
+                     else target_list.by_names(list(stored.get("names") or []), pool))
             codes = list(stored.get("codes") or [])
         else:
             emp_no = ((state or {}).get("employee_id") or "").strip() or None
@@ -407,6 +409,17 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
         # 요건별 원장 값 병기
         lines += [f"    - {note.cond_text(t, c)}" for c in t.conds]
     text = "\n".join(lines)
+    listed = customer_selection.from_targets(state, found, query)
+    # 표는 코드 값 그대로 응답 — LLM 재작성에 의한 순서·수치·행 누락 방지.
+    # PIN 이 든 표시 문서는 meta 에만 두고 모델·관측으로 전달되는 text 에는 싣지 않는다.
+    document = "\n\n".join([
+        f"목록 {listed['number']} · " + head.removeprefix("■ "),
+        *([lines[1].removeprefix("· ")] if codes else []),
+        target_table.render(found),
+        *(["공제한도 소진율은 연금저축·IRP 합산 연 900만원 기본한도 기준입니다. "
+           "고객 PIN은 원장에 없으면 미확인으로 표시합니다."] if found else []),
+        *(["번호나 이름으로 이어서 질문해 주세요. 예: ‘2번 고객 자세히’, ‘이 고객 만기 상품은?’"] if found else []),
+    ])
     names = [t.profile.nm for t in found]
     return _ev("branch_targets", query, text,
                [{"id": "branch_targets.today",
@@ -415,7 +428,10 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
                         "순서는 부점 CASE(타겟 룰베이스 부점 시트)",
                  "score": None, "page": None}],
                allow=[text],
-               meta={"count": len(found), "names": names, "codes": codes, "replayed": replay,
+               meta={"document": document, "customer_list": listed,
+                     "count": len(found), "names": names, "refs": [t.profile.customer_ref for t in found],
+                     "codes": codes, "replayed": replay,
                      # 이 대화의 첫 추천 — graph.ask 가 Turn 에 남긴다(이미 있으면 그것을 잇는다)
                      "first_targets": stored if replay else {"date": day, "names": names,
+                                                             "refs": [t.profile.customer_ref for t in found],
                                                              "codes": codes}})

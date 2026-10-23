@@ -10,6 +10,8 @@ branch_search: 검사 거부·실행 오류는 사유를 실어 최대 RETRIES �
 
 from __future__ import annotations
 
+import re
+
 from pension_agent.common import observability
 from pension_agent.common.llm import LLMError, available, generate, json_object  # noqa: F401
 from pension_agent.evidence.record import Evidence, _ev
@@ -129,6 +131,29 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
 
     observability.step("branch_search", branch_name, attempt=attempt, rows=len(rows),
                        truncated=truncated or None)
+    from pension_agent.tools import customer_selection  # noqa: PLC0415
+    from pension_agent.tools.branch_briefing import roster  # noqa: PLC0415
+
+    inspected = check._mask_strings(sql)
+    is_list = (not rows or any("customer_ref" in row or "customer_name" in row for row in rows)
+               or (bool(re.search(r"\bFROM\s+v_irp_customer(?:_prev)?\b", inspected, re.I))
+                   and not re.search(r"\b(?:COUNT|SUM|AVG|MIN|MAX)\s*\(|\bGROUP\s+BY\b", inspected, re.I)))
+    identities = []
+    for row in rows if is_list else []:
+        identity = dict(row)
+        if row.get("customer_ref") and not row.get("customer_name"):
+            profile = roster.lookup(row["customer_ref"], emp_no)
+            if profile:
+                identity.update(customer_name=profile.nm, age=profile.ag, star_grade=profile.club_grade)
+        identities.append(identity)
+    listed = customer_selection.snapshot(state, [
+        {"ref": row.get("customer_ref"), "name": row.get("customer_name"), "age": row.get("age"),
+         "grade": row.get("star_grade"), "balance": row.get("eval_amt")}
+        for row in identities], code, question) if is_list else None
+    # 내부 식별자는 코드 전용. 응답 표와 모델 근거에는 순번만 수록.
+    visible = [{k: v for k, v in row.items() if k != "customer_ref"} for row in rows]
+    shown = [{"순서": i, **{k: v for k, v in row.items() if k != "순서"}}
+             for i, row in enumerate(visible, 1)] if is_list else visible
     note_line = (f"※ 결과가 {run.MAX_ROWS}행을 넘어 앞의 {run.MAX_ROWS}행만 실었습니다."
                  if truncated else "")
     text = "\n".join(x for x in (
@@ -136,17 +161,23 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
         f"· 조회 목적: {reason}" if reason else "",
         "· 실행한 조회문:",
         "```sql", sql, "```",
-        table(rows),
+        table(shown),
         note_line,
     ) if x)
+    meta = {"rows": len(rows), "truncated": truncated, "branch": branch_name, "sql": sql}
+    if listed is not None:
+        meta.update(customer_list=listed, document="\n\n".join(x for x in (
+            f"목록 {listed['number']} · {branch_name} 고객 조회 — {len(rows)}명",
+            reason, table(shown), note_line,
+            "번호나 이름으로 이어서 질문해 주세요. 예: ‘2번 고객 자세히’." if rows else "",
+        ) if x))
     return _ev("branch_search", query, text,
                [{"id": "branch_db",
                  "title": f"부점 데이터 조회 ({branch_name})",
                  # 실행 SQL 을 출처로 — 수치 역추적용
                  "doc": sql,
                  "score": None, "page": None}],
-               meta={"rows": len(rows), "truncated": truncated, "branch": branch_name,
-                     "sql": sql})
+               meta=meta)
 
 
 #: D 등급(원문에 없는 설계 제안) 기준을 쓴 재료의 성격 표시 — 루트 CLAUDE.md «D 를 A 와 같은 얼굴로 세우지 않는다»
