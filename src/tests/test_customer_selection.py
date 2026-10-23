@@ -73,7 +73,9 @@ class SelectionTest(unittest.TestCase):
         for e in saved["lists"][0]["entries"]:
             e["name"] = "홍길동"
         profiles = {p.customer_ref: replace(p, nm="홍길동") for p in (self.p1, self.p2)}
-        with patch.object(roster, "lookup", side_effect=lambda ref, _emp: profiles[ref]):
+        with patch.object(roster, "lookup", side_effect=lambda ref, _emp: profiles[ref]), \
+                patch.object(roster, "find_names", side_effect=lambda names, _emp:
+                             ("0001", [p for p in profiles.values() if p.nm in names])):
             first = self.resolve("홍길동 고객 만기 상품은?", saved)
             self.assertEqual(first.case, "duplicate_name")
             self.assertEqual(len(first.clarify["options"]), 2)
@@ -94,7 +96,7 @@ class SelectionTest(unittest.TestCase):
             named_age = self.resolve(f"홍길동 고객 중 {self.p1.ag}세 고객 만기 상품은?", saved)
             self.assertEqual(named_age.customer_id, self.p1.id)
             stale = deepcopy(first.context)
-            stale["lists"][0]["created"] = 0
+            stale["directory"]["created"] = 0
             self.assertEqual(self.resolve("99세 고객", stale).case, "expired")
             for answer in ("3번", "99세 고객"):
                 self.assertEqual(self.resolve(answer, first.context).case, "pending_mismatch")
@@ -106,7 +108,9 @@ class SelectionTest(unittest.TestCase):
             entry.update(name="홍길동", age=49, grade=grade)
         profiles = {p.customer_ref: replace(p, nm="홍길동", ag=49, club_grade=e["grade"])
                     for p, e in zip((self.p1, self.p2), entries)}
-        with patch.object(roster, "lookup", side_effect=lambda ref, _emp: profiles[ref]):
+        with patch.object(roster, "lookup", side_effect=lambda ref, _emp: profiles[ref]), \
+                patch.object(roster, "find_names", side_effect=lambda names, _emp:
+                             ("0001", [p for p in profiles.values() if p.nm in names])):
             out = {"customer_context": saved, "selection_case": "none"}
             questions = suggest.followup_questions(out)
             self.assertEqual(questions, ["49세 VIP 등급의 홍길동 고객을 자세히 알려줘",
@@ -124,16 +128,19 @@ class SelectionTest(unittest.TestCase):
             self.assertEqual(self.resolve(questions[1], first.context).case, "changed")
         entries[1]["grade"] = "VIP"
         self.assertEqual(suggest.followup_questions({"customer_context": saved, "selection_case": "none"}), [])
-        pending = self.resolve("홍길동 고객 만기는?", saved)
-        self.assertEqual(suggest.followup_questions({"customer_context": pending.context,
-                                                    "selection_case": pending.case}), [])
+        with patch.object(roster, "find_names", return_value=("0001", list(profiles.values()))):
+            pending = self.resolve("홍길동 고객 만기는?", saved)
+            self.assertEqual(suggest.followup_questions({"customer_context": pending.context,
+                                                        "selection_case": pending.case}), [])
 
     def test_pending_named_confirmation_preserves_real_new_question(self):
         saved = deepcopy(self.saved)
         for e in saved["lists"][0]["entries"]:
             e["name"] = "홍길동"
         profiles = {p.customer_ref: replace(p, nm="홍길동") for p in (self.p1, self.p2)}
-        with patch.object(roster, "lookup", side_effect=lambda ref, _emp: profiles[ref]):
+        with patch.object(roster, "lookup", side_effect=lambda ref, _emp: profiles[ref]), \
+                patch.object(roster, "find_names", side_effect=lambda names, _emp:
+                             ("0001", [p for p in profiles.values() if p.nm in names])):
             first = self.resolve("홍길동 고객 만기는?", saved)
             new_question = f"{self.p2.ag}세 홍길동 고객의 세액공제 잔여한도를 알려줘"
             result = self.resolve(new_question, first.context)
@@ -156,6 +163,123 @@ class SelectionTest(unittest.TestCase):
             listed = S.snapshot(dict(state, customer_context=updated), self.listed["entries"], "0001", "q")
             updated = S.remember(updated, [{"meta": {"customer_list": listed}}])
         self.assertEqual(self.resolve("목록 1의 1번 고객", updated).case, "list_missing")
+
+    def test_branch_name_lookup_without_list_or_displayed_customer(self):
+        profile = roster.lookup("0001:3", EMP)
+        self.assertNotIn(profile.customer_ref, [e["ref"] for e in self.saved["lists"][0]["entries"]])
+        for q in (f"{profile.nm} 고객 자세히 알려줘", f"{profile.nm} 자세히 알려줘",
+                  f"{profile.nm}고객 만기는?", f"{profile.nm}의 보유상품은?", f"{profile.nm}를 자세히 알려줘"):
+            result = self.resolve(q, self.empty)
+            self.assertEqual(result.customer_id, profile.id)
+            self.assertEqual(result.context["lists"], [])
+            self.assertIsNone(result.context["active"])
+        result = self.resolve(f"{profile.nm} 고객 자세히 알려줘")
+        self.assertEqual(result.context["lists"], self.saved["lists"])
+        self.assertEqual(result.context["active"], 1)
+        self.assertEqual(self.resolve("2번 고객", result.context).customer_id, self.p2.id)
+        self.assertEqual(self.resolve("그 고객 세액공제는?", result.context).customer_id, profile.id)
+        kept = S.context([{"customer_context": result.context}], EMP)
+        self.assertEqual(self.resolve("그 고객 만기는?", kept).customer_id, profile.id)
+
+    def test_branch_names_are_not_pronouns_and_multiple_names_are_not_guessed(self):
+        for q in (f"{self.p1.nm}와 {self.p2.nm} 고객 자세히 알려줘",
+                  f"{self.p1.nm}랑 {self.p2.nm} 고객 자세히 알려줘"):
+            self.assertEqual(self.resolve(q, self.empty).case, "multiple")
+        profile = replace(self.p1, nm="정송이")
+        with patch.object(roster, "find_names", return_value=("0001", [profile])), \
+                patch.object(roster, "lookup", return_value=profile):
+            self.assertEqual(self.resolve("정송이 고객 자세히 알려줘", self.empty).customer_id, self.p1.id)
+
+    def _non_target(self) -> str:
+        """관리 대상이 아니고 부점 안에서 이름이 하나뿐인 합성 고객의 내부 행 식별자."""
+        _, rows, _ = run.execute(
+            "SELECT customer_ref FROM v_irp_customer WHERE is_target = 0 AND customer_name IN ("
+            "SELECT customer_name FROM v_irp_customer GROUP BY customer_name HAVING COUNT(*) = 1) "
+            "ORDER BY customer_ref", "0001", EMP)
+        return next(r["customer_ref"] for r in rows if not C.get_profile(r["customer_ref"])
+                    or C.get_profile(r["customer_ref"]).customer_ref == r["customer_ref"])
+
+    def test_branch_customer_without_detail_gets_actual_available_values(self):
+        # 상세 원장 공급자가 없는 배포(행내 DB 등)의 경로 — 목업 DB 의 합성 고객 상세 원장(demo_detail)을 빼고 본다
+        ref = self._non_target()
+        profile = roster.lookup(ref, EMP)
+        _, rows, _ = run.execute(f"SELECT is_target FROM v_irp_customer WHERE customer_ref = '{ref}'", "0001", EMP)
+        self.assertEqual(rows[0]["is_target"], 0)
+        no_detail = patch.object(C, "DETAIL_SOURCES", [])
+        no_detail.start()
+        self.addCleanup(no_detail.stop)
+        result = self.resolve(f"{profile.nm} 고객 자세히 알려줘", self.empty)
+        self.assertEqual(result.case, "detail_unavailable")
+        self.assertIn(profile.nm, result.answer)
+        self.assertIn(f"{profile.ret:+.1f}%", result.answer)
+        self.assertIn("| IRP 잔액 |", result.answer)
+        self.assertIn("공제 잔여한도", result.answer)
+        self.assertIn("다음 만기일", result.answer)
+        self.assertNotIn(profile.customer_ref, result.answer)
+        self.assertIn("현재 확인할 수 없어요", result.answer)
+        self.assertTrue(result.sources)
+        followup = self.resolve("그 고객 만기는?", result.context)
+        self.assertEqual(followup.context["selected"]["ref"], profile.customer_ref)
+        self.assertIn(profile.nm, followup.answer)
+        self.assertEqual(suggest.followup_questions({"customer_context": result.context,
+                                                    "selection_case": result.case}), [])
+
+    def test_branch_name_lookup_connects_demo_detail(self):
+        """목업 DB 에서는 관리 대상이 아닌 합성 고객도 이름으로 고르면 상세 원장(demo_detail)으로 연결된다."""
+        ref = self._non_target()
+        profile = roster.lookup(ref, EMP)
+        result = self.resolve(f"{profile.nm} 고객 자세히 알려줘", self.empty)
+        self.assertEqual(result.case, "selected")
+        self.assertEqual(result.customer_id, ref)
+        detail = C.get_profile(ref)
+        self.assertTrue(detail.holdings)
+        self.assertEqual(C.conditions(detail), C.conditions(profile))
+
+    def test_branch_lookup_is_scoped_and_fails_closed(self):
+        q = f"{self.p1.nm} 고객 자세히 알려줘"
+        for emp, case in (("3902201", "name_missing"), ("9999999", "scope_changed"), (None, "scope_changed")):
+            ctx = S.context([], emp)
+            result = S.resolve(q, ctx, emp)
+            self.assertEqual(result.case, case)
+            self.assertIsNone(result.customer_id)
+            self.assertIsNone(result.context["selected"])
+        with patch.object(roster, "find_names", side_effect=run.DBUnavailable("offline")):
+            self.assertEqual(self.resolve(q, self.empty).case, "db_unavailable")
+        with patch.object(run, "execute", return_value=("sql", [], True)):
+            self.assertEqual(self.resolve(q, self.empty).case, "db_unavailable")
+
+    def test_branch_duplicate_outside_displayed_subset_requires_confirmation(self):
+        emp = "3902201"
+        code, profiles = roster.find_names(["김지유"], emp)
+        self.assertEqual(len(profiles), 2)
+        first = profiles[0]
+        state = {"employee_id": emp, "question": "일부 고객 조회"}
+        listed = S.snapshot(state, [{"ref": first.customer_ref, "name": first.nm,
+                                    "age": first.ag, "grade": first.club_grade}], code, "일부 고객 조회")
+        saved = S.remember(S.context([], emp), [{"meta": {"customer_list": listed}}])
+        result = S.resolve("김지유 고객 만기는?", saved, emp)
+        self.assertEqual(result.case, "duplicate_name")
+        self.assertEqual(len(result.clarify["options"]), 2)
+        self.assertEqual(result.context["lists"], saved["lists"])
+        self.assertEqual(result.context["active"], saved["active"])
+        confirmed = S.resolve("2번", result.context, emp)
+        self.assertEqual(confirmed.context["selected"]["ref"], profiles[1].customer_ref)
+        explicit = S.resolve("목록 1의 김지유 고객 만기는?", saved, emp)
+        self.assertEqual(explicit.context["selected"]["ref"], first.customer_ref)
+        expired = deepcopy(result.context)
+        expired["directory"]["created"] = 0
+        self.assertEqual(S.resolve("2번", expired, emp).case, "expired")
+
+    def test_name_lookup_uses_fixed_scoped_sql_and_safe_values(self):
+        with patch.object(run, "execute", wraps=run.execute) as execute:
+            code, profiles = roster.find_names(["이준호", "' OR 1=1 --", "%"], EMP)
+        self.assertEqual(code, "0001")
+        self.assertEqual([p.nm for p in profiles], ["이준호"])
+        sql, branch, employee = execute.call_args.args
+        self.assertEqual((branch, employee), ("0001", EMP))
+        self.assertNotIn("is_target", sql)
+        self.assertNotIn("OR 1=1", sql)
+        self.assertIn("customer_name IN ('이준호')", sql)
 
     def test_empty_new_list_and_aggregate(self):
         selected = self.resolve("1번 고객").context
@@ -222,6 +346,7 @@ class SelectionTest(unittest.TestCase):
 
     def test_malformed_context_is_discarded(self):
         for change in ({"lists": "invalid"}, {"lists": [{}]}, {"pending": "invalid"},
+                       {"directory": "invalid"}, {"directory": {"number": 0}},
                        {"selected": {"list": 1, "number": "bad"}}):
             broken = dict(self.saved, **change)
             kept = S.context([{"question": "q", "customer_context": broken}], EMP)
@@ -257,7 +382,8 @@ class SelectionTest(unittest.TestCase):
         saved["lists"][0]["entries"][0]["ref"] = None
         questions = suggest.followup_questions({**out, "customer_context": saved})
         self.assertTrue(questions)
-        self.assertTrue(all(self.resolve(q, saved).customer_id == self.p2.id for q in questions))
+        # 이름 질문은 목록 식별자가 없더라도 부점 전체를 정확 일치 재조회해 연결 가능.
+        self.assertEqual({self.resolve(q, saved).customer_id for q in questions}, {self.p1.id, self.p2.id})
         replay = {**out, "selection_case": "list_replay", "question": "목록 다시 보여줘"}
         questions = suggest.followup_questions(replay)
         self.assertNotIn("목록 다시 보여줘", questions)
@@ -384,6 +510,19 @@ class SelectionTest(unittest.TestCase):
             self.assertIn("999", r.text)
             chat("1번 고객", session="different-session")
             self.assertEqual(len(seen), count)
+            # 목록·중점관리 추천 없이 바로 이름으로 상세 고객 연결.
+            direct = chat("이준호 고객 자세히 알려줘", session="direct-name")
+            self.assertEqual(seen[-1]["customer_id"], roster.lookup("0001:3", EMP).id)
+            self.assertTrue(recommendations(direct))
+            count = len(seen)
+            # 상세 원장 공급자가 없는 배포의 경로 — 부점 DB 기본정보만 코드로 답한다
+            with patch.object(C, "DETAIL_SOURCES", []):
+                available = chat("오다은 고객 자세히 알려줘", session="branch-values")
+            self.assertEqual(len(seen), count)  # 원장에 있는 값만 코드로 표시.
+            events = [json.loads(line) for line in available.json()["content"].splitlines()]
+            self.assertTrue(next(e["items"] for e in events if e["type"] == "sources"))
+            self.assertIn("오다은", available.text)
+            self.assertIn("IRP 잔액", available.text)
         context_store.clear()
 
 

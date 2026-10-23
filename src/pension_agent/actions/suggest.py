@@ -372,7 +372,7 @@ def _customer_followups(out: dict) -> list[str] | None:
     case = out.get("selection_case")
     pending = saved.get("pending") or {}
     lists = saved.get("lists") or []
-    listed = next((s for s in lists if s["number"] == (pending.get("list") or saved.get("active"))), None)
+    listed = selection.get_list(saved, pending.get("list", saved.get("active")))
 
     def resolves(question: str, accepted: set[str], expected_ref: str | None = None) -> bool:
         try:
@@ -406,8 +406,10 @@ def _customer_followups(out: dict) -> list[str] | None:
                   and resolves(replay, {"list_replay"}))
     selected = saved.get("selected")
     profile = C.get_profile(out.get("customer_id") or "")
+    if selected and case == "detail_unavailable":
+        return []
     if selected and profile and case == "selected":
-        selected_list = next((s for s in lists if s["number"] == selected["list"]), {})
+        selected_list = selection.get_list(saved, selected["list"]) or {}
         entries = selected_list.get("entries") or []
         entry = next((e for e in entries if e.get("ref") == selected["ref"]), {})
         reference = selection.name_reference(entry, entries) or "이 고객"
@@ -434,7 +436,8 @@ def _customer_followups(out: dict) -> list[str] | None:
         picked = []
         for q in candidates:
             named = re.sub(r"이 고객(?!군)", lambda _: reference, q)
-            if selected["list"] != saved.get("active") and reference != "이 고객":
+            if (selected["list"] != selection.DIRECTORY and selected["list"] != saved.get("active")
+                    and reference != "이 고객"):
                 # 이전 목록의 고객을 골랐으면 최신 목록의 동명이인으로 바뀌지 않게 목록도 명시.
                 named = (f"목록 {selected['list']}의 {named}" if reference in named
                          else f"목록 {selected['list']}의 {reference}에 대해, {named}")
@@ -454,7 +457,7 @@ def _customer_followups(out: dict) -> list[str] | None:
             if not reference:
                 continue
             q = f"{reference}을 자세히 알려줘"
-            if not _already(_norm(q), asked) and resolves(q, {"selected"}):
+            if not _already(_norm(q), asked) and resolves(q, {"selected", "detail_unavailable"}, entry.get("ref")):
                 candidates.append(q)
             if len(candidates) >= 2:
                 break

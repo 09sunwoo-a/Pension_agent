@@ -148,3 +148,23 @@ def lookup(customer_ref: str, emp_no: str | None) -> C.Profile | None:
     if cut or len(rows) != 1:
         return None
     return row_profile({**rows[0], "branch_code": code})
+
+
+def find_names(names: list[str], emp_no: str | None) -> tuple[str, list[C.Profile]]:
+    """직원 부점 전체에서 정확한 이름 후보 조회. 관리 대상 여부로 제한하지 않음."""
+    from pension_agent.tools.branch_briefing import run  # noqa: PLC0415
+
+    mine = run.my_branch(emp_no)
+    if not mine:
+        raise LookupError("직원 사번으로 소속 부점을 확인하지 못했습니다")
+    # 고정 코드 질의의 값만 허용. SQL 조각·따옴표·와일드카드는 받지 않음.
+    safe = sorted({n for n in names if re.fullmatch(r"[가-힣A-Za-z]{2,30}", n)})
+    if not safe:
+        return mine[0], []
+    values = ", ".join(f"'{name}'" for name in safe)
+    _sql, rows, cut = run.execute(
+        f"SELECT * FROM v_irp_customer WHERE customer_name IN ({values}) ORDER BY customer_ref",
+        mine[0], emp_no, limit=ROSTER_MAX)
+    if cut:
+        raise run.DBUnavailable("이름 조회 결과가 행 수 상한을 넘었습니다. 고객 구분 정보를 추가해 주세요")
+    return mine[0], [row_profile({**r, "branch_code": mine[0]}) for r in rows]
