@@ -316,6 +316,7 @@ def _change(seg: dict, st: dict) -> str:
 MEANINGS = {
     "transfer_out_count": "다른 금융기관으로 빠져나간 계좌 — 늘면 이탈이 늘었다는 뜻",
     "transfer_out_amt": "다른 금융기관으로 빠져나간 금액 — 늘면 이탈이 늘었다는 뜻",
+    "low_return_count": "운용 수익률이 기준에 못 미치는 고객 — 늘면 운용 관리가 필요한 고객이 늘었다는 뜻",
 }
 
 
