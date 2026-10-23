@@ -468,6 +468,8 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     document = "\n\n".join(x for x in [
         f"목록 {listed['number']} · " + head.removeprefix("■ "),
         *intro,
+        (f"모든 고객에게 같은 사유({', '.join(target_table.common(found))})는 표에서 뺐습니다."
+         if target_table.common(found) else ""),
         target_table.render(found) if found else "",
         *(["공제한도 소진율은 연금저축·IRP 합산 연 900만원 기본한도 기준입니다. "
            "고객 PIN은 원장에 없으면 미확인으로 표시합니다."] if found else []),

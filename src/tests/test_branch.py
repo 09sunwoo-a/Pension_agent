@@ -706,9 +706,21 @@ def check_target_table() -> None:
     check(all(f"(소진 {pct}%) |" in row for row, pct in zip(sample_rows, (100, 0, 67, 39)))
           and "(-9.4%) |" in sample_rows[-1] and "(+6.2%) |" in sample_rows[0],
           "소진율 경계·반올림과 수익률의 양수·음수 부호가 정확하다")
-    check(all(all(note.cond_text(target, c) in row for c in target.conds)
-              and "연금저축 보유" in row for target, row in zip(samples, sample_rows)),
+    alone = [target_table.render([t]).splitlines()[2] for t in samples]
+    check(all(all(r in row for r in target_table.reasons(t)) and "연금저축 보유" in row
+              for t, row in zip(samples, alone)),
           "관리 사유는 세 건을 넘어도 생략하지 않고 연금저축 보유도 유지한다")
+    check(all("편중(80% 이상)" not in r and "만기예금 보유" not in r for r in alone),
+          "관리 사유는 짧은 이름으로 쓴다(«원리금보장 N%» · «만기예금 D-n(금액)»)")
+    same = target_table.common(samples)
+    check(same and all(not any(f", {x}" in row or f"| {x}" in row for x in same) for row in sample_rows),
+          "모든 고객에게 글자까지 같은 사유는 표에서 뺀다", f"{same}")
+    check("모든 고객에게 같은 사유" in doc, "뺀 공통 사유는 표 위에서 한 번 밝힌다")
+    merged = Target(replace(p, rk="위험중립형", port=[20, 6, 70, 4], pension_savings=False),  # 위험자산 74%
+                    ["lim", "mis", "nod"])
+    check(target_table.reasons(merged) == ["위험자산 74%(한도 초과 · 성향 불일치)", "디폴트옵션 미설정"],
+          "같은 비중을 두 번 말하지 않는다(위험자산 한도 초과 + 성향 불일치 → 한 칸)",
+          str(target_table.reasons(merged)))
     dirty = Target(replace(p, nm="고객|이름\n<태그>", id="0001:내부키", club_grade=None), ["tax"])
     dirty_row = target_table.render([dirty]).splitlines()[2]
     check(len(re.split(r"(?<!\\)\|", dirty_row)) == 9 and "<태그>" not in dirty_row
