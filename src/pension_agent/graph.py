@@ -125,7 +125,7 @@ def ask(
 ) -> dict[str, Any]:
     """한 턴 실행. 상태 미보유 — 반환된 history 를 다음 호출에 넘김.
 
-    customer_id: 열린 브리핑 화면 고객 id. 없으면 고객 관련 기능은 «화면을 먼저 열어달라»
+    customer_id: 열린 브리핑 화면 고객 id. 없으면 부점 전체 이름 조회·표시 목록 선택으로도 연결 가능
     session_id: 상담이력 단위. 기본 "default"
     on_progress: 진행 표시 콜백(ContextVar 전달 · 실패해도 답변 계속)
     x_client_user: 모든 LLM 호출의 `x-client-user` 헤더(쿼터 버킷) — 비우면 429 위험
@@ -156,7 +156,7 @@ def ask(
                            pending=(_pending_label(history)))
         with progress.reporting(on_progress):
             if selection.answer is not None:
-                out = {"question": question, "answer": selection.answer, "sources": [],
+                out = {"question": question, "answer": selection.answer, "sources": selection.sources or [],
                        "evidence": [], "intent": "situation", "clarify": selection.clarify,
                        "customer_id": customer_id}
             else:
