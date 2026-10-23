@@ -24,12 +24,13 @@ def _pin(profile: Profile) -> str:
 
 
 def render(targets: list[Target]) -> str:
-    """선정 순서·모든 사유를 유지한 표 하나. PIN 은 기존 쪽지의 마스킹 규칙 적용."""
+    """선정 순서·모든 사유를 유지한 표 하나. PIN 은 기존 쪽지의 마스킹 규칙 적용.
+    잔액과 1년 수익률 · 공제 잔여한도와 소진율은 한 칸에 괄호로 둔다(2026-10-23 사용자 결정 — 열 수를 줄인다)."""
     if not targets:
         return note.EMPTY_BODY
     lines = [
-        "| 순서 | 고객 PIN | 고객(나이·등급) | 투자성향 | IRP 잔액 | 1년 수익률 | 공제한도 소진율 | 공제 잔여한도 | 관리 사유 |",
-        "|---:|---|---|---|---:|---:|---:|---:|---|",
+        "| 순서 | 고객 PIN | 고객(나이·등급) | 투자성향 | IRP 잔액(1년 수익률) | 공제 잔여한도(소진율) | 관리 사유 |",
+        "|---:|---|---|---|---:|---:|---|",
     ]
     for i, target in enumerate(targets, 1):
         p = target.profile
@@ -38,8 +39,8 @@ def render(targets: list[Target]) -> str:
         reasons = [note.cond_text(target, cond) for cond in target.conds]
         if p.pension_savings:
             reasons.append("연금저축 보유")
-        cells = [str(i), _pin(p), customer, p.rk, note.won(p.bal), f"{p.ret:+.1f}%",
-                 f"{used:.0f}%", note.won(p.room * 10_000),
+        cells = [str(i), _pin(p), customer, p.rk, f"{note.won(p.bal)} ({p.ret:+.1f}%)",
+                 f"{note.won(p.room * 10_000)} (소진 {used:.0f}%)",
                  " / ".join(reasons)]
         lines.append("| " + " | ".join(_cell(value) for value in cells) + " |")
     return "\n".join(lines)

@@ -694,7 +694,8 @@ def check_target_table() -> None:
           "표의 고객·순번은 추천 순서를 그대로 보존한다")
     check(not re.search(r"\d{6}-\d{7}", doc) and "고객 PIN" in doc and "미확인" in doc,
           "PIN 은 마스킹하고 PIN 없는 합성 고객의 내부 키는 미확인이다")
-    check("공제한도 소진율" in doc and "공제 잔여한도" in doc and "900만원" in doc,
+    check("공제한도 소진율" in doc and "공제 잔여한도(소진율)" in doc and "IRP 잔액(1년 수익률)" in doc
+          and "900만원" in doc,
           "소진율·잔여한도와 기본한도 기준이 함께 표시된다")
 
     p = C.PERSONAS[0]
@@ -702,15 +703,15 @@ def check_target_table() -> None:
                for room, ret in ((0, 6.2), (900, 2.8), (300, 21.6), (550, -9.4))]
     rendered = target_table.render(samples)
     sample_rows = rendered.splitlines()[2:]
-    check(all(f"| {pct}% |" in row for row, pct in zip(sample_rows, (100, 0, 67, 39)))
-          and "-9.4%" in sample_rows[-1] and "+6.2%" in sample_rows[0],
+    check(all(f"(소진 {pct}%) |" in row for row, pct in zip(sample_rows, (100, 0, 67, 39)))
+          and "(-9.4%) |" in sample_rows[-1] and "(+6.2%) |" in sample_rows[0],
           "소진율 경계·반올림과 수익률의 양수·음수 부호가 정확하다")
     check(all(all(note.cond_text(target, c) in row for c in target.conds)
               and "연금저축 보유" in row for target, row in zip(samples, sample_rows)),
           "관리 사유는 세 건을 넘어도 생략하지 않고 연금저축 보유도 유지한다")
     dirty = Target(replace(p, nm="고객|이름\n<태그>", id="0001:내부키", club_grade=None), ["tax"])
     dirty_row = target_table.render([dirty]).splitlines()[2]
-    check(len(re.split(r"(?<!\\)\|", dirty_row)) == 11 and "<태그>" not in dirty_row
+    check(len(re.split(r"(?<!\\)\|", dirty_row)) == 9 and "<태그>" not in dirty_row
           and "0001:내부키" not in dirty_row and "미확인" in dirty_row,
           "셀의 구분자·줄바꿈·HTML 과 내부 키가 표를 깨뜨리거나 PIN 이 되지 않는다")
     check(target_table.render([]) == note.EMPTY_BODY, "0명은 빈 표 대신 대상 없음으로 안내한다")

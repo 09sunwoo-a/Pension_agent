@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from pension_agent import context_store, graph, tools
-from pension_agent.common import config
+from pension_agent.common import config, session_store
 from pension_agent.actions import suggest
 from pension_agent.state import format_history
 from pension_agent.tools import customer_selection as S
@@ -352,7 +352,10 @@ class SelectionTest(unittest.TestCase):
                 return {**state, "answer": "선택 고객의 답변", "sources": [], "evidence": []}
 
         context_store.clear()
+        # 상담이력은 임시 폴더에 쓰고 끝나면 지운다 — session_store 는 경로를 모듈 상수로 들고 있어(config 값을
+        # 임포트 때 복사) config 만 바꾸면 실제 runtime/session_data 에 남았다(2026-10-23)
         with tempfile.TemporaryDirectory() as tmp, patch.object(config, "SESSION_DATA_DIR", Path(tmp)), \
+                patch.object(session_store, "SESSION_DATA_DIR", Path(tmp)), \
                 patch.object(graph, "_AGENT", Fake()), TestClient(main.app) as client:
             def chat(q, session="selection-test"):
                 r = client.post("/chat", json={"input_value": json.dumps({
