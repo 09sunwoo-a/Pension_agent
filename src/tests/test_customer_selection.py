@@ -407,6 +407,24 @@ class SelectionTest(unittest.TestCase):
         with patch.object(S, "resolve", side_effect=RuntimeError("validation failed")):
             self.assertEqual(suggest.followup_questions(out), [])
 
+    def test_new_list_skips_customers_already_viewed(self):
+        """고객을 자세히 본 뒤 몇 턴 지나 목록을 다시 띄우면, 그 고객을 «자세히 알려줘»로 또 권하지 않는다
+        (2026-10-23 실측 — 2번 소혜진을 본 뒤 «우리 부점 중점 관리 고객»에 «소혜진 고객을 자세히 알려줘»가 섰다)."""
+        p3 = roster.lookup("0001:3", EMP)
+        viewed = self.resolve("2번 고객 자세히")
+        self.assertEqual(viewed.customer_id, self.p2.id)
+        history = [{"question": "2번 고객 자세히", "customer_context": viewed.context},
+                   {"question": "IRP 수수료 얼마야?", "customer_context": viewed.context}]
+        relisted = S.snapshot({**self.state, "customer_context": viewed.context}, [
+            {"ref": p.customer_ref, "name": p.nm, "age": p.ag, "grade": p.club_grade}
+            for p in (self.p1, self.p2, p3)], "0001", "우리 부점 중점 관리 고객 알려줘")
+        saved = S.remember(viewed.context, [{"meta": {"customer_list": relisted, "document": "목록 2"}}])
+        out = {"question": "우리 부점 중점 관리 고객 알려줘", "customer_context": saved,
+               "selection_case": "none", "history": history,
+               "evidence": [{"tool": "branch_targets", "meta": {"customer_list": relisted}}]}
+        self.assertEqual(suggest.followup_questions(out),
+                         [f"{p.nm} 고객을 자세히 알려줘" for p in (self.p1, p3)])
+
     def test_selected_recommendations_use_unasked_material(self):
         selected = self.resolve("2번 고객")
         out = {"question": "2번 고객 만기 상품은?", "customer_context": selected.context,

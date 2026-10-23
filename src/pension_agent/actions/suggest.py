@@ -451,8 +451,12 @@ def _customer_followups(out: dict) -> list[str] | None:
         asked = {_norm(t.get("question")) for t in out.get("history") or []
                  if (t.get("customer_context") or {}).get("active") == listed["number"]}
         asked.add(_norm(out.get("question")))
+        # 이 대화에서 이미 골라 본 고객은 새 목록에서도 다시 권하지 않는다 — 고객을 자세히 본 뒤 몇 턴 지나
+        # 중점관리 고객을 다시 물으면 그 고객이 목록 앞쪽에 있어 «○○ 고객을 자세히 알려줘»가 또 섰다(2026-10-23 실측).
+        seen_refs = {((t.get("customer_context") or {}).get("selected") or {}).get("ref")
+                     for t in out.get("history") or []} - {None}
         candidates = []
-        for entry in listed["entries"][:MAX_CUSTOMER_PROBES]:
+        for entry in [e for e in listed["entries"] if e.get("ref") not in seen_refs][:MAX_CUSTOMER_PROBES]:
             reference = selection.name_reference(entry, listed["entries"])
             if not reference:
                 continue
