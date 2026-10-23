@@ -378,7 +378,8 @@ def briefing_frame(st: dict, focus: int | None) -> dict:
     """부점 브리핑 답변의 틀(코드가 만든다 — LLM 은 가운데 문장만 쓴다). 화면 기획안의 브리핑 카드 · 지표 목록 ·
     고객 카드를 마크다운 인용 상자 + 표 하나로 옮긴 것(2026-10-23 사용자 결정 «A안 · 열 이름 부점 현황 | 값»).
 
-    반환: head(인용 상자 첫 줄) · caption(인용 상자 끝 줄) · table · bold(본문에서 굵게 할 «N명»)."""
+    반환: head(인용 상자 첫 줄) · table · bold(본문에서 굵게 할 «N명»). 분석 기준 줄(«전월말·오늘 … 기준»)은
+    두지 않는다(2026-10-23 사용자 결정 — 날짜는 제목에 있다)."""
     ind = {i["id"]: i for i in st["indicators"]}
     day = clock.today()
     rows = [(ind[k]["name"], _short(ind[k]) + _arrow(ind[k]))
@@ -394,17 +395,16 @@ def briefing_frame(st: dict, focus: int | None) -> dict:
     ]
     table = "\n".join(["| 부점 현황 | 값 |", "|---|---:|", *(f"| {a} | {b} |" for a, b in rows)])
     return {"head": f"**오늘의 부점 브리핑** · {day.month}월 {day.day}일 {_WEEKDAYS[day.weekday()]}요일",
-            "caption": f"_전월말·오늘 고객상태 및 관리신호 분석 · {day.month}.{day.day} 기준_",
             "table": table, "bold": f"{focus}명" if focus else ""}
 
 
 def framed(answer: str, frame: dict) -> str:
-    """LLM 이 쓴 브리핑 문장을 틀에 넣는다 — 인용 상자(제목 · 문장 · 분석 기준) 아래 표. 찾은 고객 수는 굵게."""
+    """LLM 이 쓴 브리핑 문장을 틀에 넣는다 — 인용 상자(제목 · 문장) 아래 표. 찾은 고객 수는 굵게."""
     body = answer.strip()
     if frame.get("bold"):
         body = re.sub(rf"(고객\s*)?(?<![\d,]){re.escape(frame['bold'])}",
                       lambda m: f"**{m.group(0).strip()}**", body, count=1)
-    lines = [frame["head"], "", *body.splitlines(), "", frame["caption"]]
+    lines = [frame["head"], "", *body.splitlines()]
     box = "\n".join(f"> {ln}" if ln.strip() else ">" for ln in lines)
     return f"{box}\n\n{frame['table']}"
 

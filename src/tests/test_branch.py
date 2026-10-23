@@ -625,8 +625,8 @@ def check_briefing_frame() -> None:
         check(f"오늘의 중점관리 고객: {focus}명" in ev["text"], "재료에 중점관리 고객 수")
         out = tool.framed(f"오늘은 고객 {focus}명을 찾았습니다.", frame)
         check(f"**고객 {focus}명**" in out, "찾은 고객 수는 굵게", out)
-        check(out.startswith("> **오늘의 부점 브리핑** · ") and "> _전월말·오늘 고객상태" in out,
-              "인용 상자: 제목 · 문장 · 분석 기준")
+        check(out.startswith("> **오늘의 부점 브리핑** · ") and "분석" not in out.split("\n\n|")[0],
+              "인용 상자: 제목 · 문장(분석 기준 줄 없음)")
         check(out.rstrip().endswith(table.splitlines()[-1]), "표는 인용 상자 아래")
     narrow = tool._branch_status(_state(EMP, "디폴트옵션 미설정 고객이 지난달보다 늘었어?"), "q")
     check(narrow["meta"]["frame"] is None, "한 고객군만 물은 질문에는 틀을 붙이지 않는다")
