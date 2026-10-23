@@ -607,6 +607,32 @@ def check_pension_savings() -> None:
     check(all(got.get(n) == v for n, v in known.items()), "목업 고객의 연금저축은 원장 값 그대로(비면 미확인)", f"{got}")
 
 
+def check_briefing_frame() -> None:
+    """부점 브리핑 답변 틀(2026-10-23 사용자 결정) — 코드가 만든 제목·분석 기준·표 하나(부점 현황 | 값) 안에 LLM 문장.
+    한 고객군만 물은 질문에는 틀을 붙이지 않는다. 찾은 고객 수는 굵게."""
+    ev = tool._branch_status(_state(EMP, "오늘의 부점 브리핑 알려줘"), "오늘 부점 브리핑")
+    frame = ev["meta"]["frame"]
+    check(bool(frame), "부점 브리핑 질문에는 답변 틀이 붙는다")
+    table = frame["table"]
+    check(table.startswith("| 부점 현황 | 값 |"), "표의 열 이름은 «부점 현황 | 값»", table.splitlines()[0])
+    for label in ("부점 잔액", "부점 수익률", "고유계정대 잔액", "원리금보장 비중", "올해 계약이전",
+                  "우리부점 관리 고객 (개인형 IRP)", "수익률 저조 고객 (수익률 1% 미만)", "적립금 1억 이상 고객"):
+        check(f"| {label} |" in table, f"표에 «{label}» 줄", table)
+    check("(전체 적립금의 " in table.splitlines()[-1].split("|")[2], "적립금 비중은 값 열에 있다", table.splitlines()[-1])
+    check(len([ln for ln in table.splitlines() if ln.startswith("|")]) == 10, "표는 하나(머리 2줄 + 8줄)")
+    focus = ev["meta"]["focus"]
+    if focus:
+        check(f"오늘의 중점관리 고객: {focus}명" in ev["text"], "재료에 중점관리 고객 수")
+        out = tool.framed(f"오늘은 고객 {focus}명을 찾았습니다.", frame)
+        check(f"**고객 {focus}명**" in out, "찾은 고객 수는 굵게", out)
+        check(out.startswith("> **오늘의 부점 브리핑** · ") and "> _전월말·오늘 고객상태" in out,
+              "인용 상자: 제목 · 문장 · 분석 기준")
+        check(out.rstrip().endswith(table.splitlines()[-1]), "표는 인용 상자 아래")
+    narrow = tool._branch_status(_state(EMP, "디폴트옵션 미설정 고객이 지난달보다 늘었어?"), "q")
+    check(narrow["meta"]["frame"] is None, "한 고객군만 물은 질문에는 틀을 붙이지 않는다")
+    check("화면 표" not in narrow["text"], "틀이 없으면 재료에 «화면 표» 줄도 없다")
+
+
 def check_question_set() -> None:
     """시험 질문(tests/branch_questions.py) — LLM 없이 확인할 수 있는 것 전부.
     정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
@@ -660,6 +686,7 @@ def main() -> int:
     check_strategy()
     check_targets()
     check_pension_savings()
+    check_briefing_frame()
     check_question_set()
 
     passed = sum(1 for ok, _, _ in _results if ok)

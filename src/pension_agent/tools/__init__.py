@@ -142,6 +142,7 @@ from pension_agent.tools.kb_search.playbook import (  # noqa: F401
 from pension_agent.tools.branch_briefing.tool import (  # noqa: F401
     _branch,
     _branch_status,
+    framed,
 )
 from pension_agent.tools.general.answered import (  # noqa: F401
     CARDS_HEADER,

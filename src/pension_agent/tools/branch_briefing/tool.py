@@ -337,6 +337,89 @@ def status_text(st: dict) -> str:
     return "\n".join(lines)
 
 
+#: 부점 브리핑 화면 틀을 붙이는 질문 — 직원이 부점 전체 상태를 물었을 때만(«디폴트옵션 미설정 고객이 지난달보다
+#: 늘었어?»처럼 한 고객군을 물은 답에 지표 표가 따라붙지 않게). 2026-10-23 사용자 결정 — 화면 기획안의 느낌.
+BRIEFING_WORDS = ("브리핑", "현황")
+_WEEKDAYS = "월화수목금토일"
+
+
+def _eok(v: float) -> str:
+    """금액 줄임 표기(화면 기획안) — 1천만원 이상은 «526.8억»처럼 억 단위 소수 한 자리, 그 밖은 원 표기."""
+    if abs(v) >= 10_000_000:
+        return f"{abs(v) / 100_000_000:,.1f}억"
+    return won(int(abs(v)))
+
+
+def _short(ind: dict, key: str = "now") -> str:
+    v = ind[key]
+    if ind["unit"] == "원":
+        return _eok(v)
+    if ind["unit"] == "%":
+        return f"{v:.2f}%" if ind["id"] == "branch_return_rate" else f"{v:.1f}%"
+    return f"{int(v):,}{'명' if ind['unit'] == '계좌' else ind['unit']}"
+
+
+def _arrow(ind: dict) -> str:
+    """증감 표기 «(▲ 1.3억)». 판정 기준 미만의 변화는 붙이지 않는다(«변화 없음»)."""
+    if ind["direction"] == "변화 없음":
+        return ""
+    d = ind["delta"]
+    mark = "▲" if d > 0 else "▼"
+    if ind["unit"] == "원":
+        size = _eok(d)
+    elif ind["unit"] == "%":
+        size = f"{abs(d):.2f}%p" if ind["id"] == "branch_return_rate" else f"{abs(d):.1f}%p"
+    else:
+        size = f"{abs(int(d)):,}{ind['unit']}"
+    return f" ({mark} {size})"
+
+
+def briefing_frame(st: dict, focus: int | None) -> dict:
+    """부점 브리핑 답변의 틀(코드가 만든다 — LLM 은 가운데 문장만 쓴다). 화면 기획안의 브리핑 카드 · 지표 목록 ·
+    고객 카드를 마크다운 인용 상자 + 표 하나로 옮긴 것(2026-10-23 사용자 결정 «A안 · 열 이름 부점 현황 | 값»).
+
+    반환: head(인용 상자 첫 줄) · caption(인용 상자 끝 줄) · table · bold(본문에서 굵게 할 «N명»)."""
+    ind = {i["id"]: i for i in st["indicators"]}
+    day = clock.today()
+    rows = [(ind[k]["name"], _short(ind[k]) + _arrow(ind[k]))
+            for k in ("total_eval_amt", "branch_return_rate", "idle_cash_total", "safe_asset_ratio")]
+    rows.append((ind["transfer_out_count"]["name"],
+                 f"{_short(ind['transfer_out_count'])} · {_short(ind['transfer_out_amt'])}"))
+    rows += [
+        ("우리부점 관리 고객 (개인형 IRP)", f"**{_short(ind['customer_count'])}**"),
+        (f"{ind['low_return_count']['name']} (수익률 {st.get('low_return_pct', 1):g}% 미만)",
+         f"**{_short(ind['low_return_count'])}**"),
+        (ind["high_balance_count"]["name"],
+         f"**{_short(ind['high_balance_count'])}** (전체 적립금의 {_short(ind['high_balance_share'])})"),
+    ]
+    table = "\n".join(["| 부점 현황 | 값 |", "|---|---:|", *(f"| {a} | {b} |" for a, b in rows)])
+    return {"head": f"**오늘의 부점 브리핑** · {day.month}월 {day.day}일 {_WEEKDAYS[day.weekday()]}요일",
+            "caption": f"_전월말·오늘 고객상태 및 관리신호 분석 · {day.month}.{day.day} 기준_",
+            "table": table, "bold": f"{focus}명" if focus else ""}
+
+
+def framed(answer: str, frame: dict) -> str:
+    """LLM 이 쓴 브리핑 문장을 틀에 넣는다 — 인용 상자(제목 · 문장 · 분석 기준) 아래 표. 찾은 고객 수는 굵게."""
+    body = answer.strip()
+    if frame.get("bold"):
+        body = re.sub(rf"(고객\s*)?(?<![\d,]){re.escape(frame['bold'])}",
+                      lambda m: f"**{m.group(0).strip()}**", body, count=1)
+    lines = [frame["head"], "", *body.splitlines(), "", frame["caption"]]
+    box = "\n".join(f"> {ln}" if ln.strip() else ">" for ln in lines)
+    return f"{box}\n\n{frame['table']}"
+
+
+def _focus_count(emp_no: str | None, st: dict) -> int | None:
+    """오늘의 중점관리 고객 수(관리 대상 추천과 같은 명부 — roster.focus_names). 오늘 CASE 가 없으면 None."""
+    from pension_agent.tools.branch_briefing import roster  # noqa: PLC0415
+    if not st["cases"]:
+        return None
+    try:
+        return len(roster.focus_names(emp_no, [c["id"] for c in st["cases"]]))
+    except (LookupError, run.DBUnavailable, status.RuleError):
+        return None
+
+
 def _branch_status(state: AgentState, query: str) -> Evidence | None:
     """오늘 부점 현황 — 지표·세그먼트 변화·오늘의 CASE. 화면 패널과 같은 계산(status.compute)."""
     if run.backend() == "off":
@@ -350,6 +433,15 @@ def _branch_status(state: AgentState, query: str) -> Evidence | None:
         raise ToolFailure("branch_status", str(exc)) from exc
     observability.step("branch_status", st["branch"], cases=",".join(st["cases_all"]) or "-")
     text = status_text(st)
+    focus = _focus_count(emp_no, st)
+    if focus is not None:
+        text += (f"\n· 오늘의 중점관리 고객: {focus}명 — 관리 대상 중 오늘의 관리 방향의 «우선 관리할 고객» 조건을 "
+                 "모두 갖춘 고객")
+    question = ((state or {}).get("question") or "").strip()
+    frame = briefing_frame(st, focus) if any(w in question for w in BRIEFING_WORDS) else None
+    if frame:
+        text += ("\n· 화면 표: 이 답변 아래에 부점 지표 표(잔액·수익률·고유계정대·원리금보장 비중·계약이전·고객 수)가 "
+                 "함께 나갑니다")
     uses_draft = any(c["grade"] == "D" for c in st["cases"]) or any(
         s["grade"] == "D" for s in st["segments"])
     return _ev("branch_status", query, text,
@@ -358,4 +450,4 @@ def _branch_status(state: AgentState, query: str) -> Evidence | None:
                  "doc": "부점 DB 고정 뷰(오늘 · 전월말) · 기준은 타겟 룰베이스 부점 시트",
                  "score": None, "page": None}],
                marks=[DRAFT_MARK] if uses_draft else None,
-               meta={"status": st})
+               meta={"status": st, "focus": focus, "frame": frame})

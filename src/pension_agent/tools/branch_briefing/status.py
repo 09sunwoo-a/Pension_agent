@@ -274,6 +274,9 @@ def compute(emp_no: str | None) -> dict:
         "rule_status": r.status,
         # 세그먼트 «증가·감소» 판정 최소 인원(BP-01)
         "segment_step": int(seg_step),
+        # 수익률 저조 · 고액 적립금 기준(BP-08 · BP-09) — 표에 «수익률 1% 미만»처럼 기준을 함께 적는다
+        "low_return_pct": _param(r, _LOW_RETURN_PARAM, 1),
+        "high_balance_amt": _param(r, _HIGH_BALANCE_PARAM, 100_000_000),
     }
 
 

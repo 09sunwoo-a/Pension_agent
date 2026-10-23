@@ -640,6 +640,10 @@ def compose(state: AgentState) -> dict[str, Any]:
                 "llm_error": f"{type(exc).__name__}: {exc}",
                 "sources": _sources(evidence, [], [])}
 
+    # 답변 틀(부점 브리핑 — 코드가 만든 제목·표). 검사를 통과한 문장에만 씌운다
+    frame = next((e["meta"].get("frame") for e in evidence if (e.get("meta") or {}).get("frame")), None)
+    if answer and frame:
+        answer = tools.framed(answer, frame)
     if answer:
         # 빠진 표시는 본문 아래 제 줄로
         parts = [_break_marks(answer)] + ([ "\n".join(_as_mark(a) for a in appends)] if appends else [])
