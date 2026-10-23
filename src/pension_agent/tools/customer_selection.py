@@ -1,4 +1,4 @@
-"""대화의 고객 선택 — 표시한 목록의 내부 행 식별자를 해석·재확인. LLM 추측 금지.
+"""대화의 고객 선택 — 목록 번호 또는 부점 전체 이름 조회로 식별·재확인. LLM 추측 금지.
 
 목록·선택·되묻기는 직원/세션별 Turn 에 보관하며 프롬프트에는 전달하지 않는다.
 """
@@ -17,8 +17,9 @@ from pension_agent.tools.customer_solution import customer as C
 
 MAX_LISTS = 3
 TTL_SEC = 2 * 60 * 60
+DIRECTORY = 0  # 표시 목록과 분리한 부점 이름 조회 후보. 목록 순번을 바꾸지 않음.
 _ROW = re.compile(r"(?<![\d.-])(-?\d+)\s*번(?:째)?\s*(?:고객|분)")
-_PRONOUN = re.compile(r"(?:이|그|해당)\s*고객")
+_PRONOUN = re.compile(r"(?<![가-힣A-Za-z])(?:이|그|해당)\s*고객")
 _UNKNOWN_NAME = re.compile(r"(?<![가-힣A-Za-z])([김이박최정강조윤장임한오서신권황안송류홍][가-힣]{1,3})\s*고객")
 _GENERIC = {"어떤", "다른", "해당", "전체", "모든", "관리", "대상", "추천", "중점관리", "미접촉", "만기",
             "이탈", "이전", "신규", "신규가입", "정기예금", "이상", "이하", "이내", "이탈징후", "이탈위험", "임박", "한도초과"}
@@ -30,7 +31,10 @@ def _valid(saved: dict) -> bool:
     lists = saved.get("lists")
     if not isinstance(lists, list) or len(lists) > MAX_LISTS or not isinstance(saved.get("serial"), int):
         return False
-    for listed in lists:
+    directory = saved.get("directory")
+    if directory is not None and (not isinstance(directory, dict) or directory.get("number") != DIRECTORY):
+        return False
+    for listed in [*lists, *([directory] if directory is not None else [])]:
         if (not isinstance(listed, dict) or not isinstance(listed.get("number"), int)
                 or not isinstance(listed.get("created"), (int, float))
                 or not isinstance(listed.get("entries"), list) or len(listed["entries"]) > roster.ROSTER_MAX):
@@ -61,7 +65,14 @@ def context(history: list[dict] | None, employee_id: str | None, session_id: str
                 return deepcopy(saved)
             break
     return {"employee_id": employee_id, "session_id": session_id, "serial": 0,
-            "lists": [], "active": None, "selected": None, "pending": None}
+            "lists": [], "active": None, "selected": None, "pending": None, "directory": None}
+
+
+def get_list(saved: dict, number: int | None) -> dict | None:
+    """표시한 목록과 별도의 이름 조회 후보를 같은 선택 경로에서 읽음."""
+    if number == DIRECTORY:
+        return saved.get("directory")
+    return next((s for s in saved.get("lists") or [] if s["number"] == number), None)
 
 
 def snapshot(state: dict, entries: list[dict], branch_code: str | None, query: str) -> dict:
@@ -98,7 +109,7 @@ def remember(saved: dict, evidence: list[dict]) -> dict:
         listed = dict(found, document=meta.get("document") or "")
         prior = [s for s in (out.get("lists") or []) if s["number"] != listed["number"]]
         out["lists"] = [*prior, listed][-MAX_LISTS:]
-        out.update(serial=listed["number"], active=listed["number"], selected=None, pending=None)
+        out.update(serial=listed["number"], active=listed["number"], selected=None, pending=None, directory=None)
     return out
 
 
@@ -111,6 +122,7 @@ class Resolution:
     clarify: dict | None = None
     question: str | None = None
     notice: str | None = None
+    sources: list[dict] | None = None
 
 
 def _label(entry: dict) -> str:
@@ -143,6 +155,35 @@ def name_reference(entry: dict, entries: list[dict]) -> str | None:
 def _grades(question: str) -> list[str]:
     return [g for g in ("패밀리", "베스트", "그랜드", "로얄", "MVP", "VIP", "VVIP")
             if re.search(r"(?<![가-힣A-Za-z])" + g + r"(?![가-힣A-Za-z])", question)]
+
+
+def _names(question: str, entries: list[dict]) -> list[str]:
+    return sorted({e["name"] for e in entries if isinstance(e.get("name"), str) and e["name"] and re.search(
+        r"(?<![가-힣A-Za-z])" + re.escape(e["name"]) + r"(?=\s|고객|님|은|는|의|에게|한테|을|를|이|가|에|와|과|랑|$)", question)})
+
+
+def _name_tokens(question: str) -> list[str]:
+    """질문 단어와 조사 제거형을 정확 일치로 조회. 단어를 고객명이라고 단정하지 않음."""
+    tokens = set()
+    for token in re.findall(r"[가-힣A-Za-z]{2,30}", question)[:64]:
+        tokens.add(token)
+        tokens.add(re.sub(r"(?:고객(?:님)?(?:으로|에게|한테|의|을|은|는)?|님(?:의|은|는)?|에게|한테|의|은|는|을|를|이|가|에|와|과|랑)$", "", token))
+    return sorted(n for n in tokens if len(n) > 1 and n not in _GENERIC)
+
+
+def _available_details(profile: C.Profile) -> str:
+    """상세 원장 미연결 고객도 실제 부점 조회값은 답변. 없는 보유상품을 합성하지 않음."""
+    from pension_agent.common import note  # noqa: PLC0415
+    from pension_agent.tools.customer_solution.target_table import _cell  # noqa: PLC0415
+
+    cells = [profile.nm, f"{profile.ag}세", profile.club_grade or "미확인", profile.rk,
+             note.won(profile.bal), f"{profile.ret:+.1f}%", note.won(profile.room * 10_000),
+             profile.matDate or "조회된 만기 없음", note.won(profile.matAmt) if profile.matDate else "—"]
+    return ("부점 전체 고객에서 확인한 정보입니다.\n\n"
+            "| 고객 | 나이 | 등급 | 투자성향 | IRP 잔액 | 1년 수익률 | 공제 잔여한도 | 다음 만기일 | 만기금액 |\n"
+            "|---|---:|---|---|---:|---:|---:|---|---:|\n| "
+            + " | ".join(_cell(str(value)) for value in cells) + " |\n\n"
+            "보유상품별 내역·상담이력 등 상세 원장 연결이 필요한 자료는 현재 확인할 수 없어요.")
 
 
 def _reply(saved: dict, case: str, text: str, *, entries: list[dict] | None = None,
@@ -187,8 +228,8 @@ def resolve(question: str, saved: dict, employee_id: str | None,
         elif any(word in q for word in ("이전", "직전")):
             earlier = [s["number"] for s in lists if s["number"] < (saved.get("active") or 0)]
             requested_list = max(earlier) if earlier else -1
-    list_number = requested_list if requested_list is not None else (pending.get("list") or saved.get("active"))
-    listed = next((s for s in lists if s["number"] == list_number), None)
+    list_number = requested_list if requested_list is not None else pending.get("list", saved.get("active"))
+    listed = get_list(saved, list_number)
     entries = (listed or {}).get("entries") or []
 
     numbers = [int(m[1]) for m in _ROW.finditer(q)]
@@ -207,32 +248,54 @@ def resolve(question: str, saved: dict, employee_id: str | None,
     if pending and not numbers:
         age = re.search(r"(\d{1,3})\s*세", q)
         grades = _grades(q)
-    names = sorted({e["name"] for e in entries if isinstance(e.get("name"), str) and e["name"] and re.search(
-        r"(?<![가-힣A-Za-z])" + re.escape(e["name"]) + r"(?=\s|고객|님|은|는|의|에게|한테|$)", q)})
+    names = _names(q, entries)
     unknown = [m[1] for m in _UNKNOWN_NAME.finditer(q) if m[1] not in _GENERIC and m[1] not in names]
     partial = re.search(r"(?<![가-힣A-Za-z])([김이박최정강조윤장임한오서신권황안송류홍])(?:씨)?\s*고객", q)
     pronoun = bool(_PRONOUN.search(q))
     if pronoun:
         partial = None
     replay = "목록" in q and any(word in q for word in ("다시", "보여", "돌아")) and not numbers and not names
+    # 이름만 지정하면 표시 목록의 부분집합을 신뢰하지 않고 직원 부점 전체에서 정확 일치 조회.
+    # 명시한 목록·번호, 동명이인 확인 응답, 지시어는 기존 선택 맥락을 유지.
+    if not (numbers or requested_list is not None or pending or pronoun or partial or replay):
+        tokens = _name_tokens(q)
+        if tokens and (employee_id or names or unknown):
+            try:
+                code, profiles = roster.find_names(tokens, employee_id)
+            except (run.DBUnavailable, LookupError) as exc:
+                if names or unknown:
+                    case = "db_unavailable" if isinstance(exc, run.DBUnavailable) else "scope_changed"
+                    return _reply(saved, case, "현재 직원의 소속 부점 고객을 확인할 수 없어요. 사번·부점 또는 DB 연결 상태를 확인해 주세요.")
+            else:
+                if profiles:
+                    listed = {"number": DIRECTORY, "created": time.time(), "date": clock.today().isoformat(),
+                              "employee_id": employee_id, "branch_code": code, "query": question,
+                              "entries": [{"number": i, "ref": p.customer_ref, "name": p.nm,
+                                           "age": p.ag, "grade": p.club_grade} for i, p in enumerate(profiles, 1)]}
+                    saved["directory"] = listed
+                    entries = listed["entries"]
+                    names = _names(q, entries)
+                    unknown = [name for name in unknown if name not in names]
+                elif names or unknown:
+                    return _reply(saved, "name_missing", "말씀하신 고객은 현재 직원의 소속 부점 전체 고객에서 확인되지 않아요. 정확한 이름과 소속 부점을 확인해 주세요.")
     selecting = bool(numbers or names or unknown or partial or pronoun or requested_list is not None or replay or age or grades)
-    if (len(lists) > 1 and requested_list is None and (numbers or names)
+    if (len(lists) > 1 and requested_list is None and (numbers or (names and listed and listed["number"] != DIRECTORY))
             and any(word in q for word in ("아까", "처음", "먼저"))):
         return _reply(saved, "ambiguous_list", "어느 목록의 고객인지 확인이 필요해요. ‘목록 1의 2번 고객’처럼 목록 번호와 고객 번호를 함께 말씀해 주세요.")
     if not selecting and pending:
         saved["pending"] = None  # 별개 질문은 원래 고객 질문의 답으로 취급하지 않음
     if not selecting and not saved.get("selected"):
         return Resolution(customer_id, saved)
-    if requested_list is not None and listed is None:
+    if requested_list is not None and (listed is None or requested_list == DIRECTORY):
         return _reply(saved, "list_missing", "지정한 목록을 보관하고 있지 않아요. 조건을 다시 말씀해 조회해 주세요.")
     if selecting and listed is None and (numbers or names or unknown or partial or replay):
-        return _reply(saved, "no_list", "현재 대화에 선택할 고객 목록이 없어요. 먼저 조건으로 고객을 조회해 주세요.")
+        return _reply(saved, "no_list", "현재 대화에 번호로 선택할 고객 목록이 없어요. 고객 이름을 말씀하시거나 먼저 조건으로 고객을 조회해 주세요.")
 
     # 기존에 선택한 고객은 명시 선택이 없을 때만 유지.
     if (not numbers and not names and not unknown and not partial and not replay
             and requested_list is None and saved.get("selected")):
         selected = saved["selected"]
-        listed = next((s for s in lists if s["number"] == selected["list"]), None)
+        listed = get_list(saved, selected["list"])
         entries = (listed or {}).get("entries") or []
         numbers = [selected["number"]]
     if listed:
@@ -320,13 +383,17 @@ def resolve(question: str, saved: dict, employee_id: str | None,
     was = saved.get("selected")
     saved.update(selected={"list": listed["number"], "number": entry["number"], "ref": entry["ref"]}, pending=None)
     if C.get_profile(profile.id) is None:
-        return Resolution(None, saved, "detail_unavailable",
-                          f"{_label(entry)} 고객을 확인했어요. 현재는 목록 정보만 있고 상세 원장 연결이 없어 보유상품·만기·상담이력은 확인할 수 없어요.")
+        return Resolution(None, saved, "detail_unavailable", _available_details(profile),
+                          sources=[{"id": "customer", "title": f"{profile.nm} 고객 현황",
+                                    "doc": "소속 부점 고객 원장 조회값", "score": None, "page": None}])
     original = pending.get("question")
     only_selector = re.fullmatch(
         r"\d+\s*번(?:째)?\s*고객(?:님)?(?:으로\s*확인해줘|이요|요)?[.!?]?", q)
     reference = name_reference(entry, entries)
     named_confirmation = reference and q.rstrip(".!?") == f"{reference}으로 확인해줘"
     effective = original if (pending_reply or only_selector or named_confirmation) and original else question
+    label = _label(entry)
+    if listed["number"] == DIRECTORY and len(entries) == 1:
+        label = label.split("번 ", 1)[1]
     return Resolution(profile.id, saved, "selected", question=effective,
-                      notice=f"{_label(entry)} 고객 기준으로 확인했어요." if was != saved["selected"] else None)
+                      notice=f"{label} 고객 기준으로 확인했어요." if was != saved["selected"] else None)
