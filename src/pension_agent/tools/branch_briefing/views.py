@@ -39,6 +39,8 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
             ("pension_eligible", "문자", "연금 개시 요건 충족 여부('충족' 또는 '미충족')"),
             ("next_maturity_date", "날짜 문자 YYYY-MM-DD", "가장 이른 만기 상품의 만기일(없으면 NULL)"),
             ("next_maturity_amt", "정수(원)", "그 만기 상품의 금액"),
+            ("next_maturity_type", "문자", "그 만기 상품의 유형 — '예금'(정기예금) 또는 'GIC'(이율보증형보험). "
+                                         "만기 상품이 없으면 NULL. «정기예금 만기»는 next_maturity_type = '예금'"),
             ("days_to_maturity", "정수(일)", "오늘부터 그 만기일까지 남은 일수. 음수면 만기가 지난 것"),
             ("last_contact_days", "정수(일)", "마지막 접촉 후 지난 일수(없으면 NULL)"),
             ("target_reasons", "문자", "관리 대상으로 선정된 사유들(쉼표로 이어 붙임, 없으면 빈 문자열)"),

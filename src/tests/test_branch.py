@@ -233,6 +233,12 @@ def check_retry_and_evidence() -> None:
     t = tool.table([{"customer_name": "가", "return_rate": -9.4, "safe_asset_pct": None, "eval_amt": 5_000_000}])
     check("| -9.4% |" in t and "| 5,000,000 |" in t and "None" not in t and "|  |" in t,
           "뷰가 (%) 로 선언한 컬럼만 셀에 % 를 붙인다(답변의 「-9.4%」가 재료와 맞게)", t)
+    with _LLM(_sql("SELECT customer_name, days_to_maturity, eval_amt FROM v_irp_customer "
+                   "WHERE safe_asset_pct >= 80 AND days_to_maturity BETWEEN 0 AND 30")):
+        crit_ev = tools.run("branch_search", _state(q="원리금보장 편중 · 만기 한 달 이내 고객"), "편중 만기 고객")
+    check("· 조회 기준: 원리금보장·현금성 자산 비중 80% 이상" in (crit_ev or {}).get("text", ""),
+          "조회문의 백분율 조건이 재료에 % 단위로 선다(답변의 «80% 이상»이 폐기되지 않게)",
+          (crit_ev or {}).get("text", "")[:200])
 
 
 def check_registry() -> None:
@@ -365,6 +371,35 @@ def check_etf() -> None:
               "«ETF 1천만원 이상 · 수익률 5% 미만»에 해당하는 고객이 있다", str(sorted(names)))
         _, prev, _ = run.execute("SELECT SUM(etf_eval_amt) AS s FROM v_irp_customer_prev", "0001", EMP)
         check((prev[0]["s"] or 0) > 0, "전월말 스냅샷에도 ETF 평가금액이 있다")
+
+
+def check_maturity_type() -> None:
+    """만기 상품 유형 컬럼 — 「정기예금 만기」를 아무 만기 상품으로 바꿔 조회하지 않게(2026-10-23 실측)."""
+    from pension_agent.tools.branch_briefing import tool as BT  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
+    check(any(c == "next_maturity_type" for c, _t, _d in views.columns("v_irp_customer")),
+          "LLM 이 보는 뷰 목록에 만기 상품 유형이 있다")
+    with _Today():
+        _, rows, _ = run.execute("SELECT customer_name, next_maturity_type, next_maturity_date "
+                                 "FROM v_irp_customer", "0001", EMP, limit=2000)
+        by = {r["customer_name"]: r for r in rows}
+        for nm in ("한지우", "김서연"):
+            p = next(x for x in C.PERSONAS if x.nm == nm)
+            first = sorted(p.maturities, key=lambda m: m.get("date") or "")[0]
+            check(by[nm]["next_maturity_type"] == first["type"], f"목업 고객 {nm} — 만기 유형 = 원장 상품유형",
+                  f"{by[nm]['next_maturity_type']} vs {first['type']}")
+        odd = [r for r in rows if bool(r["next_maturity_date"]) != bool(r["next_maturity_type"])
+               or r["next_maturity_type"] not in (None, "예금", "GIC")]
+        check(not odd, "만기 상품이 있으면 유형이 '예금'·'GIC' 중 하나이고, 없으면 NULL", str(odd[:2]))
+        kinds = {r["next_maturity_type"] for r in rows}
+        check({"예금", "GIC"} <= kinds, "합성 고객에 정기예금과 GIC 가 함께 있다", str(kinds))
+        _, prev, _ = run.execute("SELECT COUNT(*) AS n FROM v_irp_customer_prev WHERE next_maturity_type = '예금'",
+                                 "0001", EMP)
+        check(prev[0]["n"] > 0, "전월말 스냅샷에도 만기 유형이 있다")
+    crit = BT.percent_criteria("SELECT customer_name FROM v_irp_customer WHERE safe_asset_pct >= 80 "
+                               "AND days_to_maturity BETWEEN 0 AND 30 AND idle_cash_pct BETWEEN 10 AND 50")
+    check(crit == ["원리금보장·현금성 자산 비중 80% 이상", "운용되지 않는 현금성자산(고유계정대) 비중 10%~50%"],
+          "백분율 컬럼 조건만 % 단위로 «조회 기준»에 싣는다(남은 일수는 싣지 않는다)", str(crit))
 
 
 def check_yeouido_screen() -> None:
@@ -542,6 +577,7 @@ def main() -> int:
     check_status()
     check_yeouido_screen()
     check_etf()
+    check_maturity_type()
     check_realistic()
     check_strategy()
     check_targets()

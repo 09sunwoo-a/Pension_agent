@@ -63,6 +63,27 @@ def _percent_columns() -> set[str]:
     return {c for v in views.VIEWS for c, t, _d in (views.VIEWS[v][1] or []) if "(%)" in t}
 
 
+_OPS = {">=": "이상", "<=": "이하", ">": "초과", "<": "미만", "=": ""}
+_NUM = r"(-?\d+(?:\.\d+)?)"
+
+
+def percent_criteria(sql: str) -> list[str]:
+    """조회문이 백분율 컬럼에 건 조건 → 「원리금보장·현금성 자산 비중 80% 이상」.
+
+    조회문에는 80 이 맨숫자로 있어 답변의 «80% 이상»이 자료 밖 수치로 폐기된다(2026-10-23 실측). 셀에 % 를 붙이는
+    것(table)과 같은 선언 — 뷰 목록이 «(%)» 로 적은 컬럼만 단위를 붙인다.
+    """
+    names = {c: d.split(" — ")[0] for v in views.VIEWS for c, t, d in (views.VIEWS[v][1] or []) if "(%)" in t}
+    out = []
+    for col, label in names.items():
+        for lo, hi in re.findall(rf"\b{col}\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}", sql, re.IGNORECASE):
+            out.append(f"{label} {lo}%~{hi}%")
+        for op, num in re.findall(rf"\b{col}\s*(>=|<=|<>|>|<|=)\s*{_NUM}", sql):
+            if op in _OPS:
+                out.append(f"{label} {num}% {_OPS[op]}".rstrip())
+    return out
+
+
 def segment_catalog() -> str:
     """SQL 프롬프트에 싣는 세그먼트 정의(룰베이스 표) — 「납입금 미운용」 같은 직원 표현을 표의 조건으로 옮기게 한다."""
     lines = []
@@ -173,6 +194,7 @@ def _branch(state: AgentState, query: str) -> Evidence | None:
     text = "\n".join(x for x in (
         f"■ 부점 데이터 조회 — {branch_name} 부점 · 조회 {len(rows)}행",
         f"· 조회 목적: {reason}" if reason else "",
+        ("· 조회 기준: " + " · ".join(percent_criteria(sql))) if percent_criteria(sql) else "",
         "· 실행한 조회문:",
         "```sql", sql, "```",
         table(rows),

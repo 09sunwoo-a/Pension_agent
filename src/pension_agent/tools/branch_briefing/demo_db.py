@@ -45,6 +45,8 @@ COLUMNS = (
     "risk_mismatch", "isa_maturity_date", "isa_maturity_amt",
     # 상품 유형별 보유(2026-10-22) — 원천 테이블 미확정 시연 컬럼
     "etf_eval_amt",
+    # 만기 상품의 유형(2026-10-23) — 원장 상품유형 표기('예금'·'GIC')
+    "next_maturity_type",
 )
 _COL = {name: i for i, name in enumerate(COLUMNS)}
 
@@ -108,6 +110,8 @@ def _persona_rows() -> list[tuple]:
             (p.isa or {}).get("date"), int((p.isa or {}).get("amount") or 0) or None,
             # ETF 평가금액 — 원장 보유상품(holdings)의 ETF 합계 그대로
             sum(int(h.get("amount") or 0) for h in (p.holdings or []) if h.get("type") == "ETF"),
+            # 만기 상품 유형 — 원장 보유상품의 상품유형 그대로
+            first.get("type") if first else None,
         ))
     return rows
 
@@ -166,8 +170,23 @@ def _synthetic_rows() -> list[tuple]:
             "불일치" if C.risk_mismatch(risk, 100 - safe, safe) else "일치",
             None, None,
             etf_amount(base[0], base[4], bal, safe),
+            maturity_type(base[0], base[4], base[14]),
         ))
     return out
+
+
+#: 합성 고객의 만기 상품 중 정기예금 비율(나머지는 GIC — 이율보증형보험). 시연값.
+_DEPOSIT_SHARE = 0.8
+
+
+def maturity_type(name: str, branch: str, maturity_date: str | None) -> str | None:
+    """합성 고객의 만기 상품 유형(시연값) — 원장 상품유형 표기 '예금'·'GIC'. 만기 상품이 없으면 None.
+
+    이름·부점으로 시드를 따로 둔다 — 다른 컬럼의 난수 순서를 건드리지 않고, 오늘·전월말 표가 같은 값을 갖는다.
+    """
+    if not maturity_date:
+        return None
+    return "예금" if random.Random(f"mat:{branch}:{name}").random() < _DEPOSIT_SHARE else "GIC"
 
 
 #: 합성 고객 중 ETF 를 가진 비율 · 실적배당(원리금보장 밖) 몫 중 ETF 비중 범위(시연값).
@@ -237,6 +256,7 @@ def _prev_rows(current: list[tuple]) -> list[tuple]:
             r[_COL["default_option"]] = "설정"
             r[_COL["pension_started"]], r[_COL["pension_eligible"]] = "미개시", "미충족"
             r[_COL["next_maturity_date"]] = r[_COL["next_maturity_amt"]] = None
+            r[_COL["next_maturity_type"]] = None
             r[_COL["tax_credit_room"]], r[_COL["transfer_inquiry"]] = 0, "없음"
             r[_COL["risk_mismatch"]] = "일치"
             r[_COL["isa_maturity_date"]] = r[_COL["isa_maturity_amt"]] = None
@@ -288,6 +308,9 @@ def connection() -> sqlite3.Connection:
                 d.setdefault("etf_eval_amt", etf_amount(d["customer_name"], d["branch_code"],
                                                         d["eval_amt"], d["safe_asset_pct"]))
             _prev_etf(yeouido, yeouido_prev)
+            for d in yeouido + yeouido_prev:
+                d.setdefault("next_maturity_type", maturity_type(d["customer_name"], d["branch_code"],
+                                                                 d["next_maturity_date"]))
             # 다른 부점 — 기존 합성 고객(0001 몫은 버린다. 난수 순서를 그대로 두려고 생성 뒤에 거른다)
             # 전월말도 예전과 같은 입력(목업 + 합성 288명)으로 흔든 뒤 거른다 — 다른 부점 결과를 그대로 둔다
             legacy = _persona_rows() + _synthetic_rows()
