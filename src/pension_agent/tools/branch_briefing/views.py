@@ -93,6 +93,9 @@ VALUE_LABELS: dict[tuple[str, str], str] = {
     ("next_maturity_type", "GIC"): "GIC(이율보증형보험)",
 }
 
+#: 남은 일수 컬럼 → 음수일 때 결과 칸에 붙일 말(「-13 (만기 13일 지남)」).
+PAST_WHEN_NEGATIVE: dict[str, str] = {"days_to_maturity": "만기", "isa_days_to_maturity": "ISA 만기"}
+
 #: 사번 → 부점 조회 SQL 이름(코드 전용, LLM 미노출).
 MY_BRANCH = "my_branch"
 

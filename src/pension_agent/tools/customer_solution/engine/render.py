@@ -6,6 +6,7 @@ from typing import Any
 
 from pension_agent.tools.customer_solution.customer import (
     DEPOSIT_CAP_WON,
+    DORMANT_DAYS,
     RISK_ASSET_CAP_PCT,
     TAX_CREDIT_CAP_WON,
     Profile,
@@ -103,7 +104,7 @@ def _last_contact_label(p: Profile) -> str:
     """최근 접촉 표기 — "N일 전", 180일 이상(`dor` 경계)이면 "없음(6개월+)"."""
     if p.dorm is None:
         return "확인 필요(접촉 이력 없음)"
-    return "없음(6개월+)" if p.dorm >= 180 else f"{p.dorm}일 전"
+    return "없음(6개월+)" if p.dorm >= DORMANT_DAYS else f"{p.dorm}일 전"
 
 
 def _return_label(p: Profile, *, long: bool = False) -> str:

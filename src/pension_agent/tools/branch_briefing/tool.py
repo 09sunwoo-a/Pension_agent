@@ -53,8 +53,16 @@ def table(rows: list[dict]) -> str:
     pct = _percent_columns()
     out = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
     out += ["| " + " | ".join(_cell(r.get(c)) + ("%" if c in pct and r.get(c) is not None else "")
-                              for c in cols) + " |" for r in rows]
+                              + _past(c, r.get(c)) for c in cols) + " |" for r in rows]
     return "\n".join(out)
+
+
+def _past(col: str, value) -> str:
+    """남은 일수가 음수인 칸에 뜻을 붙인다 — 「-13」을 답변이 «만기까지 -13일»로 옮겼다(2026-10-23 실측)."""
+    what = views.PAST_WHEN_NEGATIVE.get(col)
+    if what and isinstance(value, (int, float)) and value < 0:
+        return f" ({what} {abs(int(value))}일 지남)"
+    return ""
 
 
 def _percent_columns() -> set[str]:
@@ -98,6 +106,13 @@ def criteria(sql: str) -> list[str]:
         for x in re.finditer(rf"\b{col}\s+BETWEEN\s+{_NUM}\s+AND\s+{_NUM}", where, re.IGNORECASE):
             found.append((x.start(), f"{label} {_unit(kind, x.group(1))}~{_unit(kind, x.group(2))}"))
         for x in re.finditer(rf"\b{col}\s*(>=|<=|<>|!=|>|<|=)\s*{_NUM}(?![\w.])", where):
+            past = views.PAST_WHEN_NEGATIVE.get(col)
+            if past and (x.group(1), x.group(2)) in (("<", "0"), ("<=", "-1")):  # «만기까지 0일 미만» 대신
+                found.append((x.start(), f"{past}가 지남"))
+                continue
+            if past and (x.group(1), x.group(2)) in ((">=", "0"), (">", "-1")):
+                found.append((x.start(), f"{past}가 아직 안 지남"))
+                continue
             if "0/1" in kind:  # 여부 컬럼 — 1 이면 그것만, 0 이면 그것이 아닌 고객
                 yes = (x.group(1) in ("=", ">=")) == (x.group(2) == "1")
                 found.append((x.start(), f"{label}{'만' if yes else ' 아님'}"))
@@ -106,8 +121,13 @@ def criteria(sql: str) -> list[str]:
         for x in re.finditer(rf"\b{col}\s*(=|<>|!=)\s*'([^']*)'", where):
             value = views.VALUE_LABELS.get((col, x.group(2)), x.group(2))
             found.append((x.start(), f"{label}: {value}" + (" 아님" if x.group(1) != "=" else "")))
-        for x in re.finditer(rf"\b{col}\s+LIKE\s+'%?([^'%]*)%?'", where, re.IGNORECASE):
-            found.append((x.start(), f"{label}에 «{x.group(1)}» 포함"))
+        for x in re.finditer(rf"\b{col}\s+LIKE\s+'([^']*)'", where, re.IGNORECASE):
+            word = re.sub(r"^%|%$", "", x.group(1))
+            note = _reasons().get(word) if col == "target_reasons" else None
+            if note is not None:  # 요건 판정 결과로 건 조건 — 그 요건의 기준을 함께
+                found.append((x.start(), f"관리 대상 요건 «{word}»" + (f"({note})" if note else "")))
+            else:
+                found.append((x.start(), f"{label}에 «{word}» 포함"))
     return [text for _pos, text in sorted(found)]
 
 
@@ -121,7 +141,30 @@ def segment_catalog() -> str:
             continue
         alias = f" · 다른 이름: {', '.join(seg.aliases)}" if seg.aliases else ""
         lines.append(f"- {seg.name}{alias} → WHERE {where}")
+    lines += reason_catalog({_bare(s.name) for s in status.rules().segments})
     return "\n".join(lines) or "(정의 없음)"
+
+
+def _bare(name: str) -> str:
+    return re.split(r"[(（]", name)[0].strip()
+
+
+def reason_catalog(segment_names: set[str]) -> list[str]:
+    """관리 대상 요건 이름 → target_reasons LIKE. 「장기 미접촉」을 SQL 작성 LLM 이 «90일 이상»처럼 스스로 정하지 않고,
+    요건 판정(customer.conditions)이 이미 채운 사유를 그대로 쓰게 한다(2026-10-23 실측 — 판정을 두 번 만들지 않는다).
+    세그먼트와 이름이 같은 요건은 세그먼트 정의가 먼저라 싣지 않는다."""
+    out = []
+    for name, note in _reasons().items():
+        if name not in segment_names:
+            out.append(f"- {name}(관리 대상 요건{' — ' + note if note else ''}) → WHERE target_reasons LIKE '%{name}%'")
+    return out
+
+
+def _reasons() -> dict[str, str]:
+    """관리 대상 요건 이름 → 기준 설명(코드 상수에서 — 판정과 같은 값). 설명이 없는 요건은 빈 문자열."""
+    from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
+    notes = {"dor": f"마지막 접촉 후 {C.DORMANT_DAYS}일 이상"}
+    return {_bare(name): notes.get(code, "") for code, name in C.CONDS.items() if _bare(name)}
 
 
 _SELECT_WORD = re.compile(r"\bSELECT\b", re.IGNORECASE)

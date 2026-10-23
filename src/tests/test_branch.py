@@ -405,8 +405,22 @@ def check_maturity_type() -> None:
           "조회문의 조건을 전부 조회문 순서대로 말로 옮긴다 — 단위는 뷰 타입 선언에서(%·일)", str(crit))
     more = BT.criteria("SELECT TOP 5 customer_name FROM v_irp_customer WHERE etf_eval_amt >= 10000000 "
                        "AND target_reasons LIKE '%장기 미접촉%' AND is_target = 1")
-    check(more == ["ETF 평가금액 1,000만원 이상", "관리 대상 사유에 «장기 미접촉» 포함", "관리 대상만"],
-          "금액은 원 단위 표기 · LIKE 는 «포함» · 여부 컬럼은 «만»", str(more))
+    check(more == ["ETF 평가금액 1,000만원 이상", "관리 대상 요건 «장기 미접촉»(마지막 접촉 후 180일 이상)",
+                   "관리 대상만"],
+          "금액은 원 단위 표기 · 요건 사유는 그 요건의 기준과 함께 · 여부 컬럼은 «만»", str(more))
+    cat = BT.segment_catalog()
+    check("장기 미접촉(관리 대상 요건 — 마지막 접촉 후 180일 이상) → WHERE target_reasons LIKE '%장기 미접촉%'" in cat
+          and "디폴트옵션 미설정(관리 대상 요건" not in cat,
+          "SQL 프롬프트가 요건 이름의 정의를 싣는다 — «장기 미접촉»을 LLM 이 «90일 이상»으로 정하지 않게"
+          "(세그먼트와 같은 이름의 요건은 싣지 않는다)")
+    from pension_agent.tools.customer_solution import customer as CC  # noqa: PLC0415
+    check(CC.DORMANT_DAYS == 180 and "180일" in cat, "장기 미접촉 기준은 판정 상수 하나에서 온다")
+    t = BT.table([{"customer_name": "가", "days_to_maturity": -13}, {"customer_name": "나", "days_to_maturity": 5}])
+    past = BT.criteria("SELECT a FROM v_irp_customer WHERE next_maturity_type = '예금' AND days_to_maturity < 0 "
+                       "AND isa_days_to_maturity >= 0")
+    check(past == ["만기 상품: 정기예금", "만기가 지남", "ISA 만기가 아직 안 지남"],
+          "남은 일수 0 기준 조건은 «만기가 지남»으로 옮긴다(«0일 미만»이 아니라)", str(past))
+    check("| -13 (만기 13일 지남) |" in t and "| 5 |" in t, "지난 만기는 칸에 «N일 지남»을 붙인다", t)
     check(BT.criteria("SELECT COUNT(*) AS n FROM v_irp_customer") == [], "조건이 없으면 조회 조건 줄도 없다")
 
 

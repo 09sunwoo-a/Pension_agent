@@ -175,6 +175,10 @@ CONDS = {
 #: 원리금보장 편중 임계(%) — TARGET_ID TG-202(D, 80~100%) ∪ TG-003(A, 100%) 합집합이라 상한 없음
 PRINCIPAL_HEAVY_PCT = 80
 
+#: 장기 미접촉 임계(마지막 접촉 후 일수) — 타겟 룰베이스에 행이 없다(TARGET_ID 없음). 근거는 기능정의
+#: 07/01 화면 예시의 «6개월+ 미접촉». 부점 고객 검색의 «장기 미접촉»도 이 값으로 판정된 사유를 쓴다
+DORMANT_DAYS = 180
+
 #: 미운용 현금성자산 임계 — 고유계정대 비중(%), TARGET_ID TG-001 · 세그먼트 1·3 선별 기준
 CASH_IDLE_PCT = 50
 
@@ -217,7 +221,7 @@ def conditions(p: Profile) -> list[str]:
     # None 가드 필수 — None 비교 시 TypeError 로 브리핑 전체 중단
     if p.retPct is not None and p.retPct <= 30:
         a.add("low")
-    if p.dorm is not None and p.dorm >= 180:
+    if p.dorm is not None and p.dorm >= DORMANT_DAYS:
         a.add("dor")
     if p.nchM >= NO_CHANGE_MONTHS:
         a.add("nch")
