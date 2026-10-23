@@ -24,7 +24,7 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
     "v_irp_customer": (
         "우리 부점의 IRP 고객 — 고객 한 명당 한 행. 다른 부점 고객은 들어 있지 않다", [
             ("customer_name", "문자", "고객 이름"),
-            ("age", "정수", "나이(만)"),
+            ("age", "정수(세)", "나이(만)"),
             ("star_grade", "문자", "스타클럽 등급(패밀리·베스트·그랜드·로얄·MVP)"),
             ("risk_profile", "문자", "투자성향(안정형·안정추구형·위험중립형·적극투자형·공격투자형)"),
             ("branch_name", "문자", "관리 부점 이름"),
@@ -77,14 +77,15 @@ VIEWS: dict[str, tuple[str, list[tuple[str, str, str]]]] = {
 CONDITION_LABELS: dict[str, str] = {
     "age": "나이", "star_grade": "스타클럽 등급", "risk_profile": "투자성향", "eval_amt": "평가금액",
     "return_rate": "운용 수익률", "safe_asset_pct": "원리금보장·현금성 자산 비중",
-    "idle_cash_pct": "미운용 현금성자산 비중", "default_option": "디폴트옵션", "pension_started": "연금",
+    "idle_cash_pct": "미운용 현금성자산 비중", "default_option": "디폴트옵션", "pension_started": "연금 개시 여부",
     "pension_eligible": "연금개시 요건", "next_maturity_amt": "만기 금액", "next_maturity_type": "만기 상품",
     "days_to_maturity": "만기까지 남은 일수", "last_contact_days": "마지막 접촉 후 지난 일수",
     "idle_cash_amt": "미운용 현금성자산 금액", "idle_cash_days": "미운용 기간",
     "tax_credit_room": "세액공제 잔여한도", "transfer_inquiry": "계약이전 사전조회",
     "risk_mismatch": "투자성향 대비 자산구성", "isa_maturity_amt": "ISA 만기자금",
     "isa_days_to_maturity": "ISA 만기까지 남은 일수", "etf_eval_amt": "ETF 평가금액",
-    "target_reasons": "관리 대상 사유", "is_target": "관리 대상", "transfer_amt": "이전 금액", "to_institution": "이전 기관",
+    "target_reasons": "관리 대상 사유", "joined_date": "IRP 가입일",
+    "next_maturity_date": "만기일", "isa_maturity_date": "ISA 만기일", "transfer_date": "계약이전 일자", "is_target": "관리 대상", "transfer_amt": "이전 금액", "to_institution": "이전 기관",
 }
 
 #: 값 표기(컬럼, 원장 값) → 직원이 읽는 말. 원장 표기가 줄임말인 것만.

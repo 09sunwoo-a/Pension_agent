@@ -73,6 +73,8 @@ def _percent_columns() -> set[str]:
 
 _OPS = {">=": "이상", "<=": "이하", ">": "초과", "<": "미만", "=": "", "<>": "아님", "!=": "아님"}
 _NUM = r"(-?\d+(?:\.\d+)?)"
+#: 문자(날짜) 값의 크기 비교 — 「transfer_date >= '2026-01-01'」 → «계약이전 일자 2026-01-01부터»
+_TEXT_OPS = {">=": "부터", "<=": "까지", ">": " 이후", "<": " 이전"}
 _WHERE = re.compile(r"\bWHERE\b(.*?)(?:\bGROUP\s+BY\b|\bORDER\s+BY\b|\bHAVING\b|$)", re.IGNORECASE | re.DOTALL)
 
 
@@ -83,6 +85,8 @@ def _unit(kind: str, num: str) -> str:
         return won(int(float(num)))
     if "(일)" in kind:
         return f"{num}일"
+    if "(세)" in kind:
+        return f"{num}세"
     return num
 
 
@@ -121,6 +125,8 @@ def criteria(sql: str) -> list[str]:
         for x in re.finditer(rf"\b{col}\s*(=|<>|!=)\s*'([^']*)'", where):
             value = views.VALUE_LABELS.get((col, x.group(2)), x.group(2))
             found.append((x.start(), f"{label}: {value}" + (" 아님" if x.group(1) != "=" else "")))
+        for x in re.finditer(rf"\b{col}\s*(>=|<=|>|<)\s*'([^']*)'", where):
+            found.append((x.start(), f"{label} {x.group(2)}{_TEXT_OPS[x.group(1)]}"))
         for x in re.finditer(rf"\b{col}\s+LIKE\s+'([^']*)'", where, re.IGNORECASE):
             word = re.sub(r"^%|%$", "", x.group(1))
             note = _reasons().get(word) if col == "target_reasons" else None
@@ -128,7 +134,8 @@ def criteria(sql: str) -> list[str]:
                 found.append((x.start(), f"관리 대상 요건 «{word}»" + (f"({note})" if note else "")))
             else:
                 found.append((x.start(), f"{label}에 «{word}» 포함"))
-    return [text for _pos, text in sorted(found)]
+    # 같은 조건을 두 뷰에 건 조회(오늘 · 전월말 비교)는 한 번만
+    return list(dict.fromkeys(text for _pos, text in sorted(found)))
 
 
 def segment_catalog() -> str:

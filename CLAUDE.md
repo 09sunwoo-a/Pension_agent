@@ -144,7 +144,7 @@ cd src
 python -m tests.test_engine               # 엔진 선정 로직
 python -m tests.test_support              # ⑥~⑨ · 더미 규약 · 시효성 수치
 python -m tests.test_customer_solution    # 브리핑 문서 — LLM 1회 · 검증 · 실패 처리
-python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE · 전략 브리핑
+python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE · 전략 브리핑 · 시험 질문(오프라인)
 python -m tests.test_agent                # 라우팅·도구 루프·하지말것 가드
 python -m tests.test_infra                # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api                  # HTTP 진입점 — 행내 플랫폼 I/O 스키마
@@ -169,6 +169,8 @@ python -m scripts.demo_status                   # §7 근거등급 표 갱신
 ```
 
 테스트는 LLM 키 없이 돈다. `langgraph` 는 설치가 필요하다(`src/requirements.txt`).
+
+부점 브리핑 시험 질문을 **실제 LLM** 으로 채점하려면(키 필요 · 느림) `python -m tests.live_branch` — 지난번 통과 후 관련 코드·질문이 그대로인 질문은 건너뛴다(`--list` 로 무엇을 돌릴지만 보기 · `--all` 전부). 질문을 더하려면 `tests/branch_questions.py` 에 한 줄을 더하고, 오프라인 검사(`tests.test_branch`)를 먼저 통과시킨다.
 
 ## 구조 규칙
 

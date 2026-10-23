@@ -426,11 +426,13 @@ python -m scripts.kb_build.build_kb --activate   # 검토 후 활성화
 
 전부 LLM 키 없이 돈다. 코드를 고친 뒤 모두 통과하는지 확인한다.
 
+부점 브리핑 시험 질문을 **실제 LLM** 으로 채점하려면(키 필요 · 느림) `python -m tests.live_branch` — 지난번 통과 후 관련 코드·질문이 그대로인 질문은 건너뛴다(`--list` 로 무엇을 돌릴지만 보기 · `--all` 전부). 질문을 더하려면 `tests/branch_questions.py` 에 한 줄을 더하고, 오프라인 검사(`tests.test_branch`)를 먼저 통과시킨다.
+
 ```bash
 python -m tests.test_engine               # 추천 엔진 계산
 python -m tests.test_support              # 화법·반론·참고자료·안내 콘텐츠 선정
 python -m tests.test_customer_solution    # 브리핑 문서 — LLM 1회 · 검사 · 실패 처리
-python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE 판정 · 전략 브리핑 · 추천 순서
+python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE 판정 · 전략 브리핑 · 추천 순서 · 시험 질문(오프라인)
 python -m tests.test_agent                # 분류 · 도구 루프 · 답변 검사 · 쪽지 (본문은 tests/agent/)
 python -m tests.test_infra                # 공용 기반 · 임포트 방향 · 429 호출 제한
 python -m tests.test_api                  # HTTP 입출력 규격

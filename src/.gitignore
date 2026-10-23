@@ -15,3 +15,6 @@ sources/
 # 실데이터 전환 시 아래 주석을 푼다 — 직원 발화 원문이 쌓이는 자리다(session_store.py 머리말).
 # runtime/session_data/
 
+
+# 실제 LLM 시험 질문 채점 결과(tests/live_branch.py) — 실행 기록이라 저장소에 넣지 않는다
+tests/.live_cache/

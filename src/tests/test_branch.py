@@ -588,6 +588,40 @@ def check_targets() -> None:
     check(-1 < a < b, "쪽지 표도 도구가 실은 순서 그대로다")
 
 
+def check_question_set() -> None:
+    """시험 질문(tests/branch_questions.py) — LLM 없이 확인할 수 있는 것 전부.
+    정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
+    라이브(실제 LLM) 채점은 python -m tests.live_branch."""
+    from pension_agent.evidence.verify import verify_texts  # noqa: PLC0415
+    from tests import branch_questions as BQ  # noqa: PLC0415
+    prompt = views.catalog() + "\n" + tool.segment_catalog()
+    ids = [q.id for q in BQ.QUESTIONS]
+    check(len(ids) == len(set(ids)), "시험 질문: id 중복 없음")
+    for q in BQ.QUESTIONS:
+        for text in q.prompt_has:
+            check(text in prompt, f"시험 질문 {q.id}: SQL 프롬프트에 «{text}»")
+        if q.tool != "branch_search":
+            continue
+        with _LLM(BQ.llm_reply(q, "조회" if q.sql else "그 항목의 컬럼이 없습니다")):
+            ev = tool._branch(_state(BQ.EMP, q.question), q.question)
+        text = ev["text"] if ev else ""
+        if q.sql is None:
+            check(ev and ev["meta"].get("cannot"), f"시험 질문 {q.id}: 조회할 수 없음 재료")
+        else:
+            got = tool.criteria(q.sql)
+            check(got == list(q.criteria), f"시험 질문 {q.id}: 조회 조건 줄", f"{got}")
+            check(ev and ev["meta"]["rows"] == q.rows and ev["meta"]["truncated"] == q.truncated,
+                  f"시험 질문 {q.id}: 행 수 {q.rows}",
+                  f"{ev and ev['meta']['rows']} · 잘림 {ev and ev['meta']['truncated']}")
+        if q.ideal:
+            ok, bad = verify_texts(q.ideal, ev["allow"] if ev else [], echoable=[q.question])
+            check(ok, f"시험 질문 {q.id}: 이상적인 답이 검증 통과", f"{bad}")
+            faults = BQ.answer_faults(q, q.ideal)
+            check(not faults, f"시험 질문 {q.id}: 이상적인 답이 채점 기준 통과", f"{faults}")
+        if q.sql:
+            check("```sql" in text, f"시험 질문 {q.id}: 재료에 실행한 조회문")
+
+
 def main() -> int:
     check_checker()
     check_scope()
@@ -603,6 +637,7 @@ def main() -> int:
     check_realistic()
     check_strategy()
     check_targets()
+    check_question_set()
 
     passed = sum(1 for ok, _, _ in _results if ok)
     total = len(_results)
