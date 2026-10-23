@@ -22,8 +22,9 @@
 |---|---|---|
 | 지식 질의응답 | 「세액공제 한도 얼마야?」 · 「계약이전 어떻게 처리해?」 · 「고객이 수수료 비싸다는데 뭐라고 하지?」 | 아니오 |
 | 고객별 솔루션 | 「이 고객 브리핑 해줘」 · 「이 고객 왜 관리 대상이야?」 · 「뭘 안내할 수 있어?」 | 예 |
-| 메인 브리핑(부점 데이터) | 「우리 부점 만기 30일 이내 고객 누구야?」 · 「다른 부점이랑 타겟 수 비교해줘」 | 아니오 |
-| 오늘의 타겟 목록 | 「오늘 누구부터 봐야 해?」 | 아니오 |
+| 부점 브리핑 — 관리 대상 추천 | 「오늘 중점적으로 관리할 고객은 누구야?」 · 「처음 추천한 고객 다시 보여줘」 | 아니오 |
+| 부점 브리핑 — 부점 현황 | 「오늘 부점 현황 말해줘」 · 화면 진입 시 현황 패널 + 전략 브리핑 | 아니오 |
+| 부점 브리핑 — 고객 검색 | 「현금성 장기대기 고객 보여줘」 · 「IRP 잔액 7천만원 이상 고객 보여줘」 · 「ISA 만기 고객은 몇 명이야?」 | 아니오 |
 | 쪽지 보내기 | 「지금까지 내용 정리해서 쪽지로 보내줘」 → 확인 후 발송 | 아니오 |
 | 화면 연계 | 답변에 나온 단말 화면번호를 딥링크로 준다 | 아니오 |
 
@@ -47,7 +48,7 @@ src/
 │  ├─ nodes/               그래프 단계: 질문 이해 · 도구 고르기 · 답변 작성 · 되묻기 · 제안·확인
 │  ├─ tools/               에이전트가 부르는 기능. __init__.py 의 TOOLS 가 전체 목록이다
 │  │  ├─ customer_solution/  고객별 솔루션 — 도구는 tool.py, 나머지는 계산
-│  │  ├─ branch_briefing/  메인 브리핑 — 도구는 tool.py, 나머지는 SQL 검사·실행
+│  │  ├─ branch_briefing/  부점 브리핑 — 도구는 tool.py · 현황 판정 status.py · 전략 브리핑 strategy.py · SQL 검사·실행
 │  │  ├─ kb_search/        지식베이스 검색(화법·수치·절차·화면·시황·상품 등)
 │  │  └─ general/          파일 하나가 도구 하나: 날짜 · 세액공제 계산 · 상담 이력 · 직전 답변
 │  ├─ evidence/            근거 목록의 규약과 답변 검사
@@ -231,7 +232,7 @@ flowchart TD
     llm_down --> __end__
     lms_link --> __end__
     offer --> __end__
-    tools[["자료 도구 22종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 문서 · 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록<br/>&nbsp;&nbsp;&nbsp;&nbsp;이번 상담 대화 기록 · 이 고객에게 맞는 참고자료 · 안내할 이벤트·세미나<br/>오늘의 목록: 오늘의 타겟 고객 목록<br/>부점 데이터: 부점 고객 데이터<br/>계산: 세액공제 환급액 · 오늘 날짜·기한<br/>이번 대화: 이전 답변"]]
+    tools[["자료 도구 23종 — 답변의 근거는 모두 이 도구로 조회한다<br/>지식베이스: 상담 화법 · 제도·상품 수치 · 업무 처리 절차 · 단말 화면번호<br/>&nbsp;&nbsp;&nbsp;&nbsp;비대면 채널 경로 · 고객군 정의 · 관리 방법론 · 영업점 현장 관찰<br/>&nbsp;&nbsp;&nbsp;&nbsp;시황 자료 · 운용 상품 자료<br/>현재 고객: 고객 브리핑 문서 · 고객 브리핑 자료 · 적합성 범위 · 지난 상담 기록<br/>&nbsp;&nbsp;&nbsp;&nbsp;이번 상담 대화 기록 · 이 고객에게 맞는 참고자료 · 안내할 이벤트·세미나<br/>부점 브리핑: 관리 대상 추천 · 부점 현황 · 부점 고객 데이터<br/>계산: 세액공제 환급액 · 오늘 날짜·기한<br/>이번 대화: 이전 답변"]]
     plan -. "필요한 자료를 골라 조회" .-> tools
     gates[["답변 점검 — 근거를 벗어난 답변은 화면에 내보내지 않는다<br/>① 근거에 없는 숫자·상품명 → 내보내지 않음<br/>② 값과 조건을 잘못 짝지은 문장 → 내보내지 않음<br/>③ 빠진 필수 안내 문구·원문 인용 → 보완해서 내보냄"]]
     compose -. "내보내기 전 검사" .-> gates
@@ -325,9 +326,38 @@ python -m scripts.import_targets       # 타겟 룰베이스 xlsx → targets.js
 python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의 검증(ERROR 0건)
 ```
 
-## 8. 메인 브리핑 — 부점 데이터 조회 (`tools/branch_briefing/`)
+## 8. 부점 브리핑 (`tools/branch_briefing/` · `customer_solution/tool.py::_targets`)
 
-직원이 자기 부점의 IRP 고객 데이터를 조건으로 묻는다(「디폴트옵션 미설정 몇 명이야?」).
+직원이 자기 부점의 IRP 고객을 본다. 기능이 셋이고, 도구 이름이 기능을 가른다.
+
+| 기능 | 도구 | 무엇으로 답하나 | LLM |
+|---|---|---|---|
+| 관리 대상 추천 | `branch_targets` | 그 직원 부점의 부점 DB 관리 대상(타겟 룰베이스 요건 판정을 그대로 적용 — `roster.branch_profiles` → `target_list`) 중 **오늘 성립한 CASE 의 중점관리 조건을 전부 만족하는 고객**(`roster.focus_names` — 시트 `부점CASE_중점조건`, AND. 여의도종합금융센터는 관리 대상 1,328명 중 61명). 중점관리 고객은 하루 100명까지(넘으면 우선순위 앞쪽만 싣고 전체 인원을 밝힌다). 성립한 CASE 가 없거나 조건을 모두 갖춘 고객이 0명이면 중점관리 고객이 아님을 밝히고 관리 대상을 우선순위 앞쪽부터 30명(인원 상한은 시트 `부점_임계값` BP-10 · BP-11 — `status.target_limits`). 순서는 오늘의 부점 CASE 가 가리키는 요건을 가진 고객이 앞(`target_list.prioritize`). **이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로** 싣는다(`Turn.first_targets` — 이름만, 날짜가 바뀌면 새로) | 답변 작성만 |
+| 부점 현황 | `branch_status` | 지표(잔액·계좌 수·부점 수익률·고유계정대 잔액·원리금보장 비중·올해 계약이전·수익률 저조·1억 이상) · 세그먼트 인원 · **전월말 대비 변화** · 오늘의 CASE(`status.compute`). CASE 판정에 쓰는 지표는 앞의 셋 | 답변 작성만 |
+| 고객 검색 | `branch_search` | 직원이 말한 조건 → SELECT 한 문장(아래) | SQL 작성 · 답변 작성 |
+
+**기준은 룰베이스 xlsx 의 부점 시트 6종이다**(`부점세그먼트_Master` · `부점세그먼트_조건` · `부점CASE_Rule` ·
+`부점CASE_조건` · `부점CASE_중점조건` · `부점_임계값` → `scripts.import_targets` → `targets.json` 의 `branch_*`). 세그먼트 조건·CASE
+판정조건·«증가로 볼 최소 인원»이 전부 거기 있고 코드는 읽어서 SQL 로 옮긴다(`status.segment_sql` — 뷰에 없는
+필드·모르는 연산자·따옴표가 낀 값은 옮기지 않는다). **이 시트들은 에이전트 초안이다** — 기획자 위임(2026-10-22)으로
+작성했고 검토 전이며, 표의 «적용상태» 칸이 그 사실을 적는다(시연값 현황 리포트 `scripts.demo_status` §8 도 센다). 고칠 값은 xlsx 에 넣고
+`python -m scripts.import_targets` 로 다시 내린다.
+
+**화면 진입 — 현황 패널 + 전략 브리핑**(`strategy.py`). 프론트가 `mode: "branch_briefing"` 으로 질문 없이 한 번
+부르면(`main.py`) `branch_panel`(정형 수치) · `branch_briefing`(문장) 두 이벤트가 나간다(이벤트 필드는 `main.py` 머리말 · 상세 계약은 따로 배포하는 호출 계약 문서).
+
+```
+[코드] 오늘 · 전월말 스냅샷 집계 → 세그먼트 변화 → CASE 판정(표) → [LLM] 문장 2~4개 → [코드] 숫자 검사
+```
+
+- 판단 구조는 부점 상태 → 세그먼트 변화 → 고객 프로파일 특징 → 우선순위 → 상담·운용 전략이고, CASE 를
+  고르는 것은 코드다. LLM 은 판정된 CASE 를 문장으로 옮길 뿐이다.
+- **문장에 쓰는 숫자는 판정 근거가 된 세그먼트 인원 변화뿐이다**(「13명 늘었습니다」). 잔액·계좌 수·수익률은
+  패널이 숫자로 보여주므로 문장은 방향만 말한다. 코드가 검사하고(`strategy.check_text`), 걸리면 한 번 다시
+  쓰게 한 뒤 또 걸리면 표의 «상담·운용 전략» 문장을 그대로 싣는다(`fallback`). 해당 CASE 가 없으면 LLM 을
+  부르지 않는다(`no_case`). LLM 이 죽으면 문장을 만들지 않는다(`llm_down`).
+
+**고객 검색 — SQL 한 문장.**
 
 ```
 질문 → [LLM] SELECT 문 한 개 → [코드] 검사 → [코드] 실행 → 결과 표 → [LLM] 답변
@@ -335,8 +365,8 @@ python -m pension_agent.tools.customer_solution.engine   # 전략·상품 정의
 
 | 단계 | 파일 | 하는 일 |
 |---|---|---|
-| 볼 수 있는 것 | `views.py` | LLM 에게 보여주는 유일한 스키마. 고정 뷰 두 개 — `v_irp_customer`(우리 부점 고객, 한 명당 한 행) · `v_branch_summary`(부점별 집계) |
-| 검사 | `check.py` | SELECT 한 문장만 · 세미콜론·주석·WITH·쓰기 명령 금지 · 고정 뷰만 조회 · 시스템 객체 금지 |
+| 볼 수 있는 것 | `views.py` | LLM 에게 보여주는 유일한 스키마. 고정 뷰 네 개 — `v_irp_customer`(우리 부점 고객, 한 명당 한 행) · `v_irp_customer_prev`(같은 꼴의 전월말 스냅샷) · `v_transfer_out`(타사로 계약이전된 계좌, 한 건당 한 행) · `v_branch_summary`(부점별 집계). 프롬프트에는 부점 세그먼트 정의(이름 · 직원 표현 · 조건)도 함께 실려, 「납입금 미운용」·「현금성 장기대기」가 표의 조건으로 옮겨진다 |
+| 검사 | `check.py` | SELECT 한 문장만 · 세미콜론·주석·WITH·쓰기 명령 금지 · 고정 뷰만 조회 · 시스템 객체 금지. 현황 집계처럼 코드가 만든 SQL 도 같은 검사를 지난다 |
 | 실행 | `run.py` | 고정 뷰 SQL 을 `WITH` 로 앞에 붙인다(DB 에 뷰를 만들지 않는다). 부점코드는 직원 사번으로 조회한 값을 코드가 넣는다. 최대 100행(Sybase 는 `SELECT TOP`) |
 | 재시도 | `tool.py` | 검사나 실행에서 걸리면 이유를 LLM 에게 돌려주고 최대 2번 다시 쓰게 한다 |
 | 고정 뷰 SQL | `sql/sqlite/` · `sql/sybase/` | 사람이 쓴다. 조인과 코드값 풀이가 여기 있다 |
@@ -350,13 +380,15 @@ DB 는 `BRANCH_DB` 로 고른다.
 
 | 값 | DB |
 |---|---|
-| `demo` (기본) | 행외 목업 DB(sqlite 메모리, `demo_db.py`) — 부점 4곳 · 고객 300명. 전부 시연값이다 |
+| `demo` (기본) | 행외 목업 DB(sqlite 메모리, `demo_db.py`) — 부점 4곳 · 전월말 스냅샷 · 계약이전. 전부 시연값이다. 여의도종합금융센터 1,392명은 부점 브리핑 화면 기획안의 수치가 그대로 나오게 맞춘 고객이다(`demo_yeouido.py` — 목업 고객 12명 + 합성 1,380명) |
 | `sybase` | 행내 Sybase IQ 를 MCP 도구 `sybaseiq_query` 로 조회한다(`common/mcp/sybase.py`) |
 | `off` | 조회하지 않는다. 표에 없는 값도 `off` 로 본다 |
 
 **행내로 옮길 때 할 일.**
-1. `sql/sybase/` 의 세 파일(`my_branch.sql` 사번→부점 · `v_irp_customer.sql` · `v_branch_summary.sql`)을
-   실제 테이블로 작성한다. 결과 컬럼 이름과 뜻은 `views.py` 와 같아야 한다. 작성 전에는 «DB 미연결»로 답한다.
+1. `sql/sybase/` 의 다섯 파일(`my_branch.sql` 사번→부점 · `v_irp_customer.sql` · `v_irp_customer_prev.sql`(전월말
+   기준년월일 스냅샷) · `v_transfer_out.sql`(계약이전 원장) · `v_branch_summary.sql`)을 실제 테이블로 작성한다. 결과 컬럼 이름과 뜻은 `views.py` 와
+   같아야 한다. 작성 전에는 «DB 미연결»로 답한다. 부점 세그먼트용 컬럼(미운용 금액·기간 · 세액공제 잔여한도 ·
+   계약이전 사전조회 · 성향 불일치 · ISA 만기)은 원천 테이블이 아직 정해지지 않았다.
 2. `.env` 에 `BRANCH_DB=sybase`, `MCP_SERVERS=workb,sybase`, `MCP_CONN_ID` 를 넣는다.
 3. `sybaseiq_query` 의 SQL 인자 이름과 응답 형식을 확인한다. 다르면 `MCP_SYBASE_TOOL` ·
    `MCP_SYBASE_QUERY_ARG` 로 바꾼다.
@@ -394,11 +426,14 @@ python -m scripts.kb_build.build_kb --activate   # 검토 후 활성화
 
 전부 LLM 키 없이 돈다. 코드를 고친 뒤 모두 통과하는지 확인한다.
 
+부점 브리핑 시험 질문을 **실제 LLM** 으로 채점하려면(키 필요 · 느림) `python -m tests.live_branch` — 지난번 통과 후 관련 코드·질문이 그대로인 질문은 건너뛴다(`--list` 로 무엇을 돌릴지만 보기 · `--all` 전부). 질문을 더하려면 `tests/branch_questions.py` 에 한 줄을 더하고, 오프라인 검사(`tests.test_branch`)를 먼저 통과시킨다.
+
 ```bash
 python -m tests.test_engine               # 추천 엔진 계산
 python -m tests.test_support              # 화법·반론·참고자료·안내 콘텐츠 선정
 python -m tests.test_customer_solution    # 브리핑 문서 — LLM 1회 · 검사 · 실패 처리
-python -m tests.test_branch               # 부점 데이터 조회 — SQL 검사 · 부점 범위 · 행 수 상한
+python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE 판정 · 전략 브리핑 · 추천 순서 · 시험 질문(오프라인)
+python -m tests.test_customer_selection   # 목록 후속 질문 — 동명이인·번호 오류·만료·부점·HTTP 세션 연결
 python -m tests.test_agent                # 분류 · 도구 루프 · 답변 검사 · 쪽지 (본문은 tests/agent/)
 python -m tests.test_infra                # 공용 기반 · 임포트 방향 · 429 호출 제한
 python -m tests.test_api                  # HTTP 입출력 규격

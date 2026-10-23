@@ -7,7 +7,7 @@
 # 실패한다 — 아래 langgraph 주석 참고.
 #
 # 개발·시연 화면(Streamlit)과 변환기는 배포 이미지에 넣지 않는다 — 개발용 패키지
-# (streamlit · pandas · anthropic · openpyxl)는 따로 설치한다(README §1).
+# (streamlit · pandas · anthropic)는 따로 설치한다(README §1).
 # ─────────────────────────────────────────────────────────────
 
 # HTTP 진입점 (main.py). 플랫폼 승인 버전.
@@ -18,6 +18,8 @@ starlette==0.46.2           # fastapi 0.115.12 의 의존(<0.47). 같은 환경�
                             # 그 오류가 나면: pip install "starlette==0.46.2"
 uvicorn==0.34.2
 python-dotenv==1.1.0        # .env 파싱 (env.py). 승인 버전.
+openpyxl==3.1.5             # 관리 대상 목록 엑셀 첨부(target_table.workbook). 2026-10-23 사용자 확인 —
+                            # 행내에서 쓸 수 있음. 버전은 개발 환경 값이다 — 행내 Nexus 버전과 다르면 맞춘다.
 
 # consult_agent 대화 그래프.
 #

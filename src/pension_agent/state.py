@@ -37,6 +37,9 @@ class Turn(TypedDict, total=False):
     answer: str | None               # 화면에 나간 답변(추천질문 전, ANSWER_KEEP 자). 되묻기·LLM 장애 턴엔 없음. last_answer 도구만 읽음
     sources: list[dict]              # 그 답변의 출처(역할 포함)
     marks: list[str]                 # 그 답변의 재료 성격 표시
+    # 첫 관리 대상 추천 {date, names, refs, codes}. 내부 행 식별자로 동명이인 구분(PIN 미포함).
+    first_targets: dict | None
+    customer_context: dict | None    # 직원/세션별 목록 식별자·선택·동명이인 확인. 프롬프트 미포함
 
 
 class AgentState(TypedDict, total=False):
@@ -47,6 +50,7 @@ class AgentState(TypedDict, total=False):
     session_id: str | None
     # [입력] 로그인 직원 사번 — WorkB 쪽지 수신자(기본 본인)·발송 주체. 없으면 환경변수, 그것도 없으면 쪽지 미제안
     employee_id: str | None
+    customer_context: dict | None    # 코드 전용 고객 선택 맥락
     intent: str                      # understand 가 채움 — routing.INTENTS 중 하나
     customer_type: str | None
     objection_type: str | None

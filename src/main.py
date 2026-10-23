@@ -4,7 +4,8 @@
       → text/event-stream, 이벤트마다 {"event": "CHUNK", "content": "<JSON 이벤트>"}
 
 요청 키(input_value 안):
-    message         (필수) 직원 질문
+    message         (필수 · mode=branch_briefing 이면 생략) 직원 질문
+    mode            (선택) "branch_briefing" — 부점 브리핑 화면 진입. 질문 없이 현황 패널 + 전략 브리핑
     x_client_user   (필수) 호출 직원 식별자 · 쿼터 버킷. 사번 7자리로 시작하면 사번으로 사용
     customer_id     (선택) 브리핑 화면 고객 id. `b64:` + base64(원장 표기) 권장 — 원장 표기는 게이트웨이 FILTER_INVALID
     session_id      (선택) 세션 구분자. 기본 "default"
@@ -13,7 +14,7 @@
 
 응답 이벤트 type(한 턴 순서):
     progress   0개 이상 · 답변 전
-    answer     1개 · text · intent · links · messages(없으면 [])
+    answer     1개 · text · intent · links · messages · files(없으면 [])
     action     연계 제안 턴에만
     clarify    되묻기 턴에만
     sources    항상(0건이면 [])
@@ -22,6 +23,11 @@
     done       항상 마지막
     error      실패 시 answer 대신 · 그 뒤 done
     log        로그 이벤트 켰을 때만 · 아무 자리
+
+mode=branch_briefing 응답 이벤트 type(순서):
+    branch_panel     1개 · 부점 현황(지표·세그먼트 전월말 대비·오늘의 CASE) — 숫자는 여기서만
+    branch_briefing  1개 · text · status(ok·fallback·no_case·llm_down) · reason
+    done             항상 마지막 · 실패 시 error 뒤 done
 
 프레이밍: 스트림은 SSE(`data: {...}\n\n`, CHAT_SSE_FRAMING=0 이면 줄마다 JSON) · 비스트림 신호 시 JSON 하나.
 로그: 루트 로거 → stdout · INFO. 로거 `api`(HTTP 경계) · `agent`(단계별).
@@ -51,6 +57,7 @@ from pension_agent.common import config, llm, mcp, observability, privacy
 from pension_agent import context_store
 from pension_agent import graph as consult_graph
 from pension_agent.nodes import act as consult_act
+from pension_agent.tools.branch_briefing import strategy as branch_strategy
 from pension_agent.tools.customer_solution import customer as strategy_customer
 
 
@@ -214,6 +221,8 @@ def _turn_events(result: dict[str, Any], *, with_trace: bool = False) -> list[di
         "links": list(result.get("links") or []),
         # 본문이 인용한 고객 발송 문구(LMS) — links 와 같은 이유로 answer 필드
         "messages": list(result.get("messages") or []),
+        # 첨부 파일(관리 대상 목록 엑셀) — 본문 표 아래 내려받기 버튼 재료라 answer 필드
+        "files": list(result.get("files") or []),
     }]
     action = result.get("pending_action")
     # 동명이인 후보 턴(`candidates`)은 네/아니오 턴이 아님 — action 미전송
@@ -238,6 +247,47 @@ def _turn_events(result: dict[str, Any], *, with_trace: bool = False) -> list[di
 def _error_events(exc: BaseException) -> list[dict[str, Any]]:
     # 실패도 이벤트로 전달 — 빈 응답과 구분
     return [{"type": "error", "text": f"{type(exc).__name__}: {exc}"}, {"type": "done"}]
+
+
+#: 부점 브리핑 화면 진입 요청(질문 없음).
+BRIEFING_MODE = "branch_briefing"
+
+
+def _briefing_events(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """strategy.build() 결과 → branch_panel → branch_briefing → done."""
+    brief = result["briefing"]
+    return [{"type": "branch_panel", **result["panel"]},
+            {"type": "branch_briefing", "text": brief.get("text"), "status": brief.get("status"),
+             "reason": brief.get("reason")},
+            {"type": "done"}]
+
+
+async def _branch_briefing(args: dict[str, Any], rid: str, streaming: bool):
+    """화면 진입 — 대화 그래프를 거치지 않고 현황(코드) + 전략 브리핑 문장(LLM 1회). 맥락 저장 안 함."""
+    started = time.monotonic()
+    emp_no = consult_graph.employee_no(args["employee_id"], args["x_client_user"])
+    log.info("[%s] request     모드=%s 사용자=%s 사번=%s", rid, BRIEFING_MODE,
+             args["x_client_user"], emp_no or "-")
+
+    def run_once() -> dict[str, Any]:
+        with observability.request_id(rid), llm.client_user(args["x_client_user"]):
+            return branch_strategy.build(emp_no)
+    try:
+        events = _briefing_events(await asyncio.to_thread(run_once))
+        log.info("[%s] done        모드=%s 소요=%.1f초 브리핑=%s", rid, BRIEFING_MODE,
+                 time.monotonic() - started, events[1].get("status"))
+    except Exception as exc:  # noqa: BLE001 — 부점 미확인·DB 미연결도 이벤트로
+        log.warning("[%s] error       모드=%s 사유=%r", rid, BRIEFING_MODE,
+                    f"{type(exc).__name__}: {exc}")
+        events = _error_events(exc)
+    if not streaming:
+        return JSONResponse({"event": "CHUNK",
+                             "content": "\n".join(_event_json(e) for e in events)})
+
+    async def generate():
+        for ev in events:
+            yield _event(ev)
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 
 def _wants_stream(request: Request, req: ChatRequest, payload: dict[str, Any]) -> bool:
@@ -301,8 +351,11 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
     x_client_user = payload.get("x_client_user")
     if not x_client_user:
         raise _reject(rid, "input_value 에 'x_client_user' 키가 필요합니다.")
+    mode = payload.get("mode")
+    if mode not in (None, "", BRIEFING_MODE):
+        raise _reject(rid, f"input_value 의 'mode' 는 {BRIEFING_MODE!r} 만 쓸 수 있습니다.")
     message = payload.get("message")
-    if not message:
+    if not message and mode != BRIEFING_MODE:
         raise _reject(rid, "input_value 에 'message' 키가 필요합니다.")
 
     # Turn 형식(question 키)만 사용 — 다른 형식은 format_history 에서 500. None 이면 저장 맥락 사용
@@ -311,7 +364,8 @@ def _parse(req: ChatRequest, rid: str = "-") -> dict[str, Any]:
         isinstance(h, dict) and "question" in h for h in hists) else None
 
     return {
-        "question": str(message),
+        "question": str(message or ""),
+        "mode": mode or None,
         "history": history,
         # b64·13자리 → 원장 표기
         "customer_id": strategy_customer.normalize_id(payload.get("customer_id")),
@@ -386,6 +440,8 @@ async def chat(req: ChatRequest, request: Request):
     question = args["question"]
     x_client_user, session_id = args["x_client_user"], args["session_id"]
     streaming = _wants_stream(request, req, args["payload"])
+    if args["mode"] == BRIEFING_MODE:
+        return await _branch_briefing(args, rid, streaming)
     # 로그 이벤트는 요청 줄보다 먼저 attach — 스트림은 큐로, 비스트림은 모아서 content 앞에
     with_logs = _wants_logs(args["payload"])
     log_events: list[dict[str, Any]] = []

@@ -119,6 +119,7 @@ class Profile:
     joined: str | None = None  # IRP 가입일(ISO)
     pension_started: bool = False  # 연금수령 개시 — 참이면 add·tax 미성립(추가납 권유 금지)
     club_grade: str | None = None  # 스타클럽 등급 — 값 있을 때만 표시
+    customer_ref: str | None = None  # 부점 원장의 내부 행 식별자(PIN 아님, 대화형 목록 연결용)
 
     @property
     def risk_asset(self) -> int:
@@ -175,6 +176,10 @@ CONDS = {
 #: 원리금보장 편중 임계(%) — TARGET_ID TG-202(D, 80~100%) ∪ TG-003(A, 100%) 합집합이라 상한 없음
 PRINCIPAL_HEAVY_PCT = 80
 
+#: 장기 미접촉 임계(마지막 접촉 후 일수) — 타겟 룰베이스에 행이 없다(TARGET_ID 없음). 근거는 기능정의
+#: 07/01 화면 예시의 «6개월+ 미접촉». 부점 고객 검색의 «장기 미접촉»도 이 값으로 판정된 사유를 쓴다
+DORMANT_DAYS = 180
+
 #: 미운용 현금성자산 임계 — 고유계정대 비중(%), TARGET_ID TG-001 · 세그먼트 1·3 선별 기준
 CASH_IDLE_PCT = 50
 
@@ -199,6 +204,13 @@ def churn(p: Profile) -> float:
     return round(v, 1)
 
 
+def risk_mismatch(rk: str, risk_pct: float, principal_pct: float) -> bool:
+    """투자성향 대비 자산구성 불일치(요건 `mis`). 부점 DB 목업·부점 세그먼트 BS-07 도 이 판정을 쓴다."""
+    return ((rk in ("안정형", "안정추구형") and risk_pct >= 35)
+            or (rk == "위험중립형" and risk_pct >= 68)
+            or (rk in ("적극투자형", "공격투자형") and principal_pct >= 65))
+
+
 def conditions(p: Profile) -> list[str]:
     """성립 타겟 요건(PRIO 순)."""
     a: set[str] = set()
@@ -210,7 +222,7 @@ def conditions(p: Profile) -> list[str]:
     # None 가드 필수 — None 비교 시 TypeError 로 브리핑 전체 중단
     if p.retPct is not None and p.retPct <= 30:
         a.add("low")
-    if p.dorm is not None and p.dorm >= 180:
+    if p.dorm is not None and p.dorm >= DORMANT_DAYS:
         a.add("dor")
     if p.nchM >= NO_CHANGE_MONTHS:
         a.add("nch")
@@ -221,11 +233,7 @@ def conditions(p: Profile) -> list[str]:
         a.add("sec")
     if p.risk_asset > RISK_ASSET_CAP_PCT:
         a.add("lim")
-    if (
-        (p.rk in ("안정형", "안정추구형") and p.risk_asset >= 35)
-        or (p.rk == "위험중립형" and p.risk_asset >= 68)
-        or (p.rk in ("적극투자형", "공격투자형") and p.port[0] >= 65)
-    ):
+    if risk_mismatch(p.rk, p.risk_asset, p.port[0]):
         a.add("mis")
     if churn(p) >= 10:
         a.add("chn")

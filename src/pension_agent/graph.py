@@ -18,6 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from pension_agent.common import llm, observability, note
 from pension_agent.common.session_store import append_turn
 from pension_agent.tools.customer_solution import customer as CUST
+from pension_agent.tools import customer_selection
 
 from pension_agent.common import progress
 from pension_agent import tools, turn_trace
@@ -100,6 +101,17 @@ def _pending_label(history: list[dict] | None) -> str | None:
     return "되묻기" if last.get("pending_clarify") else None
 
 
+def _first_targets(history: list[dict] | None, evidence: list) -> dict | None:
+    """이 대화의 첫 관리 대상 추천. 기록에 있으면 그것, 없으면 이번 턴 branch_targets 산출."""
+    for ev in evidence:
+        if ev.get("tool") == "branch_targets" and (ev.get("meta") or {}).get("first_targets"):
+            return ev["meta"]["first_targets"]
+    for turn in reversed(history or []):
+        if turn.get("first_targets"):
+            return turn["first_targets"]
+    return None
+
+
 def employee_no(explicit: str | None, x_client_user: str | None) -> str | None:
     """직원 WorkB 사번. 명시값 우선, x_client_user 는 사번 꼴일 때만. main.py 로그와 공용."""
     return (explicit or "").strip() or note.as_emp_no(x_client_user)
@@ -122,12 +134,15 @@ def ask(
     global _AGENT
     if _AGENT is None:
         _AGENT = build_agent()
+    emp_no = employee_no(employee_id, x_client_user)
+    saved = customer_selection.context(history, emp_no, session_id)
+    selection = customer_selection.resolve(question, saved, emp_no, customer_id)
+    customer_id = selection.customer_id
     # 관측 user_id 는 고객(브리핑과 같은 `customer_ref` 표기), 직원은 메타데이터
     who = observability.customer_ref(
         customer_id, _customer_name(customer_id), guard.conditions_of(customer_id))
     tags = ["consult", *who["tags"]]
     # 사번은 여기서 한 번만 판정 — 상태·상담이력·발송 공용
-    emp_no = employee_no(employee_id, x_client_user)
     # 요청 id 는 main.py 가 연 것을 잇고 경과초 시계만 턴 시작으로
     started_at = observability.wall_clock()
     with observability.request_id(observability.current_request_id()), \
@@ -140,12 +155,20 @@ def ask(
                            history=f"{len(history or [])}턴",
                            pending=(_pending_label(history)))
         with progress.reporting(on_progress):
-            out = _AGENT.invoke(
-                {"question": question, "history": history or [], "customer_id": customer_id,
-                 # history 도구가 «지난번»에서 이번 세션 제외용
-                 "session_id": session_id,
-                 # 쪽지 수신·발송 주체
-                 "employee_id": emp_no})
+            if selection.answer is not None:
+                out = {"question": question, "answer": selection.answer, "sources": [],
+                       "evidence": [], "intent": "situation", "clarify": selection.clarify,
+                       "customer_id": customer_id}
+            else:
+                out = _AGENT.invoke(
+                    {"question": selection.question or question, "history": history or [], "customer_id": customer_id,
+                     "customer_context": selection.context,
+                     # history 도구가 «지난번»에서 이번 세션 제외용
+                     "session_id": session_id,
+                     # 쪽지 수신·발송 주체
+                     "employee_id": emp_no})
+                if selection.notice and not out.get("llm_error"):
+                    out["answer"] = selection.notice + "\n\n" + out["answer"]
         evidence = out.get("evidence") or []
         # 닫을 때 태그를 덮어쓰므로 여는 태그도 함께 전달
         span.update(output=out.get("answer"), intent=out.get("intent"),
@@ -176,6 +199,11 @@ def ask(
     trace = turn_trace.build(out, journal, started_at=started_at,
                              finished_at=observability.wall_clock())
     answer = out["answer"]
+    customer_context = customer_selection.remember(selection.context, evidence)
+    # 이번 턴에 새로 표시한 목록·선택 상태로 추천질문 생성(이전 목록 번호를 추천하지 않음).
+    out["customer_context"] = customer_context
+    out["selection_case"] = selection.case
+    out.setdefault("customer_id", customer_id)
     # 추천질문·딥링크·발송 문구는 모든 intent 가 지나는 여기 한 곳에서 생성
     followups = suggest.followup_questions(out)
     if followups:
@@ -206,6 +234,9 @@ def ask(
                    else (out.get("answer") or "")[:ANSWER_KEEP] or None),
         "sources": list(out.get("sources") or []),
         "marks": tools.ledger_marks(evidence),
+        # 이 대화의 첫 관리 대상 추천 — 이미 있으면 그대로 잇고, 없으면 이번 턴 추천을 첫 추천으로
+        "first_targets": _first_targets(history, evidence),
+        "customer_context": customer_context,
     }
     new_history = [*(history or []), turn][-HISTORY_LIMIT:]
 
@@ -225,6 +256,11 @@ def ask(
         "links": list(links or []),
         # 본문 속 고객 발송 문구 `{kind, label, text, copy}`. 없으면 []
         "messages": messages,
+        # 첨부 파일 `{name, mime, base64}` — 관리 대상 목록 엑셀. 없으면 []
+        # 그 목록이 답변 자체인 턴만 — 쪽지 초안처럼 목록을 재료로만 쓴 턴에는 붙이지 않는다
+        "files": [f for e in evidence for f in ((e.get("meta") or {}).get("files") or [])
+                  if (e.get("meta") or {}).get("document")
+                  and e["meta"]["document"] in (out.get("answer") or "")],
         # answer 끝 추천질문 블록과 같은 내용
         "followups": followups,
         "intent": out.get("intent"),  # 프론트가 correction 처럼 미완성 기능을 표시할 때 씀

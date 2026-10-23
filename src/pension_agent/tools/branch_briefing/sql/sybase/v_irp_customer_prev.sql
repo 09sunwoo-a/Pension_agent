@@ -1,0 +1,4 @@
+-- TODO(행내): Sybase IQ 물리 테이블·컬럼 이름을 확인해 이 파일을 작성한다.
+-- 결과 컬럼 이름과 뜻은 sql/sqlite/v_irp_customer_prev.sql 및 views.py 의 목록과 같아야 한다
+-- (LLM 은 그 목록만 보고 SQL 을 쓴다). 이 줄이 남아 있는 동안 Sybase 경로는 «DB 미연결»로 답한다.
+-- 전월말({prev_date}) 기준 원장 스냅샷을 읽는다(기준년월일 = 전월 말일).

@@ -291,7 +291,7 @@ def check_memo() -> int:
     who = CUST.PERSONAS[0]
     facts = engine.prepare(who)
     _kt, _kwhat = memo.table_for({"customer_id": who.id}, [])
-    _tt, _twhat = memo.table_for({}, [{"tool": "targets"}])
+    _tt, _twhat = memo.table_for({}, [{"tool": "branch_targets"}])
     hit = (memo.KEY_INFO_HEADER in _kt and _kt.count("<tr>") == 6
            and str(facts["customer"]["평가금액"]) in _kt
            and str(facts["account_state"]["세액공제_잔여한도"]) in _kt

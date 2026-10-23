@@ -1,6 +1,11 @@
 """행외 목업 DB(sqlite 메모리) — 전부 시연값.
 
-고객 300명 = 고정 시드 합성 288명 + 목업 고객 12명(customers.json 과 같은 값 — 화면 간 수치 일치).
+여의도종합금융센터(0001) 1,392명 = 목업 고객 12명(customers.json 과 같은 값) + 부점 브리핑 화면 기획안의
+수치에 맞춘 합성 1,380명(demo_yeouido.py). 다른 세 부점은 고정 시드 합성 72명씩.
+전월말 스냅샷(`irp_customer_prev`)도 시연값이다 — 오늘 표에서 고정 시드로 «한 달 전» 을 되짚어 만든다.
+다른 부점은 CASE 1(계좌 감소·사전조회·만기 증가)·CASE 2(수익률 하락·미운용 증가)가 서도록 흔들고,
+여의도종합금융센터는 화면 기획안의 증감 화살표대로 되짚는다(CASE 3 — demo_yeouido.py).
+올해 계약이전(타사 유출)은 `irp_transfer_out` — 고객 표에는 없는 떠난 계좌다.
 질의는 sql/sqlite 고정 뷰 경유만.
 """
 
@@ -11,10 +16,12 @@ import sqlite3
 import threading
 from datetime import date, timedelta
 
+from pension_agent.common import clock
+from pension_agent.tools.branch_briefing import demo_yeouido, roster
 from pension_agent.tools.customer_solution import customer as C
 
 #: 시연 부점(첫 부점에 목업 고객 12명).
-BRANCHES = (("0001", "여의도"), ("0002", "강남"), ("0003", "판교"), ("0004", "부산"))
+BRANCHES = (("0001", demo_yeouido.NAME), ("0002", "강남"), ("0003", "판교"), ("0004", "부산"))
 #: 시연 직원(사번 · 이름 · 부점). 3902172 는 문서·테스트용 개발 사번.
 EMPLOYEES = (("3902172", "김국민", "0001"), ("3902173", "이하나", "0001"),
              ("3902201", "박서준", "0002"), ("3902301", "최유리", "0003"),
@@ -22,30 +29,80 @@ EMPLOYEES = (("3902172", "김국민", "0001"), ("3902173", "이하나", "0001"),
 
 _SYNTH = 288
 _SEED = 20261021
+#: 전월말 이후 해지된(오늘 표에는 없는) 시연 계좌 수 — 부점마다.
+_CLOSED_PER_BRANCH = 6
 
-_SCHEMA = """
+#: 고객 표 컬럼(순서 = INSERT 순서). 오늘 표와 전월말 표가 같다.
+COLUMNS = (
+    "customer_name", "age", "star_grade", "risk_profile",
+    "branch_code", "manager_emp_no", "joined_date",
+    "eval_amt", "return_rate", "safe_asset_pct", "idle_cash_pct",
+    "default_option", "pension_started", "pension_eligible",
+    "next_maturity_date", "next_maturity_amt",
+    "last_contact_days", "target_reasons",
+    # 부점 브리핑 세그먼트용(2026-10-22) — 원천 테이블 미확정 시연 컬럼
+    "idle_cash_amt", "idle_cash_days", "tax_credit_room", "transfer_inquiry",
+    "risk_mismatch", "isa_maturity_date", "isa_maturity_amt",
+    # 상품 유형별 보유(2026-10-22) — 원천 테이블 미확정 시연 컬럼
+    "etf_eval_amt",
+    # 만기 상품의 유형(2026-10-23) — 원장 상품유형 표기('예금'·'GIC')
+    "next_maturity_type",
+    # 연금저축 계좌 보유(2026-10-23) — '보유'·'미보유', 확인되지 않았으면 NULL
+    "pension_savings",
+)
+_COL = {name: i for i, name in enumerate(COLUMNS)}
+
+_TYPES = {"age": "INTEGER", "eval_amt": "INTEGER", "return_rate": "REAL",
+          "safe_asset_pct": "REAL", "idle_cash_pct": "REAL", "next_maturity_amt": "INTEGER",
+          "last_contact_days": "INTEGER", "idle_cash_amt": "INTEGER", "idle_cash_days": "INTEGER",
+          "tax_credit_room": "INTEGER", "isa_maturity_amt": "INTEGER",
+          "etf_eval_amt": "INTEGER"}
+
+
+def _table_sql(name: str) -> str:
+    cols = ",\n  ".join(f"{c} {_TYPES.get(c, 'TEXT')}" for c in COLUMNS)
+    return f"CREATE TABLE {name} (\n  {cols}\n);"
+
+
+_SCHEMA = f"""
 CREATE TABLE branch (branch_code TEXT PRIMARY KEY, branch_name TEXT);
 CREATE TABLE employee (emp_no TEXT PRIMARY KEY, emp_name TEXT, branch_code TEXT);
-CREATE TABLE irp_customer_base (
-  customer_name TEXT, age INTEGER, star_grade TEXT, risk_profile TEXT,
-  branch_code TEXT, manager_emp_no TEXT, joined_date TEXT,
-  eval_amt INTEGER, return_rate REAL, safe_asset_pct REAL, idle_cash_pct REAL,
-  default_option TEXT, pension_started TEXT, pension_eligible TEXT,
-  next_maturity_date TEXT, next_maturity_amt INTEGER,
-  last_contact_days INTEGER, target_reasons TEXT
+{_table_sql("irp_customer_base")}
+{_table_sql("irp_customer_prev")}
+CREATE TABLE irp_transfer_out (
+  customer_name TEXT, branch_code TEXT, transfer_date TEXT, transfer_amt INTEGER, to_institution TEXT
 );
 """
 
 _LOCK = threading.Lock()
 _CONN: sqlite3.Connection | None = None
+_DETAIL_IDS: dict[str, str] = {}  # 내부 행 식별자 → 상세 원장 id. 모델·표에는 미노출
+
+
+def detail_id(customer_ref: str) -> str | None:
+    """목업 상세 원장이 있는 행의 id. 동명이인 이름으로 조인하지 않음."""
+    connection()
+    return _DETAIL_IDS.get(customer_ref)
+
+
+def _idle_days(p: C.Profile, today: date) -> int | None:
+    """고유계정대 금액 변동 없이 지난 일수(시연 근사) — 1개월 변동이 있으면 0, 없으면 마지막 거래 후 경과일."""
+    act = p.activity or {}
+    if act.get("cash_delta_1m"):
+        return 0
+    last = act.get("last_order") or act.get("last_trade")
+    return (today - date.fromisoformat(last)).days if last else None
 
 
 def _persona_rows() -> list[tuple]:
+    today = clock.today()
     rows = []
     for p in C.PERSONAS:
         mats = sorted(p.maturities or [], key=lambda m: m.get("date") or "")
         first = mats[0] if mats else None
-        names = [C.CONDS.get(c, c) for c in C.conditions(p)]
+        conds = C.conditions(p)
+        names = [C.CONDS.get(c, c) for c in conds]
+        cash = next((a for a in p.assets if a["type"] == "고유계정대"), None)
         rows.append((
             p.nm, p.ag, p.club_grade, p.rk, "0001", "3902172", p.joined,
             int(p.bal), p.ret, float(p.port[0]) if p.port else None, p.cash_idle_pct,
@@ -53,6 +110,19 @@ def _persona_rows() -> list[tuple]:
             "충족" if p.pension_eligible else "미충족",
             first["date"] if first else None, int(first["amount"]) if first else None,
             p.dorm, ", ".join(names),
+            int(cash["amount"]) if cash else 0, _idle_days(p, today),
+            # room 은 만원 단위(customer.Profile.room)
+            int(p.room) * 10_000,
+            # 사전조회 신청은 원장에 없음 — 이탈 신호 요건(chn·out) 고객을 신청으로 둔 시연값
+            "신청" if {"chn", "out"} & set(conds) else "없음",
+            "불일치" if "mis" in conds else "일치",
+            (p.isa or {}).get("date"), int((p.isa or {}).get("amount") or 0) or None,
+            # ETF 평가금액 — 원장 보유상품(holdings)의 ETF 합계 그대로
+            sum(int(h.get("amount") or 0) for h in (p.holdings or []) if h.get("type") == "ETF"),
+            # 만기 상품 유형 — 원장 보유상품의 상품유형 그대로
+            first.get("type") if first else None,
+            # 연금저축 보유 — 원장 연금저축보유여부(Y/N, 비어 있으면 미확인)
+            {True: "보유", False: "미보유"}.get(p.pension_savings),
         ))
     return rows
 
@@ -69,7 +139,7 @@ _REASONS = ("디폴트옵션 미설정", "원리금보장상품 편중(80% 이�
 
 def _synthetic_rows() -> list[tuple]:
     rnd = random.Random(_SEED)
-    today = C.today()
+    today = clock.today()
     managers = {b: [e[0] for e in EMPLOYEES if e[2] == b] for b, _ in BRANCHES}
     rows = []
     for i in range(_SYNTH):
@@ -85,7 +155,7 @@ def _synthetic_rows() -> list[tuple]:
             reasons = sorted([*reasons, "디폴트옵션 미설정"])
         eligible = age >= 55 and rnd.random() < 0.8
         started = eligible and rnd.random() < 0.4
-        rows.append((
+        base = (
             rnd.choice(_SURNAMES) + rnd.choice(_GIVEN), age, rnd.choice(_GRADES),
             rnd.choice(_RISKS), branch, rnd.choice(managers[branch]),
             (date(2012, 1, 1) + timedelta(days=rnd.randint(0, 5000))).isoformat(),
@@ -94,8 +164,153 @@ def _synthetic_rows() -> list[tuple]:
             mat.isoformat() if mat else None,
             rnd.randint(5, 120) * 1_000_000 if mat else None,
             rnd.randint(0, 400), ", ".join(reasons),
+        )
+        rows.append(base)
+    # 부점 브리핑 컬럼은 기존 값의 난수 순서를 바꾸지 않도록 별도 시드로 뒤에 붙인다
+    extra = random.Random(_SEED + 2)
+    out = []
+    for base in rows:
+        risk, bal, safe, idle = base[3], base[7], base[9], base[10]
+        started = base[12] == "개시"
+        out.append(base + (
+            round(bal * idle / 100),
+            extra.randint(0, 240) if idle >= 30 else extra.randint(0, 20),
+            0 if started else extra.choice((0, 0, 1, 3, 5, 9)) * 1_000_000,
+            "신청" if extra.random() < 0.15 else "없음",
+            # 위험자산 비중은 원리금보장 비중의 나머지로 근사
+            "불일치" if C.risk_mismatch(risk, 100 - safe, safe) else "일치",
+            None, None,
+            etf_amount(base[0], base[4], bal, safe),
+            maturity_type(base[0], base[4], base[14]),
+            pension_savings(base[0], base[4]),
         ))
-    return rows
+    return out
+
+
+#: 합성 고객의 만기 상품 중 정기예금 비율(나머지는 GIC — 이율보증형보험). 시연값.
+_DEPOSIT_SHARE = 0.8
+
+
+def maturity_type(name: str, branch: str, maturity_date: str | None) -> str | None:
+    """합성 고객의 만기 상품 유형(시연값) — 원장 상품유형 표기 '예금'·'GIC'. 만기 상품이 없으면 None.
+
+    이름·부점으로 시드를 따로 둔다 — 다른 컬럼의 난수 순서를 건드리지 않고, 오늘·전월말 표가 같은 값을 갖는다.
+    """
+    if not maturity_date:
+        return None
+    return "예금" if random.Random(f"mat:{branch}:{name}").random() < _DEPOSIT_SHARE else "GIC"
+
+
+#: 합성 고객 중 연금저축 계좌를 가진 비율(시연값 — 행내 통계 아님).
+_PENSION_SAVINGS_SHARE = 0.35
+
+
+def pension_savings(name: str, branch: str) -> str:
+    """합성 고객의 연금저축 보유(시연값) — '보유'·'미보유'. 이름·부점 시드라 오늘·전월말 표가 같다."""
+    return "보유" if random.Random(f"psv:{branch}:{name}").random() < _PENSION_SAVINGS_SHARE else "미보유"
+
+
+#: 합성 고객 중 ETF 를 가진 비율 · 실적배당(원리금보장 밖) 몫 중 ETF 비중 범위(시연값).
+_ETF_SHARE = 0.4
+_ETF_PART = (0.15, 0.7)
+
+
+def etf_amount(name: str, branch: str, eval_amt: int, safe_pct: float | None) -> int:
+    """합성 고객의 ETF 평가금액(시연값) — 원리금보장 밖 몫 안에서.
+
+    고객마다 이름·부점으로 시드를 따로 둔다 — 다른 컬럼의 난수 순서를 건드리지 않아 화면 기획안 수치가 그대로다.
+    """
+    rnd = random.Random(f"etf:{branch}:{name}")
+    risky = eval_amt * (100 - (safe_pct or 0)) / 100
+    if risky < 1_000_000 or rnd.random() >= _ETF_SHARE:
+        return 0
+    return int(round(risky * rnd.uniform(*_ETF_PART), -4))
+
+
+def _prev_etf(today_rows: list[dict], prev_rows: list[dict]) -> None:
+    """전월말 ETF 평가금액 — 오늘 값을 전월말 잔액 비율로 되짚는다(해지 계좌·없던 고객은 0)."""
+    now = {(r["branch_code"], r["customer_name"]): r for r in today_rows}
+    for r in prev_rows:
+        cur = now.get((r["branch_code"], r["customer_name"]))
+        if cur is None or not cur["eval_amt"]:
+            r["etf_eval_amt"] = 0
+        else:
+            r["etf_eval_amt"] = int(round(cur["etf_eval_amt"] * r["eval_amt"] / cur["eval_amt"], -4))
+
+
+def _prev_rows(current: list[tuple]) -> list[tuple]:
+    """전월말 스냅샷(시연값). 오늘 표를 한 달 전으로 되짚는다 — 만기 잔여일수는 전월말 기준으로 맞춘다.
+
+    흔드는 것: 수익률(전월말이 높았다) · 잔액(전월말이 조금 적었다) · 미운용 현금성(일부는 전월말에 운용 중) ·
+    사전조회(일부는 이번 달 신청) · 30일 이내 만기(이번 달에 새로 들어왔다) · 해지 계좌(전월말에만 있다).
+    """
+    rnd = random.Random(_SEED + 1)
+    today, prev = clock.today(), clock.prev_month_end()
+    out: list[tuple] = []
+    for row in current:
+        r = list(row)
+        r[_COL["return_rate"]] = round(r[_COL["return_rate"]] + 0.6, 1)
+        r[_COL["eval_amt"]] = round(r[_COL["eval_amt"]] * 0.98)
+        r[_COL["etf_eval_amt"]] = int(round(r[_COL["etf_eval_amt"]] * 0.98, -4))
+        if (r[_COL["idle_cash_pct"]] or 0) >= 50 and rnd.random() < 0.6:
+            r[_COL["idle_cash_pct"]] = 20.0
+            r[_COL["idle_cash_amt"]] = round(r[_COL["eval_amt"]] * 0.2)
+            r[_COL["idle_cash_days"]] = 0
+        if r[_COL["transfer_inquiry"]] == "신청" and rnd.random() < 0.7:
+            r[_COL["transfer_inquiry"]] = "없음"
+        mat = r[_COL["next_maturity_date"]]
+        if mat:
+            offset = (date.fromisoformat(mat) - today).days
+            # 오늘 기준 30일 이내 만기는 전월말에는 창 밖(아직 그 상품이 없거나 더 멀었다)
+            prev_offset = offset + 60 if 0 <= offset <= 30 else offset
+            r[_COL["next_maturity_date"]] = (prev + timedelta(days=prev_offset)).isoformat()
+        out.append(tuple(r))
+    # 전월말 이후 해지된 계좌 — 어느 세그먼트에도 걸리지 않게 평이하게
+    for code in sorted({r[_COL["branch_code"]] for r in current}):
+        for k in range(_CLOSED_PER_BRANCH):
+            r = list(next(x for x in current if x[_COL["branch_code"]] == code))
+            r[_COL["customer_name"]] = f"해지고객{code}-{k + 1}"
+            r[_COL["eval_amt"]] = 3_000_000 + k * 500_000
+            r[_COL["return_rate"]] = 8.0
+            r[_COL["idle_cash_pct"]], r[_COL["idle_cash_amt"]], r[_COL["idle_cash_days"]] = 5.0, 150_000, 0
+            r[_COL["safe_asset_pct"]] = 40.0
+            r[_COL["default_option"]] = "설정"
+            r[_COL["pension_started"]], r[_COL["pension_eligible"]] = "미개시", "미충족"
+            r[_COL["next_maturity_date"]] = r[_COL["next_maturity_amt"]] = None
+            r[_COL["next_maturity_type"]] = None
+            r[_COL["tax_credit_room"]], r[_COL["transfer_inquiry"]] = 0, "없음"
+            r[_COL["risk_mismatch"]] = "일치"
+            r[_COL["isa_maturity_date"]] = r[_COL["isa_maturity_amt"]] = None
+            r[_COL["etf_eval_amt"]] = 0
+            r[_COL["target_reasons"]] = ""
+            out.append(tuple(r))
+    return out
+
+
+def _judged(rows: list[tuple]) -> list[tuple]:
+    """관리 대상 사유(target_reasons)를 룰베이스 요건 판정으로 채운다 — 무작위 사유를 두지 않는다.
+
+    행 → Profile → customer.conditions() (roster.row_profile). 목업 고객은 원장 Profile 그대로라 화면 브리핑과 같다.
+    """
+    at = _COL["target_reasons"]
+    out = []
+    for r in rows:
+        out.append(r[:at] + (roster.reasons(dict(zip(COLUMNS, r))),) + r[at + 1:])
+    return out
+
+
+def _other_transfers() -> list[tuple]:
+    """다른 부점의 올해 계약이전(시연값) — 부점마다 12건, 올해 1월 1일부터 오늘 사이."""
+    rnd = random.Random(_SEED + 3)
+    today = clock.today()
+    start = date(today.year, 1, 1)
+    out = []
+    for code, _ in BRANCHES[1:]:
+        for _k in range(12):
+            out.append((rnd.choice(_SURNAMES) + rnd.choice(_GIVEN), code,
+                        (start + timedelta(days=rnd.randint(0, (today - start).days))).isoformat(),
+                        rnd.randint(5, 150) * 1_000_000, rnd.choice(("증권", "은행", "보험"))))
+    return out
 
 
 def connection() -> sqlite3.Connection:
@@ -108,8 +323,32 @@ def connection() -> sqlite3.Connection:
             conn.executescript(_SCHEMA)
             conn.executemany("INSERT INTO branch VALUES (?, ?)", BRANCHES)
             conn.executemany("INSERT INTO employee VALUES (?, ?, ?)", EMPLOYEES)
-            conn.executemany(f"INSERT INTO irp_customer_base VALUES ({', '.join('?' * 18)})",
-                             _persona_rows() + _synthetic_rows())
+            personas = [{**dict(zip(COLUMNS, r)), "_detail_id": p.id}
+                        for r, p in zip(_persona_rows(), C.PERSONAS)]
+            yeouido, yeouido_prev, transfers = demo_yeouido.build(personas)
+            for d in yeouido:
+                d.setdefault("etf_eval_amt", etf_amount(d["customer_name"], d["branch_code"],
+                                                        d["eval_amt"], d["safe_asset_pct"]))
+            _prev_etf(yeouido, yeouido_prev)
+            for d in yeouido + yeouido_prev:
+                d.setdefault("next_maturity_type", maturity_type(d["customer_name"], d["branch_code"],
+                                                                 d["next_maturity_date"]))
+                d.setdefault("pension_savings", pension_savings(d["customer_name"], d["branch_code"]))
+            # 다른 부점 — 기존 합성 고객(0001 몫은 버린다. 난수 순서를 그대로 두려고 생성 뒤에 거른다)
+            # 전월말도 예전과 같은 입력(목업 + 합성 288명)으로 흔든 뒤 거른다 — 다른 부점 결과를 그대로 둔다
+            legacy = _persona_rows() + _synthetic_rows()
+            others = [r for r in legacy if r[_COL["branch_code"]] != demo_yeouido.CODE]
+            others_prev = [r for r in _prev_rows(legacy) if r[_COL["branch_code"]] != demo_yeouido.CODE]
+            marks = ", ".join("?" * len(COLUMNS))
+            rows = _judged([tuple(d[c] for c in COLUMNS) for d in yeouido] + others)
+            _DETAIL_IDS.clear()
+            _DETAIL_IDS.update({f"{d['branch_code']}:{i}": d["_detail_id"]
+                                for i, d in enumerate(yeouido, 1) if d.get("_detail_id")})
+            prev_rows = _judged([tuple(d[c] for c in COLUMNS) for d in yeouido_prev] + others_prev)
+            conn.executemany(f"INSERT INTO irp_customer_base VALUES ({marks})", rows)
+            conn.executemany(f"INSERT INTO irp_customer_prev VALUES ({marks})", prev_rows)
+            conn.executemany("INSERT INTO irp_transfer_out VALUES (?, ?, ?, ?, ?)",
+                             transfers + _other_transfers())
             conn.commit()
             # 검사를 빠져나간 쓰기 문장 대비
             conn.execute("PRAGMA query_only = ON")
@@ -124,3 +363,4 @@ def reset() -> None:
         if _CONN is not None:
             _CONN.close()
         _CONN = None
+        _DETAIL_IDS.clear()

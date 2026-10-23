@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 import main
 from pension_agent.common import config as _cfg
 from pension_agent.common import llm, observability
+from pension_agent import context_store
 
 _results: list[tuple[bool, str, str]] = []
 
@@ -459,10 +460,38 @@ try:
     finally:
         main.SSE_FRAMING = True
 
+    # 부점 브리핑 화면 진입 — message 없이 · 현황 패널 + 브리핑 문장 · 맥락 미저장
+    from pension_agent.tools.branch_briefing import strategy as _strategy  # noqa: PLC0415
+    _saved_gen = _strategy.generate
+    _strategy.generate = lambda prompt, **kw: "부점 계좌 수가 줄었습니다. 만기금액이 큰 고객부터 확인하는 것이 좋겠습니다."
+    try:
+        r = client.post("/chat", json=_body(mode=main.BRIEFING_MODE, x_client_user="3902172-ui"))
+        evs = _events(r)
+        check(r.status_code == 200 and _types(evs) == ["branch_panel", "branch_briefing", "done"],
+              "mode=branch_briefing 은 message 없이 branch_panel → branch_briefing → done", str(_types(evs)))
+        panel = evs[0] if evs else {}
+        check(panel.get("branch") == "여의도종합금융센터" and len(panel.get("indicators") or []) >= 3
+              and panel.get("prev_date"), "패널에 부점 지표 셋과 전월말 기준일이 실린다")
+        brief = evs[1] if len(evs) > 1 else {}
+        check(brief.get("status") in ("ok", "no_case") and brief.get("text"), "브리핑 문장이 실린다", str(brief))
+        check(context_store.get("3902172-ui", "default") is None, "화면 진입 요청은 대화 맥락에 남지 않는다")
+        r = client.post("/chat", json={**_body(mode=main.BRIEFING_MODE, x_client_user="3902172"), "stream": False})
+        # 비스트림은 이벤트 전부를 content 하나에 줄바꿈으로 잇는다(대화 턴과 같은 규칙)
+        check(_types(_events_in(r.json()["content"])) == ["branch_panel", "branch_briefing", "done"],
+              "비스트림도 같은 이벤트 셋이다")
+        r = client.post("/chat", json=_body(mode=main.BRIEFING_MODE, x_client_user="nobody"))
+        check(_types(_events(r)) == ["error", "done"], "사번으로 부점을 못 찾으면 error → done")
+        r = client.post("/chat", json=_body(mode="other", x_client_user="3902172"))
+        check(r.status_code == 422, "모르는 mode 는 422")
+        r = client.post("/chat", json=_body(x_client_user="3902172"))
+        check(r.status_code == 422, "mode 가 없으면 message 는 여전히 필수")
+    finally:
+        _strategy.generate = _saved_gen
+
     # 계약 문서(client/README.md)와 코드 일치
     _readme = (_cfg.SRC_ROOT.parent / "client" / "README.md").read_text(encoding="utf-8")
     _emitted = {"progress", "answer", "action", "clarify", "sources", "followups", "error", "done",
-                "log", "trace"}
+                "log", "trace", "branch_panel", "branch_briefing"}
     _in_code = set(re.findall(r'"type":\s*"(\w+)"', Path(main.__file__).read_text(encoding="utf-8")))
     check(_in_code == _emitted,
           "main.py 가 내보내는 이벤트 type 목록이 테스트가 아는 것과 같다(새 type 은 여기와 문서에 등록)",
@@ -471,6 +500,8 @@ try:
     check(not _missing, "client/README.md 가 모든 이벤트 type 을 설명한다", str(_missing))
     _keys = ["message", "x_client_user", "customer_id", "session_id"]
     check(all(f"`{k}`" in _readme for k in _keys), "client/README.md 가 요청 키 4개를 설명한다")
+    check("`mode`" in _readme and f"`{main.BRIEFING_MODE}`" in _readme,
+          "client/README.md 가 부점 브리핑 진입 요청(mode)을 설명한다")
     # `links` 는 새 type 이 아닌 answer 필드 — type 검사로 미검출
     check("`links`" in _readme and "mystar-link://" in _readme,
           "client/README.md 가 answer.links 와 딥링크 스킴을 설명한다")

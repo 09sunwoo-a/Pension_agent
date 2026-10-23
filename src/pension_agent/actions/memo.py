@@ -63,11 +63,11 @@ class Draft:
 
 
 def material(state: AgentState) -> list[tools.Evidence]:
-    """쪽지 재료 — 이번 턴 원장 + customer/targets 도구 결과(별도 읽기 경로 금지)."""
+    """쪽지 재료 — 이번 턴 원장 + customer/branch_targets 도구 결과(별도 읽기 경로 금지)."""
     ev = list(state.get("evidence") or [])
     used = {e["tool"] for e in ev}
     want, query = (("customer", "고객 브리핑 자료") if state.get("customer_id")
-                   else ("targets", "오늘의 타겟 고객"))
+                   else ("branch_targets", "오늘의 관리 대상 추천"))
     if want not in used:
         try:
             found = tools.run(want, state, query)
@@ -117,15 +117,25 @@ def _key_info_table(customer_id: str) -> str:
 
 
 def table_for(state: AgentState, evidence: list[tools.Evidence]) -> tuple[str, str]:
-    """본문 아래 (표 HTML, 표 설명). 고객 정보 표 또는 타겟 목록(원장에 targets 있을 때만)."""
+    """본문 아래 (표 HTML, 표 설명). 고객 정보 표 또는 타겟 목록(원장에 branch_targets 있을 때만).
+
+    타겟 목록은 그 도구가 실은 순서 그대로(CASE 순 · 첫 추천) — 여기서 다시 고르지 않는다.
+    """
     if state.get("customer_id"):
         found = _key_info_table(state["customer_id"])
         return (f"<b>{note.esc(KEY_INFO_HEADER)}</b><br>{found}",
                 "이 고객의 연령·투자성향·평가금액·수익률·연금개시·세액공제 잔여한도·관리 사유") \
             if found else ("", "")
-    if not any(e["tool"] == "targets" for e in evidence):
+    found = next((e for e in evidence if e["tool"] == "branch_targets"), None)
+    if found is None:
         return "", ""
-    targets = note.today_targets()
+    from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
+    from pension_agent.tools.customer_solution.tool import roster_targets  # noqa: PLC0415
+    names = (found.get("meta") or {}).get("names")
+    _scope, pool = roster_targets(state)
+    refs = (found.get("meta") or {}).get("refs")
+    targets = (target_list.by_refs(refs, pool) if refs and all(refs) else
+               target_list.by_names(names, pool) if names is not None else pool)
     if not targets:
         return "", ""
     table, _shown = note.targets_table(targets)
