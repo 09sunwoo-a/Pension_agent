@@ -266,6 +266,14 @@ def build(personas: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
         r["safe_asset_pct"] = round(max(r["idle_cash_pct"], r["safe_asset_pct"]), 1)
         r["risk_mismatch"] = "불일치" if C.risk_mismatch(
             r["risk_profile"], 100 - round(r["safe_asset_pct"]), round(r["safe_asset_pct"])) else "일치"
+        # 만기 상품(예금·GIC)은 원리금보장 몫 안에 있다 — 위에서 비중을 옮긴 뒤라 다시 맞춘다(2026-10-23 — 합성 고객
+        # 상세 원장 demo_detail 이 이 행에서 보유상품을 만든다. 넘치면 만기 금액이 원리금보장 보유액보다 커진다)
+        if r["next_maturity_date"]:
+            room = round(r["eval_amt"] * r["safe_asset_pct"] / 100) - r["idle_cash_amt"]
+            if room < _STEP:     # 원리금보장 몫이 없으면 만기 상품도 없다
+                r["next_maturity_date"] = r["next_maturity_amt"] = None
+            else:
+                r["next_maturity_amt"] = min(r["next_maturity_amt"], room // _STEP * _STEP)
 
     # 이번 달 신규 계좌 — 전월말 표에는 없다
     since = max(1, (today - prev).days)

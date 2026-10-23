@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -328,9 +329,14 @@ def _port(rec: dict) -> tuple[list[int], int]:
         sm["수익증권평가금액"] - bond,
         sm["ETF평가금액"],
     ]
+    return port_of(amounts, bal), round(sm["고유계정대평가금액"] * 100 / bal)
+
+
+def port_of(amounts: list[int], bal: int) -> list[int]:
+    """4분류 금액 → 비중(%, 합 100). 부점 DB 행의 판정(roster.row_profile)도 이것을 쓴다 — 반올림이 같아야 요건이 같다."""
     port = [round(a * 100 / bal) for a in amounts]
     port[port.index(max(port))] += 100 - sum(port)  # 반올림 오차는 최대 슬롯이 흡수
-    return port, round(sm["고유계정대평가금액"] * 100 / bal)
+    return port
 
 
 #: 원장 요약 자산군(0 인 것 제외)
@@ -533,6 +539,23 @@ def encode_id(customer_id: str) -> str:
     return ID_B64_PREFIX + base64.b64encode(customer_id.encode("utf-8")).decode("ascii")
 
 
+#: customers.json 밖의 상세 원장 공급자 — 고객 id → Profile(모르는 id 면 None). 등록 순서대로 묻는다.
+#: 지금 등록하는 것은 부점 목업 DB 의 합성 고객 상세(branch_briefing/demo_detail — 목업 DB 일 때만)
+DETAIL_SOURCES: list[Callable[[str], Profile | None]] = []
+
+
+def from_record(rec: dict) -> Profile:
+    """customers.json 꼴 레코드 한 건 → Profile. 시연 고객과 같은 매핑 — 상세 원장 공급자도 이것을 쓴다."""
+    return _to_profile(rec)
+
+
 def get_profile(customer_id: str) -> Profile | None:
     """고객 id → Profile(없으면 None). 실 저장소 교체 시 이 함수만 수정."""
-    return _BY_ID.get(customer_id)
+    found = _BY_ID.get(customer_id)
+    if found is not None or not customer_id:
+        return found
+    for source in DETAIL_SOURCES:
+        found = source(customer_id)
+        if found is not None:
+            return found
+    return None

@@ -13,7 +13,11 @@
     demo_db.py   connection()             행외 목업 DB(sqlite 메모리 · 오늘 + 전월말 스냅샷 · 계약이전)
     roster.py    row_profile() · branch_profiles()  부점 DB 행 → Profile · 직원 부점의 관리 대상 명부
     demo_yeouido.py build()               여의도종합금융센터 1,392명 — 화면 기획안 수치 + 현실 비율의 시연 고객
+    demo_detail.py profile()              합성 고객의 상세 원장(시연값) — DB 한 줄 → customers.json 꼴 → Profile
     sql/         sqlite/ · sybase/        고정 뷰 SQL(사람 작성, sybase 는 행내 작성)
 
 백엔드: 환경변수 BRANCH_DB(demo · sybase · off).
 """
+
+# 합성 고객 상세 원장 공급자 등록(목업 DB 일 때만 답한다 — customer.DETAIL_SOURCES)
+from pension_agent.tools.branch_briefing import demo_detail  # noqa: E402, F401

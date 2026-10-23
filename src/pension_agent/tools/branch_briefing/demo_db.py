@@ -364,3 +364,5 @@ def reset() -> None:
             _CONN.close()
         _CONN = None
         _DETAIL_IDS.clear()
+    from pension_agent.tools.branch_briefing import demo_detail  # noqa: PLC0415 — 순환 임포트 회피
+    demo_detail.clear()

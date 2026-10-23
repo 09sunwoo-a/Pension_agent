@@ -607,6 +607,75 @@ def check_pension_savings() -> None:
     check(all(got.get(n) == v for n, v in known.items()), "목업 고객의 연금저축은 원장 값 그대로(비면 미확인)", f"{got}")
 
 
+def check_demo_detail() -> None:
+    """합성 고객 상세 원장(demo_detail) — 목록과 같은 값·같은 관리 사유 · 같은 고객이면 같은 값 · 목업 DB 일 때만."""
+    from pension_agent.tools.branch_briefing import demo_db, demo_detail, roster  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
+    names = {h["name"] for p in C.PERSONAS for h in p.holdings}
+    keys = ("bal", "nm", "ag", "rk", "ret", "dopt", "room", "dorm", "pension_started", "pension_eligible",
+            "club_grade", "cash_idle_pct", "port")
+    for day in ("2026-10-22", "2026-10-23"):
+        with _Today(day):
+            rows = [dict(r, customer_ref=f"{r['branch_code']}:{r['rid']}") for r in
+                    demo_db.connection().execute("SELECT rowid AS rid, * FROM irp_customer_base")]
+            bad: list[str] = []
+            n = 0
+            for r in rows:
+                ref = r["customer_ref"]
+                if demo_db.detail_id(ref):
+                    continue
+                n += 1
+                lst, det = roster.row_profile(r), C.get_profile(ref)
+                if det is None:
+                    bad.append(f"{ref} 상세 없음")
+                    continue
+                if C.conditions(lst) != C.conditions(det) or C.churn(lst) != C.churn(det):
+                    bad.append(f"{ref} 요건 {C.conditions(lst)} ≠ {C.conditions(det)}")
+                bad += [f"{ref} {k}" for k in keys if getattr(lst, k) != getattr(det, k)]
+                if lst.matDate and (lst.matDate, lst.matAmt) != (det.matDate, det.matAmt):
+                    bad.append(f"{ref} 만기")
+                if (lst.isa or {}).get("amount") != (det.isa or {}).get("amount"):
+                    bad.append(f"{ref} ISA")
+                if sum(h["amount"] for h in det.holdings) != det.bal:
+                    bad.append(f"{ref} 보유상품 합 ≠ 평가금액")
+                if any(h["name"] not in names | {"고유계정대"} for h in det.holdings):
+                    bad.append(f"{ref} 시연 고객 원장 밖 상품명")
+                if any(h.get("discontinued") for h in det.holdings):
+                    bad.append(f"{ref} 판매중단 상품")
+            check(n > 1_500 and not bad, f"합성 고객 상세 원장이 목록 값·관리 사유와 같다({day} · {n}명)",
+                  f"{len(bad)}건: {bad[:5]}")
+            ref = next(r["customer_ref"] for r in rows if not demo_db.detail_id(r["customer_ref"]))
+            first = C.get_profile(ref)
+            demo_detail.clear()
+            check(C.get_profile(ref) == first, "같은 고객이면 상세 원장이 같은 값이다(시드 = 내부 행 식별자)")
+            persona_ref = next(r["customer_ref"] for r in rows if demo_db.detail_id(r["customer_ref"]))
+            check(demo_detail.profile(persona_ref) is None and C.get_profile(demo_db.detail_id(persona_ref)),
+                  "시연 고객은 자기 원장(customers.json)이다 — 생성기가 만들지 않는다")
+            check(C.get_profile("0001:999999") is None and C.get_profile("모르는고객") is None,
+                  "없는 행·모르는 id 는 상세가 없다")
+            saved = os.environ.get("BRANCH_DB")
+            os.environ["BRANCH_DB"] = "off"
+            try:
+                demo_detail.clear()
+                check(C.get_profile(ref) is None, "목업 DB 가 아니면 합성 상세 원장을 만들지 않는다")
+            finally:
+                if saved is None:
+                    os.environ.pop("BRANCH_DB", None)
+                else:
+                    os.environ["BRANCH_DB"] = saved
+                demo_detail.clear()
+    with _Today("2026-10-23"):
+        from pension_agent.tools import customer_selection  # noqa: PLC0415
+        ev = tools.run("branch_targets", _state(), "오늘의 중점관리 고객")
+        listed = ev["meta"]["customer_list"]
+        saved = {"employee_id": EMP, "session_id": "t", "serial": 1, "lists": [listed],
+                 "active": listed["number"], "selected": None, "pending": None}
+        out = customer_selection.resolve("1번 고객 자세히", saved, EMP, None)
+        first = listed["entries"][0]
+        check(out.customer_id == first["ref"] and out.case != "detail_unavailable",
+              "목록에서 고른 합성 고객이 상세 원장으로 연결된다", f"{out.case} · {out.answer}")
+
+
 def check_briefing_frame() -> None:
     """부점 브리핑 답변 틀(2026-10-23 사용자 결정) — 코드가 만든 제목·분석 기준·표 하나(부점 현황 | 값) 안에 LLM 문장.
     한 고객군만 물은 질문에는 틀을 붙이지 않는다. 찾은 고객 수는 굵게."""
@@ -784,6 +853,7 @@ def main() -> int:
     check_strategy()
     check_targets()
     check_pension_savings()
+    check_demo_detail()
     check_briefing_frame()
     check_target_table()
     check_question_set()
