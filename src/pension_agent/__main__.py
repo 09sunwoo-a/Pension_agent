@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import sys
+from pathlib import Path
 
 from pension_agent.common import mcp, note
 from pension_agent.actions import render
@@ -62,6 +64,11 @@ def _print_answer(r: dict) -> None:
     # 단말 화면 딥링크 — 터미널에는 감쌀 자리가 없어 목록 출력
     for item in r.get("links") or []:
         print(f"  [화면] {item['screen']} {item.get('label') or ''} → {item['url']}")
+    # 첨부 파일(관리 대상 목록 엑셀) — 프론트는 내려받기 버튼, 터미널은 현재 폴더에 저장
+    for item in r.get("files") or []:
+        path = Path(Path(item["name"]).name).resolve()
+        path.write_bytes(base64.b64decode(item["base64"]))
+        print(f"  [첨부 파일] {path}")
     print(render.sources_block(r["sources"]))
 
 if len(argv) > 1:
