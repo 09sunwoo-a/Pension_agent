@@ -60,5 +60,12 @@ def prioritize(targets: list[Target], codes: list[str]) -> list[Target]:
 
 def by_names(names: list[str], targets: list[Target] | None = None) -> list[Target]:
     """이름 목록 순서대로 Target — 저장해 둔 추천 목록을 다시 세울 때. 없는 이름은 건너뛴다."""
-    pool = {t.profile.nm: t for t in (today_targets() if targets is None else targets)}
-    return [pool[n] for n in names if n in pool]
+    pool = today_targets() if targets is None else targets
+    groups = {n: [t for t in pool if t.profile.nm == n] for n in names}
+    return [groups[n][0] for n in names if len(groups[n]) == 1]
+
+
+def by_refs(refs: list[str], targets: list[Target]) -> list[Target]:
+    """동명이인을 구분하는 내부 행 식별자 순서. 없는 식별자는 다른 고객으로 대체하지 않음."""
+    pool = {t.profile.customer_ref: t for t in targets if t.profile.customer_ref}
+    return [pool[ref] for ref in refs if ref in pool]

@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 from datetime import date
+from dataclasses import replace
+import re
 
 from pension_agent.common import clock
 from pension_agent.tools.customer_solution import customer as C
@@ -23,12 +25,19 @@ PERSONA_BRANCH = "0001"
 
 
 def _persona(name: str) -> C.Profile | None:
-    return next((p for p in C.PERSONAS if p.nm == name), None)
+    matches = [p for p in C.PERSONAS if p.nm == name]
+    return matches[0] if len(matches) == 1 else None
 
 
 def row_profile(row: dict) -> C.Profile:
     """부점 DB 고객 행(v_irp_customer 컬럼 또는 원본 표 컬럼) → Profile."""
-    if row.get("branch_code") in (None, PERSONA_BRANCH):
+    ref = row.get("customer_ref")
+    if ref:
+        from pension_agent.tools.branch_briefing import demo_db, run  # noqa: PLC0415
+        found = C.get_profile(demo_db.detail_id(ref)) if run.backend() == "demo" else None
+        if found is not None and found.nm == row["customer_name"] and found.ag == int(row["age"]):
+            return replace(found, customer_ref=ref)
+    elif row.get("branch_code") in (None, PERSONA_BRANCH):
         found = _persona(row["customer_name"])
         if found is not None:
             return found
@@ -36,7 +45,8 @@ def row_profile(row: dict) -> C.Profile:
     safe = int(round(row.get("safe_asset_pct") or 0))
     idle_pct = row.get("idle_cash_pct") or 0
     return C.Profile(
-        id=f"{row.get('branch_code', '')}:{row['customer_name']}",
+        id=ref or f"{row.get('branch_code', '')}:{row['customer_name']}",
+        customer_ref=ref,
         nm=row["customer_name"], ag=int(row["age"]), bal=int(row["eval_amt"]),
         rk=row["risk_profile"], grade="",
         # 4분류 [원리금보장+현금, 채권형, 실적배당, 섹터ETF] — 행에는 원리금보장 비중만 있어 나머지를 실적배당으로
@@ -97,3 +107,16 @@ def focus_names(emp_no: str | None, case_ids: list[str]) -> set[str]:
     if cut:
         raise run.DBUnavailable("중점관리 명부가 행 수 상한을 넘었습니다")
     return {r["customer_name"] for r in rows}
+def lookup(customer_ref: str, emp_no: str | None) -> C.Profile | None:
+    """현재 직원 부점에서 내부 식별자로 한 행만 확인. 이름·순번으로 재검색하지 않음."""
+    from pension_agent.tools.branch_briefing import run  # noqa: PLC0415
+
+    mine = run.my_branch(emp_no)
+    if not mine or not re.fullmatch(r"[0-9A-Za-z]{1,10}:[0-9]+", customer_ref):
+        return None
+    code, _name = mine
+    _sql, rows, cut = run.execute(
+        f"SELECT * FROM v_irp_customer WHERE customer_ref = '{customer_ref}'", code, emp_no)
+    if cut or len(rows) != 1:
+        return None
+    return row_profile({**rows[0], "branch_code": code})

@@ -202,6 +202,9 @@ _NEXT: dict[str, tuple[tuple[tuple[str, ...], str, str], ...]] = {
     # date 미포함(이어질 질문 없음)
 }
 
+# 전체 브리핑 뒤에도 같은 고객의 상담·적합성·상담이력으로 이어짐.
+_NEXT["briefing"] = _NEXT["customer"]
+
 #: 같은 도구로 이끄는 칩 수 상한.
 MAX_PER_LEAD = 2
 
@@ -297,8 +300,8 @@ def _has_material(lead: str, probes: tuple[str, ...], state: dict) -> bool:
     return False
 
 
-def followup_questions(out: dict) -> list[str]:
-    """답변 끝 추천질문. `out` 은 그래프 최종 상태."""
+def _material_followups(out: dict) -> list[str]:
+    """근거 도구별 추천질문. 고객 목록의 선택 안내는 followup_questions 에서 처리."""
     # 미표시: 되묻기·확인 대기·LLM 실패(정상 답변처럼 보임)·근거 0건 턴
     if out.get("clarify") or out.get("pending_action") or out.get("llm_error"):
         return []
@@ -350,3 +353,139 @@ def followup_questions(out: dict) -> list[str]:
             seen.add(_norm(question))
             per_lead[lead] = per_lead.get(lead, 0) + 1
     return picked
+
+
+# 큰 목록에서도 추천을 위해 전체 명부를 재조회하지 않음.
+MAX_CUSTOMER_PROBES = 10
+
+
+def _customer_followups(out: dict) -> list[str] | None:
+    """목록 → 선택 확인 → 선택 고객의 질문. None 이면 기존 근거별 추천으로."""
+    from pension_agent.tools import customer_selection as selection  # noqa: PLC0415
+    from pension_agent.tools.branch_briefing import run  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as C  # noqa: PLC0415
+
+    saved = out.get("customer_context") or {}
+    if not saved:
+        return None
+    employee = saved.get("employee_id")
+    case = out.get("selection_case")
+    pending = saved.get("pending") or {}
+    lists = saved.get("lists") or []
+    listed = next((s for s in lists if s["number"] == (pending.get("list") or saved.get("active"))), None)
+
+    def resolves(question: str, accepted: set[str], expected_ref: str | None = None) -> bool:
+        try:
+            resolved = selection.resolve(question, saved, employee)
+            return (resolved.case in accepted and (expected_ref is None
+                    or (resolved.context.get("selected") or {}).get("ref") == expected_ref))
+        except run.DBUnavailable:
+            return False
+
+    if pending:
+        # 실제 후보의 이름·구분 정보를 인용. 번호를 외울 필요 없이 원래 질문으로 연결.
+        entries = (listed or {}).get("entries") or []
+        candidates = [f"{reference}으로 확인해줘" for entry in entries
+                      if entry["number"] in pending.get("numbers", [])
+                      and (reference := selection.name_reference(entry, entries))]
+        return [q for q in candidates[:MAX_CUSTOMER_PROBES]
+                if resolves(q, {"selected", "detail_unavailable"})][:MAX_FOLLOWUPS]
+    if out.get("clarify"):
+        return []
+    if case in {"db_unavailable", "screen_conflict"}:
+        return []
+
+    if case in {"ambiguous_list", "multiple_lists", "list_missing"}:
+        candidates = [f"목록 {s['number']} 다시 보여줘" for s in lists]
+        available = [q for q in candidates if resolves(q, {"list_replay"})]
+        if available:
+            return available[:MAX_FOLLOWUPS]
+
+    replay = "목록 다시 보여줘"
+    valid_list = (case not in {"changed", "no_identifier"} and listed is not None
+                  and resolves(replay, {"list_replay"}))
+    selected = saved.get("selected")
+    profile = C.get_profile(out.get("customer_id") or "")
+    if selected and profile and case == "selected":
+        selected_list = next((s for s in lists if s["number"] == selected["list"]), {})
+        entries = selected_list.get("entries") or []
+        entry = next((e for e in entries if e.get("ref") == selected["ref"]), {})
+        reference = selection.name_reference(entry, entries) or "이 고객"
+
+        def normalized(question: str) -> str:
+            question = re.sub(r"^목록\s*\d+의\s*", "", question)
+            return _norm(question.replace(reference, "이 고객").replace(f"{profile.nm} 고객", "이 고객"))
+
+        # 같은 문구라도 다른 고객에게는 새 질문. 현재 고객에게 이미 물은 질문만 제외.
+        history = [t for t in (out.get("history") or [])
+                   if ((t.get("customer_context") or {}).get("selected") or {}).get("ref") == selected["ref"]]
+        asked = [t.get("question") or "" for t in history] + [out.get("question") or ""]
+        candidates: list[str] = []
+        used = {e["tool"] for e in out.get("evidence") or []}
+        if "briefing" not in used:
+            if profile.maturities and not any("만기" in q for q in asked):
+                candidates.append("이 고객의 만기 상품을 확인해줘")
+            if profile.room > 0 and not any("공제" in q for q in asked):
+                candidates.append("이 고객의 세액공제 잔여한도를 알려줘")
+            if profile.holdings and not any("보유" in q or "수익률" in q for q in asked):
+                candidates.append("이 고객의 보유상품과 수익률을 알려줘")
+        candidates += _material_followups({**out, "history": history})
+        seen = {normalized(q) for q in asked}
+        picked = []
+        for q in candidates:
+            named = re.sub(r"이 고객(?!군)", lambda _: reference, q)
+            if selected["list"] != saved.get("active") and reference != "이 고객":
+                # 이전 목록의 고객을 골랐으면 최신 목록의 동명이인으로 바뀌지 않게 목록도 명시.
+                named = (f"목록 {selected['list']}의 {named}" if reference in named
+                         else f"목록 {selected['list']}의 {reference}에 대해, {named}")
+            if not _already(normalized(named), seen) and resolves(named, {"selected"}, selected["ref"]):
+                picked.append(named)
+                seen.add(normalized(named))
+        return picked[:MAX_FOLLOWUPS]
+
+    if valid_list and listed["entries"]:
+        # 실제 목록의 이름을 인용하고, 상세 원장 연결까지 확인한 질문만 추천.
+        asked = {_norm(t.get("question")) for t in out.get("history") or []
+                 if (t.get("customer_context") or {}).get("active") == listed["number"]}
+        asked.add(_norm(out.get("question")))
+        candidates = []
+        for entry in listed["entries"][:MAX_CUSTOMER_PROBES]:
+            reference = selection.name_reference(entry, listed["entries"])
+            if not reference:
+                continue
+            q = f"{reference}을 자세히 알려줘"
+            if not _already(_norm(q), asked) and resolves(q, {"selected"}):
+                candidates.append(q)
+            if len(candidates) >= 2:
+                break
+        if case not in (None, "none", "list_replay") and not _already(_norm(replay), asked) and not any(
+                e.get("meta", {}).get("customer_list") for e in out.get("evidence") or []):
+            candidates.append(replay)
+        return candidates[:MAX_FOLLOWUPS]
+
+    # 만료된 목록은 안전하게 재실행 가능한 원래 질문만 제안. 부점 변경 시 이전 조건을 재사용하지 않음.
+    if lists or case not in (None, "none", "selected"):
+        try:
+            if not run.my_branch(employee):
+                return []
+        except run.DBUnavailable:
+            return []
+        query = (listed or {}).get("query") or ""
+        if case in {"expired", "changed", "no_identifier"} and query and not re.search(
+                r"목록|이\s*고객|그\s*고객|\d+\s*번|그\s*중|이\s*중|처음|아까", query):
+            return [query]
+        q = "오늘 중점적으로 관리할 고객을 보여줘"
+        return [] if _same_question(_norm(q), _norm(out.get("question"))) else [q]
+    return None
+
+
+def followup_questions(out: dict) -> list[str]:
+    """현재 목록·선택 상태를 우선 반영한 답변 끝 추천질문. LLM 미호출."""
+    if out.get("pending_action") or out.get("llm_error"):
+        return []
+    try:
+        contextual = _customer_followups(out)
+    except Exception:
+        # 추천 검증 장애가 이미 완성한 답변을 실패로 바꾸지 않음.
+        return []
+    return contextual if contextual is not None else _material_followups(out)

@@ -233,8 +233,7 @@ QUESTIONS: list[Q] = [
     Q("targets_today",
       "오늘 중점적으로 관리할 고객은 누구야?",
       "branch_targets",
-      must=("명", "| 순번 | 고객 |"),
-      must_not=("편중(80% 이상)",),
+      must=("명", "| 순서 | 고객 PIN |"),
       names=False),
 ]
 

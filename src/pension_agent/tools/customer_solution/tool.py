@@ -376,72 +376,6 @@ def _today_focus(state: AgentState, scope: str | None) -> tuple[list[dict], set[
         return [], None
 
 
-#: 명단 표의 짧은 요건 이름(2026-10-23 사용자 결정 — «원리금보장상품 편중(80% 이상) 100%» → «원리금보장 100%»).
-#: 값은 note.DETAIL 그대로이고 이름만 줄인다. 여기 없는 요건은 CONDS 이름 그대로.
-SHORT_CONDS = {
-    "chn": "이탈 위험 높음", "nod": "디폴트옵션 미설정", "pen": "연금개시 요건충족 후 미개시",
-    "nch": "운용변경 없음", "sec": "섹터 집중", "hlt": "판매중단·환매추천 펀드", "idl": "미운용 현금",
-    "isa": "ISA 만기자금", "out": "이탈위험 관찰", "tax": "세액공제 여력", "add": "추가입금 여력",
-    "low": "수익률 하위 30%",
-}
-
-
-def _paren(value: str) -> str:
-    """«D-7 · 1,926만원» → «D-7(1,926만원)»."""
-    head, sep, rest = value.partition(" · ")
-    return f"{head}({rest})" if sep else value
-
-
-def _reasons(t, drop: set[str]) -> str:
-    """표 한 칸의 관리 사유 — 짧은 이름 · 같은 값을 두 번 말하지 않는다(투자성향 불일치가 보여주는 비중이
-    원리금보장·위험자산 한도와 같은 값이면 그 값 옆에 «성향 불일치»로 붙인다)."""
-    from pension_agent.common import note  # noqa: PLC0415
-    p = t.profile
-    conds = [c for c in t.conds if c not in drop]
-    metric = ""
-    if "mis" in conds:
-        metric = note.DETAIL["mis"](p).partition(" · ")[2]   # «위험자산 74%» · «원리금보장 100%»
-    out = []
-    for c in conds:
-        if c == "dep":
-            text = f"원리금보장 {p.port[0]}%"
-            out.append([text, ["성향 불일치"] if metric == text else []])
-        elif c == "lim":
-            text = f"위험자산 {p.risk_asset}%"
-            out.append([text, ["한도 초과"] + (["성향 불일치"] if metric == text else [])])
-        elif c == "mis":
-            shown = {"dep": f"원리금보장 {p.port[0]}%", "lim": f"위험자산 {p.risk_asset}%"}
-            if any(k in conds and shown[k] == metric for k in shown):
-                continue
-            out.append([f"투자성향 불일치({metric})", []])
-        else:
-            name = SHORT_CONDS.get(c, note.CONDS.get(c, c))
-            try:
-                value = note.DETAIL.get(c, lambda _p: None)(p)
-            except Exception:  # noqa: BLE001
-                value = None
-            if c == "mat":
-                name = "만기예금"
-            out.append([f"{name} {_paren(value)}" if value else name, []])
-    return ", ".join(f"{text}({' · '.join(extra)})" if extra else text for text, extra in out) or "—"
-
-
-def target_table(found: list) -> tuple[str, set[str]]:
-    """관리 대상 명단 표(코드가 만든다 — 2026-10-23 사용자 결정). 전원에게 같은 요건은 표에서 빼고(앞 문장이
-    한 번 말한다) 장기 미접촉은 일수 열로 둔다. 반환: (표, 뺀 공통 요건)."""
-    from pension_agent.common import note  # noqa: PLC0415
-    common = set.intersection(*(set(t.conds) for t in found)) if len(found) > 1 else set()
-    common -= {"dor"}
-    rows = ["| 순번 | 고객 | 나이 · 성향 | 평가금액 | 미접촉 | 그 밖의 관리 사유 |",
-            "|---:|---|---|---:|---:|---|"]
-    for i, t in enumerate(found, 1):
-        p = t.profile
-        dorm = f"{p.dorm}일" if p.dorm is not None else "—"
-        rows.append(f"| {i} | {p.nm} | {p.ag}세 · {p.rk} | {note.won(p.bal)} | {dorm} | "
-                    f"{_reasons(t, common | {'dor'})} |")
-    return "\n".join(rows), common
-
-
 def _targets(state: AgentState, query: str) -> Evidence | None:
     """관리 대상 추천(branch_targets) — 오늘의 중점관리 고객을 오늘의 부점 CASE 순서로.
 
@@ -451,11 +385,12 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     중점관리 100명)이고, 넘으면 우선순위 앞쪽만 싣고 전체 인원을 밝힌다. 성립한 CASE 가 없거나 CASE 조건을
     모두 갖춘 고객이 0명이면, 중점관리 고객이 아님을 밝히고 관리 대상을 우선순위 앞쪽부터 상한만큼 싣는다.
     이 대화에서 이미 추천했으면 그 첫 목록을 다시 계산하지 않고 그대로 싣는다(날짜가 바뀌었으면 새로).
-    고객 화면 없이 사용, KB-PIN 미포함 — 첫 목록도 이름으로만 남긴다.
+    고객 화면 없이 사용. LLM 재료·첫 목록은 PIN 미포함, 최종 표만 마스킹된 PIN 표시.
     """
     from pension_agent.common import note  # noqa: PLC0415 — 순환 임포트 회피
     from pension_agent.tools.branch_briefing import status  # noqa: PLC0415
-    from pension_agent.tools.customer_solution import target_list  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import target_list, target_table  # noqa: PLC0415
+    from pension_agent.tools import customer_selection  # noqa: PLC0415
 
     day = clock.today().isoformat()
     stored = first_targets((state or {}).get("history"))
@@ -465,7 +400,8 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     try:
         scope, pool = roster_targets(state)
         if replay:
-            found = target_list.by_names(list(stored.get("names") or []), pool)
+            found = (target_list.by_refs(stored["refs"], pool) if stored.get("refs") and all(stored["refs"])
+                     else target_list.by_names(list(stored.get("names") or []), pool))
             codes = list(stored.get("codes") or [])
         else:
             today, focus = _today_focus(state, scope)
@@ -517,6 +453,7 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
     if not found:
         # 0건도 명시 — «질의 빗나감»과 구별
         lines.append("· 오늘 사후관리 타겟으로 선정된 고객이 없습니다.")
+    intro = [ln.removeprefix("· ") for ln in lines[1:]]
     for i, t in enumerate(found, 1):
         p = t.profile
         attrs = " · ".join([f"{p.ag}세", p.rk] + ([p.club_grade] if p.club_grade else []))
@@ -524,12 +461,18 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
         lines.append(f"· {i}. {p.nm} — {attrs} · 평가금액 {note.won(p.bal)}{focus}")
         # 요건별 원장 값 병기
         lines += [f"    - {note.cond_text(t, c)}" for c in t.conds]
-    table, common = target_table(found) if found else ("", set())
-    if table:
-        lines.append("· 화면 표: 이 답변 아래에 위 명단이 표(순번·나이·성향·평가금액·미접촉 일수·그 밖의 관리 사유)로 "
-                     "함께 나갑니다" + (f" — 모든 고객에게 같은 요건({', '.join(cases.get(c, c) for c in sorted(common))})"
-                                     "은 표에서 뺐습니다" if common else ""))
     text = "\n".join(lines)
+    listed = customer_selection.from_targets(state, found, query)
+    # 표는 코드 값 그대로 응답 — LLM 재작성에 의한 순서·수치·행 누락 방지.
+    # PIN 이 든 표시 문서는 meta 에만 두고 모델·관측으로 전달되는 text 에는 싣지 않는다.
+    document = "\n\n".join(x for x in [
+        f"목록 {listed['number']} · " + head.removeprefix("■ "),
+        *intro,
+        target_table.render(found) if found else "",
+        *(["공제한도 소진율은 연금저축·IRP 합산 연 900만원 기본한도 기준입니다. "
+           "고객 PIN은 원장에 없으면 미확인으로 표시합니다."] if found else []),
+        *(["번호나 이름으로 이어서 질문해 주세요. 예: ‘2번 고객 자세히’, ‘이 고객 만기 상품은?’"] if found else []),
+    ] if x)
     names = [t.profile.nm for t in found]
     return _ev("branch_targets", query, text,
                [{"id": "branch_targets.today",
@@ -538,9 +481,10 @@ def _targets(state: AgentState, query: str) -> Evidence | None:
                         "순서는 부점 CASE(타겟 룰베이스 부점 시트)",
                  "score": None, "page": None}],
                allow=[text],
-               meta={"count": len(found), "total": total, "names": names, "codes": codes, "replayed": replay,
-                     # 답변 아래에 코드가 붙이는 명단 표(plan.compose)
-                     "after": table,
+               meta={"document": document, "customer_list": listed,
+                     "count": len(found), "total": total, "names": names,
+                     "refs": [t.profile.customer_ref for t in found], "codes": codes, "replayed": replay,
                      # 이 대화의 첫 추천 — graph.ask 가 Turn 에 남긴다(이미 있으면 그것을 잇는다)
                      "first_targets": stored if replay else {"date": day, "names": names,
+                                                             "refs": [t.profile.customer_ref for t in found],
                                                              "codes": codes}})

@@ -119,6 +119,7 @@ class Profile:
     joined: str | None = None  # IRP 가입일(ISO)
     pension_started: bool = False  # 연금수령 개시 — 참이면 add·tax 미성립(추가납 권유 금지)
     club_grade: str | None = None  # 스타클럽 등급 — 값 있을 때만 표시
+    customer_ref: str | None = None  # 부점 원장의 내부 행 식별자(PIN 아님, 대화형 목록 연결용)
 
     @property
     def risk_asset(self) -> int:

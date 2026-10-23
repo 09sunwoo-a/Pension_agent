@@ -568,7 +568,7 @@ def check_targets() -> None:
     first = graph._first_targets([], [ev])
     hist = [{"question": "오늘 누구 봐야 해", "first_targets": first}]
     check(graph._first_targets(hist, []) == first, "다음 턴은 이전 턴의 첫 추천을 잇는다")
-    fake = dict(first, names=list(reversed(first["names"])))
+    fake = dict(first, names=list(reversed(first["names"])), refs=list(reversed(first["refs"])))
     with _Today():
         again = tools.run("branch_targets", {"question": "처음 추천한 고객 다시 보여줘", "employee_id": EMP,
                                              "history": [{"question": "q", "first_targets": fake}]}, "다시")
@@ -637,31 +637,6 @@ def check_briefing_frame() -> None:
     check("화면 표" not in narrow["text"], "틀이 없으면 재료에 «화면 표» 줄도 없다")
 
 
-def check_target_table() -> None:
-    """관리 대상 명단 표(2026-10-23 사용자 결정) — 코드가 답변 아래에 붙인다. 전원 공통 요건은 빼고, 짧은 이름,
-    같은 값을 두 번 말하지 않는다(투자성향 불일치가 보여주는 비중이 원리금보장·위험자산 한도와 같으면 합친다)."""
-    from pension_agent.tools.customer_solution import tool as CT  # noqa: PLC0415
-    ev = CT._targets(_state(EMP, "오늘 중점관리 고객 보여줘"), "q")
-    table = ev["meta"]["after"]
-    rows = [ln for ln in table.splitlines()[2:]]
-    check(table.startswith("| 순번 | 고객 | 나이 · 성향 | 평가금액 | 미접촉 | 그 밖의 관리 사유 |"), "명단 표 열 이름")
-    check(len(rows) == ev["meta"]["count"], "명단 표는 실은 인원 전부", f"{len(rows)} vs {ev['meta']['count']}")
-    check("화면 표:" in ev["text"], "재료에 «화면 표» 줄")
-    check(all("편중(80% 이상)" not in r for r in rows), "짧은 이름 — «원리금보장 N%»")
-    check(not any("투자성향 불일치(위험자산" in r and "위험자산" in r.split("투자성향 불일치")[0] for r in rows),
-          "같은 비중을 두 번 말하지 않는다")
-    if len(rows) > 1:
-        cells = [r.split("|")[6] for r in rows]
-        check(not all("세액공제" in c for c in cells), "전원 공통 요건은 표에서 뺀다")
-    # 합치기 단위 검사 — 위험자산 한도 초과와 성향 불일치가 같은 값
-    class P:
-        rk, port, risk_asset, dorm = "위험중립형", [20, 0, 0, 0], 74, 300
-    class X:
-        profile, conds = P, ["lim", "mis", "nod"]
-    check(CT._reasons(X, set()) == "위험자산 74%(한도 초과 · 성향 불일치), 디폴트옵션 미설정",
-          "위험자산 한도 초과 + 성향 불일치 → 한 칸", CT._reasons(X, set()))
-
-
 def check_question_set() -> None:
     """시험 질문(tests/branch_questions.py) — LLM 없이 확인할 수 있는 것 전부.
     정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
@@ -697,6 +672,62 @@ def check_question_set() -> None:
             check(not faults, f"시험 질문 {q.id}: 이상적인 답이 채점 기준 통과", f"{faults}")
         if q.sql:
             check("```sql" in text, f"시험 질문 {q.id}: 재료에 실행한 조회문")
+
+
+def check_target_table() -> None:
+    from dataclasses import replace  # noqa: PLC0415
+    from unittest.mock import patch  # noqa: PLC0415
+
+    from pension_agent.common import note  # noqa: PLC0415
+    from pension_agent.nodes import answer as ANS, plan  # noqa: PLC0415
+    from pension_agent.tools.customer_solution import customer as C, target_table  # noqa: PLC0415
+    from pension_agent.tools.customer_solution.target_list import Target  # noqa: PLC0415
+
+    with _Today():
+        ev = tools.run("branch_targets", _state(), "관리 대상")
+    doc = ev["meta"]["document"]
+    rows = [line for line in doc.splitlines() if line.startswith("| ")][1:]
+    check(len(rows) == ev["meta"]["count"] and doc.count("| 순서 |") == 1,
+          "관리 대상 전원이 카드·분할 없이 표 하나에 모두 나온다", f"{len(rows)} vs {ev['meta']['count']}")
+    check(all(f"| {i} |" in row and name in row
+              for i, (name, row) in enumerate(zip(ev["meta"]["names"], rows), 1)),
+          "표의 고객·순번은 추천 순서를 그대로 보존한다")
+    check(not re.search(r"\d{6}-\d{7}", doc) and "고객 PIN" in doc and "미확인" in doc,
+          "PIN 은 마스킹하고 PIN 없는 합성 고객의 내부 키는 미확인이다")
+    check("공제한도 소진율" in doc and "공제 잔여한도" in doc and "900만원" in doc,
+          "소진율·잔여한도와 기본한도 기준이 함께 표시된다")
+
+    p = C.PERSONAS[0]
+    samples = [Target(replace(p, room=room, ret=ret, pension_savings=True), ["mat", "hlt", "dep", "nod"])
+               for room, ret in ((0, 6.2), (900, 2.8), (300, 21.6), (550, -9.4))]
+    rendered = target_table.render(samples)
+    sample_rows = rendered.splitlines()[2:]
+    check(all(f"| {pct}% |" in row for row, pct in zip(sample_rows, (100, 0, 67, 39)))
+          and "-9.4%" in sample_rows[-1] and "+6.2%" in sample_rows[0],
+          "소진율 경계·반올림과 수익률의 양수·음수 부호가 정확하다")
+    check(all(all(note.cond_text(target, c) in row for c in target.conds)
+              and "연금저축 보유" in row for target, row in zip(samples, sample_rows)),
+          "관리 사유는 세 건을 넘어도 생략하지 않고 연금저축 보유도 유지한다")
+    dirty = Target(replace(p, nm="고객|이름\n<태그>", id="0001:내부키", club_grade=None), ["tax"])
+    dirty_row = target_table.render([dirty]).splitlines()[2]
+    check(len(re.split(r"(?<!\\)\|", dirty_row)) == 11 and "<태그>" not in dirty_row
+          and "0001:내부키" not in dirty_row and "미확인" in dirty_row,
+          "셀의 구분자·줄바꿈·HTML 과 내부 키가 표를 깨뜨리거나 PIN 이 되지 않는다")
+    check(target_table.render([]) == note.EMPTY_BODY, "0명은 빈 표 대신 대상 없음으로 안내한다")
+
+    with patch.object(plan, "generate", return_value=_sql(None)) as unused:
+        with patch.object(ANS, "compose", side_effect=AssertionError("표를 재작성하면 안 됨")):
+            out = ANS.answer({"question": "오늘 누구부터 봐야 해?", "evidence": [ev]})
+    check(out["answer"] == doc and not unused.called,
+          "완성된 표는 모델 재작성 없이 그대로 답변이 된다")
+    check(not re.search(r"\d{6}-\d{7}", ev["text"] + str(ev["sources"]) + str(ev["allow"]))
+          and "고객 PIN" not in ev["text"],
+          "모델·관측용 근거와 출처는 PIN 표시 문서와 분리된다")
+
+    with _Today(), patch.object(plan, "generate", return_value='{"tool":"branch_targets","query":"관리 대상"}'):
+        result = plan.plan_step({"question": "오늘 누구부터 봐야 해?", "employee_id": EMP})
+    check(result.get("plan_done") and result["evidence"][0]["meta"].get("document"),
+          "관리 대상 표가 완성되면 재료 수집을 종료해 누락·재요약을 막는다")
 
 
 def main() -> int:

@@ -17,7 +17,7 @@ from pension_agent.state import AgentState
 
 
 def answer(state: AgentState) -> dict[str, Any]:
-    """판정·작성 병행. 원장에 완성 문서(전체 브리핑)가 있으면 그대로 반환."""
+    """판정·작성 병행. 원장에 완성 문서(브리핑·관리 대상 표)가 있으면 그대로 반환."""
     doc = document_answer(state)
     if doc is not None:
         return doc

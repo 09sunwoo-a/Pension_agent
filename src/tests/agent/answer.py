@@ -359,7 +359,7 @@ def check_no_repeat() -> int:
             "answer": "KB 중립형 MP 는 최근 1년 5.1% 예요.", "sources": [],
             "evidence": [ev, tools._ev("customer", "q", "■ 고객", [])],
         })})
-        out = G.ask("이 고객한테 뭘 권할 수 있어?")
+        out = G.ask("이 고객한테 뭘 권할 수 있어?", customer_id="TEST")
     finally:
         G._AGENT = orig_agent
     turn = out["history"][-1]

@@ -145,6 +145,7 @@ python -m tests.test_engine               # 엔진 선정 로직
 python -m tests.test_support              # ⑥~⑨ · 더미 규약 · 시효성 수치
 python -m tests.test_customer_solution    # 브리핑 문서 — LLM 1회 · 검증 · 실패 처리
 python -m tests.test_branch               # 부점 브리핑 — SQL 검사 · 부점 범위 · 현황·CASE · 전략 브리핑 · 시험 질문(오프라인)
+python -m tests.test_customer_selection   # 목록 뒤 고객 선택 — 번호·이름·동명이인·만료·세션
 python -m tests.test_agent                # 라우팅·도구 루프·하지말것 가드
 python -m tests.test_infra                # 공용 인프라 · 임포트 경계 · 429 호출 게이트
 python -m tests.test_api                  # HTTP 진입점 — 행내 플랫폼 I/O 스키마

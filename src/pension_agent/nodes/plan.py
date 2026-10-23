@@ -289,7 +289,7 @@ def plan_step(state: AgentState) -> dict[str, Any]:
     # last 는 재료를 얻었을 때만 존중 — 빗나간 호출로 끝내면 다른 도구 기회 소실
     if last and found is not None:
         update["plan_done"] = True
-    # 완성 문서(전체 브리핑)면 수집 종료 — 그대로 답(document_answer)
+    # 완성 문서(전체 브리핑·관리 대상 표)면 수집 종료 — 그대로 답(document_answer)
     if found is not None and found["meta"].get("document"):
         update["plan_done"] = True
     return update
@@ -515,7 +515,7 @@ def screen(answer: str, evidence: list[tools.Evidence], question: str,
 
 
 def document_answer(state: AgentState) -> dict[str, Any] | None:
-    """원장의 완성 문서(meta["document"], 전체 브리핑)를 그대로 답으로. 없으면 None.
+    """원장의 완성 문서(meta["document"], 브리핑·관리 대상 표)를 그대로 답으로. 없으면 None.
 
     도구 안에서 검사 완료 — compose 재작성 시 양식·표 값 훼손.
     """
@@ -644,10 +644,6 @@ def compose(state: AgentState) -> dict[str, Any]:
     frame = next((e["meta"].get("frame") for e in evidence if (e.get("meta") or {}).get("frame")), None)
     if answer and frame:
         answer = tools.framed(answer, frame)
-    # 답변 아래 코드가 붙이는 표(관리 대상 명단 — 길이 상한에 잘리지 않고 값이 계산값 그대로)
-    after = [e["meta"]["after"] for e in evidence if (e.get("meta") or {}).get("after")]
-    if answer and after:
-        answer = answer.rstrip() + "\n\n" + "\n\n".join(after)
     if answer:
         # 빠진 표시는 본문 아래 제 줄로
         parts = [_break_marks(answer)] + ([ "\n".join(_as_mark(a) for a in appends)] if appends else [])

@@ -76,6 +76,13 @@ CREATE TABLE irp_transfer_out (
 
 _LOCK = threading.Lock()
 _CONN: sqlite3.Connection | None = None
+_DETAIL_IDS: dict[str, str] = {}  # 내부 행 식별자 → 상세 원장 id. 모델·표에는 미노출
+
+
+def detail_id(customer_ref: str) -> str | None:
+    """목업 상세 원장이 있는 행의 id. 동명이인 이름으로 조인하지 않음."""
+    connection()
+    return _DETAIL_IDS.get(customer_ref)
 
 
 def _idle_days(p: C.Profile, today: date) -> int | None:
@@ -316,7 +323,8 @@ def connection() -> sqlite3.Connection:
             conn.executescript(_SCHEMA)
             conn.executemany("INSERT INTO branch VALUES (?, ?)", BRANCHES)
             conn.executemany("INSERT INTO employee VALUES (?, ?, ?)", EMPLOYEES)
-            personas = [dict(zip(COLUMNS, r)) for r in _persona_rows()]
+            personas = [{**dict(zip(COLUMNS, r)), "_detail_id": p.id}
+                        for r, p in zip(_persona_rows(), C.PERSONAS)]
             yeouido, yeouido_prev, transfers = demo_yeouido.build(personas)
             for d in yeouido:
                 d.setdefault("etf_eval_amt", etf_amount(d["customer_name"], d["branch_code"],
@@ -333,6 +341,9 @@ def connection() -> sqlite3.Connection:
             others_prev = [r for r in _prev_rows(legacy) if r[_COL["branch_code"]] != demo_yeouido.CODE]
             marks = ", ".join("?" * len(COLUMNS))
             rows = _judged([tuple(d[c] for c in COLUMNS) for d in yeouido] + others)
+            _DETAIL_IDS.clear()
+            _DETAIL_IDS.update({f"{d['branch_code']}:{i}": d["_detail_id"]
+                                for i, d in enumerate(yeouido, 1) if d.get("_detail_id")})
             prev_rows = _judged([tuple(d[c] for c in COLUMNS) for d in yeouido_prev] + others_prev)
             conn.executemany(f"INSERT INTO irp_customer_base VALUES ({marks})", rows)
             conn.executemany(f"INSERT INTO irp_customer_prev VALUES ({marks})", prev_rows)
@@ -352,3 +363,4 @@ def reset() -> None:
         if _CONN is not None:
             _CONN.close()
         _CONN = None
+        _DETAIL_IDS.clear()

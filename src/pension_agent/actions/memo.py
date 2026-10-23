@@ -133,7 +133,9 @@ def table_for(state: AgentState, evidence: list[tools.Evidence]) -> tuple[str, s
     from pension_agent.tools.customer_solution.tool import roster_targets  # noqa: PLC0415
     names = (found.get("meta") or {}).get("names")
     _scope, pool = roster_targets(state)
-    targets = target_list.by_names(names, pool) if names is not None else pool
+    refs = (found.get("meta") or {}).get("refs")
+    targets = (target_list.by_refs(refs, pool) if refs and all(refs) else
+               target_list.by_names(names, pool) if names is not None else pool)
     if not targets:
         return "", ""
     table, _shown = note.targets_table(targets)
