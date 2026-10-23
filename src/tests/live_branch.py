@@ -101,14 +101,14 @@ def grade(q: BQ.Q, out: dict) -> tuple[list[str], str | None]:
     evidence = (out.get("trace") or {}).get("evidence") or []
     faults: list[str] = []
     used = [e.get("tool") for e in evidence]
-    if q.tool not in used:
+    if not set(q.tool.split("|")) & set(used):
         faults.append(f"도구 «{q.tool}»를 쓰지 않음(쓴 도구: {used or '없음'})")
     if plan.is_failure_notice(answer):
         faults.append("실패 안내로 답함")
     mine = next((e for e in evidence if e.get("tool") == "branch_search"), None)
     llm_sql = next((c.get("doc") for c in (mine or {}).get("cards") or [] if c.get("id") == "branch_db"), None)
     names, count = None, None
-    if q.tool == "branch_search" and mine:
+    if "branch_search" in q.tool.split("|") and mine:
         cannot = "조회하지 못함" in (mine.get("text") or "")
         if q.sql is None:
             if not cannot:

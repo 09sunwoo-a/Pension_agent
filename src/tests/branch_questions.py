@@ -25,7 +25,7 @@ BRANCH_CODE = "0001"
 class Q:
     id: str
     question: str
-    tool: str                        # 기대 도구(라이브: 원장에 이 도구의 재료가 있어야 한다)
+    tool: str                        # 기대 도구(라이브: 원장에 이 도구의 재료가 있어야 한다). «a|b» 는 둘 중 하나
     sql: str | None = None           # 정답 조회문(branch_search). None 이면 «조회할 수 없음»이 정답
     rows: int | None = None          # 정답 조회문의 행 수(목업 기준, 상한 100 에 걸리면 100)
     truncated: bool = False          # 정답 조회문이 행 수 상한에 걸리는가
@@ -154,7 +154,7 @@ QUESTIONS: list[Q] = [
     Q("branch_compare",
       "우리 부점 평균 수익률이 다른 부점보다 높아?",
       "branch_search",
-      sql="SELECT branch_name, is_my_branch, avg_return_rate FROM v_branch_summary",
+      sql="SELECT branch_name, avg_return_rate FROM v_branch_summary",
       rows=4,
       ideal="여의도종합금융센터 부점의 평균 수익률은 17.48%로, 강남(7.94%)과 판교(7.35%)보다 높아요.",
       must=("17.48%", "높"),
@@ -169,7 +169,8 @@ QUESTIONS: list[Q] = [
       ideal="여의도종합금융센터 부점에서 2026년 1월 1일부터 다른 금융기관으로 계약이전된 IRP 계좌는 89건이에요.",
       must=("89건",),
       names=False,
-      note="날짜 조건이 «조회 조건» 줄에서 빠졌었다(2026-10-23 오프라인 발견)"),
+      note="날짜 조건이 «조회 조건» 줄에서 빠졌었다(오프라인 발견) · SQL 프롬프트에 오늘이 없어 «올해»를 2024 로 "
+           "조회해 0건으로 답함(2026-10-23 실측)"),
     Q("transfer_destination",
       "계약이전 어디로 많이 나갔어?",
       "branch_search",
@@ -180,7 +181,7 @@ QUESTIONS: list[Q] = [
       names=False),
     Q("default_option_vs_prev",
       "디폴트옵션 미설정 고객이 지난달보다 늘었어?",
-      "branch_search",
+      "branch_search|branch_status",  # 부점 현황의 고객군 인원(전월말 → 오늘)으로 답해도 맞다
       sql="SELECT (SELECT COUNT(*) FROM v_irp_customer WHERE default_option = '미설정') AS 오늘, "
           "(SELECT COUNT(*) FROM v_irp_customer_prev WHERE default_option = '미설정') AS 전월말",
       rows=1,
@@ -235,7 +236,8 @@ def has(text: str, phrase: str) -> bool:
 def answer_faults(q: Q, answer: str, names: list[str] | None = None, count: int | None = None) -> list[str]:
     """답변 문장 검사(라이브 · 이상적인 답 공용). 걸린 것을 사람이 읽는 말로."""
     # 조건·인원은 명단 앞에서 말해야 한다(답변 형태 — 목록 앞에서 조회 조건을 하나도 빼지 않고)
-    head = re.split(r"\n\s*(?:[-·•]|\d+\.)\s", answer, maxsplit=1)[0]
+    # 비교·집계 답은 값이 목록 안에 있어도 된다 — 앞머리 검사는 고객 명단 질문만
+    head = re.split(r"\n\s*(?:[-·•]|\d+\.)\s", answer, maxsplit=1)[0] if q.names else answer
     out = [f"명단 앞에 있어야 할 말이 없음: «{p}»" for p in q.must if not has(head, p)]
     out += [f"없어야 할 말이 있음: «{p}»" for p in q.must_not if has(answer, p)]
     if names is not None and q.names and len(names) <= 30:

@@ -15,6 +15,8 @@ BRANCH_SQL_SYSTEM = """당신은 KB국민은행 영업점 직원의 질문을 SQ
 3. 날짜 계산 함수를 쓰지 않습니다. 남은 일수·경과 일수는 이미 계산된 컬럼
    (days_to_maturity, last_contact_days)으로 조건을 겁니다. days_to_maturity 가 음수면 이미 지난
    만기입니다 — «N일 이내 만기»는 days_to_maturity BETWEEN 0 AND N 으로 겁니다.
+   «올해»·«이번 달»처럼 기간으로 물으면 <오늘> 의 날짜로 날짜 문자를 비교합니다
+   (예: 올해 → transfer_date >= '<오늘의 연도>-01-01'). 연도를 짐작해 쓰지 않습니다.
 4. 문자 값은 <뷰> 설명에 적힌 한글 값을 그대로 씁니다(예: default_option = '미설정').
    여러 사유가 이어 붙은 컬럼(target_reasons)은 LIKE '%사유%' 로 찾습니다.
 5. «상위 N명»·«N개만»처럼 개수를 정하면 SELECT TOP N 으로 씁니다. LIMIT 은 쓰지 않습니다.
@@ -37,7 +39,11 @@ BRANCH_SQL_SYSTEM = """당신은 KB국민은행 영업점 직원의 질문을 SQ
 
 출력은 JSON 객체 하나입니다. 다른 글을 붙이지 않습니다."""
 
-BRANCH_SQL_PROMPT = """<뷰>
+BRANCH_SQL_PROMPT = """<오늘>
+{today}
+</오늘>
+
+<뷰>
 {catalog}
 </뷰>
 

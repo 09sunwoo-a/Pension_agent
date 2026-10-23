@@ -593,6 +593,7 @@ def check_question_set() -> None:
     정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
     라이브(실제 LLM) 채점은 python -m tests.live_branch."""
     from pension_agent.evidence.verify import verify_texts  # noqa: PLC0415
+    from pension_agent.common import clock  # noqa: PLC0415
     from tests import branch_questions as BQ  # noqa: PLC0415
     prompt = views.catalog() + "\n" + tool.segment_catalog()
     ids = [q.id for q in BQ.QUESTIONS]
@@ -600,10 +601,12 @@ def check_question_set() -> None:
     for q in BQ.QUESTIONS:
         for text in q.prompt_has:
             check(text in prompt, f"시험 질문 {q.id}: SQL 프롬프트에 «{text}»")
-        if q.tool != "branch_search":
+        if "branch_search" not in q.tool.split("|"):
             continue
-        with _LLM(BQ.llm_reply(q, "조회" if q.sql else "그 항목의 컬럼이 없습니다")):
+        with _LLM(BQ.llm_reply(q, "조회" if q.sql else "그 항목의 컬럼이 없습니다")) as llm:
             ev = tool._branch(_state(BQ.EMP, q.question), q.question)
+        today = f"<오늘>\n{clock.today().isoformat()}\n</오늘>"
+        check(all(today in p for p in llm.prompts), f"시험 질문 {q.id}: SQL 프롬프트에 오늘 날짜")
         text = ev["text"] if ev else ""
         if q.sql is None:
             check(ev and ev["meta"].get("cannot"), f"시험 질문 {q.id}: 조회할 수 없음 재료")

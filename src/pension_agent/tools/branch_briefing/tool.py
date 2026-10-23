@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-from pension_agent.common import observability
+from pension_agent.common import clock, observability
 from pension_agent.common.llm import LLMError, available, generate, json_object  # noqa: F401
 from pension_agent.evidence.record import Evidence, _ev
 from pension_agent.prompts.branch import (
@@ -203,7 +203,9 @@ def _cannot(query: str, branch_name: str, reason: str) -> Evidence:
 def _sql(question: str, last_sql: str = "", error: str = "") -> tuple[str | None, str]:
     """LLM 생성 (SQL, 설명). 답할 수 없으면 (None, 사유), 파싱 실패면 ("", 사유)."""
     retry = BRANCH_SQL_RETRY_BLOCK.format(sql=last_sql, error=error) if error else ""
-    raw = generate(BRANCH_SQL_PROMPT.format(catalog=views.catalog(), segments=segment_catalog(),
+    # 오늘 날짜 — 없으면 «올해»를 LLM 이 2024 로 짐작했다(2026-10-23 실측)
+    raw = generate(BRANCH_SQL_PROMPT.format(today=clock.today().isoformat(),
+                                            catalog=views.catalog(), segments=segment_catalog(),
                                             question=question, retry=retry),
                    system=BRANCH_SQL_SYSTEM, max_tokens=600, temperature=0.0,
                    name="branch.sql")
