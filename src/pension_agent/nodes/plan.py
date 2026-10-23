@@ -644,6 +644,10 @@ def compose(state: AgentState) -> dict[str, Any]:
     frame = next((e["meta"].get("frame") for e in evidence if (e.get("meta") or {}).get("frame")), None)
     if answer and frame:
         answer = tools.framed(answer, frame)
+    # 답변 아래 코드가 붙이는 표(관리 대상 명단 — 길이 상한에 잘리지 않고 값이 계산값 그대로)
+    after = [e["meta"]["after"] for e in evidence if (e.get("meta") or {}).get("after")]
+    if answer and after:
+        answer = answer.rstrip() + "\n\n" + "\n\n".join(after)
     if answer:
         # 빠진 표시는 본문 아래 제 줄로
         parts = [_break_marks(answer)] + ([ "\n".join(_as_mark(a) for a in appends)] if appends else [])

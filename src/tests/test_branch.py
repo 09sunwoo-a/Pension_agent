@@ -637,6 +637,31 @@ def check_briefing_frame() -> None:
     check("화면 표" not in narrow["text"], "틀이 없으면 재료에 «화면 표» 줄도 없다")
 
 
+def check_target_table() -> None:
+    """관리 대상 명단 표(2026-10-23 사용자 결정) — 코드가 답변 아래에 붙인다. 전원 공통 요건은 빼고, 짧은 이름,
+    같은 값을 두 번 말하지 않는다(투자성향 불일치가 보여주는 비중이 원리금보장·위험자산 한도와 같으면 합친다)."""
+    from pension_agent.tools.customer_solution import tool as CT  # noqa: PLC0415
+    ev = CT._targets(_state(EMP, "오늘 중점관리 고객 보여줘"), "q")
+    table = ev["meta"]["after"]
+    rows = [ln for ln in table.splitlines()[2:]]
+    check(table.startswith("| 순번 | 고객 | 나이 · 성향 | 평가금액 | 미접촉 | 그 밖의 관리 사유 |"), "명단 표 열 이름")
+    check(len(rows) == ev["meta"]["count"], "명단 표는 실은 인원 전부", f"{len(rows)} vs {ev['meta']['count']}")
+    check("화면 표:" in ev["text"], "재료에 «화면 표» 줄")
+    check(all("편중(80% 이상)" not in r for r in rows), "짧은 이름 — «원리금보장 N%»")
+    check(not any("투자성향 불일치(위험자산" in r and "위험자산" in r.split("투자성향 불일치")[0] for r in rows),
+          "같은 비중을 두 번 말하지 않는다")
+    if len(rows) > 1:
+        cells = [r.split("|")[6] for r in rows]
+        check(not all("세액공제" in c for c in cells), "전원 공통 요건은 표에서 뺀다")
+    # 합치기 단위 검사 — 위험자산 한도 초과와 성향 불일치가 같은 값
+    class P:
+        rk, port, risk_asset, dorm = "위험중립형", [20, 0, 0, 0], 74, 300
+    class X:
+        profile, conds = P, ["lim", "mis", "nod"]
+    check(CT._reasons(X, set()) == "위험자산 74%(한도 초과 · 성향 불일치), 디폴트옵션 미설정",
+          "위험자산 한도 초과 + 성향 불일치 → 한 칸", CT._reasons(X, set()))
+
+
 def check_question_set() -> None:
     """시험 질문(tests/branch_questions.py) — LLM 없이 확인할 수 있는 것 전부.
     정답 조회문이 통과·실행되는지 · 행 수 · «조회 조건» 줄 · SQL 프롬프트의 기준 · 이상적인 답이 검증기를 통과하는지.
@@ -691,6 +716,7 @@ def main() -> int:
     check_targets()
     check_pension_savings()
     check_briefing_frame()
+    check_target_table()
     check_question_set()
 
     passed = sum(1 for ok, _, _ in _results if ok)
